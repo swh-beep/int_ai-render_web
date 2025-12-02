@@ -52,8 +52,6 @@ header {
     object-fit: contain;
     display: block;
     margin: 0 auto 1.5rem;
-    /* 로고 색상 반전 (검은색 로고를 흰색으로) */
-    filter: invert(1);
 }
 
 header h1 {
