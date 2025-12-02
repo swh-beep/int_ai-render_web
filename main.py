@@ -128,8 +128,9 @@ def generate_empty_room(image_path, start_time):
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data:
                     print(">> [성공] 빈 방 이미지 생성됨!", flush=True)
+                    unique_id = uuid.uuid4().hex[:8]
                     timestamp = int(time.time())
-                    filename = f"empty_{timestamp}.jpg"
+                    filename = f"empty_{timestamp}_{unique_id}.jpg"
                     output_path = os.path.join("outputs", filename)
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
                     return standardize_image(output_path)
@@ -169,7 +170,7 @@ def generate_furnished_room(room_path, style_config, reference_image_path=None, 
             
             "<MANDATORY WINDOW TREATMENT>\n"
             "- Install pure WHITE CHIFFON CURTAINS on all windows.\n"
-            "- They must be SHEER (80% transparency), allowing natural light.\n\n"
+            "- They must be SHEER (90% transparency), allowing natural light.\n\n"
             
             "<DESIGN INSTRUCTIONS>\n"
             "1. PERSPECTIVE MATCH: Align the furniture with the floor grid and vanishing points of the empty room.\n"
@@ -210,7 +211,7 @@ def generate_furnished_room(room_path, style_config, reference_image_path=None, 
                 if hasattr(part, 'inline_data') and part.inline_data:
                     print(">> [성공] 가구 배치 완료", flush=True)
                     timestamp = int(time.time())
-                    filename = f"result_{timestamp}.jpg"
+                    filename = f"result_{timestamp}_{unique_id}.jpg"
                     output_path = os.path.join("outputs", filename)
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
                     return standardize_image(output_path)
@@ -273,8 +274,9 @@ def download_image(url):
     try:
         img_response = requests.get(url)
         if img_response.status_code == 200:
+            unique_id = uuid.uuid4().hex[:8]
             timestamp = int(time.time())
-            filename = f"magnific_{timestamp}.jpg"
+            filename = f"magnific_{timestamp}_{unique_id}.jpg"
             path = os.path.join("outputs", filename)
             with open(path, "wb") as f: f.write(img_response.content)
             print(f">> [성공] 저장됨: {filename}", flush=True)
