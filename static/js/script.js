@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------------------------------------------------------
-    // [핵심] 렌더링 요청 및 타이머 로직 (복구됨!)
+    // [핵심] 렌더링 요청 및 타이머 로직
     // ---------------------------------------------------------
     if (renderBtn) {
         renderBtn.addEventListener('click', async () => {
@@ -228,20 +228,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!response.ok) throw new Error(`서버 에러 (${response.status})`);
 
-                // ... (앞부분 fetch 요청 코드 생략) ...
-
                 const data = await response.json();
                 console.log("✅ 렌더링 완료:", data);
 
-                // [수정됨] Before 이미지를 '빈 방(empty_room_url)'으로 변경
-                // 기존: if (resultBefore) resultBefore.src = data.original_url;
-                if (resultBefore) resultBefore.src = data.empty_room_url;
+                // [수정 완료] Before 이미지를 서버가 준 'original_url'(빈 방)로 설정
+                // main.py에서 original_url에 빈 방 이미지를 담아서 보냈기 때문입니다.
+                if (resultBefore) resultBefore.src = data.original_url;
 
                 if (resultAfter) {
                     resultAfter.src = data.result_url;
                     resultAfter.onload = () => {
                         if (comparisonContainer) {
-                            // ... (이하 동일)
                             const aspect = resultAfter.naturalWidth / resultAfter.naturalHeight;
                             comparisonContainer.style.aspectRatio = `${aspect}`;
                             updateImageWidth();
@@ -250,14 +247,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (downloadLink) downloadLink.href = data.result_url;
 
-                // [수정 3] 결과 보여줄 때 슬라이더를 항상 중앙(50%)으로 초기화
+                // [결과 화면] 슬라이더 중앙(50%) 초기화
                 if (resultSection) {
                     resultSection.classList.remove('hidden');
 
-                    // 슬라이더 값 50으로 강제 설정
                     if (compareSlider) compareSlider.value = 50;
 
-                    // Before 이미지 너비도 50%로 강제 설정
                     const beforeWrapper = document.querySelector('.image-wrapper.before');
                     if (beforeWrapper) beforeWrapper.style.width = '50%';
 
