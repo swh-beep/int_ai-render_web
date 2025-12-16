@@ -122,31 +122,48 @@ def switch_to_next_key():
     print(f"♻️ [Failover] API 키 변경됨! (Key #{CURRENT_KEY_INDEX} -> Key #{CURRENT_KEY_INDEX + 1})")
     return True
 
-def call_gemini_with_failover(model, contents, request_options, safety_settings):
-    """Gemini API 호출을 감싸서 에러 발생 시 키를 바꾸고 재시도하는 래퍼 함수"""
-    max_retries = len(API_KEY_POOL) # 키 개수만큼 재시도 기회 부여
+def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
+    """
+    [수정] model 객체 대신 model_name을 받아서, 
+    시도할 때마다 새로운 키로 모델을 다시 로드하는 방식
+    """
+    global CURRENT_KEY_INDEX
+    max_retries = len(API_KEY_POOL)
+    if max_retries == 0: max_retries = 1
+    
     attempt = 0
     
-    while attempt < max_retries:
+    while attempt < max_retries + 1: # 키 개수 + 1번 정도 여유 있게 시도
         try:
-            # 현재 설정된 키로 요청 시도
-            response = model.generate_content(
+            # [핵심 변경] 매 시도마다 모델을 새로 생성해야 바뀐 키가 적용됨!
+            # system_instruction이 있다면 포함해서 생성
+            if system_instruction:
+                current_model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+            else:
+                current_model = genai.GenerativeModel(model_name)
+
+            print(f"👉 [Try] Key #{CURRENT_KEY_INDEX + 1}로 요청 시도...", flush=True)
+
+            response = current_model.generate_content(
                 contents, 
                 request_options=request_options,
                 safety_settings=safety_settings
             )
-            return response # 성공 시 바로 반환
+            return response
             
         except Exception as e:
-            print(f"⚠️ [Error] Key #{CURRENT_KEY_INDEX + 1} 에러 발생: {e}")
+            error_msg = str(e)
+            print(f"⚠️ [Error] Key #{CURRENT_KEY_INDEX + 1} 실패: {error_msg}", flush=True)
             
-            # 키 교체 시도
+            # 429: Too Many Requests, 403: Quota Exceeded 등의 에러일 때 키 교체
+            # (사실 모든 에러에 대해 교체해도 무방하지만, 명시적으로 로그 남김)
+            if "429" in error_msg or "403" in error_msg or "Quota" in error_msg or "limit" in error_msg:
+                print("📉 쿼터 초과 감지! 키 교체 진행합니다.")
+            
             if switch_to_next_key():
-                print("🔄 다음 키로 재시도합니다...")
                 attempt += 1
-                time.sleep(1) # 잠시 대기 후 재시도
+                time.sleep(1) # 너무 빠른 재시도 방지
             else:
-                # 더 이상 바꿀 키가 없으면 에러 던짐
                 print("❌ 더 이상 사용할 수 있는 키가 없습니다.")
                 raise e
     
@@ -172,7 +189,7 @@ def standardize_image(image_path, output_path=None):
 
 def generate_empty_room(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
-    print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) / 현재 Key #{CURRENT_KEY_INDEX + 1} ---", flush=True)
+    print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) ---", flush=True)
     try:
         img = Image.open(image_path)
         prompt = (
@@ -180,12 +197,12 @@ def generate_empty_room(image_path, unique_id, start_time):
             "Create a photorealistic image of this room but completely EMPTY.\n\n"
             "ACTIONS:\n"
             "1. REMOVE ALL furniture, rugs, decor, and lighting.\n"
-            "2. REMOVE ALL window treatments (curtains, blinds, shades). Show bare windows/glass.\n"
-            "3. KEEP the original floor material, wall color, ceiling structure, and windows EXACTLY as they are.\n"
+            "2. REMOVE ALL window treatments. Show bare windows/glass.\n"
+            "3. KEEP the original floor material, wall color, ceiling structure EXACTLY as they are.\n"
             "4. IN-PAINT the removed areas seamlessly.\n\n"
-            "OUTPUT RULE: Return ONLY the generated image. Do NOT output any text."
+            "OUTPUT RULE: Return ONLY the generated image."
         )
-        model = genai.GenerativeModel(MODEL_NAME)
+        
         remaining = max(10, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
         
         safety_settings = [
@@ -195,15 +212,16 @@ def generate_empty_room(image_path, unique_id, start_time):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        # [변경] 기존 model.generate_content 대신 Failover 함수 사용
+        # [변경] model 객체 대신 MODEL_NAME 문자열을 넘김
         response = call_gemini_with_failover(
-            model,
+            MODEL_NAME, # <--- 여기가 핵심
             [prompt, img],
             request_options={'timeout': remaining},
             safety_settings=safety_settings
         )
         
         if response and response.parts:
+            # (기존 저장 로직 동일...)
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data:
                     print(">> [성공] 빈 방 이미지 생성됨!", flush=True)
@@ -213,19 +231,17 @@ def generate_empty_room(image_path, unique_id, start_time):
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
                     return standardize_image(output_path)
         
+        # (실패 처리 로직 동일...)
         print(">> [실패] 이미지가 생성되지 않았습니다.", flush=True)
-        try:
-            if response.text:
-                print(f"   [모델 답변]: {response.text}", flush=True)
-        except: pass
         return image_path 
     except Exception as e:
         print(f"!! Stage 1 시스템 에러: {e}", flush=True)
+        traceback.print_exc() # 에러 상세 출력
         return image_path
 
 def generate_furnished_room(room_path, style_config, reference_image_path, unique_id, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return room_path
-    print(f"\n--- [Stage 2] 가구 배치 / 현재 Key #{CURRENT_KEY_INDEX + 1} ---", flush=True)
+    print(f"\n--- [Stage 2] 가구 배치 ---", flush=True)
     try:
         room_img = Image.open(room_path)
         
@@ -277,9 +293,9 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         
-        # [변경] 기존 model.generate_content 대신 Failover 함수 사용
+# [변경] model 객체 대신 MODEL_NAME 문자열을 넘김
         response = call_gemini_with_failover(
-            model,
+            MODEL_NAME, # <--- 여기가 핵심
             input_content, 
             request_options={'timeout': remaining},
             safety_settings=safety_settings
@@ -294,14 +310,12 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
                     output_path = os.path.join("outputs", filename)
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
                     return standardize_image(output_path)
+        
         print(">> [실패] 가구 배치 실패.", flush=True)
-        try:
-            if response.text:
-                print(f"   [모델 답변]: {response.text}", flush=True)
-        except: pass
         return room_path
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
+        traceback.print_exc()
         return room_path
 
 def call_magnific_api(image_path, unique_id, start_time):
