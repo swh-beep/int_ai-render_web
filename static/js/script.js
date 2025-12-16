@@ -132,14 +132,49 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBtn.scrollIntoView({ behavior: 'smooth' });
     }
 
-    function createCard(text, onClick) {
+function createCard(text, onClick) {
         const div = document.createElement('div');
         div.className = 'style-card';
-        div.textContent = text;
         div.onclick = onClick;
+
+        // [수정] 1. 이미지 태그 추가 (이게 없어서 깨져 보인 겁니다)
+        const img = document.createElement('img');
+        
+        // 이미지 파일명 추측 로직: "Living Room" -> "living_room"
+        let safeName = text.toLowerCase().replace(/ /g, '_');
+        
+        // 썸네일 경로 설정 (확장자가 jpg일지 png일지 몰라서 일단 jpg 시도)
+        img.src = `/static/thumbnails/${safeName}.jpg`; 
+        
+        // 이미지가 없을 경우를 대비한 스타일
+        img.alt = text;
+        img.style.width = "100%";
+        img.style.height = "150px"; // 높이 강제 고정
+        img.style.objectFit = "cover";
+        img.style.borderRadius = "8px";
+        img.style.marginBottom = "10px";
+
+        // 이미지가 로드 실패하면(엑박) 숨기고 글자만 보여주기
+        img.onerror = function() {
+            if (this.src.endsWith('.jpg')) {
+                this.src = this.src.replace('.jpg', '.png'); // png로 재시도
+            } else {
+                this.style.display = 'none';
+            }
+        };
+
+        // [수정] 2. 텍스트 라벨 추가
+        const span = document.createElement('div');
+        span.textContent = text;
+        span.style.fontWeight = "600";
+        span.style.fontSize = "1.1em";
+
+        // 카드에 이미지와 텍스트 넣기
+        div.appendChild(img);
+        div.appendChild(span);
+        
         return div;
     }
-
     function highlightSelection(grid, activeCard) {
         Array.from(grid.children).forEach(c => c.classList.remove('selected'));
         activeCard.classList.add('selected');
