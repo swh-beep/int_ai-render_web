@@ -18,6 +18,8 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 import gc
+# [중요] 안전 설정을 위한 타입 임포트
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -44,9 +46,10 @@ print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개")
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-MODEL_NAME = 'gemini-3-pro-image-preview' # 모델명 확인
 
-# [설정] 3장 생성을 위해 시간 넉넉히
+# 초강력 고정 # 모델명 절대 변경금지 # 모델명 3 pro image preview 에서 절대변경금지
+MODEL_NAME = 'gemini-3-pro-image-preview' 
+
 TOTAL_TIMEOUT_LIMIT = 300 
 
 os.makedirs("outputs", exist_ok=True)
@@ -67,20 +70,20 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------
-# [NEW] 스마트 키 관리자 (할당량 초과 시 '잠시 열외' 시스템)
+# [키 관리] 할당량 초과 시 잠시 제외
 # ---------------------------------------------------------
 QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
     
-    max_retries = len(API_KEY_POOL) + 1
+    max_retries = len(API_KEY_POOL) + 2
     
     for attempt in range(max_retries):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         
         if not available_keys:
-            print("🔄 [System] 락 해제 및 재시작", flush=True)
+            print("🔄 [System] 모든 키가 락 상태. 초기화 후 재시도.", flush=True)
             QUOTA_EXCEEDED_KEYS.clear()
             available_keys = list(API_KEY_POOL)
             time.sleep(1)
@@ -100,25 +103,17 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
                 request_options=request_options,
                 safety_settings=safety_settings
             )
-            
-            # [추가] 즉시 검사: 구글이 입구컷 시켰는지 확인
-            if response.prompt_feedback:
-                if response.prompt_feedback.block_reason:
-                    print(f"🚫 [Block] Key(...{masked_key}) 구글이 차단함! 사유: {response.prompt_feedback.block_reason}", flush=True)
-                    # 이건 키 문제가 아니라 '내용' 문제이므로, 재시도해봤자 소용없지만 로그를 위해 남김
-            
             return response
 
         except Exception as e:
             error_msg = str(e)
-            if "429" in error_msg or "403" in error_msg or "Quota" in error_msg:
+            if "429" in error_msg or "403" in error_msg or "Quota" in error_msg or "limit" in error_msg:
                 print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과.", flush=True)
                 QUOTA_EXCEEDED_KEYS.add(current_key)
             else:
-                # [상세 로그] 왜 에러가 났는지 정확히 출력
-                print(f"⚠️ [Error] Key(...{masked_key}) 에러 발생: {error_msg}", flush=True)
+                print(f"⚠️ [Error] Key(...{masked_key}) 에러: {error_msg}", flush=True)
             
-            time.sleep(1)
+            time.sleep(0.5)
 
     print("❌ [Fatal] 모든 키 시도 실패.")
     return None
@@ -146,20 +141,15 @@ def generate_empty_room(image_path, unique_id, start_time):
     print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) ---", flush=True)
     
     img = Image.open(image_path)
-    system_instruction = "You are an expert architectural AI. Your task is to perform structure-preserving image editing."
+    system_instruction = "You are an expert architectural AI."
     
     prompt = (
-        "IMAGE EDITING TASK (STRICT):\n"
-        "Create a photorealistic image of this room but completely EMPTY.\n"
-        "1. REMOVE ALL furniture, rugs, decor, and lighting.\n"
-        "2. REMOVE ALL window treatments. Show bare windows/glass.\n"
-        "3. KEEP the original floor material, wall color, ceiling structure EXACTLY as they are.\n"
-        "4. IN-PAINT the removed areas seamlessly.\n"
-        "OUTPUT RULE: Return ONLY the generated image."
+        "IMAGE EDITING TASK:\n"
+        "Show this room completely empty.\n"
+        "Remove all furniture and decorations.\n"
+        "Keep the floor, walls, and ceiling structure exactly as they are.\n"
+        "Return ONLY the image."
     )
-    
-    # [수정] 안전 설정을 더 강력하게 지정 (모두 허용)
-    from google.generativeai.types import HarmCategory, HarmBlockThreshold
     
     safety_settings = {
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -180,27 +170,20 @@ def generate_empty_room(image_path, unique_id, start_time):
             system_instruction=system_instruction
         )
         
-        # [디버깅] 왜 비었는지 확인
-        if response:
-            if hasattr(response, 'candidates') and response.candidates:
-                if hasattr(response, 'parts') and response.parts:
-                    # 성공 케이스
-                    for part in response.parts:
-                        if hasattr(part, 'inline_data') and part.inline_data:
-                            print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
-                            # ... (저장 로직 생략, 기존 코드와 동일) ...
-                            timestamp = int(time.time())
-                            filename = f"empty_{timestamp}_{unique_id}.jpg"
-                            output_path = os.path.join("outputs", filename)
-                            with open(output_path, 'wb') as f: f.write(part.inline_data.data)
-                            return standardize_image(output_path)
-                else:
-                    # 후보는 있는데 파트가 없음 (Safety Filter일 확률 높음)
-                    print(f"⚠️ [Blocked] AI가 응답을 생성했지만 안전 필터에 걸렸습니다. (Finish Reason: {response.candidates[0].finish_reason})", flush=True)
+        if response and hasattr(response, 'candidates') and response.candidates:
+            if hasattr(response, 'parts') and response.parts:
+                for part in response.parts:
+                    if hasattr(part, 'inline_data') and part.inline_data:
+                        print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
+                        timestamp = int(time.time())
+                        filename = f"empty_{timestamp}_{unique_id}.jpg"
+                        output_path = os.path.join("outputs", filename)
+                        with open(output_path, 'wb') as f: f.write(part.inline_data.data)
+                        return standardize_image(output_path)
             else:
-                # 후보조차 없음 (입구컷)
-                print(f"⚠️ [Blocked] 응답 후보(Candidates)가 비어있습니다. (Prompt Feedback 확인 필요)", flush=True)
-
+                 reason = response.candidates[0].finish_reason if response.candidates else "Unknown"
+                 print(f"⚠️ [Blocked] 생성 거부됨 (Finish Reason: {reason})", flush=True)
+        
         print(f"⚠️ [Stage 1 실패] 시도 {try_count+1} 실패. 재시도...", flush=True)
 
     print(">> [최종 실패] 3번 시도했으나 빈 방 생성 불가.", flush=True)
@@ -211,33 +194,32 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
     
     try:
         room_img = Image.open(room_path)
-        system_instruction = "You are an expert interior designer AI. Your task is virtual staging. You must place furniture realistically."
+        system_instruction = "You are an expert interior designer AI."
 
         prompt = (
-            "IMAGE GENERATION TASK (Virtual Staging):\n"
-            "Furnish the empty room using the furniture styles shown in the Moodboard.\n"
-            "1. RE-ARRANGE: Do NOT copy the layout. Place furniture realistically.\n"
-            "2. LIGHTING: Turn on all lights (4000K warm white).\n"
-            "3. SCALE & PERSPECTIVE: Match the room's perspective perfectly.\n"
-            "OUTPUT RULE: Return ONLY the generated interior image."
+            "Virtual Staging Task:\n"
+            "Furnish this empty room realistically using the style from the reference.\n"
+            "Match the perspective and lighting.\n"
+            "Output ONLY the image."
         )
         
-        input_content = [prompt, "Background Empty Room:", room_img]
+        input_content = [prompt, "Empty Room:", room_img]
         if reference_image_path:
             try:
                 ref_img = Image.open(reference_image_path)
                 if ref_img.width > 2048 or ref_img.height > 2048: ref_img.thumbnail((2048, 2048))
-                input_content.append("Furniture Reference (Moodboard):")
+                input_content.append("Style Reference:")
                 input_content.append(ref_img)
             except: pass
         
         remaining = max(30, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
+        
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         
         response = call_gemini_with_failover(
             MODEL_NAME, 
@@ -247,59 +229,83 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
             system_instruction=system_instruction
         )
         
-        # [수정됨] 여기도 동일하게 안전장치 추가
         if response and hasattr(response, 'candidates') and response.candidates:
-            try:
-                if hasattr(response, 'parts') and response.parts:
-                    for part in response.parts:
-                        if hasattr(part, 'inline_data') and part.inline_data:
-                            timestamp = int(time.time())
-                            filename = f"result_{timestamp}_{unique_id}.jpg"
-                            output_path = os.path.join("outputs", filename)
-                            with open(output_path, 'wb') as f: f.write(part.inline_data.data)
-                            return standardize_image(output_path)
-            except ValueError:
-                 print(f"   ⚠️ [Blocked] 가구 배치 생성 거부됨 ({unique_id})", flush=True)
+            if hasattr(response, 'parts') and response.parts:
+                for part in response.parts:
+                    if hasattr(part, 'inline_data') and part.inline_data:
+                        timestamp = int(time.time())
+                        filename = f"result_{timestamp}_{unique_id}.jpg"
+                        output_path = os.path.join("outputs", filename)
+                        with open(output_path, 'wb') as f: f.write(part.inline_data.data)
+                        return standardize_image(output_path)
         
-        print(f"   >> [실패] 가구 배치 생성 실패 ({unique_id}) - 응답 없음", flush=True)
+        print(f"   >> [실패] 가구 배치 생성 실패 ({unique_id})", flush=True)
         return None 
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
         return None
 
+# [업스케일링 디버그 강화]
 def call_magnific_api(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
-    print("\n--- [Stage 3] 업스케일링 시도 ---", flush=True)
+    print(f"\n--- [Stage 3] 업스케일링 시도 (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
+    
     if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
-         print(">> [SKIP] API 키 없음.", flush=True)
+         print(">> [SKIP] Magnific API 키가 .env에 없거나 잘못되었습니다.", flush=True)
          return image_path
     try:
         with open(image_path, "rb") as img_file:
             base64_string = base64.b64encode(img_file.read()).decode('utf-8')
+        
         payload = {
-            "image": base64_string, "scale_factor": "2x", "optimized_for": "standard",
+            "image": base64_string, 
+            "scale_factor": "2x", 
+            "optimized_for": "standard",
             "prompt": "high quality, 4k, realistic interior, highly detailed",
-            "creativity": 2, "hdr": 4, "resemblance": 4, "fractality": 3, "engine": "automatic"
+            "engine": "automatic"
         }
-        headers = { "x-freepik-api-key": MAGNIFIC_API_KEY, "Content-Type": "application/json", "Accept": "application/json" }
+        
+        headers = { 
+            "x-freepik-api-key": MAGNIFIC_API_KEY, # Freepik API 키 사용
+            "Content-Type": "application/json"
+        }
+        
+        print(">> API 서버에 요청 전송...", flush=True)
         response = requests.post(MAGNIFIC_ENDPOINT, json=payload, headers=headers)
-        if response.status_code != 200: return image_path
+        
+        if response.status_code != 200: 
+            print(f"!! [API 오류] {response.status_code}: {response.text}", flush=True)
+            return image_path
+
         result_json = response.json()
+        
         if "data" in result_json and "generated" in result_json["data"]:
              return download_image(result_json["data"]["generated"][0], unique_id) or image_path
+        
         elif "data" in result_json and "task_id" in result_json["data"]:
             task_id = result_json["data"]["task_id"]
+            print(f">> 작업 예약됨 (ID: {task_id})...", end="", flush=True)
+            
             while time.time() - start_time < TOTAL_TIMEOUT_LIMIT:
                 time.sleep(2)
                 status_res = requests.get(f"{MAGNIFIC_ENDPOINT}/{task_id}", headers=headers)
                 if status_res.status_code == 200:
                     s_data = status_res.json()
-                    if s_data.get("data", {}).get("status") == "COMPLETED":
+                    status = s_data.get("data", {}).get("status")
+                    if status == "COMPLETED":
+                        print(" 완료!")
                         return download_image(s_data["data"]["generated"][0], unique_id) or image_path
-                    elif s_data.get("data", {}).get("status") == "FAILED": return image_path
+                    elif status == "FAILED": 
+                        print(" 실패.")
+                        return image_path
+                print(".", end="", flush=True)
             return image_path
-        else: return image_path
-    except: return image_path
+        else: 
+            print(f"!! [알 수 없는 응답] {result_json}")
+            return image_path
+    except Exception as e:
+        print(f"!! [시스템 에러] {e}", flush=True)
+        return image_path
 
 def download_image(url, unique_id):
     try:
@@ -314,7 +320,7 @@ def download_image(url, unique_id):
     except: return None
 
 # ---------------------------------------------------------
-# 3. 라우트 및 엔드포인트
+# 3. 라우트
 # ---------------------------------------------------------
 @app.get("/")
 async def read_index(): return FileResponse("static/index.html")
@@ -329,7 +335,6 @@ async def get_styles_for_room(room_type: str):
 
 @app.post("/render")
 def render_room(file: UploadFile = File(...), room: str = Form(...), style: str = Form(...), variant: str = Form(...)):
-    # [안전장치] 서버 크래시 방지용 try-except
     try:
         full_style = f"{room}-{style}-{variant}"
         unique_id = uuid.uuid4().hex[:8]
@@ -356,7 +361,6 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
                 if variant in f: ref_path = os.path.join(target_dir, f); break
             if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
 
-        # 3. 병렬 처리
         generated_results = []
         print(f"\n🚀 [Parallel] 3장 동시 생성 시작!", flush=True)
 
@@ -364,9 +368,7 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
             sub_id = f"{unique_id}_v{index+1}"
             print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
             try:
-                # 스타일 프롬프트 안전하게 가져오기
                 selected_style_prompt = STYLES.get(style, STYLES.get("Modern", "Modern Style"))
-                
                 result_path = generate_furnished_room(step1_img, selected_style_prompt, ref_path, sub_id, start_time)
                 if result_path:
                     print(f"   ✅ [Variation {index+1}] 성공!", flush=True)
@@ -418,7 +420,6 @@ def upscale_and_download(req: UpscaleRequest):
         unique_id = uuid.uuid4().hex[:8]
         start_time = time.time()
         print(f"\n--- [Upscale Request] {filename} ---", flush=True)
-        
         final_path = call_magnific_api(local_path, unique_id, start_time)
         return JSONResponse(content={
             "upscaled_url": f"/outputs/{os.path.basename(final_path)}",
