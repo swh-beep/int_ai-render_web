@@ -77,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
         variantSection.classList.add('hidden');
         renderBtn.disabled = true;
         
-        // 기존 선택 제거
         document.querySelectorAll('.style-card.selected').forEach(el => el.classList.remove('selected'));
     }
 
@@ -87,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(types => {
                 roomGrid.innerHTML = '';
                 types.forEach(type => {
+                    // Room은 이름 그대로 파일명 추측 (예: Living Room -> livingroom.jpg)
                     const card = createCard(type, () => selectRoom(type, card));
                     roomGrid.appendChild(card);
                 });
@@ -97,12 +97,12 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedRoom = type;
         highlightSelection(roomGrid, cardElement);
         
-        // 다음 단계 로드
         fetch(`/styles/${type}`)
             .then(res => res.json())
             .then(styles => {
                 styleGrid.innerHTML = '';
                 styles.forEach(style => {
+                    // Style도 이름 그대로 파일명 추측
                     const sCard = createCard(style, () => selectStyle(style, sCard));
                     styleGrid.appendChild(sCard);
                 });
@@ -115,12 +115,22 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedStyle = style;
         highlightSelection(styleGrid, cardElement);
         
-        // Step 3 (Variant) 생성
+        // [핵심 수정] Step 3 (Variant) 이미지 경로 생성 로직
         variantGrid.innerHTML = '';
         ['1', '2', '3'].forEach(v => {
-            const vCard = createCard(`Option ${v}`, () => selectVariant(v, vCard));
+            // 파일명 규칙: {방이름}_{스타일}_{번호}.png (로그 기반)
+            // 공백제거: "Living Room" -> "livingroom"
+            const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
+            // 공백->언더바: "Oriental" -> "oriental", "Modern Luxury" -> "modern_luxury" (추정)
+            const safeStyle = selectedStyle.toLowerCase().replace(/ /g, '_');
+            
+            // 이미지 경로 직접 지정
+            const customImgPath = `/static/thumbnails/${safeRoom}_${safeStyle}_${v}.png`;
+            
+            const vCard = createCard(`Option ${v}`, () => selectVariant(v, vCard), customImgPath);
             variantGrid.appendChild(vCard);
         });
+        
         variantSection.classList.remove('hidden');
         variantSection.scrollIntoView({ behavior: 'smooth' });
     }
@@ -132,12 +142,53 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBtn.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // [복구 완료] 원래 주셨던 코드대로 텍스트만 들어가는 버전입니다.
-    function createCard(text, onClick) {
+    // [수정된 createCard] customImageUrl 파라미터 추가
+    function createCard(text, onClick, customImageUrl = null) {
         const div = document.createElement('div');
         div.className = 'style-card';
-        div.textContent = text;
         div.onclick = onClick;
+
+        const img = document.createElement('img');
+        
+        if (customImageUrl) {
+            // 1. Variant 처럼 직접 경로를 준 경우
+            img.src = customImageUrl;
+        } else {
+            // 2. Room/Style 처럼 텍스트로 추측하는 경우
+            // (기본적으로 공백 제거 후 소문자로)
+            let safeName = text.toLowerCase().replace(/ /g, '');
+            img.src = `/static/thumbnails/${safeName}.jpg`;
+        }
+        
+        // 스타일 설정
+        img.style.width = "100%";
+        img.style.height = "120px";
+        img.style.objectFit = "cover";
+        img.style.borderRadius = "8px";
+        img.style.marginBottom = "8px";
+        img.style.display = "block";
+
+        // 에러 처리 (이미지 없으면 숨기기 or png 재시도)
+        img.onerror = function() {
+            // 만약 jpg였는데 실패했으면 png로, png였으면 jpg로 한번씩 교차 시도 가능하지만
+            // 여기선 간단히 jpg -> png 시도 로직만 유지
+            if (this.src.endsWith('.jpg')) {
+                this.src = this.src.replace('.jpg', '.png');
+            } else if (!this.src.includes('_retry')) {
+                 // 무한루프 방지하며 숨김 처리
+                 this.style.display = 'none';
+            }
+        };
+
+        const span = document.createElement('div');
+        span.textContent = text;
+        span.style.fontWeight = "600";
+        span.style.fontSize = "1rem";
+        span.style.textAlign = "center";
+
+        div.appendChild(img);
+        div.appendChild(span);
+        
         return div;
     }
 
@@ -153,7 +204,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingOverlay.classList.remove('hidden');
         resultSection.classList.add('hidden');
         
-        // 타이머 시작
         let startTime = Date.now();
         const timerInterval = setInterval(() => {
             let elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -176,22 +226,18 @@ document.addEventListener('DOMContentLoaded', () => {
             loadingOverlay.classList.add('hidden');
             resultSection.classList.remove('hidden');
 
-            // [Before & After 이미지 설정]
             const resultAfter = document.getElementById('result-after');
             const resultBefore = document.getElementById('result-before');
             
-            resultBefore.src = data.empty_room_url; // 빈 방
+            resultBefore.src = data.empty_room_url;
             
-            // 결과 리스트 처리
             const results = data.result_urls || [];
             const thumbBox = document.getElementById('thumbnailContainer');
             thumbBox.innerHTML = "";
 
             if (results.length > 0) {
-                // 첫 번째 결과 기본 표시
                 resultAfter.src = results[0]; 
 
-                // 썸네일 생성
                 results.forEach((url, index) => {
                     const thumb = document.createElement("img");
                     thumb.src = url;
@@ -203,9 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     thumb.style.border = index === 0 ? "3px solid #007AFF" : "3px solid transparent";
                     
                     thumb.onclick = () => {
-                        // 메인 이미지 변경
                         resultAfter.src = url;
-                        // 썸네일 스타일 업데이트
                         Array.from(thumbBox.children).forEach(c => c.style.border = "3px solid transparent");
                         thumb.style.border = "3px solid #007AFF";
                     };
@@ -213,7 +257,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
-            // 슬라이더 초기화
             initSlider(); 
             resultSection.scrollIntoView({ behavior: 'smooth' });
         })
@@ -237,7 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
         afterWrapper.style.width = "50%";
     }
 
-    // --- 5. 업스케일 & 다운로드 기능 (이건 유지해야 기능이 작동합니다) ---
+    // --- 5. 업스케일 & 다운로드 기능 ---
     const upscaleBtn = document.getElementById("upscaleBtn");
     if(upscaleBtn) {
         upscaleBtn.onclick = function() {
