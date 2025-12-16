@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
 from PIL import Image, ImageOps
 from pydantic import BaseModel
+from concurrent.futures import ThreadPoolExecutor
 import re
 import traceback
 
@@ -414,34 +415,38 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
         if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
     
     # ---------------------------------------------------------
-    # [변경점] 3장 생성 루프 (Parallel or Sequential)
-    # Render 서버 부하를 고려해 순차적으로 3장 생성
+    # [🚀 POWER UP] 3장 동시 생성 (병렬 처리)
     # ---------------------------------------------------------
     generated_results = []
     
-    for i in range(3): # 3번 반복
-        if time.time() - start_time > TOTAL_TIMEOUT_LIMIT - 30: 
-            print("⏰ 시간 부족으로 추가 생성 중단")
-            break
-            
-        print(f"\n🎨 [Variation {i+1}/3] 생성 중...", flush=True)
-        # unique_id에 순번을 붙여서 파일명 구분
-        sub_id = f"{unique_id}_v{i+1}"
+    print(f"\n🚀 [Parallel] 3장 동시 생성 시작! (서버 업그레이드 적용됨)", flush=True)
+
+    # 1. 개별 작업을 수행할 함수 정의 (내부 함수)
+    def process_one_variant(index):
+        sub_id = f"{unique_id}_v{index+1}"
+        print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
+        try:
+            # 순서: 빈방 이미지 -> 가구 배치 (API 호출)
+            result_path = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, sub_id, start_time)
+            print(f"   ✅ [Variation {index+1}] 생성 완료!", flush=True)
+            return f"/outputs/{os.path.basename(result_path)}"
+        except Exception as e:
+            print(f"   ❌ [Variation {index+1}] 실패: {e}", flush=True)
+            return None
+
+    # 2. 3개의 일꾼(Worker)을 동시에 투입
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # 작업 3개를 한꺼번에 던짐
+        futures = [executor.submit(process_one_variant, i) for i in range(3)]
         
-        # Stage 2 생성 (Gemini)
-        # 프롬프트에 약간의 변형을 주고 싶다면 generate_furnished_room 내부에서 랜덤성을 기대하거나
-        # i 값을 넘겨서 프롬프트를 미세하게 조정할 수도 있음 (현재는 Gemini의 랜덤성에 의존)
-        result_path = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, sub_id, start_time)
-        
-        # [중요] 3장 모두 업스케일링(Magnific)을 하면 시간이 너무 오래 걸림 (비용+시간 문제)
-        # 전략: 우선 3장 모두 Gemini 결과물을 리스트에 담습니다.
-        # 만약 꼭 고화질이 필요하면 첫 번째만 하거나, 나중에 선택된 것만 하는 API를 따로 파야 합니다.
-        # 여기서는 시간 관계상 Gemini 결과물(Stage 2)을 바로 반환합니다.
-        
-        generated_results.append(f"/outputs/{os.path.basename(result_path)}")
+        # 끝나는 대로 결과 수집
+        for future in futures:
+            res = future.result()
+            if res:
+                generated_results.append(res)
 
     elapsed = time.time() - start_time
-    print(f"=== [{unique_id}] 총 소요 시간: {elapsed:.1f}초 / 생성된 이미지: {len(generated_results)}장 ===", flush=True)
+    print(f"=== [{unique_id}] 총 소요 시간: {elapsed:.1f}초 (병렬 처리) / 생성된 이미지: {len(generated_results)}장 ===", flush=True)
     
     # 결과가 하나도 없으면 원본이라도 넣음
     if not generated_results:
