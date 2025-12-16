@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
 from PIL import Image, ImageOps
+from pydantic import BaseModel
 import re
 import traceback
 
@@ -382,64 +383,105 @@ def download_image(url, unique_id):
 @app.post("/render")
 def render_room(file: UploadFile = File(...), room: str = Form(...), style: str = Form(...), variant: str = Form(...)):
     full_style = f"{room}-{style}-{variant}"
-    
     unique_id = uuid.uuid4().hex[:8]
     
-    print(f"\n=== 요청 시작 [{unique_id}]: {full_style} ===", flush=True)
+    print(f"\n=== 요청 시작 [{unique_id}]: {full_style} (3 Variations) ===", flush=True)
     start_time = time.time()
     
+    # 1. 원본 저장 및 표준화
     timestamp = int(time.time())
     safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
     raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
     
     with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
-    
     std_path = standardize_image(raw_path)
     
+    # 2. 빈 방 만들기 (Stage 1) - 한 번만 실행하면 됨 (공통)
     step1_img = generate_empty_room(std_path, unique_id, start_time)
     
+    # 3. 무드보드 에셋 찾기
     ref_path = None
     safe_room = room.lower().replace(" ", "")
     safe_style = style.lower().replace(" ", "-").replace("_", "-")
     target_dir = os.path.join("assets", safe_room, safe_style)
     
-    print(f">> [Moodboard] 에셋 폴더 탐색: {target_dir}", flush=True)
-    
     if os.path.exists(target_dir):
         files = sorted(os.listdir(target_dir))
         for f in files:
-            if not f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                continue
-            numbers = re.findall(r'\d+', f)
-            if variant in numbers:
+            if variant in f: # 간단한 매칭
                 ref_path = os.path.join(target_dir, f)
-                print(f">> [Moodboard] ✅ 파일 찾음: {f}", flush=True)
                 break
+        if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
+    
+    # ---------------------------------------------------------
+    # [변경점] 3장 생성 루프 (Parallel or Sequential)
+    # Render 서버 부하를 고려해 순차적으로 3장 생성
+    # ---------------------------------------------------------
+    generated_results = []
+    
+    for i in range(3): # 3번 반복
+        if time.time() - start_time > TOTAL_TIMEOUT_LIMIT - 30: 
+            print("⏰ 시간 부족으로 추가 생성 중단")
+            break
+            
+        print(f"\n🎨 [Variation {i+1}/3] 생성 중...", flush=True)
+        # unique_id에 순번을 붙여서 파일명 구분
+        sub_id = f"{unique_id}_v{i+1}"
         
-        if ref_path is None and len(files) > 0:
-            ref_path = os.path.join(target_dir, files[0])
-            print(f">> [Moodboard] ⚠️ 번호 일치 파일 없음. 대체 사용: {files[0]}", flush=True)
-    else:
-        print(f">> [Moodboard] ❌ 폴더 없음: {target_dir}", flush=True)
+        # Stage 2 생성 (Gemini)
+        # 프롬프트에 약간의 변형을 주고 싶다면 generate_furnished_room 내부에서 랜덤성을 기대하거나
+        # i 값을 넘겨서 프롬프트를 미세하게 조정할 수도 있음 (현재는 Gemini의 랜덤성에 의존)
+        result_path = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, sub_id, start_time)
+        
+        # [중요] 3장 모두 업스케일링(Magnific)을 하면 시간이 너무 오래 걸림 (비용+시간 문제)
+        # 전략: 우선 3장 모두 Gemini 결과물을 리스트에 담습니다.
+        # 만약 꼭 고화질이 필요하면 첫 번째만 하거나, 나중에 선택된 것만 하는 API를 따로 파야 합니다.
+        # 여기서는 시간 관계상 Gemini 결과물(Stage 2)을 바로 반환합니다.
+        
+        generated_results.append(f"/outputs/{os.path.basename(result_path)}")
 
-    if ref_path is None: 
-        print(">> [Moodboard] ❌ 경고: 에셋 찾기 실패 (AI 임의 생성)", flush=True)
-    
-    step2_img = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, unique_id, start_time)
-    final_img = call_magnific_api(step2_img, unique_id, start_time)
-    
-    if final_img is None: final_img = step2_img
-    
     elapsed = time.time() - start_time
-    print(f"=== [{unique_id}] 총 소요 시간: {elapsed:.1f}초 ===", flush=True)
+    print(f"=== [{unique_id}] 총 소요 시간: {elapsed:.1f}초 / 생성된 이미지: {len(generated_results)}장 ===", flush=True)
     
+    # 결과가 하나도 없으면 원본이라도 넣음
+    if not generated_results:
+        generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
+
     return JSONResponse(content={
         "original_url": f"/outputs/{os.path.basename(step1_img)}", 
-        "empty_room_url": f"/outputs/{os.path.basename(std_path)}", 
-        "result_url": f"/outputs/{os.path.basename(final_img)}",
-        "message": "Complete" if elapsed <= TOTAL_TIMEOUT_LIMIT else "Timeout Partial Result"
+        "empty_room_url": f"/outputs/{os.path.basename(step1_img)}", 
+        "result_urls": generated_results, # [url1, url2, url3] 리스트 반환
+        "message": "Complete"
     })
+class UpscaleRequest(BaseModel):
+    image_url: str
 
+@app.post("/upscale")
+def upscale_and_download(req: UpscaleRequest):
+    try:
+        # 클라이언트가 보낸 URL (/outputs/파일이름.jpg)에서 파일명만 추출
+        filename = os.path.basename(req.image_url)
+        local_path = os.path.join("outputs", filename)
+        
+        if not os.path.exists(local_path):
+            return JSONResponse(content={"error": "File not found"}, status_code=404)
+            
+        unique_id = uuid.uuid4().hex[:8]
+        start_time = time.time() # 업스케일링을 위한 시간 카운트 새로 시작
+        
+        print(f"\n--- [Request] 개별 업스케일링 요청: {filename} ---", flush=True)
+        
+        # 기존에 있던 함수 그대로 재활용
+        final_path = call_magnific_api(local_path, unique_id, start_time)
+        
+        # 결과 반환
+        return JSONResponse(content={
+            "upscaled_url": f"/outputs/{os.path.basename(final_path)}",
+            "message": "Success"
+        })
+    except Exception as e:
+        print(f"!! 업스케일링 에러: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 if __name__ == "__main__":
     import uvicorn
     try:
