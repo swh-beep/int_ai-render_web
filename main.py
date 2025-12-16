@@ -74,13 +74,13 @@ QUOTA_EXCEEDED_KEYS = set()
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
     
-    max_retries = len(API_KEY_POOL) + 2
+    max_retries = len(API_KEY_POOL) + 1
     
     for attempt in range(max_retries):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         
         if not available_keys:
-            print("🔄 [System] 모든 키가 락(Lock) 상태입니다. 락을 해제하고 다시 시작합니다.", flush=True)
+            print("🔄 [System] 락 해제 및 재시작", flush=True)
             QUOTA_EXCEEDED_KEYS.clear()
             available_keys = list(API_KEY_POOL)
             time.sleep(1)
@@ -100,19 +100,27 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
                 request_options=request_options,
                 safety_settings=safety_settings
             )
+            
+            # [추가] 즉시 검사: 구글이 입구컷 시켰는지 확인
+            if response.prompt_feedback:
+                if response.prompt_feedback.block_reason:
+                    print(f"🚫 [Block] Key(...{masked_key}) 구글이 차단함! 사유: {response.prompt_feedback.block_reason}", flush=True)
+                    # 이건 키 문제가 아니라 '내용' 문제이므로, 재시도해봤자 소용없지만 로그를 위해 남김
+            
             return response
 
         except Exception as e:
             error_msg = str(e)
-            if "429" in error_msg or "403" in error_msg or "Quota" in error_msg or "limit" in error_msg:
-                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과. 한 바퀴 돌 동안 잠급니다.", flush=True)
+            if "429" in error_msg or "403" in error_msg or "Quota" in error_msg:
+                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과.", flush=True)
                 QUOTA_EXCEEDED_KEYS.add(current_key)
             else:
-                print(f"⚠️ [Error] Key(...{masked_key}) 단순 에러(락 안함): {error_msg}", flush=True)
+                # [상세 로그] 왜 에러가 났는지 정확히 출력
+                print(f"⚠️ [Error] Key(...{masked_key}) 에러 발생: {error_msg}", flush=True)
             
             time.sleep(0.5)
 
-    print("❌ [Fatal] 모든 키로 시도했으나 API 호출 실패.")
+    print("❌ [Fatal] 모든 키 시도 실패.")
     return None
 
 # ---------------------------------------------------------
@@ -135,10 +143,10 @@ def standardize_image(image_path, output_path=None):
 
 def generate_empty_room(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
-    print(f"\n--- [Stage 1] 빈 방 생성 시작 ---", flush=True)
+    print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) ---", flush=True)
     
     img = Image.open(image_path)
-    system_instruction = "You are an expert architectural AI. Your task is to perform structure-preserving image editing. You must output an image."
+    system_instruction = "You are an expert architectural AI. Your task is to perform structure-preserving image editing."
     
     prompt = (
         "IMAGE EDITING TASK (STRICT):\n"
@@ -150,16 +158,20 @@ def generate_empty_room(image_path, unique_id, start_time):
         "OUTPUT RULE: Return ONLY the generated image."
     )
     
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
+    # [수정] 안전 설정을 더 강력하게 지정 (모두 허용)
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
+    
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
 
     max_stage_retries = 3
     for try_count in range(max_stage_retries):
         remaining = max(10, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
+        
         response = call_gemini_with_failover(
             MODEL_NAME, 
             [prompt, img], 
@@ -168,24 +180,28 @@ def generate_empty_room(image_path, unique_id, start_time):
             system_instruction=system_instruction
         )
         
-        # [수정됨] 여기가 에러의 원인이었습니다. response.parts에 바로 접근하면 터집니다.
-        # response.candidates가 존재하는지 먼저 확인해야 합니다.
-        if response and hasattr(response, 'candidates') and response.candidates:
-            try:
-                # parts가 존재하는지 안전하게 확인
+        # [디버깅] 왜 비었는지 확인
+        if response:
+            if hasattr(response, 'candidates') and response.candidates:
                 if hasattr(response, 'parts') and response.parts:
+                    # 성공 케이스
                     for part in response.parts:
                         if hasattr(part, 'inline_data') and part.inline_data:
                             print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
+                            # ... (저장 로직 생략, 기존 코드와 동일) ...
                             timestamp = int(time.time())
                             filename = f"empty_{timestamp}_{unique_id}.jpg"
                             output_path = os.path.join("outputs", filename)
                             with open(output_path, 'wb') as f: f.write(part.inline_data.data)
                             return standardize_image(output_path)
-            except ValueError:
-                print(f"⚠️ [Blocked] AI가 응답을 생성했지만 안전 필터 등에 걸렸습니다.", flush=True)
-        
-        print(f"⚠️ [Stage 1 실패] 이미지가 생성되지 않음 (Blocked or Empty). 재시도...", flush=True)
+                else:
+                    # 후보는 있는데 파트가 없음 (Safety Filter일 확률 높음)
+                    print(f"⚠️ [Blocked] AI가 응답을 생성했지만 안전 필터에 걸렸습니다. (Finish Reason: {response.candidates[0].finish_reason})", flush=True)
+            else:
+                # 후보조차 없음 (입구컷)
+                print(f"⚠️ [Blocked] 응답 후보(Candidates)가 비어있습니다. (Prompt Feedback 확인 필요)", flush=True)
+
+        print(f"⚠️ [Stage 1 실패] 시도 {try_count+1} 실패. 재시도...", flush=True)
 
     print(">> [최종 실패] 3번 시도했으나 빈 방 생성 불가.", flush=True)
     return image_path
