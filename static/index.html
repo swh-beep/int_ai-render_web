@@ -61,21 +61,20 @@
                     <div class="image-wrapper after" style="position: absolute; top: 0; left: 0; height: 100%; width: 50%; overflow: hidden; z-index: 2;">
                         <img id="result-after" src="" alt="After" style="height: 100%; width: auto; max-width: none;">
                     </div>
-                    
                     <div class="image-wrapper before" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%;">
                         <img id="result-before" src="" alt="Before" style="height: 100%; width: 100%; object-fit: cover;">
                     </div>
-                    
                     <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider" style="width: 100%; position: absolute; top: 50%; z-index: 10; margin: 0;">
                 </div>
 
-                <div id="thumbnailContainer" style="display: flex; justify-content: center; gap: 10px; margin-top: 20px; padding: 10px;"></div>
+                <div id="thumbnailContainer" style="display: flex; justify-content: center; gap: 10px; margin-top: 20px; padding: 10px;">
+                    </div>
 
                 <div class="download-area" style="text-align: center; margin-top: 20px;">
-                    <button id="upscaleBtn" class="action-btn" style="background-color: #6f42c1; color: white; cursor: pointer; padding: 10px 20px; border: none; border-radius: 5px; font-size: 16px;">
+                    <button id="upscaleBtn" class="action-btn" style="background-color: #6f42c1; color: white; cursor: pointer; padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;">
                         ✨ Upscale & Download
                     </button>
-                    <p id="upscaleStatus" style="font-size: 0.9em; color: #666; margin-top: 5px; display: none;">
+                    <p id="upscaleStatus" style="font-size: 0.9em; color: #666; margin-top: 10px; display: none;">
                         고화질 변환 중입니다... (약 30~60초 소요)
                     </p>
                 </div>
