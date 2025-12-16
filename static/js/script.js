@@ -1,298 +1,296 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // 요소 선택
+    console.log("✅ script.js 로드됨 (수정버전)");
+
     const dropZone = document.querySelector('.drop-zone');
     const fileInput = document.getElementById('file-input');
     const previewContainer = document.getElementById('preview-container');
     const imagePreview = document.getElementById('image-preview');
     const removeBtn = document.getElementById('remove-image');
-    
-    const roomSection = document.getElementById('room-section');
-    const styleSection = document.getElementById('style-section');
-    const variantSection = document.getElementById('variant-section');
-    
+
     const roomGrid = document.getElementById('room-grid');
     const styleGrid = document.getElementById('style-grid');
     const variantGrid = document.getElementById('variant-grid');
-    
+
+    const roomSection = document.getElementById('room-section');
+    const styleSection = document.getElementById('style-section');
+    const variantSection = document.getElementById('variant-section');
+
     const renderBtn = document.getElementById('render-btn');
     const loadingOverlay = document.getElementById('loading-overlay');
+    
+    // 결과창 관련 요소들
     const resultSection = document.getElementById('result-section');
-    const timerElement = document.getElementById('timer');
+    const resultBefore = document.getElementById('result-before');
+    const resultAfter = document.getElementById('result-after');
+    const compareSlider = document.getElementById('compare-slider');
+    const comparisonContainer = document.querySelector('.comparison-container');
+    
+    // [NEW] 새로 추가된 요소 (썸네일 & 업스케일 버튼)
+    const thumbnailContainer = document.getElementById('thumbnailContainer');
+    const upscaleBtn = document.getElementById('upscaleBtn');
+    const upscaleStatus = document.getElementById('upscaleStatus');
 
-    // 상태 변수
     let selectedFile = null;
     let selectedRoom = null;
     let selectedStyle = null;
     let selectedVariant = null;
 
-    // --- 1. 파일 업로드 핸들링 ---
-    dropZone.addEventListener('click', () => fileInput.click());
+    // ---------------------------------------------------------
+    // [초기화] 룸 타입 불러오기 (원본 유지)
+    // ---------------------------------------------------------
+    fetch('/room-types')
+        .then(res => {
+            if (!res.ok) throw new Error(`서버 연결 실패 (${res.status})`);
+            return res.json();
+        })
+        .then(rooms => {
+            roomGrid.innerHTML = '';
+            rooms.forEach(room => {
+                const btn = document.createElement('button');
+                btn.className = 'style-btn';
+                btn.textContent = room;
+                btn.onclick = () => selectRoom(room, btn);
+                roomGrid.appendChild(btn);
+            });
+        })
+        .catch(err => {
+            console.error(err);
+            if (roomGrid) roomGrid.innerHTML = `<p style="color:red">서버 연결 실패.</p>`;
+        });
 
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = '#007AFF';
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.style.borderColor = '#ccc';
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = '#ccc';
-        if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
-    });
-
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length) handleFile(e.target.files[0]);
-    });
-
-    function handleFile(file) {
-        selectedFile = file;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            imagePreview.src = e.target.result;
-            dropZone.classList.add('hidden');
-            previewContainer.classList.remove('hidden');
-            loadRoomTypes(); // 파일 업로드 후 Step 1 로드
-        };
-        reader.readAsDataURL(file);
-    }
-
-    removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectedFile = null;
-        fileInput.value = '';
-        previewContainer.classList.add('hidden');
-        dropZone.classList.remove('hidden');
-        resetSelections();
-    });
-
-    // --- 2. 데이터 로드 및 UI 생성 ---
-    function resetSelections() {
-        selectedRoom = null;
+    // ---------------------------------------------------------
+    // 선택 핸들러 (원본 유지)
+    // ---------------------------------------------------------
+    function selectRoom(room, btn) {
+        selectedRoom = room;
         selectedStyle = null;
         selectedVariant = null;
-        styleSection.classList.add('hidden');
-        variantSection.classList.add('hidden');
-        renderBtn.disabled = true;
-        
-        document.querySelectorAll('.style-card.selected').forEach(el => el.classList.remove('selected'));
-    }
 
-    function loadRoomTypes() {
-        fetch('/room-types')
-            .then(res => res.json())
-            .then(types => {
-                roomGrid.innerHTML = '';
-                types.forEach(type => {
-                    // Room은 이름 그대로 파일명 추측 (예: Living Room -> livingroom.jpg)
-                    const card = createCard(type, () => selectRoom(type, card));
-                    roomGrid.appendChild(card);
-                });
-            });
-    }
+        document.querySelectorAll('#room-grid .style-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
 
-    function selectRoom(type, cardElement) {
-        selectedRoom = type;
-        highlightSelection(roomGrid, cardElement);
-        
-        fetch(`/styles/${type}`)
+        fetch(`/styles/${room}`)
             .then(res => res.json())
             .then(styles => {
                 styleGrid.innerHTML = '';
                 styles.forEach(style => {
-                    // Style도 이름 그대로 파일명 추측
-                    const sCard = createCard(style, () => selectStyle(style, sCard));
-                    styleGrid.appendChild(sCard);
+                    const styleBtn = document.createElement('button');
+                    styleBtn.className = 'style-btn';
+                    styleBtn.textContent = style;
+                    styleBtn.onclick = () => selectStyle(style, styleBtn);
+                    styleGrid.appendChild(styleBtn);
                 });
-                styleSection.classList.remove('hidden');
-                styleSection.scrollIntoView({ behavior: 'smooth' });
+                if (styleSection) styleSection.classList.remove('hidden');
+                if (variantSection) variantSection.classList.add('hidden');
+                checkReady();
             });
     }
 
-    function selectStyle(style, cardElement) {
+    // [원본 유지] Step 3: 10개 옵션 생성 로직
+    function selectStyle(style, btn) {
         selectedStyle = style;
-        highlightSelection(styleGrid, cardElement);
-        
-        // [핵심 수정] Step 3 (Variant) 이미지 경로 생성 로직
+        selectedVariant = null;
+
+        document.querySelectorAll('#style-grid .style-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
         variantGrid.innerHTML = '';
-        ['1', '2', '3'].forEach(v => {
-            // 파일명 규칙: {방이름}_{스타일}_{번호}.png (로그 기반)
-            // 공백제거: "Living Room" -> "livingroom"
+
+        // 1번부터 10번까지 반복 (기존 로직 복구)
+        for (let i = 1; i <= 10; i++) {
+            const variantBtn = document.createElement('div');
+            variantBtn.className = 'variant-img-btn';
+            variantBtn.setAttribute('data-index', i);
+
+            const img = document.createElement('img');
             const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
-            // 공백->언더바: "Oriental" -> "oriental", "Modern Luxury" -> "modern_luxury" (추정)
-            const safeStyle = selectedStyle.toLowerCase().replace(/ /g, '_');
-            
-            // 이미지 경로 직접 지정
-            const customImgPath = `/static/thumbnails/${safeRoom}_${safeStyle}_${v}.png`;
-            
-            const vCard = createCard(`Option ${v}`, () => selectVariant(v, vCard), customImgPath);
-            variantGrid.appendChild(vCard);
-        });
-        
-        variantSection.classList.remove('hidden');
-        variantSection.scrollIntoView({ behavior: 'smooth' });
-    }
+            const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
+            const imgName = `${safeRoom}_${safeStyle}_${i}.png`;
 
-    function selectVariant(variant, cardElement) {
-        selectedVariant = variant;
-        highlightSelection(variantGrid, cardElement);
-        renderBtn.disabled = false;
-        renderBtn.scrollIntoView({ behavior: 'smooth' });
-    }
+            img.src = `/static/thumbnails/${imgName}`;
+            img.alt = `Variant ${i}`;
+            img.onerror = function () {
+                variantBtn.classList.add('no-image');
+            };
 
-    // [수정된 createCard] customImageUrl 파라미터 추가
-    function createCard(text, onClick, customImageUrl = null) {
-        const div = document.createElement('div');
-        div.className = 'style-card';
-        div.onclick = onClick;
+            const label = document.createElement('span');
+            label.className = 'variant-label';
+            label.textContent = i;
 
-        const img = document.createElement('img');
-        
-        if (customImageUrl) {
-            // 1. Variant 처럼 직접 경로를 준 경우
-            img.src = customImageUrl;
-        } else {
-            // 2. Room/Style 처럼 텍스트로 추측하는 경우
-            // (기본적으로 공백 제거 후 소문자로)
-            let safeName = text.toLowerCase().replace(/ /g, '');
-            img.src = `/static/thumbnails/${safeName}.jpg`;
+            variantBtn.appendChild(img);
+            variantBtn.appendChild(label);
+
+            variantBtn.onclick = () => {
+                selectedVariant = i.toString();
+                document.querySelectorAll('.variant-img-btn').forEach(b => b.classList.remove('active'));
+                variantBtn.classList.add('active');
+                checkReady();
+            };
+
+            variantGrid.appendChild(variantBtn);
         }
-        
-        // 스타일 설정
-        img.style.width = "100%";
-        img.style.height = "120px";
-        img.style.objectFit = "cover";
-        img.style.borderRadius = "8px";
-        img.style.marginBottom = "8px";
-        img.style.display = "block";
 
-        // 에러 처리 (이미지 없으면 숨기기 or png 재시도)
-        img.onerror = function() {
-            // 만약 jpg였는데 실패했으면 png로, png였으면 jpg로 한번씩 교차 시도 가능하지만
-            // 여기선 간단히 jpg -> png 시도 로직만 유지
-            if (this.src.endsWith('.jpg')) {
-                this.src = this.src.replace('.jpg', '.png');
-            } else if (!this.src.includes('_retry')) {
-                 // 무한루프 방지하며 숨김 처리
-                 this.style.display = 'none';
-            }
-        };
-
-        const span = document.createElement('div');
-        span.textContent = text;
-        span.style.fontWeight = "600";
-        span.style.fontSize = "1rem";
-        span.style.textAlign = "center";
-
-        div.appendChild(img);
-        div.appendChild(span);
-        
-        return div;
+        if (variantSection) variantSection.classList.remove('hidden');
+        checkReady();
     }
 
-    function highlightSelection(grid, activeCard) {
-        Array.from(grid.children).forEach(c => c.classList.remove('selected'));
-        activeCard.classList.add('selected');
-    }
-
-    // --- 3. 렌더링 로직 ---
-    renderBtn.addEventListener('click', () => {
-        if (!selectedFile || !selectedRoom || !selectedStyle || !selectedVariant) return;
-
-        loadingOverlay.classList.remove('hidden');
-        resultSection.classList.add('hidden');
-        
-        let startTime = Date.now();
-        const timerInterval = setInterval(() => {
-            let elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            timerElement.textContent = `${elapsed}s`;
-        }, 100);
-
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('room', selectedRoom);
-        formData.append('style', selectedStyle);
-        formData.append('variant', selectedVariant);
-
-        fetch('/render', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            clearInterval(timerInterval);
-            loadingOverlay.classList.add('hidden');
-            resultSection.classList.remove('hidden');
-
-            const resultAfter = document.getElementById('result-after');
-            const resultBefore = document.getElementById('result-before');
-            
-            resultBefore.src = data.empty_room_url;
-            
-            const results = data.result_urls || [];
-            const thumbBox = document.getElementById('thumbnailContainer');
-            thumbBox.innerHTML = "";
-
-            if (results.length > 0) {
-                resultAfter.src = results[0]; 
-
-                results.forEach((url, index) => {
-                    const thumb = document.createElement("img");
-                    thumb.src = url;
-                    thumb.style.width = "80px";
-                    thumb.style.height = "80px";
-                    thumb.style.objectFit = "cover";
-                    thumb.style.cursor = "pointer";
-                    thumb.style.borderRadius = "8px";
-                    thumb.style.border = index === 0 ? "3px solid #007AFF" : "3px solid transparent";
-                    
-                    thumb.onclick = () => {
-                        resultAfter.src = url;
-                        Array.from(thumbBox.children).forEach(c => c.style.border = "3px solid transparent");
-                        thumb.style.border = "3px solid #007AFF";
-                    };
-                    thumbBox.appendChild(thumb);
-                });
-            }
-
-            initSlider(); 
-            resultSection.scrollIntoView({ behavior: 'smooth' });
-        })
-        .catch(err => {
-            clearInterval(timerInterval);
-            loadingOverlay.classList.add('hidden');
-            alert("Error rendering image: " + err);
+    // ---------------------------------------------------------
+    // 파일 업로드 (원본 유지)
+    // ---------------------------------------------------------
+    if (dropZone) {
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
         });
-    });
-
-    // --- 4. 슬라이더 기능 ---
-    function initSlider() {
-        const slider = document.getElementById('compare-slider');
-        const afterWrapper = document.querySelector('.image-wrapper.after');
-        
-        slider.oninput = function() {
-            afterWrapper.style.width = this.value + "%";
-        };
-        
-        slider.value = 50;
-        afterWrapper.style.width = "50%";
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleFile(e.target.files[0]);
+        });
     }
 
-    // --- 5. 업스케일 & 다운로드 기능 ---
-    const upscaleBtn = document.getElementById("upscaleBtn");
-    if(upscaleBtn) {
-        upscaleBtn.onclick = function() {
-            const currentImgUrl = document.getElementById("result-after").src;
-            const statusText = document.getElementById("upscaleStatus");
+    function handleFile(file) {
+        if (!file.type.startsWith('image/')) {
+            alert('이미지 파일만 가능합니다.');
+            return;
+        }
+        selectedFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            if (imagePreview) imagePreview.src = e.target.result;
+            if (previewContainer) previewContainer.classList.remove('hidden');
+            if (dropZone) dropZone.classList.add('hidden');
+            checkReady();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    if (removeBtn) {
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectedFile = null;
+            fileInput.value = '';
+            if (previewContainer) previewContainer.classList.add('hidden');
+            if (dropZone) dropZone.classList.remove('hidden');
+            checkReady();
+        });
+    }
+
+    function checkReady() {
+        if (renderBtn) renderBtn.disabled = !(selectedFile && selectedRoom && selectedStyle && selectedVariant);
+    }
+
+    // ---------------------------------------------------------
+    // [핵심 변경] 렌더링 요청 로직 (3장 처리 + 썸네일 표시)
+    // ---------------------------------------------------------
+    if (renderBtn) {
+        renderBtn.addEventListener('click', async () => {
+            if (!selectedFile || !selectedRoom || !selectedStyle || !selectedVariant) return;
+
+            if (loadingOverlay) loadingOverlay.classList.remove('hidden');
             
-            if (!currentImgUrl) return alert("No image to upscale.");
+            // 타이머
+            const timerElement = document.getElementById('timer');
+            let startTime = Date.now();
+            if (timerElement) timerElement.textContent = "0.0s";
+
+            const timerInterval = setInterval(() => {
+                if (timerElement) {
+                    const elapsedTime = (Date.now() - startTime) / 1000;
+                    timerElement.textContent = `${elapsedTime.toFixed(1)}s`;
+                }
+            }, 100);
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('room', selectedRoom);
+            formData.append('style', selectedStyle);
+            formData.append('variant', selectedVariant);
+
+            try {
+                console.log("🚀 렌더링 요청 전송...");
+                const response = await fetch('/render', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`서버 에러 (${response.status})`);
+
+                const data = await response.json();
+                console.log("✅ 렌더링 완료:", data);
+
+                // 1. Before 이미지 (빈 방)
+                if (resultBefore) resultBefore.src = data.empty_room_url || data.original_url;
+
+                // 2. After 이미지들 (3장) 처리
+                const resultList = data.result_urls || [];
+                
+                // (1) 메인 결과 표시 (첫번째 이미지)
+                if (resultList.length > 0) {
+                    resultAfter.src = resultList[0];
+                }
+
+                // (2) 썸네일 UI 생성 (3개)
+                if (thumbnailContainer) {
+                    thumbnailContainer.innerHTML = ""; // 초기화
+                    resultList.forEach((url, index) => {
+                        const thumb = document.createElement("img");
+                        thumb.src = url;
+                        thumb.style.width = "80px";
+                        thumb.style.height = "80px";
+                        thumb.style.objectFit = "cover";
+                        thumb.style.cursor = "pointer";
+                        thumb.style.borderRadius = "8px";
+                        thumb.style.border = index === 0 ? "3px solid #6f42c1" : "3px solid transparent"; // 첫번째 선택됨
+                        
+                        // 썸네일 클릭 시 메인 이미지 교체
+                        thumb.onclick = () => {
+                            resultAfter.src = url;
+                            // 스타일 업데이트
+                            Array.from(thumbnailContainer.children).forEach(c => c.style.border = "3px solid transparent");
+                            thumb.style.border = "3px solid #6f42c1";
+                        };
+                        thumbnailContainer.appendChild(thumb);
+                    });
+                }
+
+                // 슬라이더 및 화면 표시
+                if (resultSection) {
+                    resultSection.classList.remove('hidden');
+                    if (compareSlider) compareSlider.value = 50;
+                    const beforeWrapper = document.querySelector('.image-wrapper.before');
+                    if (beforeWrapper) beforeWrapper.style.width = '50%';
+                    resultSection.scrollIntoView({ behavior: 'smooth' });
+                    
+                    // 슬라이더 높이 조절
+                    setTimeout(updateImageWidth, 100);
+                }
+
+            } catch (error) {
+                console.error(error);
+                alert('작업 중 오류가 발생했습니다.\n' + error.message);
+            } finally {
+                clearInterval(timerInterval);
+                if (loadingOverlay) loadingOverlay.classList.add('hidden');
+            }
+        });
+    }
+
+    // ---------------------------------------------------------
+    // [NEW] 업스케일 & 다운로드 버튼 기능
+    // ---------------------------------------------------------
+    if (upscaleBtn) {
+        upscaleBtn.onclick = function() {
+            const currentImgUrl = resultAfter.src;
+            
+            if (!currentImgUrl) return alert("이미지가 없습니다.");
 
             upscaleBtn.disabled = true;
-            upscaleBtn.innerText = "⏳ Processing...";
+            upscaleBtn.innerText = "⏳ 고화질 변환 중...";
             upscaleBtn.style.opacity = "0.7";
-            statusText.style.display = "block";
+            if (upscaleStatus) upscaleStatus.style.display = "block";
 
             fetch("/upscale", {
                 method: "POST",
@@ -302,8 +300,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(res => res.json())
             .then(data => {
                 if (data.upscaled_url) {
-                    document.getElementById("result-after").src = data.upscaled_url;
+                    // 고화질 이미지로 교체
+                    resultAfter.src = data.upscaled_url;
                     
+                    // 자동 다운로드 트리거
                     const link = document.createElement("a");
                     link.href = data.upscaled_url;
                     link.download = "HQ_Interior_Result.jpg";
@@ -311,18 +311,39 @@ document.addEventListener('DOMContentLoaded', () => {
                     link.click();
                     document.body.removeChild(link);
                     
-                    alert("✨ Upscale Complete! Image downloaded.");
+                    alert("✨ 변환 완료! 이미지가 다운로드되었습니다.");
                 } else {
-                    alert("Upscale failed: " + (data.error || "Unknown error"));
+                    alert("업스케일링 실패: " + (data.error || "알 수 없는 오류"));
                 }
             })
-            .catch(err => alert("Server Error: " + err))
+            .catch(err => alert("서버 통신 오류: " + err))
             .finally(() => {
                 upscaleBtn.disabled = false;
                 upscaleBtn.innerText = "✨ Upscale & Download";
                 upscaleBtn.style.opacity = "1";
-                statusText.style.display = "none";
+                if (upscaleStatus) upscaleStatus.style.display = "none";
             });
         };
     }
+
+    // ---------------------------------------------------------
+    // 슬라이더 기능 (원본 유지)
+    // ---------------------------------------------------------
+    if (compareSlider) {
+        compareSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            const beforeWrapper = document.querySelector('.image-wrapper.before');
+            const afterWrapper = document.querySelector('.image-wrapper.after'); // after 너비 조절 추가
+            if (beforeWrapper) beforeWrapper.style.width = `${value}%`; // 원본코드는 before 너비를 조절했었음
+            if (afterWrapper) afterWrapper.style.width = `${value}%`; // 안전하게 추가
+        });
+    }
+
+    function updateImageWidth() {
+        if (comparisonContainer && comparisonContainer.offsetWidth > 0 && resultBefore) {
+            resultBefore.style.width = `${comparisonContainer.offsetWidth}px`;
+            if (resultAfter) resultAfter.style.width = '100%';
+        }
+    }
+    window.addEventListener('resize', updateImageWidth);
 });
