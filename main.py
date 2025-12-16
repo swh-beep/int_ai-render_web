@@ -78,7 +78,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TOTAL_TIMEOUT_LIMIT = 180
+TOTAL_TIMEOUT_LIMIT = 300
 
 # ---------------------------------------------------------
 # 2. 라우트
@@ -487,7 +487,7 @@ if __name__ == "__main__":
     try:
         print("🚀 서버를 시작합니다... (http://localhost:8001)", flush=True)
         print("💡 안정 모드: 서버가 꺼지지 않도록 자동 새로고침(Reload)을 껐습니다.", flush=True)
-        uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=False)
+        uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=False, timeout_keep_alive=300)
     except KeyboardInterrupt:
         print("\n⛔ 서버를 종료합니다.")
     except Exception as e:
