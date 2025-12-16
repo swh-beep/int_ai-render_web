@@ -19,15 +19,39 @@ import traceback
 # 1. 환경 설정 및 초기화
 # ---------------------------------------------------------
 load_dotenv()
-NANOBANANA_API_KEY = os.getenv("NANOBANANA_API_KEY")
+
+# [KEY ROTATION SYSTEM] API 키 풀(Pool) 로드
+# .env 파일이나 Render 환경변수에 NANOBANANA_API_KEY1, 2, 3 ... 형태로 저장하세요.
+API_KEY_POOL = []
+i = 1
+while True:
+    key = os.getenv(f"NANOBANANA_API_KEY{i}")
+    if not key:
+        break
+    API_KEY_POOL.append(key)
+    i += 1
+
+# 만약 1, 2 형식이 없다면 기존 단일 키(NANOBANANA_API_KEY)를 사용
+if not API_KEY_POOL:
+    single_key = os.getenv("NANOBANANA_API_KEY")
+    if single_key:
+        API_KEY_POOL.append(single_key)
+
+print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개")
+
+# 현재 사용 중인 키 인덱스 (서버가 켜져있는 동안 유지됨)
+CURRENT_KEY_INDEX = 0
+
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
 
 # [모델 설정] 
 MODEL_NAME = 'gemini-3-pro-image-preview' 
 
-if NANOBANANA_API_KEY:
-    genai.configure(api_key=NANOBANANA_API_KEY)
+# 초기 키 설정
+if API_KEY_POOL:
+    genai.configure(api_key=API_KEY_POOL[CURRENT_KEY_INDEX])
+    print(f"🔑 초기 API 키 설정 완료: Key #{CURRENT_KEY_INDEX + 1}")
 
 # [필수] 폴더 생성 (순서 중요)
 os.makedirs("outputs", exist_ok=True)
@@ -69,6 +93,62 @@ async def get_styles_for_room(room_type: str):
     return JSONResponse(content=[], status_code=404)
 
 # ---------------------------------------------------------
+# [NEW] API Key Failover Logic (핵심 기능)
+# ---------------------------------------------------------
+def switch_to_next_key():
+    """현재 키가 에러가 나면 다음 키로 변경 (끝까지 가면 다시 1번으로 순환)"""
+    global CURRENT_KEY_INDEX
+    
+    # [수정] 나머지 연산자(%)를 사용하여 무한 순환 구현
+    # 예: 키가 3개일 때 -> 0->1, 1->2, 2->0 (다시 처음으로)
+    next_index = (CURRENT_KEY_INDEX + 1) % len(API_KEY_POOL)
+    
+    # 키 변경 적용
+    CURRENT_KEY_INDEX = next_index
+    new_key = API_KEY_POOL[CURRENT_KEY_INDEX]
+    genai.configure(api_key=new_key)
+    
+    print(f"♻️ [Failover] API 키 변경됨! (Key #{CURRENT_KEY_INDEX + 1}번 키 사용 중)")
+    return True
+    
+    # 키 변경 적용
+    CURRENT_KEY_INDEX = next_index
+    new_key = API_KEY_POOL[CURRENT_KEY_INDEX]
+    genai.configure(api_key=new_key)
+    print(f"♻️ [Failover] API 키 변경됨! (Key #{CURRENT_KEY_INDEX} -> Key #{CURRENT_KEY_INDEX + 1})")
+    return True
+
+def call_gemini_with_failover(model, contents, request_options, safety_settings):
+    """Gemini API 호출을 감싸서 에러 발생 시 키를 바꾸고 재시도하는 래퍼 함수"""
+    max_retries = len(API_KEY_POOL) # 키 개수만큼 재시도 기회 부여
+    attempt = 0
+    
+    while attempt < max_retries:
+        try:
+            # 현재 설정된 키로 요청 시도
+            response = model.generate_content(
+                contents, 
+                request_options=request_options,
+                safety_settings=safety_settings
+            )
+            return response # 성공 시 바로 반환
+            
+        except Exception as e:
+            print(f"⚠️ [Error] Key #{CURRENT_KEY_INDEX + 1} 에러 발생: {e}")
+            
+            # 키 교체 시도
+            if switch_to_next_key():
+                print("🔄 다음 키로 재시도합니다...")
+                attempt += 1
+                time.sleep(1) # 잠시 대기 후 재시도
+            else:
+                # 더 이상 바꿀 키가 없으면 에러 던짐
+                print("❌ 더 이상 사용할 수 있는 키가 없습니다.")
+                raise e
+    
+    return None
+
+# ---------------------------------------------------------
 # 3. 핵심 함수들
 # ---------------------------------------------------------
 def standardize_image(image_path, output_path=None):
@@ -86,10 +166,9 @@ def standardize_image(image_path, output_path=None):
         print(f"!! 표준화 실패: {e}", flush=True)
         return image_path
 
-# [수정됨] unique_id를 인자로 받아서 파일명에 사용
 def generate_empty_room(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
-    print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) ---", flush=True)
+    print(f"\n--- [Stage 1] 빈 방 생성 시작 ({MODEL_NAME}) / 현재 Key #{CURRENT_KEY_INDEX + 1} ---", flush=True)
     try:
         img = Image.open(image_path)
         prompt = (
@@ -112,18 +191,19 @@ def generate_empty_room(image_path, unique_id, start_time):
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
 
-        response = model.generate_content(
-            [prompt, img], 
+        # [변경] 기존 model.generate_content 대신 Failover 함수 사용
+        response = call_gemini_with_failover(
+            model,
+            [prompt, img],
             request_options={'timeout': remaining},
             safety_settings=safety_settings
         )
         
-        if response.parts:
+        if response and response.parts:
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data:
                     print(">> [성공] 빈 방 이미지 생성됨!", flush=True)
                     timestamp = int(time.time())
-                    # [핵심 수정] 파일명에 unique_id 포함 (동시 접속 충돌 방지)
                     filename = f"empty_{timestamp}_{unique_id}.jpg"
                     output_path = os.path.join("outputs", filename)
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
@@ -139,10 +219,9 @@ def generate_empty_room(image_path, unique_id, start_time):
         print(f"!! Stage 1 시스템 에러: {e}", flush=True)
         return image_path
 
-# [수정됨] unique_id 인자 추가
 def generate_furnished_room(room_path, style_config, reference_image_path, unique_id, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return room_path
-    print(f"\n--- [Stage 2] 가구 배치 (Perspective Match 모드) ---", flush=True)
+    print(f"\n--- [Stage 2] 가구 배치 / 현재 Key #{CURRENT_KEY_INDEX + 1} ---", flush=True)
     try:
         room_img = Image.open(room_path)
         
@@ -194,18 +273,19 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         
-        response = model.generate_content(
+        # [변경] 기존 model.generate_content 대신 Failover 함수 사용
+        response = call_gemini_with_failover(
+            model,
             input_content, 
             request_options={'timeout': remaining},
             safety_settings=safety_settings
         )
         
-        if response.parts:
+        if response and response.parts:
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data:
                     print(">> [성공] 가구 배치 완료", flush=True)
                     timestamp = int(time.time())
-                    # [핵심 수정] 파일명에 unique_id 포함
                     filename = f"result_{timestamp}_{unique_id}.jpg"
                     output_path = os.path.join("outputs", filename)
                     with open(output_path, 'wb') as f: f.write(part.inline_data.data)
@@ -220,7 +300,6 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
         print(f"!! Stage 2 에러: {e}", flush=True)
         return room_path
 
-# [수정됨] unique_id 인자 추가
 def call_magnific_api(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
     print("\n--- [Stage 3] 업스케일링 시도 ---", flush=True)
@@ -266,13 +345,11 @@ def call_magnific_api(image_path, unique_id, start_time):
         print(f"\n!! [시스템 에러] {e}", flush=True)
         return image_path
 
-# [수정됨] unique_id 인자 추가
 def download_image(url, unique_id):
     try:
         img_response = requests.get(url)
         if img_response.status_code == 200:
             timestamp = int(time.time())
-            # [핵심 수정] 파일명에 unique_id 포함
             filename = f"magnific_{timestamp}_{unique_id}.jpg"
             path = os.path.join("outputs", filename)
             with open(path, "wb") as f: f.write(img_response.content)
@@ -288,7 +365,6 @@ def download_image(url, unique_id):
 def render_room(file: UploadFile = File(...), room: str = Form(...), style: str = Form(...), variant: str = Form(...)):
     full_style = f"{room}-{style}-{variant}"
     
-    # [핵심] 사용자 고유 ID 생성 (파일명 충돌 방지)
     unique_id = uuid.uuid4().hex[:8]
     
     print(f"\n=== 요청 시작 [{unique_id}]: {full_style} ===", flush=True)
@@ -296,17 +372,14 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
     
     timestamp = int(time.time())
     safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
-    # 원본 파일명에도 unique_id 적용
     raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
     
     with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
     
     std_path = standardize_image(raw_path)
     
-    # [수정] unique_id 전달
     step1_img = generate_empty_room(std_path, unique_id, start_time)
     
-    # [스마트 에셋 탐색]
     ref_path = None
     safe_room = room.lower().replace(" ", "")
     safe_style = style.lower().replace(" ", "-").replace("_", "-")
@@ -334,7 +407,6 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
     if ref_path is None: 
         print(">> [Moodboard] ❌ 경고: 에셋 찾기 실패 (AI 임의 생성)", flush=True)
     
-    # [수정] unique_id 전달
     step2_img = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, unique_id, start_time)
     final_img = call_magnific_api(step2_img, unique_id, start_time)
     
@@ -344,9 +416,7 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
     print(f"=== [{unique_id}] 총 소요 시간: {elapsed:.1f}초 ===", flush=True)
     
     return JSONResponse(content={
-        # Before 이미지를 '빈 방'으로 교체
         "original_url": f"/outputs/{os.path.basename(step1_img)}", 
-        # 혹시 원본이 필요할 수 있으니 empty_room_url 자리에 원본을 넣어둠 (서로 스위치)
         "empty_room_url": f"/outputs/{os.path.basename(std_path)}", 
         "result_url": f"/outputs/{os.path.basename(final_img)}",
         "message": "Complete" if elapsed <= TOTAL_TIMEOUT_LIMIT else "Timeout Partial Result"
