@@ -12,32 +12,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
 from PIL import Image, ImageOps
-from pydantic import BaseModel
-from concurrent.futures import ThreadPoolExecutor
 import re
 import traceback
+import random
+from concurrent.futures import ThreadPoolExecutor # 병렬 처리용
+from pydantic import BaseModel
+import gc 
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
 # ---------------------------------------------------------
 load_dotenv()
 
-# [KEY ROTATION SYSTEM] API 키 풀(Pool) 로드
-# .env 파일이나 Render 환경변수에 NANOBANANA_API_KEY_1, _2, _3 ... 형태로 저장하세요.
 API_KEY_POOL = []
 i = 1
 while True:
-    # f"NANOBANANA_API_KEY_{i}" 로 수정 (언더바 추가)
     key = os.getenv(f"NANOBANANA_API_KEY_{i}") 
     if not key:
-        # 혹시 언더바 없이 저장했을 수도 있으니 한 번 더 체크
         key = os.getenv(f"NANOBANANA_API_KEY{i}")
         if not key:
             break
     API_KEY_POOL.append(key)
     i += 1
 
-# 만약 1, 2 형식이 없다면 기존 단일 키(NANOBANANA_API_KEY)를 사용
 if not API_KEY_POOL:
     single_key = os.getenv("NANOBANANA_API_KEY")
     if single_key:
@@ -45,28 +42,15 @@ if not API_KEY_POOL:
 
 print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개")
 
-# 현재 사용 중인 키 인덱스 (서버가 켜져있는 동안 유지됨)
-CURRENT_KEY_INDEX = 0
-
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-
-# [모델 설정] 
 MODEL_NAME = 'gemini-3-pro-image-preview' 
 
-# 초기 키 설정
-if API_KEY_POOL:
-    genai.configure(api_key=API_KEY_POOL[CURRENT_KEY_INDEX])
-    print(f"🔑 초기 API 키 설정 완료: Key #{CURRENT_KEY_INDEX + 1}")
-
-# [필수] 폴더 생성 (순서 중요)
 os.makedirs("outputs", exist_ok=True)
 os.makedirs("assets", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
 app = FastAPI()
-
-# [필수] 정적 파일 연결
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
@@ -79,97 +63,155 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TOTAL_TIMEOUT_LIMIT = 300
+# [설정] 3장 생성을 위해 시간 넉넉히
+TOTAL_TIMEOUT_LIMIT = 300 
 
 # ---------------------------------------------------------
-# 2. 라우트
+# [NEW] 스마트 키 관리자 (할당량 초과 시 '잠시 열외' 시스템)
 # ---------------------------------------------------------
-@app.get("/")
-async def read_index():
-    return FileResponse("static/index.html")
-
-@app.get("/room-types")
-async def get_room_types():
-    return JSONResponse(content=list(ROOM_STYLES.keys()))
-
-@app.get("/styles/{room_type}")
-async def get_styles_for_room(room_type: str):
-    if room_type in ROOM_STYLES:
-        return JSONResponse(content=ROOM_STYLES[room_type])
-    return JSONResponse(content=[], status_code=404)
-
-# ---------------------------------------------------------
-# [NEW] API Key Failover Logic (핵심 기능)
-# ---------------------------------------------------------
-def switch_to_next_key():
-    """현재 키가 에러가 나면 다음 키로 변경 (끝까지 가면 다시 1번으로 순환)"""
-    global CURRENT_KEY_INDEX
-    
-    # [수정] 나머지 연산자(%)를 사용하여 무한 순환 구현
-    # 예: 키가 3개일 때 -> 0->1, 1->2, 2->0 (다시 처음으로)
-    next_index = (CURRENT_KEY_INDEX + 1) % len(API_KEY_POOL)
-    
-    # 키 변경 적용
-    CURRENT_KEY_INDEX = next_index
-    new_key = API_KEY_POOL[CURRENT_KEY_INDEX]
-    genai.configure(api_key=new_key)
-    
-    print(f"♻️ [Failover] API 키 변경됨! (Key #{CURRENT_KEY_INDEX + 1}번 키 사용 중)")
-    return True
-    
-    # 키 변경 적용
-    CURRENT_KEY_INDEX = next_index
-    new_key = API_KEY_POOL[CURRENT_KEY_INDEX]
-    genai.configure(api_key=new_key)
-    print(f"♻️ [Failover] API 키 변경됨! (Key #{CURRENT_KEY_INDEX} -> Key #{CURRENT_KEY_INDEX + 1})")
-    return True
+QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     """
-    [수정] model 객체 대신 model_name을 받아서, 
-    시도할 때마다 새로운 키로 모델을 다시 로드하는 방식
+    [요구사항 반영]
+    1. 원인 파악: 에러 발생 시 원인 분석
+    2. 조치: 할당량/과부하 에러 -> 해당 키 Lock (QUOTA_EXCEEDED_KEYS에 추가)
+            기타 에러 -> Lock 하지 않음
+    3. 재시도: 살아있는 다른 키로 즉시 재시도
     """
-    global CURRENT_KEY_INDEX
-    max_retries = len(API_KEY_POOL)
-    if max_retries == 0: max_retries = 1
+    global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
     
-    attempt = 0
+    # 내부적으로 키를 바꿔가며 시도할 횟수 (키 개수만큼)
+    max_retries = len(API_KEY_POOL) + 1
     
-    while attempt < max_retries + 1: # 키 개수 + 1번 정도 여유 있게 시도
+    for attempt in range(max_retries):
+        # 1. 사용 가능한 키 필터링 (락 걸린 키 제외)
+        available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
+        
+        # 만약 다 죽었으면 -> 락 초기화 (한 바퀴 돌았으므로 다시 기회 부여)
+        if not available_keys:
+            print("🔄 [System] 모든 키가 락(Lock) 상태입니다. 락을 해제하고 다시 시작합니다.", flush=True)
+            QUOTA_EXCEEDED_KEYS.clear()
+            available_keys = list(API_KEY_POOL)
+            time.sleep(1)
+
+        # 2. 다음 키 선택 (랜덤으로 선택하여 병렬 처리 충돌 방지)
+        current_key = random.choice(available_keys)
+        masked_key = current_key[-4:]
+
         try:
-            # [핵심 변경] 매 시도마다 모델을 새로 생성해야 바뀐 키가 적용됨!
-            # system_instruction이 있다면 포함해서 생성
+            genai.configure(api_key=current_key)
             if system_instruction:
-                current_model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+                model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
             else:
-                current_model = genai.GenerativeModel(model_name)
-
-            print(f"👉 [Try] Key #{CURRENT_KEY_INDEX + 1}로 요청 시도...", flush=True)
-
-            response = current_model.generate_content(
+                model = genai.GenerativeModel(model_name)
+            
+            # API 호출
+            response = model.generate_content(
                 contents, 
                 request_options=request_options,
                 safety_settings=safety_settings
             )
-            return response
-            
+            return response # 성공 시 반환
+
         except Exception as e:
             error_msg = str(e)
-            print(f"⚠️ [Error] Key #{CURRENT_KEY_INDEX + 1} 실패: {error_msg}", flush=True)
             
-            # 429: Too Many Requests, 403: Quota Exceeded 등의 에러일 때 키 교체
-            # (사실 모든 에러에 대해 교체해도 무방하지만, 명시적으로 로그 남김)
+            # [요구사항] 할당량(429)이나 과부하 관련 에러인가?
             if "429" in error_msg or "403" in error_msg or "Quota" in error_msg or "limit" in error_msg:
-                print("📉 쿼터 초과 감지! 키 교체 진행합니다.")
-            
-            if switch_to_next_key():
-                attempt += 1
-                time.sleep(1) # 너무 빠른 재시도 방지
+                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과. 한 바퀴 돌 동안 잠급니다.", flush=True)
+                QUOTA_EXCEEDED_KEYS.add(current_key) # 락 걸기
             else:
-                print("❌ 더 이상 사용할 수 있는 키가 없습니다.")
-                raise e
-    
+                # [요구사항] 기타 에러라면 락 하지 않음
+                print(f"⚠️ [Error] Key(...{masked_key}) 단순 에러(락 안함): {error_msg}", flush=True)
+            
+            # 다음 키로 재시도를 위해 loop continue
+            time.sleep(0.5)
+
+    print("❌ [Fatal] 모든 키로 시도했으나 API 호출 실패.")
     return None
+
+# ---------------------------------------------------------
+# 2. 핵심 함수들 (빈방 생성 로직 강화)
+# ---------------------------------------------------------
+def standardize_image(image_path, output_path=None):
+    try:
+        if output_path is None: output_path = image_path
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != 'RGB': img = img.convert('RGB')
+            # 1024px로 리사이징 (메모리 절약)
+            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            base, _ = os.path.splitext(output_path)
+            new_output_path = f"{base}.jpg"
+            img.save(new_output_path, "JPEG", quality=85)
+            return new_output_path
+    except Exception as e:
+        print(f"!! 표준화 실패: {e}", flush=True)
+        return image_path
+
+def generate_empty_room(image_path, unique_id, start_time):
+    """
+    [요구사항 반영]
+    빈방 생성이 실패했다? -> 다음 키로 다시 생성해 (최대 3회)
+    """
+    if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
+    print(f"\n--- [Stage 1] 빈 방 생성 시작 ---", flush=True)
+    
+    img = Image.open(image_path)
+    system_instruction = "You are an expert architectural AI. Your task is to perform structure-preserving image editing. You must output an image."
+    
+    prompt = (
+        "IMAGE EDITING TASK (STRICT):\n"
+        "Create a photorealistic image of this room but completely EMPTY.\n"
+        "1. REMOVE ALL furniture, rugs, decor, and lighting.\n"
+        "2. REMOVE ALL window treatments. Show bare windows/glass.\n"
+        "3. KEEP the original floor material, wall color, ceiling structure EXACTLY as they are.\n"
+        "4. IN-PAINT the removed areas seamlessly.\n"
+        "OUTPUT RULE: Return ONLY the generated image."
+    )
+    
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
+    # [핵심] 최대 3회 재시도 루프
+    max_stage_retries = 3
+    
+    for try_count in range(max_stage_retries):
+        remaining = max(10, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
+        
+        # API 호출 (여기서 이미 1차적으로 키 관리를 해줌)
+        response = call_gemini_with_failover(
+            MODEL_NAME, 
+            [prompt, img], 
+            request_options={'timeout': remaining},
+            safety_settings=safety_settings,
+            system_instruction=system_instruction
+        )
+        
+        # 성공 여부 검증 (이미지가 진짜 나왔나?)
+        if response and response.parts:
+            for part in response.parts:
+                if hasattr(part, 'inline_data') and part.inline_data:
+                    print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
+                    timestamp = int(time.time())
+                    filename = f"empty_{timestamp}_{unique_id}.jpg"
+                    output_path = os.path.join("outputs", filename)
+                    with open(output_path, 'wb') as f: f.write(part.inline_data.data)
+                    return standardize_image(output_path)
+        
+        # 실패 시 처리
+        print(f"⚠️ [Stage 1 실패] 이미지가 생성되지 않음. (시도 {try_count+1}/{max_stage_retries}) -> 재시도합니다.", flush=True)
+        # API 호출 함수가 이미 '할당량 에러'면 키를 잠갔을 것이고, 
+        # '단순 이미지 미생성'이면 키를 안 잠근 상태로 유지됩니다.
+        # 다음 루프에서 call_gemini_with_failover가 호출될 때 '새로운 키'를 뽑아서 시도하게 됩니다.
+
+    print(">> [최종 실패] 3번 시도했으나 빈 방 생성 불가.", flush=True)
+    return image_path
 
 # ---------------------------------------------------------
 # 3. 핵심 함수들
