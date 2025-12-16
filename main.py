@@ -44,7 +44,7 @@ print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개")
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-MODEL_NAME = 'gemini-2.0-flash' # 혹은 gemini-1.5-pro 등 사용 가능한 모델명
+MODEL_NAME = 'gemini-2.0-flash' # 모델명 확인
 
 # [설정] 3장 생성을 위해 시간 넉넉히
 TOTAL_TIMEOUT_LIMIT = 300 
@@ -168,23 +168,30 @@ def generate_empty_room(image_path, unique_id, start_time):
             system_instruction=system_instruction
         )
         
-        if response and response.parts:
-            for part in response.parts:
-                if hasattr(part, 'inline_data') and part.inline_data:
-                    print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
-                    timestamp = int(time.time())
-                    filename = f"empty_{timestamp}_{unique_id}.jpg"
-                    output_path = os.path.join("outputs", filename)
-                    with open(output_path, 'wb') as f: f.write(part.inline_data.data)
-                    return standardize_image(output_path)
+        # [수정됨] 여기가 에러의 원인이었습니다. response.parts에 바로 접근하면 터집니다.
+        # response.candidates가 존재하는지 먼저 확인해야 합니다.
+        if response and hasattr(response, 'candidates') and response.candidates:
+            try:
+                # parts가 존재하는지 안전하게 확인
+                if hasattr(response, 'parts') and response.parts:
+                    for part in response.parts:
+                        if hasattr(part, 'inline_data') and part.inline_data:
+                            print(f">> [성공] 빈 방 이미지 생성됨! (시도 {try_count+1}회차)", flush=True)
+                            timestamp = int(time.time())
+                            filename = f"empty_{timestamp}_{unique_id}.jpg"
+                            output_path = os.path.join("outputs", filename)
+                            with open(output_path, 'wb') as f: f.write(part.inline_data.data)
+                            return standardize_image(output_path)
+            except ValueError:
+                print(f"⚠️ [Blocked] AI가 응답을 생성했지만 안전 필터 등에 걸렸습니다.", flush=True)
         
-        print(f"⚠️ [Stage 1 실패] 이미지가 생성되지 않음. 재시도...", flush=True)
+        print(f"⚠️ [Stage 1 실패] 이미지가 생성되지 않음 (Blocked or Empty). 재시도...", flush=True)
 
     print(">> [최종 실패] 3번 시도했으나 빈 방 생성 불가.", flush=True)
     return image_path
 
 def generate_furnished_room(room_path, style_config, reference_image_path, unique_id, start_time=0):
-    if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None # 실패 시 None 반환
+    if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None 
     
     try:
         room_img = Image.open(room_path)
@@ -224,23 +231,27 @@ def generate_furnished_room(room_path, style_config, reference_image_path, uniqu
             system_instruction=system_instruction
         )
         
-        if response and response.parts:
-            for part in response.parts:
-                if hasattr(part, 'inline_data') and part.inline_data:
-                    timestamp = int(time.time())
-                    filename = f"result_{timestamp}_{unique_id}.jpg"
-                    output_path = os.path.join("outputs", filename)
-                    with open(output_path, 'wb') as f: f.write(part.inline_data.data)
-                    return standardize_image(output_path)
+        # [수정됨] 여기도 동일하게 안전장치 추가
+        if response and hasattr(response, 'candidates') and response.candidates:
+            try:
+                if hasattr(response, 'parts') and response.parts:
+                    for part in response.parts:
+                        if hasattr(part, 'inline_data') and part.inline_data:
+                            timestamp = int(time.time())
+                            filename = f"result_{timestamp}_{unique_id}.jpg"
+                            output_path = os.path.join("outputs", filename)
+                            with open(output_path, 'wb') as f: f.write(part.inline_data.data)
+                            return standardize_image(output_path)
+            except ValueError:
+                 print(f"   ⚠️ [Blocked] 가구 배치 생성 거부됨 ({unique_id})", flush=True)
         
-        print(f"   >> [실패] 가구 배치 생성 실패 ({unique_id})", flush=True)
+        print(f"   >> [실패] 가구 배치 생성 실패 ({unique_id}) - 응답 없음", flush=True)
         return None 
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
         return None
 
 def call_magnific_api(image_path, unique_id, start_time):
-    # (Magnific 함수는 기존 유지)
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
     print("\n--- [Stage 3] 업스케일링 시도 ---", flush=True)
     if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
@@ -302,69 +313,80 @@ async def get_styles_for_room(room_type: str):
 
 @app.post("/render")
 def render_room(file: UploadFile = File(...), room: str = Form(...), style: str = Form(...), variant: str = Form(...)):
-    full_style = f"{room}-{style}-{variant}"
-    unique_id = uuid.uuid4().hex[:8]
-    print(f"\n=== 요청 시작 [{unique_id}]: {full_style} (Parallel) ===", flush=True)
-    start_time = time.time()
-    
-    timestamp = int(time.time())
-    safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
-    raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
-    with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
-    std_path = standardize_image(raw_path)
-    
-    # 1. 빈 방 생성 (재시도 로직 포함됨)
-    step1_img = generate_empty_room(std_path, unique_id, start_time)
-    
-    # 2. 무드보드 찾기
-    ref_path = None
-    safe_room = room.lower().replace(" ", "")
-    safe_style = style.lower().replace(" ", "-").replace("_", "-")
-    target_dir = os.path.join("assets", safe_room, safe_style)
-    if os.path.exists(target_dir):
-        files = sorted(os.listdir(target_dir))
-        for f in files:
-            if variant in f: ref_path = os.path.join(target_dir, f); break
-        if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
+    # [안전장치] 서버 크래시 방지용 try-except
+    try:
+        full_style = f"{room}-{style}-{variant}"
+        unique_id = uuid.uuid4().hex[:8]
+        print(f"\n=== 요청 시작 [{unique_id}]: {full_style} (Parallel) ===", flush=True)
+        start_time = time.time()
+        
+        timestamp = int(time.time())
+        safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
+        raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
+        with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
+        std_path = standardize_image(raw_path)
+        
+        # 1. 빈 방 생성
+        step1_img = generate_empty_room(std_path, unique_id, start_time)
+        
+        # 2. 무드보드 찾기
+        ref_path = None
+        safe_room = room.lower().replace(" ", "")
+        safe_style = style.lower().replace(" ", "-").replace("_", "-")
+        target_dir = os.path.join("assets", safe_room, safe_style)
+        if os.path.exists(target_dir):
+            files = sorted(os.listdir(target_dir))
+            for f in files:
+                if variant in f: ref_path = os.path.join(target_dir, f); break
+            if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
 
-    # 3. 병렬 처리 (가구 배치)
-    generated_results = []
-    print(f"\n🚀 [Parallel] 3장 동시 생성 시작!", flush=True)
+        # 3. 병렬 처리
+        generated_results = []
+        print(f"\n🚀 [Parallel] 3장 동시 생성 시작!", flush=True)
 
-    def process_one_variant(index):
-        sub_id = f"{unique_id}_v{index+1}"
-        print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
-        try:
-            result_path = generate_furnished_room(step1_img, STYLES.get(style, STYLES.get("Modern")), ref_path, sub_id, start_time)
-            if result_path:
-                print(f"   ✅ [Variation {index+1}] 성공!", flush=True)
-                return f"/outputs/{os.path.basename(result_path)}"
-            else:
+        def process_one_variant(index):
+            sub_id = f"{unique_id}_v{index+1}"
+            print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
+            try:
+                # 스타일 프롬프트 안전하게 가져오기
+                selected_style_prompt = STYLES.get(style, STYLES.get("Modern", "Modern Style"))
+                
+                result_path = generate_furnished_room(step1_img, selected_style_prompt, ref_path, sub_id, start_time)
+                if result_path:
+                    print(f"   ✅ [Variation {index+1}] 성공!", flush=True)
+                    return f"/outputs/{os.path.basename(result_path)}"
+                else:
+                    return None
+            except Exception as e:
+                print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
                 return None
-        except Exception as e:
-            print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
-            return None
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(process_one_variant, i) for i in range(3)]
-        for future in futures:
-            res = future.result()
-            if res: generated_results.append(res)
-            gc.collect() # 메모리 관리
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(process_one_variant, i) for i in range(3)]
+            for future in futures:
+                try:
+                    res = future.result()
+                    if res: generated_results.append(res)
+                except Exception as e:
+                    print(f"⚠️ [Thread Error] {e}")
+                gc.collect()
 
-    elapsed = time.time() - start_time
-    print(f"=== [{unique_id}] 완료. 생성된 이미지: {len(generated_results)}장, 소요시간: {elapsed:.1f}초 ===", flush=True)
-    
-    # 실패 시 원본이라도 반환
-    if not generated_results: generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
+        elapsed = time.time() - start_time
+        print(f"=== [{unique_id}] 완료. 생성된 이미지: {len(generated_results)}장, 소요시간: {elapsed:.1f}초 ===", flush=True)
+        
+        if not generated_results: generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
 
-    return JSONResponse(content={
-        "original_url": f"/outputs/{os.path.basename(std_path)}", # 원본
-        "empty_room_url": f"/outputs/{os.path.basename(step1_img)}", # 빈방
-        "result_url": generated_results[0], # 메인 결과 (첫번째)
-        "result_urls": generated_results, # 썸네일용 전체 리스트
-        "message": "Complete"
-    })
+        return JSONResponse(content={
+            "original_url": f"/outputs/{os.path.basename(std_path)}", 
+            "empty_room_url": f"/outputs/{os.path.basename(step1_img)}", 
+            "result_url": generated_results[0], 
+            "result_urls": generated_results, 
+            "message": "Complete"
+        })
+    except Exception as e:
+        print(f"\n🔥🔥🔥 [SERVER CRASH] {e}")
+        traceback.print_exc()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 class UpscaleRequest(BaseModel):
     image_url: str
@@ -391,5 +413,4 @@ def upscale_and_download(req: UpscaleRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # 타임아웃 넉넉하게 설정
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=False, timeout_keep_alive=300)
