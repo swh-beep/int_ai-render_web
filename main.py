@@ -21,13 +21,17 @@ import traceback
 load_dotenv()
 
 # [KEY ROTATION SYSTEM] API 키 풀(Pool) 로드
-# .env 파일이나 Render 환경변수에 NANOBANANA_API_KEY1, 2, 3 ... 형태로 저장하세요.
+# .env 파일이나 Render 환경변수에 NANOBANANA_API_KEY_1, _2, _3 ... 형태로 저장하세요.
 API_KEY_POOL = []
 i = 1
 while True:
-    key = os.getenv(f"NANOBANANA_API_KEY{i}")
+    # f"NANOBANANA_API_KEY_{i}" 로 수정 (언더바 추가)
+    key = os.getenv(f"NANOBANANA_API_KEY_{i}") 
     if not key:
-        break
+        # 혹시 언더바 없이 저장했을 수도 있으니 한 번 더 체크
+        key = os.getenv(f"NANOBANANA_API_KEY{i}")
+        if not key:
+            break
     API_KEY_POOL.append(key)
     i += 1
 
