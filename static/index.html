@@ -70,6 +70,30 @@
                     </div>
                     <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider">
                 </div>
+<div id="resultSection" style="display:none;">
+    <h2>Result</h2>
+    
+    <div class="comparison-container">
+        <div class="img-comp-container">
+            <div class="img-comp-img">
+                <img id="afterImage" src="" width="100%"> </div>
+            <div class="img-comp-img img-comp-overlay">
+                <img id="beforeImage" src="" width="100%"> </div>
+        </div>
+    </div>
+
+    <div id="thumbnailContainer" style="
+        display: flex; 
+        justify-content: center; 
+        gap: 10px; 
+        margin-top: 20px; 
+        padding: 10px;
+    ">
+        </div>
+
+    <br>
+    <a id="downloadBtn" href="#" class="action-btn">Download Result</a>
+</div>
                 <div class="download-area">
                     <a id="download-link" href="#" download class="secondary-btn">Download Result</a>
                 </div>
