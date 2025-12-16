@@ -44,7 +44,7 @@ print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개")
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-MODEL_NAME = 'gemini-2.0-flash' # 모델명 확인
+MODEL_NAME = 'gemini-3-pro-image-preview' # 모델명 확인
 
 # [설정] 3장 생성을 위해 시간 넉넉히
 TOTAL_TIMEOUT_LIMIT = 300 
@@ -118,7 +118,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
                 # [상세 로그] 왜 에러가 났는지 정확히 출력
                 print(f"⚠️ [Error] Key(...{masked_key}) 에러 발생: {error_msg}", flush=True)
             
-            time.sleep(0.5)
+            time.sleep(1)
 
     print("❌ [Fatal] 모든 키 시도 실패.")
     return None
