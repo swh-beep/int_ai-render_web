@@ -352,7 +352,7 @@ def download_image(url, unique_id):
 async def read_index(): return FileResponse("static/index.html")
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon(): return FileResponse("static/logo.png")
+async def favicon(): return FileResponse("static/logo2.png")
 
 @app.get("/room-types")
 async def get_room_types(): return JSONResponse(content=list(ROOM_STYLES.keys()))
