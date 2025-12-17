@@ -617,6 +617,29 @@ header h1 {
     display: block;
 }
 
+/* [NEW] 로컬 로딩 오버레이 (카드 내부용) */
+.detail-card-loader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 20;
+}
+
+.mini-spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
 /* 디테일 뷰 개별 리트라이 버튼 (우측 상단) */
 .detail-retry-btn {
     position: absolute;

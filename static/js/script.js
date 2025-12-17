@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ script.js 로드됨 (Global Lock + 5 Main Thumbnails)");
+    console.log("✅ script.js 로드됨 (Local Loader + 5 Main Thumbnails)");
 
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
@@ -542,14 +542,17 @@ document.addEventListener('DOMContentLoaded', () => {
     async function retrySingleDetail(cardElement, styleIndex) {
         if (!currentDetailSourceUrl) return;
 
-        setGlobalLoadingState(true);
-        const startTime = showLoading("Regenerating single shot...");
-        const imgElement = cardElement.querySelector('img');
+        // 1. 해당 카드 내의 버튼만 비활성화 (전체 화면 락 X)
+        const buttons = cardElement.querySelectorAll('button');
+        buttons.forEach(btn => btn.disabled = true);
 
-        const timerInterval = setInterval(() => {
-            let elapsed = Math.floor((Date.now() - startTime) / 1000);
-            if (timerElement) timerElement.textContent = `${elapsed}s`;
-        }, 1000);
+        // 2. 로컬 로더 생성 및 삽입
+        const loader = document.createElement('div');
+        loader.className = 'detail-card-loader';
+        const spinner = document.createElement('div');
+        spinner.className = 'mini-spinner';
+        loader.appendChild(spinner);
+        cardElement.appendChild(loader);
 
         try {
             const res = await fetch("/regenerate-single-detail", {
@@ -562,6 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const data = await res.json();
             if (res.ok && data.url) {
+                const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
                 imgElement.onclick = () => openLightbox(data.url);
             } else {
@@ -570,9 +574,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             showCustomAlert("Error", "Error: " + e.message);
         } finally {
-            clearInterval(timerInterval);
-            hideLoading();
-            setGlobalLoadingState(false);
+            // 3. 로더 제거 및 버튼 활성화
+            loader.remove();
+            buttons.forEach(btn => btn.disabled = false);
         }
     }
 
