@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,22 +8,21 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="container">
         <header>
             <img src="/static/logo.png" alt="Company Logo" class="logo">
-            <h1>AI Styling Design Test</h1>
+            <h1>AI Styling Design</h1>
             <p class="subtitle-sub">Based Google Nanobanana with Gemini</p>
+            <p class="subtitle-sub">해당 웹 및 앱은 사내용입니다</p>
+            <p class="subtitle-sub">담당자 외 배포 금지</p>
+
         </header>
 
         <main>
             <section class="upload-section" id="upload-area">
                 <div class="drop-zone">
-                    <div class="folder-icon">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M10 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6H12L10 4Z" fill="#007AFF" />
-                        </svg>
-                    </div>
                     <p>Drag & Drop your room photo here or <strong>Browse</strong></p>
                     <input type="file" id="file-input" accept="image/*" hidden>
                 </div>
@@ -53,30 +53,30 @@
 
             <section class="result-section hidden" id="result-section">
                 <h2>Result</h2>
-                
-                <div class="comparison-container" style="position: relative; height: 500px; overflow: hidden;">
+
+                <div class="comparison-container">
                     <span class="label label-after">After</span>
                     <span class="label label-before">Before</span>
 
-                    <div class="image-wrapper after" style="position: absolute; top: 0; left: 0; height: 100%; width: 50%; overflow: hidden; z-index: 2;">
-                        <img id="result-after" src="" alt="After" style="height: 100%; width: auto; max-width: none;">
+                    <div class="image-wrapper after">
+                        <img id="result-after" src="" alt="After">
                     </div>
-                    <div class="image-wrapper before" style="position: absolute; top: 0; left: 0; height: 100%; width: 100%;">
-                        <img id="result-before" src="" alt="Before" style="height: 100%; width: 100%; object-fit: cover;">
+
+                    <div class="image-wrapper before" style="width: 50%;">
+                        <img id="result-before" src="" alt="Before">
                     </div>
-                    <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider" style="width: 100%; position: absolute; top: 50%; z-index: 10; margin: 0;">
+
+                    <div class="slider-wrapper">
+                        <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider">
+                        <div class="slider-handle" style="left: 50%;"></div>
+                    </div>
                 </div>
 
-                <div id="thumbnailContainer" style="display: flex; justify-content: center; gap: 10px; margin-top: 20px; padding: 10px;">
-                    </div>
+                <div id="thumbnailContainer"></div>
 
-                <div class="download-area" style="text-align: center; margin-top: 20px;">
-                    <button id="upscaleBtn" class="action-btn" style="background-color: #6f42c1; color: white; cursor: pointer; padding: 12px 24px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;">
-                        ✨ Upscale & Download
-                    </button>
-                    <p id="upscaleStatus" style="font-size: 0.9em; color: #666; margin-top: 10px; display: none;">
-                        고화질 변환 중입니다... (약 30~60초 소요)
-                    </p>
+                <div class="download-area">
+                    <button id="upscaleBtn" class="action-btn">Upscale & Download</button>
+                    <p id="upscaleStatus" class="hidden">고화질 변환 중입니다... (약 30~60초 소요)</p>
                 </div>
             </section>
         </main>
@@ -84,10 +84,12 @@
 
     <div id="loading-overlay" class="hidden">
         <div class="spinner"></div>
-        <p>Rendering your dream room...</p>
-        <p id="timer">0.0s</p>
+        <p class="loading-title">Rendering your dream room...</p>
+        <p id="loading-status">Cleaning the room...</p>
+        <p id="timer">0s</p>
     </div>
 
     <script src="/static/js/script.js"></script>
 </body>
+
 </html>

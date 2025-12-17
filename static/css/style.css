@@ -12,7 +12,7 @@
     --transition: 0.3s ease;
 }
 
-/* [수정 2] 웹사이트 전체 크기를 90%로 축소 */
+/* [수정 2] 웹사이트 전체 크기를 80%로 축소 */
 html {
     font-size: 80%;
 }
@@ -47,11 +47,11 @@ header {
 
 /* 로고 스타일 */
 .logo {
-    width: 150px;
-    height: 150px;
+    width: 250px;
+    height: 250px;
     object-fit: contain;
     display: block;
-    margin: 0 auto 1.5rem;
+    margin: 0 auto -2rem;
 }
 
 header h1 {
@@ -195,9 +195,14 @@ header h1 {
 }
 
 .style-btn.active {
-    background-color: var(--text-color);
-    border-color: var(--text-color);
-    color: var(--bg-color);
+    background-color: transparent;
+    /* 배경 투명하게 (흰색 채움 제거) */
+    border: 2px solid #ffffff;
+    /* 테두리만 두껍게 흰색 */
+    color: #ffffff;
+    /* 글씨 흰색 */
+    font-weight: 700;
+    /* 글씨 강조 */
 }
 
 /* Action Area */
@@ -207,8 +212,8 @@ header h1 {
 }
 
 #render-btn {
-    background-color: var(--text-color);
-    color: var(--bg-color);
+    background-color: #4A1215;
+    color: #ffffff;
     border: none;
     padding: 1.2rem 4rem;
     font-size: 1.2rem;
@@ -218,17 +223,18 @@ header h1 {
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
+    font-family: 'Outfit', sans-serif;
 }
 
 #render-btn:disabled {
-    opacity: 0.3;
+    background-color: #333333;
+    color: #777777;
+    opacity: 1;
     cursor: not-allowed;
-    background-color: var(--border-color);
-    color: var(--text-muted);
 }
 
 #render-btn:not(:disabled):hover {
-    background-color: #e2e2e2;
+    background-color: #631a1e;
     transform: translateY(-2px);
 }
 
@@ -239,10 +245,16 @@ header h1 {
     border: none;
 }
 
+.result-section h2 {
+    text-align: center;
+    margin-bottom: 2rem;
+    font-size: 2rem;
+}
+
 .comparison-container {
     position: relative;
     width: 100%;
-    aspect-ratio: 4/3;
+    aspect-ratio: 16 / 9;
     overflow: hidden;
     border-radius: var(--radius);
     margin-bottom: 2rem;
@@ -259,20 +271,25 @@ header h1 {
     overflow: hidden;
 }
 
+.image-wrapper.before {
+    z-index: 2;
+    border-right: 2px solid white;
+    box-sizing: border-box;
+    width: 50%;
+}
+
+.image-wrapper.after {
+    z-index: 1;
+}
+
 .image-wrapper img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
     display: block;
 }
 
-.image-wrapper.before {
-    z-index: 1;
-    width: 50%;
-    border-right: 1px solid white;
-}
-
-/* 라벨 스타일 (이미지 위에 고정) */
 .label {
     position: absolute;
     top: 20px;
@@ -296,39 +313,97 @@ header h1 {
     right: 20px;
 }
 
-.slider {
+.slider-wrapper {
     position: absolute;
-    top: 50%;
+    top: 0;
     left: 0;
     width: 100%;
-    z-index: 10;
-    opacity: 0;
-    cursor: ew-resize;
-    transform: translateY(-50%);
     height: 100%;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.slider {
+    -webkit-appearance: none;
+    appearance: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    outline: none;
+    margin: 0;
+    z-index: 10;
+    pointer-events: auto;
+    cursor: col-resize;
+}
+
+.slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0;
+    height: 0;
+}
+
+.slider::-moz-range-thumb {
+    width: 0;
+    height: 0;
+    border: 0;
+}
+
+/* [요청반영] 슬라이더 핸들 사이즈 절반으로 축소 (40px -> 20px) */
+.slider-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    background-color: white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+    z-index: 11;
+}
+
+/* [요청반영] 썸네일 중앙 정렬 추가 */
+#thumbnailContainer {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
 }
 
 .download-area {
     text-align: center;
+    margin-top: 30px;
 }
 
-.secondary-btn {
-    display: inline-block;
-    color: var(--text-muted);
-    text-decoration: none;
-    font-weight: 400;
-    margin-top: 1rem;
-    font-size: 0.9rem;
-    border-bottom: 1px solid transparent;
-    transition: var(--transition);
+.action-btn {
+    background-color: #4A1215;
+    color: white;
+    padding: 15px 30px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    font-family: 'Outfit', sans-serif;
+    letter-spacing: 0.5px;
 }
 
-.secondary-btn:hover {
-    color: var(--text-color);
-    border-bottom-color: var(--text-color);
+.action-btn:hover {
+    background-color: #631a1e;
 }
 
-/* Loading Overlay */
+.action-btn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
 #loading-overlay {
     position: fixed;
     top: 0;
@@ -353,18 +428,31 @@ header h1 {
     margin-bottom: 2rem;
 }
 
-#loading-overlay p {
+/* 첫 번째 줄: 고정 멘트 (크고 진하게) */
+.loading-title {
     color: var(--text-color);
-    font-weight: 300;
-    letter-spacing: 0.1em;
+    font-size: 1.2rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    /* 아래 줄과 간격 */
+}
+
+/* 두 번째 줄: 바뀌는 상태 멘트 (작고 얇게) */
+#loading-status {
+    color: var(--text-muted);
+    /* 회색조 */
+    font-size: 1rem;
+    font-weight: 400;
+    margin-bottom: 1rem;
 }
 
 #timer {
-    margin-top: 1rem;
     font-variant-numeric: tabular-nums;
     font-weight: 400;
     opacity: 0.8;
+    color: var(--text-color);
 }
 
 @keyframes spin {
@@ -377,20 +465,15 @@ header h1 {
     display: none !important;
 }
 
-/* Step 3 변형 선택 그리드 (5열 2행) */
 #variant-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    /* 가로 5개 강제 */
     gap: 15px;
-    /* 간격 */
     width: 100%;
     max-width: 1200px;
-    /* 전체 폭에 맞춤 */
     margin: 0 auto;
 }
 
-/* 버튼 컨테이너 (이미지 + 숫자) */
 .variant-img-btn {
     width: 100%;
     height: auto;
@@ -402,88 +485,73 @@ header h1 {
     align-items: center;
     padding: 0;
     gap: 10px;
-
-    /* [추가] 호버 시 순서 제어 (확대된 이미지가 가리지 않게) */
     position: relative;
     z-index: 1;
     transition: z-index 0s 0.5s;
-    /* 돌아갈 때 딜레이 */
 }
 
 .variant-img-btn:hover {
     z-index: 1000;
-    /* 마우스 올리면 맨 위로 */
     transition-delay: 0s;
 }
 
-/* 썸네일 이미지 스타일 */
 .variant-img-btn img {
     width: 100%;
     aspect-ratio: 16 / 9;
     object-fit: cover;
     object-position: center;
     border-radius: 12px;
-    border: 2px solid transparent;
+    border: 3px solid transparent;
     transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.3s ease, box-shadow 0.3s ease;
     background-color: #222;
     transform-origin: center;
-    /* 중앙 기준 확대 */
 }
 
-/* [수정 1] 썸네일 호버 시 2배 확대 */
 .variant-img-btn:hover img {
     transform: scale(2);
-    /* 2배 확대 */
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
     border-color: var(--primary-color);
     background-color: #000;
-    /* 비침 방지 */
 }
 
-/* [수정 3] 숫자 라벨 버튼 (얇게 수정) */
 .variant-label {
     width: 100%;
-    /* 패딩을 0.8rem -> 0.5rem으로 줄여서 높이 축소 */
     padding: 0.5rem 0;
-
     background-color: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-muted);
     border-radius: 50px;
-
     text-align: center;
     font-size: 1rem;
     font-weight: 500;
     transition: var(--transition);
 }
 
-/* Hover 효과 */
 .variant-img-btn:hover .variant-label {
     border-color: var(--primary-color);
     color: var(--text-color);
 }
 
-/* Active 효과 */
 .variant-img-btn.active img {
     border-color: var(--primary-color);
     box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
-    /* 클릭된 상태에서는 살짝만 튀어나오게 (호버랑 충돌 방지 위해 transform 제거 고려 가능) */
-    transform: translateY(-3px);
 }
 
-/* Active 상태에서도 호버하면 2배 커져야 함 */
 .variant-img-btn.active:hover img {
     transform: scale(2);
 }
 
 .variant-img-btn.active .variant-label {
-    background-color: var(--text-color);
-    border-color: var(--text-color);
-    color: var(--bg-color);
+    background-color: transparent;
+    /* 배경을 투명하게 변경 (흰색 채움 방지) */
+    border: 2px solid #ffffff;
+    /* 테두리를 2px 흰색 실선으로 설정 */
+    color: #ffffff;
+    /* 글씨는 흰색 유지 */
     font-weight: 700;
+    /* 글씨 굵게 */
 }
 
-/* 이미지가 없을 때 */
 .variant-img-btn.no-image img {
     display: none;
 }
@@ -500,4 +568,10 @@ header h1 {
     color: #fff;
     font-size: 1.5rem;
     border: 1px dashed var(--border-color);
+}
+
+#upscaleStatus {
+    font-size: 0.9em;
+    color: #666;
+    margin-top: 10px;
 }
