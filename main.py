@@ -376,7 +376,8 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
             if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
 
         generated_results = []
-        print(f"\n🚀 [Stage 2] 3장 동시 생성 시작 (Furnishing)!", flush=True)
+        # [수정] 3장 -> 5장으로 변경
+        print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Furnishing)!", flush=True)
 
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
@@ -390,8 +391,9 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(process_one_variant, i) for i in range(3)]
+        # [수정] Worker 수를 3 -> 5로 변경, range(3) -> range(5)로 변경
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
                 res = future.result()
                 if res: generated_results.append(res)

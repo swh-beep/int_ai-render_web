@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ script.js 로드됨 (Custom Modal Applied)");
+    console.log("✅ script.js 로드됨 (Global Lock + 5 Main Thumbnails)");
 
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
@@ -92,6 +92,39 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedStyle = null;
     let selectedVariant = null;
     let currentDetailSourceUrl = null;
+
+    // [New] 글로벌 락 함수 (동시 실행 방지)
+    function setGlobalLoadingState(isLoading, statusText = "") {
+        const buttonsToLock = [renderBtn, upscaleBtn, detailBtn];
+        // 디테일 카드 내의 개별 버튼들도 찾아서 잠금
+        const detailButtons = document.querySelectorAll('.detail-retry-btn, .detail-upscale-btn');
+
+        if (isLoading) {
+            // 1. 모든 버튼 비활성화
+            buttonsToLock.forEach(btn => { if (btn) btn.disabled = true; });
+            detailButtons.forEach(btn => btn.disabled = true);
+
+            // 2. 투명도 조절로 비활성 느낌 주기
+            if (upscaleBtn) upscaleBtn.style.opacity = "0.5";
+            if (detailBtn) detailBtn.style.opacity = "0.5";
+            if (renderBtn) renderBtn.style.opacity = "0.5";
+
+            // 3. 상태 메시지 표시 (선택적)
+            if (statusText && loadingStatus) loadingStatus.textContent = statusText;
+        } else {
+            // 1. 모든 버튼 활성화
+            buttonsToLock.forEach(btn => { if (btn) btn.disabled = false; });
+            detailButtons.forEach(btn => btn.disabled = false);
+
+            // 2. 투명도 복구
+            if (upscaleBtn) upscaleBtn.style.opacity = "1";
+            if (detailBtn) detailBtn.style.opacity = "1";
+            if (renderBtn) renderBtn.style.opacity = "1";
+
+            // 3. 렌더링 버튼은 조건(파일 선택 등)에 따라 다시 체크해야 함
+            checkReady();
+        }
+    }
 
     // --- 데이터 로드 ---
     fetch('/room-types')
@@ -238,12 +271,13 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBtn.addEventListener('click', async () => {
             if (!selectedFile || !selectedRoom || !selectedStyle || !selectedVariant) return;
 
+            // [Lock] 시작
+            setGlobalLoadingState(true, "Cleaning the room...");
             loadingOverlay.classList.remove('hidden');
             resultSection.classList.add('hidden');
 
             let startTime = Date.now();
             if (timerElement) timerElement.textContent = "0s";
-            if (loadingStatus) loadingStatus.textContent = "Cleaning the room...";
 
             const timerInterval = setInterval(() => {
                 let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
@@ -276,11 +310,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (results.length > 0) resultAfter.src = results[0];
 
                 thumbnailContainer.innerHTML = "";
+                // [수정] 썸네일 크기 조정 (5개 기준 꽉 차게)
                 results.forEach((url, idx) => {
                     const img = document.createElement("img");
                     img.src = url;
-                    img.style.width = "142px";
-                    img.style.height = "80px";
+                    // 가로폭 100%를 5등분하되 간격 고려해서 약 19% 정도로 설정
+                    img.style.width = "19%";
+                    img.style.height = "auto";
+                    img.style.aspectRatio = "16/9";
                     img.style.objectFit = "cover";
                     img.style.cursor = "pointer";
                     img.style.borderRadius = "8px";
@@ -301,6 +338,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(timerInterval);
                 loadingOverlay.classList.add('hidden');
                 showCustomAlert("Error", err.message);
+            } finally {
+                // [Lock] 해제
+                setGlobalLoadingState(false);
             }
         });
     }
@@ -367,9 +407,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            upscaleBtn.disabled = true;
+            // [Lock] 시작
+            setGlobalLoadingState(true, "Processing Upscale...");
             upscaleBtn.innerText = "PROCESSING...";
-            upscaleBtn.style.opacity = "0.7";
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
             try {
@@ -380,9 +420,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 showCustomAlert("Error", "Server Error during upscale.");
             } finally {
-                upscaleBtn.disabled = false;
+                // [Lock] 해제
+                setGlobalLoadingState(false);
                 upscaleBtn.innerText = "UPSCALE & DOWNLOAD";
-                upscaleBtn.style.opacity = "1";
                 if (upscaleStatus) upscaleStatus.style.display = "none";
             }
         };
@@ -409,6 +449,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             currentDetailSourceUrl = currentImgUrl;
 
+            // [Lock] 시작
+            setGlobalLoadingState(true);
             detailSection.classList.add('hidden');
             detailGrid.innerHTML = '';
 
@@ -446,6 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } finally {
                 clearInterval(msgInterval);
                 hideLoading();
+                // [Lock] 해제
+                setGlobalLoadingState(false);
             }
         };
     }
@@ -463,9 +507,10 @@ document.addEventListener('DOMContentLoaded', () => {
         retryBtn.innerHTML = '&#x21bb;';
         retryBtn.title = "Retry this shot";
 
-        // [수정됨] 커스텀 모달 사용
         retryBtn.onclick = (e) => {
             e.stopPropagation();
+            if (renderBtn.disabled) return;
+
             showCustomConfirm("Retry", "이 컷만 다시 생성하시겠습니까?\n기존 이미지는 삭제됩니다.", async () => {
                 await retrySingleDetail(card, styleIndex);
             });
@@ -476,11 +521,15 @@ document.addEventListener('DOMContentLoaded', () => {
         upBtn.textContent = "UPSCALE & DOWNLOAD";
         upBtn.onclick = async (e) => {
             e.stopPropagation();
-            upBtn.disabled = true;
+            if (renderBtn.disabled) return;
+
+            setGlobalLoadingState(true);
             upBtn.textContent = "Processing...";
+
             await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
-            upBtn.disabled = false;
+
             upBtn.textContent = "UPSCALE & DOWNLOAD";
+            setGlobalLoadingState(false);
             showCustomAlert("Success", "Detail Shot Downloaded");
         };
 
@@ -493,6 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function retrySingleDetail(cardElement, styleIndex) {
         if (!currentDetailSourceUrl) return;
 
+        setGlobalLoadingState(true);
         const startTime = showLoading("Regenerating single shot...");
         const imgElement = cardElement.querySelector('img');
 
@@ -522,6 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             clearInterval(timerInterval);
             hideLoading();
+            setGlobalLoadingState(false);
         }
     }
 
