@@ -458,12 +458,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const msgs = ["Setting up Virtual Cameras...", "Capturing Light & Textures...", "Developing Editorial Shots...", "Finalizing Your Portfolio..."];
             let step = 0;
 
-            const msgInterval = setInterval(() => {
+            // [수정] 타이머와 멘트 변경 간격을 분리
+            // 1. 초시계 (1초마다)
+            const timerInterval = setInterval(() => {
                 let elapsed = Math.floor((Date.now() - startTime) / 1000);
                 if (timerElement) timerElement.textContent = `${elapsed}s`;
+            }, 1000);
+
+            // 2. 멘트 변경 (4초마다 - 8초는 너무 긺)
+            const msgInterval = setInterval(() => {
                 step = (step + 1) % msgs.length;
                 if (step < msgs.length && loadingStatus) loadingStatus.textContent = msgs[step];
-            }, 8000);
+            }, 4000);
 
             try {
                 const res = await fetch("/generate-details", {
@@ -486,6 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 showCustomAlert("Error", "Error: " + err.message);
             } finally {
+                clearInterval(timerInterval);
                 clearInterval(msgInterval);
                 hideLoading();
                 // [Lock] 해제
