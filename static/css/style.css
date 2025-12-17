@@ -8,11 +8,11 @@
     --text-color: #ffffff;
     --text-muted: #a1a1aa;
     --border-color: #333333;
-    --radius: 0px;
+    --radius: 10px;
+    /* [요청] 10px 통일 */
     --transition: 0.3s ease;
 }
 
-/* [수정 2] 웹사이트 전체 크기를 80%로 축소 */
 html {
     font-size: 80%;
 }
@@ -45,7 +45,6 @@ header {
     padding-top: 2rem;
 }
 
-/* 로고 스타일 */
 .logo {
     width: 250px;
     height: 250px;
@@ -67,7 +66,6 @@ header h1 {
     opacity: 0.6;
 }
 
-/* Upload Section */
 .upload-section {
     margin-bottom: 3rem;
 }
@@ -139,7 +137,6 @@ header h1 {
     border-color: white;
 }
 
-/* Style Section */
 .style-section {
     margin-bottom: 3rem;
 }
@@ -196,16 +193,11 @@ header h1 {
 
 .style-btn.active {
     background-color: transparent;
-    /* 배경 투명하게 (흰색 채움 제거) */
     border: 2px solid #ffffff;
-    /* 테두리만 두껍게 흰색 */
     color: #ffffff;
-    /* 글씨 흰색 */
     font-weight: 700;
-    /* 글씨 강조 */
 }
 
-/* Action Area */
 .action-area {
     text-align: center;
     margin-bottom: 4rem;
@@ -238,7 +230,6 @@ header h1 {
     transform: translateY(-2px);
 }
 
-/* Result Section */
 .result-section {
     background-color: transparent;
     padding: 0;
@@ -352,7 +343,6 @@ header h1 {
     border: 0;
 }
 
-/* [요청반영] 슬라이더 핸들 사이즈 절반으로 축소 (40px -> 20px) */
 .slider-handle {
     position: absolute;
     top: 50%;
@@ -367,7 +357,6 @@ header h1 {
     z-index: 11;
 }
 
-/* [요청반영] 썸네일 중앙 정렬 추가 */
 #thumbnailContainer {
     display: flex;
     justify-content: center;
@@ -378,6 +367,13 @@ header h1 {
 .download-area {
     text-align: center;
     margin-top: 30px;
+}
+
+.button-group {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
 }
 
 .action-btn {
@@ -404,6 +400,16 @@ header h1 {
     cursor: not-allowed;
 }
 
+.action-btn.secondary {
+    background-color: transparent;
+    border: 2px solid #ffffff;
+    color: #ffffff;
+}
+
+.action-btn.secondary:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
 #loading-overlay {
     position: fixed;
     top: 0;
@@ -428,7 +434,6 @@ header h1 {
     margin-bottom: 2rem;
 }
 
-/* 첫 번째 줄: 고정 멘트 (크고 진하게) */
 .loading-title {
     color: var(--text-color);
     font-size: 1.2rem;
@@ -436,13 +441,10 @@ header h1 {
     letter-spacing: 0.05em;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
-    /* 아래 줄과 간격 */
 }
 
-/* 두 번째 줄: 바뀌는 상태 멘트 (작고 얇게) */
 #loading-status {
     color: var(--text-muted);
-    /* 회색조 */
     font-size: 1rem;
     font-weight: 400;
     margin-bottom: 1rem;
@@ -543,13 +545,9 @@ header h1 {
 
 .variant-img-btn.active .variant-label {
     background-color: transparent;
-    /* 배경을 투명하게 변경 (흰색 채움 방지) */
     border: 2px solid #ffffff;
-    /* 테두리를 2px 흰색 실선으로 설정 */
     color: #ffffff;
-    /* 글씨는 흰색 유지 */
     font-weight: 700;
-    /* 글씨 굵게 */
 }
 
 .variant-img-btn.no-image img {
@@ -570,8 +568,218 @@ header h1 {
     border: 1px dashed var(--border-color);
 }
 
-#upscaleStatus {
+#upscaleStatus,
+#detailStatus {
     font-size: 0.9em;
     color: #666;
     margin-top: 10px;
+}
+
+/* [NEW] Detail View Styles */
+#detail-section {
+    margin-top: 3rem;
+    text-align: center;
+    border-top: 1px solid var(--border-color);
+    padding-top: 2rem;
+}
+
+#detail-section h3 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    /* [요청] 5열 배치 */
+    gap: 1rem;
+    width: 100%;
+}
+
+.detail-card {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    transition: border-color 0.3s;
+}
+
+.detail-card:hover {
+    border-color: var(--primary-color);
+}
+
+.detail-card img {
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    cursor: pointer;
+    display: block;
+}
+
+/* 디테일 뷰 개별 리트라이 버튼 (우측 상단) */
+.detail-retry-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: background 0.3s;
+}
+
+.detail-retry-btn:hover {
+    background-color: #4A1215;
+    border-color: white;
+}
+
+/* 디테일 뷰 개별 업스케일 버튼 (하단) */
+.detail-upscale-btn {
+    width: 100%;
+    background-color: #4A1215;
+    color: white;
+    border: none;
+    padding: 8px 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    transition: background 0.3s;
+}
+
+.detail-upscale-btn:hover {
+    background-color: #631a1e;
+}
+
+.detail-upscale-btn:disabled {
+    background-color: #333;
+    color: #777;
+    cursor: not-allowed;
+}
+
+/* Lightbox Styles */
+.lightbox {
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.lightbox-content {
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border-radius: 4px;
+}
+
+.close-lightbox {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close-lightbox:hover,
+.close-lightbox:focus {
+    color: #bbb;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* [NEW] 커스텀 모달 스타일 */
+.custom-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background-color: #1a1a1a;
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    text-align: center;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.modal-content h3 {
+    margin-bottom: 1rem;
+    color: var(--text-color);
+    font-size: 1.5rem;
+}
+
+.modal-content p {
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+    line-height: 1.5;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.modal-buttons button {
+    padding: 12px 24px;
+    min-width: 100px;
+}
+
+@keyframes modalPop {
+    from {
+        transform: scale(0.9);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@media (max-width: 1024px) {
+    .detail-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .detail-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
 }

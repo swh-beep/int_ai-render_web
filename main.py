@@ -18,7 +18,6 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 import gc
-# [중요] 안전 설정을 위한 타입 임포트
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # ---------------------------------------------------------
@@ -26,7 +25,6 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # ---------------------------------------------------------
 load_dotenv()
 
-# [사용자 지정 모델 고정]
 MODEL_NAME = 'gemini-3-pro-image-preview'
 
 API_KEY_POOL = []
@@ -109,7 +107,6 @@ def standardize_image(image_path, output_path=None):
             img = ImageOps.exif_transpose(img)
             if img.mode != 'RGB': img = img.convert('RGB')
             
-            # 16:9 비율 중앙 크롭
             width, height = img.size
             target_ratio = 16 / 9
             current_ratio = width / height
@@ -140,10 +137,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
     img = Image.open(image_path)
     system_instruction = "You are an expert architectural AI."
     
-    # [수정] 요청하신 강력한 프롬프트 적용 (Step 1)
     prompt = (
-        "IMAGE EDITING TASK: Extreme Cleaning & 16:9 Outpainting.\n\n"
-        
+        "IMAGE EDITING TASK: Extreme Cleaning & Architectural Restoration.\n\n"        
         "<CRITICAL: STRUCTURAL PRESERVATION (PRIORITY #0)>\n"
         "1. **DO NOT REMOVE FIXTURES:** You must strictly PRESERVE all structural elements including Columns, Pillars, Beams, Windows (frames & glass), Doors, and Built-in fireplaces.\n"
         "2. **ONLY REMOVE MOVABLES:** Only remove furniture, rugs, curtains, and decorations that are NOT part of the building structure.\n"
@@ -154,9 +149,6 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         "2. CLEAN SURFACES: The floor and walls must be perfectly empty. Remove all shadows, reflections, and traces.\n"
         "3. BARE SHELL: Restore the room to its initial construction state.\n\n"
         
-        "<CRITICAL: 16:9 OUTPAINTING>\n"
-        "1. FILL BLACK BARS: Fill any black padding seamlessly with the existing wall/floor texture.\n"
-        "2. PERSPECTIVE: Straighten vertical lines.\n"
         "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural pillars and windows intact."
     )
     
@@ -195,8 +187,6 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
         room_img = Image.open(room_path)
         system_instruction = "You are an expert interior designer AI."
         
-        # [수정] 요청하신 강력한 프롬프트 적용 (Step 2)
-        # 주의: {analysis_result}는 현재 코드에 변수가 없으므로 제거했습니다.
         prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
@@ -373,13 +363,10 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
         raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
         
-        # [Step 0] 16:9 규격화
         std_path = standardize_image(raw_path)
         
-        # [Step 1] 중간 단계 빈 방 생성 (Cleaner)
         step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
         
-        # 무드보드 설정
         ref_path = None
         target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
         if os.path.exists(target_dir):
@@ -412,7 +399,6 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
 
         print(f"=== [{unique_id}] 가구 배치 완료: {len(generated_results)}장 ===", flush=True)
         
-        # [Step 3] 최종 결과물을 다시 비워서 Before 이미지 생성
         final_before_url = f"/outputs/{os.path.basename(step1_img)}"
         if generated_results:
             print(f"\n--- [Stage 3] 결과물 기반 Before 이미지 생성 시작 ---", flush=True)
@@ -420,7 +406,6 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
                 first_result_filename = os.path.basename(generated_results[0])
                 first_result_path = os.path.join("outputs", first_result_filename)
                 
-                # Step 1과 동일한 강력한 프롬프트로 Step 3 수행 (안정적)
                 final_before_path = generate_empty_room(first_result_path, unique_id + "_final", start_time, stage_name="Stage 3: Final Before View")
                 final_before_url = f"/outputs/{os.path.basename(final_before_path)}"
                 print(">> [성공] 최종 비교용 Before 이미지 생성 완료", flush=True)
@@ -465,6 +450,128 @@ def upscale_and_download(req: UpscaleRequest):
             
         return JSONResponse(content=response_data)
     except Exception as e: 
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+# -----------------------------------------------------------------------------
+# [Finalized] 10 Cinematic Detail Shots (Reference Matched)
+# -----------------------------------------------------------------------------
+
+SHOT_STYLES = [
+    {"name": "Fabric Texture Focus", "prompt": "FOCUS: Extreme close-up on the Main Sofa's fabric texture.\nCOMPOSITION: Focus sharply on the weave/material of the armrest or cushion. Let the background blur completely (Heavy Bokeh).\nLIGHTING: Soft side-lighting to reveal the tactile quality of the fabric."},
+    {"name": "Tabletop Vignette", "prompt": "FOCUS: Decorative objects on the Coffee Table (Vase, Books, or Ceramics).\nCOMPOSITION: Eye-level or slightly high angle. Focus on the objects, blurring the sofa and floor in the background.\nATMOSPHERE: Curated, editorial lifestyle look."},
+    {"name": "Grounding Detail", "prompt": "FOCUS: The intersection of the Coffee Table leg, the Rug, and the Floor.\nANGLE: Low Angle (Ground level view).\nGOAL: Contrast the textures of the wood/metal leg against the soft rug and hard floor. Show structural elegance."},
+    {"name": "Solo Chair Portrait", "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Medium shot (Full body of the chair). Capture its silhouette against the window or wall.\nSTYLE: Hero shot of a distinct furniture piece."},
+    {"name": "Lighting & Ceiling", "prompt": "FOCUS: The Pendant Light, Chandelier, or Floor Lamp shade.\nCOMPOSITION: Looking slightly up. If no pendant, focus on the top curtain folds or a tall plant leaf against the ceiling.\nLIGHTING: Glowing, warm, ethereal."},
+    {"name": "Layered Comfort", "prompt": "FOCUS: The layering of Cushions on the Sofa.\nCOMPOSITION: 45-degree angle showing the depth of cushions. Focus on the front cushion, blur the back.\nFEELING: Cozy, inviting, soft."},
+    {"name": "Edge & Material", "prompt": "FOCUS: The sharp edge or curve of a Coffee Table or Side Table.\nTARGET: Highlight the material (Marble vein, Wood grain, Glass reflection).\nCOMPOSITION: Macro shot focusing on the craftsmanship of the edge."},
+    {"name": "Depth Perspective", "prompt": "FOCUS: Look past a foreground object (like a blurry chair back or vase) to see the sharp furniture behind it.\nCOMPOSITION: Layered depth (Foreground Blur -> Sharp Subject -> Background Blur). Cinematic depth of field."},
+    {"name": "Sunlight Mood", "prompt": "FOCUS: An area where natural sunlight hits a surface (Rug, Floor, or Sofa arm).\nCOMPOSITION: High contrast light and shadow play. Capture the 'feeling' of a sunny afternoon.\nSTYLE: Emotional, warm, architectural photography."},
+    {"name": "Top-Down Art", "prompt": "FOCUS: High-angle view looking down at the Coffee Table and Rug area.\nCOMPOSITION: Abstract geometric composition. Show the shapes of the table, rug, and surrounding seating from above.\nSTYLE: Graphic, clean, plan-view aesthetic."}
+]
+
+def generate_detail_view(original_image_path, style_config, unique_id, index):
+    try:
+        img = Image.open(original_image_path)
+        final_prompt = (
+            "TASK: Create a photorealistic interior detail shot based on the provided room image.\n"
+            "STRICT CONSTRAINT: You must generate a close-up view of an object existing in the input image. Do not invent new furniture.\n\n"
+            f"<PHOTOGRAPHY STYLE: {style_config['name']}>\n"
+            f"{style_config['prompt']}\n\n"
+            "OUTPUT RULE: Return a high-quality, crop-like composition matching the description."
+        )
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        content = [final_prompt, "Original Room Context (Source):", img]
+        
+        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
+        if response and hasattr(response, 'candidates') and response.candidates:
+            for part in response.parts:
+                if hasattr(part, 'inline_data'):
+                    timestamp = int(time.time())
+                    safe_style_name = style_config['name'].replace(" ", "")
+                    filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.jpg"
+                    path = os.path.join("outputs", filename)
+                    with open(path, 'wb') as f: f.write(part.inline_data.data)
+                    return f"/outputs/{filename}"
+        return None
+    except Exception as e:
+        print(f"!! Detail Generation Error: {e}")
+        return None
+
+class DetailRequest(BaseModel):
+    image_url: str
+
+# [NEW] 단일 디테일 컷 리트라이 요청
+class RegenerateDetailRequest(BaseModel):
+    original_image_url: str
+    style_index: int
+
+@app.post("/regenerate-single-detail")
+def regenerate_single_detail(req: RegenerateDetailRequest):
+    try:
+        filename = os.path.basename(req.original_image_url)
+        local_path = os.path.join("outputs", filename)
+        if not os.path.exists(local_path):
+            return JSONResponse(content={"error": "Original image not found"}, status_code=404)
+        
+        if req.style_index < 0 or req.style_index >= len(SHOT_STYLES):
+            return JSONResponse(content={"error": "Invalid style index"}, status_code=400)
+
+        unique_id = uuid.uuid4().hex[:6]
+        style = SHOT_STYLES[req.style_index]
+        print(f"🔄 [Regenerate] Style {req.style_index}: {style['name']}", flush=True)
+        
+        res = generate_detail_view(local_path, style, unique_id, req.style_index + 1)
+        
+        if res:
+            return JSONResponse(content={"url": res, "message": "Success"})
+        else:
+            return JSONResponse(content={"error": "Generation failed"}, status_code=500)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/generate-details")
+def generate_details_endpoint(req: DetailRequest):
+    try:
+        filename = os.path.basename(req.image_url)
+        local_path = os.path.join("outputs", filename)
+        if not os.path.exists(local_path):
+            return JSONResponse(content={"error": "Original image not found"}, status_code=404)
+
+        unique_id = uuid.uuid4().hex[:6]
+        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Fixed Style Mode ===", flush=True)
+
+        generated_results = [] # Stores {index, url}
+        print(f"🚀 Generating {len(SHOT_STYLES)} Style Shots...", flush=True)
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for i, style in enumerate(SHOT_STYLES):
+                # 인덱스(i)를 함께 넘겨서 나중에 어떤 스타일인지 식별
+                futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
+            
+            for i, future in futures:
+                res = future.result()
+                if res: 
+                    generated_results.append({"index": i, "url": res})
+                
+        print(f"=== [Detail View] 완료: {len(generated_results)}장 생성됨 ===", flush=True)
+        
+        if not generated_results:
+            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
+
+        return JSONResponse(content={
+            "details": generated_results, # List of objects
+            "message": "Detail views generated successfully"
+        })
+
+    except Exception as e:
+        print(f"🔥🔥🔥 [Detail Error] {e}")
+        traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":

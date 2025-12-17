@@ -75,8 +75,17 @@
                 <div id="thumbnailContainer"></div>
 
                 <div class="download-area">
-                    <button id="upscaleBtn" class="action-btn">Upscale & Download</button>
+                    <div class="button-group">
+                        <button id="upscaleBtn" class="action-btn">Upscale & Download</button>
+                        <button id="detailBtn" class="action-btn secondary">Generate Detail View</button>
+                    </div>
                     <p id="upscaleStatus" class="hidden">고화질 변환 중입니다... (약 30~60초 소요)</p>
+                    <p id="detailStatus" class="hidden">촬영 중입니다... (약 40~60초)</p>
+                </div>
+
+                <div id="detail-section" class="hidden">
+                    <h3>Detail Views</h3>
+                    <div class="detail-grid" id="detail-grid"></div>
                 </div>
             </section>
         </main>
@@ -87,6 +96,22 @@
         <p class="loading-title">Rendering your dream room...</p>
         <p id="loading-status">Cleaning the room...</p>
         <p id="timer">0s</p>
+    </div>
+
+    <div id="lightbox" class="lightbox hidden">
+        <span class="close-lightbox">&times;</span>
+        <img class="lightbox-content" id="lightbox-img">
+    </div>
+
+    <div id="global-modal" class="custom-modal hidden">
+        <div class="modal-content">
+            <h3 id="modal-title">Notification</h3>
+            <p id="modal-msg">메시지 내용</p>
+            <div class="modal-buttons">
+                <button id="modal-cancel-btn" class="action-btn secondary hidden">Cancel</button>
+                <button id="modal-ok-btn" class="action-btn">Confirm</button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/script.js"></script>
