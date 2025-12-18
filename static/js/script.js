@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ script.js 로드됨 (Local Loader + 5 Main Thumbnails)");
+    console.log("✅ script.js 로드됨 (Global Lock Removed - Parallel Execution Allowed)");
 
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
@@ -8,34 +8,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalOkBtn = document.getElementById('modal-ok-btn');
     const modalCancelBtn = document.getElementById('modal-cancel-btn');
 
-    // 1. 단순 알림창 (Alert 대체)
+    // 1. 단순 알림창
     function showCustomAlert(title, message) {
         modalTitle.textContent = title;
         modalMsg.innerHTML = message.replace(/\n/g, '<br>');
         modalCancelBtn.classList.add('hidden');
         modalOkBtn.textContent = "OK";
-
         modalOkBtn.onclick = () => globalModal.classList.add('hidden');
-
         globalModal.classList.remove('hidden');
     }
 
-    // 2. 확인/취소창 (Confirm 대체)
+    // 2. 확인/취소창
     function showCustomConfirm(title, message, onConfirm) {
         modalTitle.textContent = title;
         modalMsg.innerHTML = message.replace(/\n/g, '<br>');
         modalCancelBtn.classList.remove('hidden');
         modalOkBtn.textContent = "Confirm";
-
         modalOkBtn.onclick = () => {
             globalModal.classList.add('hidden');
             if (onConfirm) onConfirm();
         };
-
-        modalCancelBtn.onclick = () => {
-            globalModal.classList.add('hidden');
-        };
-
+        modalCancelBtn.onclick = () => globalModal.classList.add('hidden');
         globalModal.classList.remove('hidden');
     }
 
@@ -55,6 +48,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const roomGrid = document.getElementById('room-grid');
     const styleGrid = document.getElementById('style-grid');
     const variantGrid = document.getElementById('variant-grid');
+
+    // Moodboard Elements
+    const moodboardUploadContainer = document.getElementById('moodboard-upload-container');
+    const moodboardDropZone = document.getElementById('moodboard-drop-zone');
+    const moodboardInput = document.getElementById('moodboard-input');
+    const moodboardPreviewContainer = document.getElementById('moodboard-preview-container');
+    const moodboardPreview = document.getElementById('moodboard-preview');
+    const removeMoodboardBtn = document.getElementById('remove-moodboard');
 
     const roomSection = document.getElementById('room-section');
     const styleSection = document.getElementById('style-section');
@@ -91,40 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedRoom = null;
     let selectedStyle = null;
     let selectedVariant = null;
+    let selectedMoodboardFile = null;
     let currentDetailSourceUrl = null;
-
-    // [New] 글로벌 락 함수 (동시 실행 방지)
-    function setGlobalLoadingState(isLoading, statusText = "") {
-        const buttonsToLock = [renderBtn, upscaleBtn, detailBtn];
-        // 디테일 카드 내의 개별 버튼들도 찾아서 잠금
-        const detailButtons = document.querySelectorAll('.detail-retry-btn, .detail-upscale-btn');
-
-        if (isLoading) {
-            // 1. 모든 버튼 비활성화
-            buttonsToLock.forEach(btn => { if (btn) btn.disabled = true; });
-            detailButtons.forEach(btn => btn.disabled = true);
-
-            // 2. 투명도 조절로 비활성 느낌 주기
-            if (upscaleBtn) upscaleBtn.style.opacity = "0.5";
-            if (detailBtn) detailBtn.style.opacity = "0.5";
-            if (renderBtn) renderBtn.style.opacity = "0.5";
-
-            // 3. 상태 메시지 표시 (선택적)
-            if (statusText && loadingStatus) loadingStatus.textContent = statusText;
-        } else {
-            // 1. 모든 버튼 활성화
-            buttonsToLock.forEach(btn => { if (btn) btn.disabled = false; });
-            detailButtons.forEach(btn => btn.disabled = false);
-
-            // 2. 투명도 복구
-            if (upscaleBtn) upscaleBtn.style.opacity = "1";
-            if (detailBtn) detailBtn.style.opacity = "1";
-            if (renderBtn) renderBtn.style.opacity = "1";
-
-            // 3. 렌더링 버튼은 조건(파일 선택 등)에 따라 다시 체크해야 함
-            checkReady();
-        }
-    }
 
     // --- 데이터 로드 ---
     fetch('/room-types')
@@ -145,6 +114,13 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedRoom = room;
         selectedStyle = null;
         selectedVariant = null;
+        selectedMoodboardFile = null;
+
+        if (moodboardPreviewContainer) moodboardPreviewContainer.classList.add('hidden');
+        if (moodboardUploadContainer) moodboardUploadContainer.classList.add('hidden');
+        if (moodboardDropZone) moodboardDropZone.classList.remove('hidden');
+        if (variantGrid) variantGrid.classList.remove('hidden');
+
         updateActiveButton(roomGrid, btn);
 
         fetch(`/styles/${room}`)
@@ -169,38 +145,49 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedVariant = null;
         updateActiveButton(styleGrid, btn);
 
+        if (style === 'Test') {
+            variantGrid.classList.add('hidden');
+            moodboardUploadContainer.classList.remove('hidden');
+        } else {
+            variantGrid.classList.remove('hidden');
+            moodboardUploadContainer.classList.add('hidden');
+            selectedMoodboardFile = null;
+        }
+
         variantGrid.innerHTML = '';
-        for (let i = 1; i <= 10; i++) {
-            const variantBtn = document.createElement('div');
-            variantBtn.className = 'variant-img-btn';
+        if (style !== 'Test') {
+            for (let i = 1; i <= 10; i++) {
+                const variantBtn = document.createElement('div');
+                variantBtn.className = 'variant-img-btn';
 
-            const img = document.createElement('img');
-            const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
-            const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
-            const imgName = `${safeRoom}_${safeStyle}_${i}.png`;
+                const img = document.createElement('img');
+                const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
+                const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
+                const imgName = `${safeRoom}_${safeStyle}_${i}.png`;
 
-            img.src = `/static/thumbnails/${imgName}`;
-            img.alt = `Variant ${i}`;
-            img.onerror = () => variantBtn.classList.add('no-image');
+                img.src = `/static/thumbnails/${imgName}`;
+                img.alt = `Variant ${i}`;
+                img.onerror = () => variantBtn.classList.add('no-image');
 
-            const label = document.createElement('span');
-            label.className = 'variant-label';
-            label.textContent = i;
+                const label = document.createElement('span');
+                label.className = 'variant-label';
+                label.textContent = i;
 
-            variantBtn.appendChild(img);
-            variantBtn.appendChild(label);
+                variantBtn.appendChild(img);
+                variantBtn.appendChild(label);
 
-            variantBtn.onclick = () => {
-                selectedVariant = i.toString();
-                document.querySelectorAll('.variant-img-btn').forEach(b => {
-                    b.classList.remove('active');
-                    b.style.borderColor = 'transparent';
-                });
-                variantBtn.classList.add('active');
-                variantBtn.style.borderColor = THEME_COLOR;
-                checkReady();
-            };
-            variantGrid.appendChild(variantBtn);
+                variantBtn.onclick = () => {
+                    selectedVariant = i.toString();
+                    document.querySelectorAll('.variant-img-btn').forEach(b => {
+                        b.classList.remove('active');
+                        b.style.borderColor = 'transparent';
+                    });
+                    variantBtn.classList.add('active');
+                    variantBtn.style.borderColor = THEME_COLOR;
+                    checkReady();
+                };
+                variantGrid.appendChild(variantBtn);
+            }
         }
         variantSection.classList.remove('hidden');
         checkReady();
@@ -218,26 +205,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 파일 처리 ---
     if (dropZone) {
         dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.style.borderColor = THEME_COLOR;
-        });
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = THEME_COLOR; });
         dropZone.addEventListener('dragleave', () => dropZone.style.borderColor = '#ccc');
         dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.style.borderColor = '#ccc';
+            e.preventDefault(); dropZone.style.borderColor = '#ccc';
             if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
         });
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length) handleFile(e.target.files[0]);
-        });
+        fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
     }
 
     function handleFile(file) {
-        if (!file.type.startsWith('image/')) {
-            showCustomAlert("Error", "이미지 파일만 가능합니다.");
-            return;
-        }
+        if (!file.type.startsWith('image/')) { showCustomAlert("Error", "이미지 파일만 가능합니다."); return; }
         selectedFile = file;
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -251,28 +229,65 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (removeBtn) {
         removeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            selectedFile = null;
-            fileInput.value = '';
-            previewContainer.classList.add('hidden');
-            dropZone.classList.remove('hidden');
+            e.stopPropagation(); selectedFile = null; fileInput.value = '';
+            previewContainer.classList.add('hidden'); dropZone.classList.remove('hidden'); checkReady();
+        });
+    }
+
+    // --- Moodboard 처리 ---
+    if (moodboardDropZone) {
+        moodboardDropZone.addEventListener('click', () => moodboardInput.click());
+        moodboardDropZone.addEventListener('dragover', (e) => { e.preventDefault(); moodboardDropZone.style.borderColor = THEME_COLOR; });
+        moodboardDropZone.addEventListener('dragleave', () => moodboardDropZone.style.borderColor = '#ccc');
+        moodboardDropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); moodboardDropZone.style.borderColor = '#ccc';
+            if (e.dataTransfer.files.length) handleMoodboardFile(e.dataTransfer.files[0]);
+        });
+        moodboardInput.addEventListener('change', (e) => { if (e.target.files.length) handleMoodboardFile(e.target.files[0]); });
+    }
+
+    function handleMoodboardFile(file) {
+        if (!file.type.startsWith('image/')) { showCustomAlert("Error", "이미지 파일만 가능합니다."); return; }
+        selectedMoodboardFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            moodboardPreview.src = e.target.result;
+            moodboardPreviewContainer.classList.remove('hidden');
+            moodboardDropZone.classList.add('hidden');
             checkReady();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    if (removeMoodboardBtn) {
+        removeMoodboardBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); selectedMoodboardFile = null; moodboardInput.value = '';
+            moodboardPreviewContainer.classList.add('hidden'); moodboardDropZone.classList.remove('hidden'); checkReady();
         });
     }
 
     function checkReady() {
-        if (renderBtn) {
-            renderBtn.disabled = !(selectedFile && selectedRoom && selectedStyle && selectedVariant);
+        if (!renderBtn) return;
+        let ready = false;
+        if (selectedFile && selectedRoom && selectedStyle) {
+            if (selectedStyle === 'Test') ready = !!selectedMoodboardFile;
+            else ready = !!selectedVariant;
         }
+        renderBtn.disabled = !ready;
     }
 
     // --- 메인 렌더링 ---
     if (renderBtn) {
         renderBtn.addEventListener('click', async () => {
-            if (!selectedFile || !selectedRoom || !selectedStyle || !selectedVariant) return;
+            let ready = false;
+            if (selectedFile && selectedRoom && selectedStyle) {
+                if (selectedStyle === 'Test') ready = !!selectedMoodboardFile;
+                else ready = !!selectedVariant;
+            }
+            if (!ready) return;
 
-            // [Lock] 시작
-            setGlobalLoadingState(true, "Cleaning the room...");
+            // [메인 렌더링] 이건 화면이 넘어가므로 본인만 잠궈도 충분함
+            renderBtn.disabled = true;
             loadingOverlay.classList.remove('hidden');
             resultSection.classList.add('hidden');
 
@@ -282,7 +297,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const timerInterval = setInterval(() => {
                 let elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
                 if (timerElement) timerElement.textContent = `${elapsedSeconds}s`;
-
                 if (loadingStatus) {
                     if (elapsedSeconds < 10) loadingStatus.textContent = "Cleaning the room...";
                     else if (elapsedSeconds < 30) loadingStatus.textContent = "Designing Variation (1/3)...";
@@ -294,7 +308,8 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('file', selectedFile);
             formData.append('room', selectedRoom);
             formData.append('style', selectedStyle);
-            formData.append('variant', selectedVariant);
+            formData.append('variant', selectedVariant || "1");
+            if (selectedMoodboardFile) formData.append('moodboard', selectedMoodboardFile);
 
             try {
                 const res = await fetch('/render', { method: 'POST', body: formData });
@@ -310,11 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (results.length > 0) resultAfter.src = results[0];
 
                 thumbnailContainer.innerHTML = "";
-                // [수정] 썸네일 크기 조정 (5개 기준 꽉 차게)
                 results.forEach((url, idx) => {
                     const img = document.createElement("img");
                     img.src = url;
-                    // 가로폭 100%를 5등분하되 간격 고려해서 약 19% 정도로 설정
                     img.style.width = "19%";
                     img.style.height = "auto";
                     img.style.aspectRatio = "16/9";
@@ -339,8 +352,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadingOverlay.classList.add('hidden');
                 showCustomAlert("Error", err.message);
             } finally {
-                // [Lock] 해제
-                setGlobalLoadingState(false);
+                renderBtn.disabled = false;
+                checkReady();
             }
         });
     }
@@ -402,13 +415,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const afterUrl = resultAfter ? resultAfter.src : null;
             const beforeUrl = resultBefore ? resultBefore.src : null;
 
-            if (!afterUrl || !beforeUrl) {
-                showCustomAlert("Warning", "이미지가 없습니다.");
-                return;
-            }
+            if (!afterUrl || !beforeUrl) { showCustomAlert("Warning", "이미지가 없습니다."); return; }
 
-            // [Lock] 시작
-            setGlobalLoadingState(true, "Processing Upscale...");
+            // [Lock] 본인만 잠금 (동시 실행 허용)
+            upscaleBtn.disabled = true;
             upscaleBtn.innerText = "PROCESSING...";
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
@@ -420,8 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 showCustomAlert("Error", "Server Error during upscale.");
             } finally {
-                // [Lock] 해제
-                setGlobalLoadingState(false);
+                upscaleBtn.disabled = false;
                 upscaleBtn.innerText = "UPSCALE & DOWNLOAD";
                 if (upscaleStatus) upscaleStatus.style.display = "none";
             }
@@ -436,21 +445,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return Date.now();
     }
 
-    function hideLoading() {
-        loadingOverlay.classList.add('hidden');
-    }
+    function hideLoading() { loadingOverlay.classList.add('hidden'); }
 
     if (detailBtn) {
         detailBtn.onclick = async () => {
             const currentImgUrl = resultAfter ? resultAfter.src : null;
-            if (!currentImgUrl) {
-                showCustomAlert("Warning", "디테일 컷을 만들 이미지가 없습니다.");
-                return;
-            }
+            if (!currentImgUrl) { showCustomAlert("Warning", "디테일 컷을 만들 이미지가 없습니다."); return; }
             currentDetailSourceUrl = currentImgUrl;
 
-            // [Lock] 시작
-            setGlobalLoadingState(true);
+            // [Lock] 본인만 잠금 (동시 실행 허용)
+            detailBtn.disabled = true;
+
             detailSection.classList.add('hidden');
             detailGrid.innerHTML = '';
 
@@ -458,14 +463,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const msgs = ["Setting up Virtual Cameras...", "Capturing Light & Textures...", "Developing Editorial Shots...", "Finalizing Your Portfolio..."];
             let step = 0;
 
-            // [수정] 타이머와 멘트 변경 간격을 분리
-            // 1. 초시계 (1초마다)
             const timerInterval = setInterval(() => {
                 let elapsed = Math.floor((Date.now() - startTime) / 1000);
                 if (timerElement) timerElement.textContent = `${elapsed}s`;
             }, 1000);
 
-            // 2. 멘트 변경 (4초마다 - 8초는 너무 긺)
             const msgInterval = setInterval(() => {
                 step = (step + 1) % msgs.length;
                 if (step < msgs.length && loadingStatus) loadingStatus.textContent = msgs[step];
@@ -481,9 +483,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
 
                 if (res.ok && data.details && data.details.length > 0) {
-                    data.details.forEach(item => {
-                        createDetailCard(item.url, item.index);
-                    });
+                    data.details.forEach(item => { createDetailCard(item.url, item.index); });
                     detailSection.classList.remove('hidden');
                     setTimeout(() => detailSection.scrollIntoView({ behavior: 'smooth' }), 100);
                 } else {
@@ -495,8 +495,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(timerInterval);
                 clearInterval(msgInterval);
                 hideLoading();
-                // [Lock] 해제
-                setGlobalLoadingState(false);
+                detailBtn.disabled = false;
             }
         };
     }
@@ -516,8 +515,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         retryBtn.onclick = (e) => {
             e.stopPropagation();
-            if (renderBtn.disabled) return;
-
             showCustomConfirm("Retry", "이 컷만 다시 생성하시겠습니까?\n기존 이미지는 삭제됩니다.", async () => {
                 await retrySingleDetail(card, styleIndex);
             });
@@ -528,32 +525,28 @@ document.addEventListener('DOMContentLoaded', () => {
         upBtn.textContent = "UPSCALE & DOWNLOAD";
         upBtn.onclick = async (e) => {
             e.stopPropagation();
-            if (renderBtn.disabled) return;
-
-            setGlobalLoadingState(true);
+            // [Lock] 카드 내부 버튼만 잠금
+            upBtn.disabled = true;
             upBtn.textContent = "Processing...";
 
             await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
 
             upBtn.textContent = "UPSCALE & DOWNLOAD";
-            setGlobalLoadingState(false);
+            upBtn.disabled = false;
             showCustomAlert("Success", "Detail Shot Downloaded");
         };
 
-        card.appendChild(img);
-        card.appendChild(retryBtn);
-        card.appendChild(upBtn);
+        card.appendChild(img); card.appendChild(retryBtn); card.appendChild(upBtn);
         detailGrid.appendChild(card);
     }
 
     async function retrySingleDetail(cardElement, styleIndex) {
         if (!currentDetailSourceUrl) return;
 
-        // 1. 해당 카드 내의 버튼만 비활성화 (전체 화면 락 X)
+        // [Lock] 카드 내부 버튼만 잠금
         const buttons = cardElement.querySelectorAll('button');
         buttons.forEach(btn => btn.disabled = true);
 
-        // 2. 로컬 로더 생성 및 삽입
         const loader = document.createElement('div');
         loader.className = 'detail-card-loader';
         const spinner = document.createElement('div');
@@ -581,7 +574,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             showCustomAlert("Error", "Error: " + e.message);
         } finally {
-            // 3. 로더 제거 및 버튼 활성화
             loader.remove();
             buttons.forEach(btn => btn.disabled = false);
         }
@@ -593,12 +585,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lightbox.classList.remove('hidden');
     }
 
-    if (closeLightbox) {
-        closeLightbox.onclick = () => lightbox.classList.add('hidden');
-    }
+    if (closeLightbox) { closeLightbox.onclick = () => lightbox.classList.add('hidden'); }
     if (lightbox) {
-        lightbox.onclick = (e) => {
-            if (e.target === lightbox) lightbox.classList.add('hidden');
-        };
+        lightbox.onclick = (e) => { if (e.target === lightbox) lightbox.classList.add('hidden'); };
     }
 });

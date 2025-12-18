@@ -120,7 +120,7 @@ def standardize_image(image_path, output_path=None):
                 offset = (height - new_height) // 2
                 img = img.crop((0, offset, width, offset + new_height))
 
-            img = img.resize((1024, 576), Image.Resampling.LANCZOS)
+            img = img.resize((1920, 1080), Image.Resampling.LANCZOS)
             
             base, _ = os.path.splitext(output_path)
             new_output_path = f"{base}.jpg"
@@ -239,7 +239,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
                     filename = f"result_{timestamp}_{unique_id}.jpg"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
-                    return standardize_image(path)
+                    return path
         return None
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
@@ -262,9 +262,23 @@ def call_magnific_api(image_path, unique_id, start_time):
         payload = {
             "image": b64, 
             "scale_factor": "2x", 
-            "optimized_for": "standard", 
+            # [수정됨] 실사/화보 느낌을 위해 변경
+            "optimized_for": "films_n_photography", 
             "engine": "automatic",
-            "prompt": "high quality, 4k, realistic interior"
+            "creativity": 2,
+            "hdr": 1,
+            "resemblance": 10,
+            "fractality": 2,
+            "prompt": (
+                "enhance fabric texture with realistic folds, "
+                "please enhance with photorealistic quality, realistic textures and lighting, soft natural shadows, high detail, DSLR camera look, realistic depth of field, "
+                "add natural fabric wrinkles on sofas, cushions, and bedding with realistic fold shadows and soft volume, "
+                "avoid rendering wrinkles as dark stains or dirty marks, "
+                "enhance rug and textile materials with lifelike fiber texture and subtle directional shadows, maintain fabric softness and hair detail where applicable, "
+                "keep original object shapes, dimensions, and surface materials consistent, do not change furniture layout, color scheme, or finishes such as wood grain, marble texture, or metallic reflections, "
+                "ensure soft volumetric light and cinematic mood with accurate material response to lighting, "
+                "--no cartoon, illustration, digital painting, painting style, smudge"
+            )
         }
         headers = {
             "x-freepik-api-key": MAGNIFIC_API_KEY, 
@@ -349,10 +363,21 @@ async def get_room_types(): return JSONResponse(content=list(ROOM_STYLES.keys())
 
 @app.get("/styles/{room_type}")
 async def get_styles_for_room(room_type: str):
-    return JSONResponse(content=ROOM_STYLES.get(room_type, []))
+    styles = ROOM_STYLES.get(room_type, [])
+    # [수정] Test 스타일 강제 추가
+    if "Test" not in styles:
+        styles = styles + ["Test"]
+    return JSONResponse(content=styles)
 
+# [수정] moodboard 파일 파라미터 추가
 @app.post("/render")
-def render_room(file: UploadFile = File(...), room: str = Form(...), style: str = Form(...), variant: str = Form(...)):
+def render_room(
+    file: UploadFile = File(...), 
+    room: str = Form(...), 
+    style: str = Form(...), 
+    variant: str = Form(...),
+    moodboard: UploadFile = File(None) # [NEW]
+):
     try:
         unique_id = uuid.uuid4().hex[:8]
         print(f"\n=== 요청 시작 [{unique_id}] (Parallel) ===", flush=True)
@@ -368,30 +393,40 @@ def render_room(file: UploadFile = File(...), room: str = Form(...), style: str 
         step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
         
         ref_path = None
-        target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
-        if os.path.exists(target_dir):
-            files = sorted(os.listdir(target_dir))
-            for f in files:
-                if variant in f: ref_path = os.path.join(target_dir, f); break
-            if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
+        
+        # [수정] Test 스타일이면 업로드된 무드보드 사용
+        if style == "Test" and moodboard:
+            mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
+            mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
+            with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
+            ref_path = mb_path
+            print(f">> [Style: Test] Custom Moodboard Used: {mb_path}", flush=True)
+        else:
+            # 기존 로직
+            target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
+            if os.path.exists(target_dir):
+                files = sorted(os.listdir(target_dir))
+                for f in files:
+                    if variant in f: ref_path = os.path.join(target_dir, f); break
+                if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
 
         generated_results = []
-        # [수정] 3장 -> 5장으로 변경
         print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Furnishing)!", flush=True)
 
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
             print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
             try:
-                style_prompt = STYLES.get(style, STYLES.get("Modern", "Modern Style"))
-                res = generate_furnished_room(step1_img, style_prompt, ref_path, sub_id, start_time)
+                # Test 스타일일 경우 프롬프트 조정
+                current_style_prompt = STYLES.get(style, "Custom Moodboard Style" if style == "Test" else STYLES.get("Modern", "Modern Style"))
+                
+                res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, start_time)
                 if res:
                     print(f"   ✅ [Variation {index+1}] 성공!", flush=True)
                     return f"/outputs/{os.path.basename(res)}"
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        # [수정] Worker 수를 3 -> 5로 변경, range(3) -> range(5)로 변경
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
@@ -455,20 +490,60 @@ def upscale_and_download(req: UpscaleRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [Finalized] 10 Cinematic Detail Shots (Reference Matched)
+# [Finalized] 10 Cinematic Detail Shots (Furniture Shape Focused)
 # -----------------------------------------------------------------------------
 
 SHOT_STYLES = [
-    {"name": "Fabric Texture Focus", "prompt": "FOCUS: Extreme close-up on the Main Sofa's fabric texture.\nCOMPOSITION: Focus sharply on the weave/material of the armrest or cushion. Let the background blur completely (Heavy Bokeh).\nLIGHTING: Soft side-lighting to reveal the tactile quality of the fabric."},
-    {"name": "Tabletop Vignette", "prompt": "FOCUS: Decorative objects on the Coffee Table (Vase, Books, or Ceramics).\nCOMPOSITION: Eye-level or slightly high angle. Focus on the objects, blurring the sofa and floor in the background.\nATMOSPHERE: Curated, editorial lifestyle look."},
-    {"name": "Grounding Detail", "prompt": "FOCUS: The intersection of the Coffee Table leg, the Rug, and the Floor.\nANGLE: Low Angle (Ground level view).\nGOAL: Contrast the textures of the wood/metal leg against the soft rug and hard floor. Show structural elegance."},
-    {"name": "Solo Chair Portrait", "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Medium shot (Full body of the chair). Capture its silhouette against the window or wall.\nSTYLE: Hero shot of a distinct furniture piece."},
-    {"name": "Lighting & Ceiling", "prompt": "FOCUS: The Pendant Light, Chandelier, or Floor Lamp shade.\nCOMPOSITION: Looking slightly up. If no pendant, focus on the top curtain folds or a tall plant leaf against the ceiling.\nLIGHTING: Glowing, warm, ethereal."},
-    {"name": "Layered Comfort", "prompt": "FOCUS: The layering of Cushions on the Sofa.\nCOMPOSITION: 45-degree angle showing the depth of cushions. Focus on the front cushion, blur the back.\nFEELING: Cozy, inviting, soft."},
-    {"name": "Edge & Material", "prompt": "FOCUS: The sharp edge or curve of a Coffee Table or Side Table.\nTARGET: Highlight the material (Marble vein, Wood grain, Glass reflection).\nCOMPOSITION: Macro shot focusing on the craftsmanship of the edge."},
-    {"name": "Depth Perspective", "prompt": "FOCUS: Look past a foreground object (like a blurry chair back or vase) to see the sharp furniture behind it.\nCOMPOSITION: Layered depth (Foreground Blur -> Sharp Subject -> Background Blur). Cinematic depth of field."},
-    {"name": "Sunlight Mood", "prompt": "FOCUS: An area where natural sunlight hits a surface (Rug, Floor, or Sofa arm).\nCOMPOSITION: High contrast light and shadow play. Capture the 'feeling' of a sunny afternoon.\nSTYLE: Emotional, warm, architectural photography."},
-    {"name": "Top-Down Art", "prompt": "FOCUS: High-angle view looking down at the Coffee Table and Rug area.\nCOMPOSITION: Abstract geometric composition. Show the shapes of the table, rug, and surrounding seating from above.\nSTYLE: Graphic, clean, plan-view aesthetic."}
+    # 1. [수정] 텍스처보다는 '암레스트의 형태'가 보이도록 줌 아웃
+    {
+        "name": "Fabric & Form Focus",
+        "prompt": "FOCUS: The entire armrest and a portion of the seat cushion.\nCOMPOSITION: Medium Shot (Zoom Out). Do not crop the edges of the armrest. Show the voluminous shape of the furniture along with the fabric texture.\nLIGHTING: Soft side-lighting to reveal volume."
+    },
+    # 2. [유지 - 약간 거리두기]
+    {
+        "name": "Tabletop Context",
+        "prompt": "FOCUS: Decorative objects on the Coffee Table, including the table edges.\nCOMPOSITION: Eye-level Medium Shot. Show the objects in relation to the table's surface area. Do not crop the table too tightly.\nATMOSPHERE: Curated, editorial lifestyle look."
+    },
+    # 3. [수정] 다리만 찍지 말고, 다리가 몸통에 붙어있는 구조를 보여줌
+    {
+        "name": "Structural Leg Detail",
+        "prompt": "FOCUS: The lower section of the furniture (Legs connected to the body frame).\nANGLE: Low Angle (Knee level). Show the structural connection between the leg and the main body. Capture the silhouette of the leg against the floor.\nGOAL: Show structural elegance."
+    },
+    # 4. [수정] 의자 전체 실루엣 강조
+    {
+        "name": "Solo Chair Silhouette",
+        "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Full Medium Shot. Capture the distinct outline and curves of the chair back and arms. Highlight the design silhouette.\nSTYLE: Hero shot of a distinct furniture piece."
+    },
+    # 5. [수정] 조명 + 천장/벽면의 공간감 확보
+    {
+        "name": "Lighting & Atmosphere",
+        "prompt": "FOCUS: The Pendant Light or Floor Lamp in the room context.\nCOMPOSITION: Wide Medium Shot looking up. Show how the lamp hangs in the space. \nLIGHTING: Pure White Daylight (Neutral 5000K). Clean, airy feel. NO yellow tones."
+    },
+    # 6. [수정] 쿠션만 보지 말고, 소파의 코너 형태를 보여줌
+    {
+        "name": "Sofa Corner Styling",
+        "prompt": "FOCUS: The corner section of the Sofa with cushion styling.\nCOMPOSITION: Medium Shot. Show the structural angle of the sofa back and seat. Capture the depth of the seating area.\nFEELING: Cozy, inviting, volumetric."
+    },
+    # 7. [수정] 모서리 '선'과 '두께감'을 보여줌 (매크로 금지)
+    {
+        "name": "Edge Profile",
+        "prompt": "FOCUS: The profile line of a Side furniture or storage edge.\nCOMPOSITION: Wide Close-up. Show the thickness of the tabletop and the curve of the edge. Establish the geometric shape of the furniture.\nTARGET: Craftsmanship and finishing."
+    },
+    # 8. [수정] 완전한 측면 뷰로 가구 라인 강조
+    {
+        "name": "Side Profile View",
+        "prompt": "FOCUS: The full side profile of the main furniture (Sofa or Chair).\nCOMPOSITION: Eye-level Side View (90 degrees). Capture the clean lines and proportions of the furniture from the side. Minimalist and geometric."
+    },
+    # 9. [수정] 빛이 떨어지는 가구의 '면'을 강조
+    {
+        "name": "Sunlight on Form",
+        "prompt": "FOCUS: A large section of the furniture (e.g., Sofa back or Rug area) bathed in light.\nCOMPOSITION: Medium Shot. Show how the light reveals the 3D form of the furniture.\nLIGHTING: Clean White Daylight (Noon time). Cool/Neutral natural light only. NO yellow/sunset."
+    },
+    # 10. [수정] 45도 쿼터뷰로 배치와 형태 동시 확보
+    {
+        "name": "Isometric Angle Context",
+        "prompt": "FOCUS: all Furniture group.\nCOMPOSITION: High Angle Isometric View (approx 45 degrees). Show the layout and the geometric relationship between the furniture pieces. NOT top-down.\nSTYLE: Modern, clean architectural view."
+    }
 ]
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
@@ -477,9 +552,14 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         final_prompt = (
             "TASK: Create a photorealistic interior detail shot based on the provided room image.\n"
             "STRICT CONSTRAINT: You must generate a close-up view of an object existing in the input image. Do not invent new furniture.\n\n"
+            # [추가된 전역 규칙] 가구 쉐입을 위해 너무 가까이 찍지 말라는 명령 추가
+            "<GLOBAL RULE: DISTANCE & FORM>\n"
+            "1. DO NOT ZOOM IN TOO MUCH. The 'Shape' and 'Silhouette' of the furniture are the most important elements.\n"
+            "2. Keep the camera at a 'Medium Shot' distance to show the furniture's volume and structure.\n"
+            "3. Avoid cutting off the edges of the main subject.\n\n"
             f"<PHOTOGRAPHY STYLE: {style_config['name']}>\n"
             f"{style_config['prompt']}\n\n"
-            "OUTPUT RULE: Return a high-quality, crop-like composition matching the description."
+            "OUTPUT RULE: Return a high-quality, editorial composition matching the description."
         )
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -507,7 +587,6 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
 class DetailRequest(BaseModel):
     image_url: str
 
-# [NEW] 단일 디테일 컷 리트라이 요청
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
@@ -553,7 +632,6 @@ def generate_details_endpoint(req: DetailRequest):
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = []
             for i, style in enumerate(SHOT_STYLES):
-                # 인덱스(i)를 함께 넘겨서 나중에 어떤 스타일인지 식별
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
             
             for i, future in futures:

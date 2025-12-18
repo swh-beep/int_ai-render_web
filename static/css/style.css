@@ -130,6 +130,7 @@ header h1 {
     align-items: center;
     justify-content: center;
     transition: var(--transition);
+    z-index: 100;
 }
 
 .icon-btn:hover {
@@ -566,6 +567,25 @@ header h1 {
     color: #fff;
     font-size: 1.5rem;
     border: 1px dashed var(--border-color);
+}
+
+/* [NEW] Moodboard Upload Styles */
+#moodboard-upload-container {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+#moodboard-preview-container {
+    position: relative;
+    margin-top: 1rem;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+#moodboard-preview {
+    width: 100%;
+    display: block;
 }
 
 #upscaleStatus,
