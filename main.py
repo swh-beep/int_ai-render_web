@@ -208,6 +208,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
 
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
             "1. **GLOBAL ILLUMINATION:** Simulate how natural light from the window bounces off the floor and interacts with the furniture. The side of the furniture facing the window must be highlighted, while the opposite side has soft, natural shading.\n"
+            "2. **TURN ON LIGHTS:** TURN ON ALL artificial light sources in the room, including ceiling lights, pendant lights, wall sconces, and floor lamps. natural white light (5000K).\n" # [추가됨] 모든 조명 켜기 강제
             "2. **SHADOW PHYSICS:** Generate 'Soft Shadows' that diffuse as they get further from the object. Shadows must exactly match the direction and intensity of the sunlight entering the room.\n"
             "3. **ATMOSPHERE:** Create a 'Sun-drenched' feel where the light wraps around the fabric/materials of the furniture (Subsurface Scattering), making it look soft and cozy, not like a 3D sticker.\n"
             "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with the natural light."
