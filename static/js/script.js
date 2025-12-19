@@ -182,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         variantGrid.innerHTML = '';
         if (style !== 'Customize') {
-            for (let i = 1; i <= 10; i++) {
+            for (let i = 1; i <= 30; i++) {
                 const variantBtn = document.createElement('div');
                 variantBtn.className = 'variant-img-btn';
 
@@ -193,7 +193,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 img.src = `/static/thumbnails/${imgName}`;
                 img.alt = `Variant ${i}`;
-                img.onerror = () => variantBtn.classList.add('no-image');
+
+                // 이미지가 없으면 버튼 숨김 (20개를 다 안 채웠을 때를 대비)
+                img.onerror = () => {
+                    variantBtn.style.display = 'none';
+                };
 
                 const label = document.createElement('span');
                 label.className = 'variant-label';
