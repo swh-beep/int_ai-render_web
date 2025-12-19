@@ -141,11 +141,11 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         "IMAGE EDITING TASK: Extreme Cleaning & Architectural Restoration.\n\n"        
         "<CRITICAL: STRUCTURAL PRESERVATION (PRIORITY #0)>\n"
         "1. **DO NOT REMOVE FIXTURES:** You must strictly PRESERVE all structural elements including Columns, Pillars, Beams, Windows (frames & glass), Doors, and Built-in fireplaces.\n"
-        "2. **ONLY REMOVE MOVABLES:** Only remove furniture, rugs, curtains, and decorations that are NOT part of the building structure.\n"
+        "2. **ONLY REMOVE MOVABLES:** Only remove furniture, rugs, lightings,curtains, and decorations that are NOT part of the building structure.\n"
         "3. **VIEW PROTECTION:** Keep the view outside the window 100% original.\n\n"
         
         "<CRITICAL: COMPLETE ERADICATION (PRIORITY #1)>\n"
-        "1. REMOVE EVERYTHING ELSE: Identify and remove ALL movable furniture, rugs, curtains, ceiling lights, wall decor, and small objects.\n"
+        "1. REMOVE EVERYTHING ELSE: Identify and remove ALL movable furniture, rugs, curtains, lightings, wall decor, and small objects.\n"
         "2. CLEAN SURFACES: The floor and walls must be perfectly empty. Remove all shadows, reflections, and traces.\n"
         "3. BARE SHELL: Restore the room to its initial construction state.\n\n"
         
@@ -199,7 +199,8 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
             "<CRITICAL: FURNITURE COMPOSITING>\n"
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
-            "3. **STYLE:** Match the Reference Moodboard style.\n\n"
+            "3. **STYLE:** Match the Reference Moodboard style.\n"
+            "4. **WINDOW TREATMENT (CURTAINS):** Add floor-to-ceiling curtains/drapes. They must be **OPEN and PULLED BACK** to the sides. Cover ONLY the outer 20-25% of the window width (leaving the center view completely visible). Use natural fabric with soft vertical folds.\n\n"
 
             "<CRITICAL: DIMENSIONAL TEXT ADHERENCE>\n"
             "1. **OCR & CONSTRAINTS:** Actively SCAN the 'Style Reference' image for any text indicating dimensions (e.g., '2400mm', 'W:200cm', '3-seater', '1800x900').\n"
@@ -365,9 +366,8 @@ async def get_room_types(): return JSONResponse(content=list(ROOM_STYLES.keys())
 @app.get("/styles/{room_type}")
 async def get_styles_for_room(room_type: str):
     styles = ROOM_STYLES.get(room_type, [])
-    # [수정] Test 스타일 강제 추가
-    if "Test" not in styles:
-        styles = styles + ["Test"]
+    if "Customize" not in styles:
+        styles = styles + ["Customize"]
     return JSONResponse(content=styles)
 
 # [수정] moodboard 파일 파라미터 추가
@@ -395,13 +395,13 @@ def render_room(
         
         ref_path = None
         
-        # [수정] Test 스타일이면 업로드된 무드보드 사용
-        if style == "Test" and moodboard:
+        # [수정] Customize 스타일이면 업로드된 무드보드 사용
+        if style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
             with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
             ref_path = mb_path
-            print(f">> [Style: Test] Custom Moodboard Used: {mb_path}", flush=True)
+            print(f">> [Style: Customize] Custom Moodboard Used: {mb_path}", flush=True)
         else:
             # 기존 로직
             target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
@@ -418,8 +418,8 @@ def render_room(
             sub_id = f"{unique_id}_v{index+1}"
             print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
             try:
-                # Test 스타일일 경우 프롬프트 조정
-                current_style_prompt = STYLES.get(style, "Custom Moodboard Style" if style == "Test" else STYLES.get("Modern", "Modern Style"))
+                # Customize 스타일일 경우 프롬프트 조정
+                current_style_prompt = STYLES.get(style, "Custom Moodboard Style" if style == "Customize" else STYLES.get("Modern", "Modern Style"))
                 
                 res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, start_time)
                 if res:
@@ -518,7 +518,7 @@ SHOT_STYLES = [
     # 5. [수정] 조명 + 천장/벽면의 공간감 확보
     {
         "name": "Lighting & Atmosphere",
-        "prompt": "FOCUS: The Pendant Light or Floor Lamp in the room context.\nCOMPOSITION: Wide Medium Shot looking up. Show how the lamp hangs in the space. \nLIGHTING: Pure White Daylight (Neutral 5000K). Clean, airy feel. NO yellow tones."
+        "prompt": "FOCUS: The Pendant Light or Floor Lamp detail in the room context.\nCOMPOSITION: Wide Medium Shot looking up. Show how the lamp hangs in the space. \nLIGHTING: Pure White Daylight (Neutral 5000K). Clean, airy feel. NO yellow tones."
     },
     # 6. [수정] 쿠션만 보지 말고, 소파의 코너 형태를 보여줌
     {
@@ -540,10 +540,10 @@ SHOT_STYLES = [
         "name": "Sunlight on Form",
         "prompt": "FOCUS: A large section of the furniture (e.g., Sofa back or Rug area) bathed in light.\nCOMPOSITION: Medium Shot. Show how the light reveals the 3D form of the furniture.\nLIGHTING: Clean White Daylight (Noon time). Cool/Neutral natural light only. NO yellow/sunset."
     },
-    # 10. [수정] 45도 쿼터뷰로 배치와 형태 동시 확보
+    # 10. [수정] 30도 쿼터뷰로 배치와 형태 동시 확보
     {
         "name": "Isometric Angle Context",
-        "prompt": "FOCUS: all Furniture group.\nCOMPOSITION: High Angle Isometric View (approx 45 degrees). Show the layout and the geometric relationship between the furniture pieces. NOT top-down.\nSTYLE: Modern, clean architectural view."
+        "prompt": "FOCUS: all Furniture group.\nCOMPOSITION: High Angle View (approx 30 degrees). Show the layout and the geometric relationship between the furniture pieces. NOT top-down.\nSTYLE: Modern, clean architectural view."
     }
 ]
 
@@ -652,6 +652,107 @@ def generate_details_endpoint(req: DetailRequest):
 
     except Exception as e:
         print(f"🔥🔥🔥 [Detail Error] {e}")
+        traceback.print_exc()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+# -----------------------------------------------------------------------------
+# [NEW] Moodboard Generator Feature
+# -----------------------------------------------------------------------------
+
+MOODBOARD_SYSTEM_PROMPT = """
+ACT AS: An Expert Image Retoucher and Cataloguer.
+TASK: Create a "Furniture Inventory Mood Board" by cropping and arranging the ACTUAL furniture from the input photos.
+
+<CRITICAL INSTRUCTION: NO HALLUCINATION>
+1. **DO NOT RE-DRAW OR RE-RENDER THE FURNITURE.**
+2. **DO NOT CHANGE THE DESIGN.** (If the sofa has round legs, keep them round. If the rug has a specific pattern, keep it EXACTLY.)
+3. Your goal is to **EXTRACT** the furniture visual data from the input images and place them on a white background.
+4. If you cannot replicate the exact item, crop the best view of it from the source image.
+
+**[STEP 1: SOURCE IDENTIFICATION]**
+* Scan all provided images (Main view + Details).
+* Find the clearest, best angle for each unique furniture item (Sofa, Chair, Table, Lamp, Rug, etc.).
+* Ignore duplicate views. Select the one "Best Shot" for each item.
+
+**[STEP 2: COMPOSITION RULES]**
+* **Background:** Pure White (#FFFFFF).
+* **Fidelity:** The items in the mood board MUST look identical to the items in the photos. Same color, same texture, same shape.
+* **Layout:** Organize them in a grid.
+* **Rug:** Show the rug pattern clearly as a flat swatch or perspective view from the photo.
+
+**[STEP 3: TEXT SPECIFICATION]**
+Write the specifications under each item in this strict vertical format:
+
+Item Name x Quantity in room EA
+Width: Estimated Value mm
+Depth: Estimated Value mm
+Height: Estimated Value mm
+
+**Exclusion:**
+- Do not include walls, ceilings, doors, or windows.
+- Focus ONLY on the moveable furniture and key decor (pendant lights, floor lamps).
+- OUTPUT RULE: Return a high-quality, 16:9 ratio / 2048x1152pixelimage, .
+"""
+
+def generate_moodboard_logic(image_path, unique_id, index):
+    try:
+        img = Image.open(image_path)
+        
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        
+        # We invoke Gemini to generate the moodboard based on the prompt
+        response = call_gemini_with_failover(MODEL_NAME, [MOODBOARD_SYSTEM_PROMPT, img], {'timeout': 45}, safety_settings)
+        
+        if response and hasattr(response, 'candidates') and response.candidates:
+            for part in response.parts:
+                if hasattr(part, 'inline_data'):
+                    timestamp = int(time.time())
+                    filename = f"gen_mb_{timestamp}_{unique_id}_{index}.jpg"
+                    path = os.path.join("outputs", filename)
+                    with open(path, 'wb') as f: f.write(part.inline_data.data)
+                    return f"/outputs/{filename}"
+        return None
+    except Exception as e:
+        print(f"!! Moodboard Gen Error: {e}")
+        return None
+
+@app.post("/generate-moodboard-options")
+def generate_moodboard_options(file: UploadFile = File(...)):
+    try:
+        unique_id = uuid.uuid4().hex[:8]
+        timestamp = int(time.time())
+        safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
+        raw_path = os.path.join("outputs", f"ref_room_{timestamp}_{unique_id}_{safe_name}")
+        
+        # Save uploaded reference image
+        with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
+        
+        print(f"\n=== [Moodboard Gen] Starting 5 variations for {unique_id} ===", flush=True)
+        
+        generated_results = []
+        
+        # Generate 5 options in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1) for i in range(5)]
+            for future in futures:
+                res = future.result()
+                if res: generated_results.append(res)
+        
+        if not generated_results:
+            return JSONResponse(content={"error": "Failed to generate moodboards"}, status_code=500)
+            
+        return JSONResponse(content={
+            "moodboards": generated_results,
+            "message": "Moodboards generated successfully"
+        })
+        
+    except Exception as e:
+        print(f"🔥🔥🔥 [Moodboard Gen Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 

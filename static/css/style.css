@@ -32,6 +32,7 @@ body {
     display: flex;
     justify-content: center;
     padding: 2rem;
+    padding-bottom: 30rem;
 }
 
 .container {
@@ -713,7 +714,7 @@ header h1 {
 /* Lightbox Styles */
 .lightbox {
     position: fixed;
-    z-index: 2000;
+    z-index: 4000;
     left: 0;
     top: 0;
     width: 100%;

@@ -57,6 +57,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const moodboardPreview = document.getElementById('moodboard-preview');
     const removeMoodboardBtn = document.getElementById('remove-moodboard');
 
+    // [NEW] Moodboard Generator Elements
+    const openMbGenBtn = document.getElementById('open-mb-gen-btn');
+    const mbGenModal = document.getElementById('moodboard-generator-modal');
+    const mbGenDropZone = document.getElementById('mb-gen-drop-zone');
+    const mbGenInput = document.getElementById('mb-gen-input');
+    const mbGenPreviewContainer = document.getElementById('mb-gen-preview-container');
+    const mbGenPreview = document.getElementById('mb-gen-preview');
+    const mbGenRemoveBtn = document.getElementById('mb-gen-remove');
+    const mbGenActionBtn = document.getElementById('mb-gen-action-btn');
+
+    // Step Elements
+    const mbGenStep1 = document.getElementById('mb-gen-step1');
+    const mbGenStep2 = document.getElementById('mb-gen-step2');
+    const mbStep2RefImg = document.getElementById('mb-step2-ref-img'); // [NEW] Step2 Original Image
+    const mbGenRetryBtn = document.getElementById('mb-gen-retry-btn'); // [NEW] Retry Button
+
+    const mbGenGrid = document.getElementById('mb-gen-grid');
+    const mbGenLoading = document.getElementById('mb-gen-loading');
+    const mbGenCloseBtn = document.getElementById('mb-gen-close-btn');
+
+    let mbGenSelectedFile = null;
+
     const roomSection = document.getElementById('room-section');
     const styleSection = document.getElementById('style-section');
     const variantSection = document.getElementById('variant-section');
@@ -85,6 +107,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const lightbox = document.getElementById('lightbox');
     const lightboxImg = document.getElementById('lightbox-img');
     const closeLightbox = document.querySelector('.close-lightbox');
+
+    // [NEW] Lightbox State for Keyboard Navigation
+    let lightboxImages = [];
+    let currentLightboxIndex = 0;
 
     const THEME_COLOR = "#ffffff";
 
@@ -145,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedVariant = null;
         updateActiveButton(styleGrid, btn);
 
-        if (style === 'Test') {
+        if (style === 'Customize') {
             variantGrid.classList.add('hidden');
             moodboardUploadContainer.classList.remove('hidden');
         } else {
@@ -155,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         variantGrid.innerHTML = '';
-        if (style !== 'Test') {
+        if (style !== 'Customize') {
             for (let i = 1; i <= 10; i++) {
                 const variantBtn = document.createElement('div');
                 variantBtn.className = 'variant-img-btn';
@@ -266,11 +292,193 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // -----------------------------------------------------------
+    // [NEW] Moodboard Generator Logic (UI Update & Keyboard Nav)
+    // -----------------------------------------------------------
+
+    // [수정] 레퍼런스 이미지 클릭 시 라이트박스 열기
+    if (mbStep2RefImg) {
+        mbStep2RefImg.onclick = () => {
+            if (mbStep2RefImg.src) {
+                openLightbox(mbStep2RefImg.src, [mbStep2RefImg.src], 0);
+            }
+        };
+    }
+
+    if (openMbGenBtn) {
+        openMbGenBtn.onclick = () => {
+            mbGenModal.classList.remove('hidden');
+
+            // Reset States
+            mbGenSelectedFile = null;
+            mbGenInput.value = '';
+            mbGenPreviewContainer.classList.add('hidden');
+            mbGenDropZone.classList.remove('hidden');
+            mbGenActionBtn.disabled = true;
+
+            // Show Step 1, Hide Step 2
+            mbGenStep1.classList.remove('hidden');
+            mbGenStep2.classList.add('hidden');
+            mbGenLoading.classList.add('hidden');
+            mbGenGrid.innerHTML = '';
+        };
+    }
+
+    if (mbGenCloseBtn) {
+        mbGenCloseBtn.onclick = () => mbGenModal.classList.add('hidden');
+    }
+
+    // File Upload (Step 1)
+    if (mbGenDropZone) {
+        mbGenDropZone.addEventListener('click', () => mbGenInput.click());
+        mbGenDropZone.addEventListener('dragover', (e) => { e.preventDefault(); mbGenDropZone.style.borderColor = THEME_COLOR; });
+        mbGenDropZone.addEventListener('dragleave', () => mbGenDropZone.style.borderColor = '#ccc');
+        mbGenDropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); mbGenDropZone.style.borderColor = '#ccc';
+            if (e.dataTransfer.files.length) handleMbGenFile(e.dataTransfer.files[0]);
+        });
+        mbGenInput.addEventListener('change', (e) => { if (e.target.files.length) handleMbGenFile(e.target.files[0]); });
+    }
+
+    function handleMbGenFile(file) {
+        if (!file.type.startsWith('image/')) { showCustomAlert("Error", "이미지 파일만 가능합니다."); return; }
+        mbGenSelectedFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            mbGenPreview.src = e.target.result;
+            mbGenPreviewContainer.classList.remove('hidden');
+            mbGenDropZone.classList.add('hidden');
+            mbGenActionBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    if (mbGenRemoveBtn) {
+        mbGenRemoveBtn.onclick = (e) => {
+            e.stopPropagation();
+            mbGenSelectedFile = null;
+            mbGenInput.value = '';
+            mbGenPreviewContainer.classList.add('hidden');
+            mbGenDropZone.classList.remove('hidden');
+            mbGenActionBtn.disabled = true;
+        }
+    }
+
+    // Generate Action
+    if (mbGenActionBtn) {
+        mbGenActionBtn.onclick = async () => {
+            await performMbGeneration();
+        };
+    }
+
+    // [NEW] Retry Button Action
+    if (mbGenRetryBtn) {
+        mbGenRetryBtn.onclick = async () => {
+            if (!mbGenSelectedFile) {
+                showCustomAlert("Error", "No reference image found. Please try again.");
+                return;
+            }
+            await performMbGeneration();
+        };
+    }
+
+    async function performMbGeneration() {
+        if (!mbGenSelectedFile) return;
+
+        // [UI Update] Switch to Step 2 & Show Loading
+        mbGenStep1.classList.add('hidden');
+        mbGenStep2.classList.remove('hidden');
+        mbGenLoading.classList.remove('hidden');
+        mbGenGrid.innerHTML = '';
+
+        // [Logic] Copy Preview Image to Step 2 Reference
+        if (mbGenPreview.src) {
+            mbStep2RefImg.src = mbGenPreview.src;
+        }
+
+        const formData = new FormData();
+        formData.append('file', mbGenSelectedFile);
+
+        try {
+            const res = await fetch('/generate-moodboard-options', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            mbGenLoading.classList.add('hidden');
+
+            if (res.ok && data.moodboards && data.moodboards.length > 0) {
+                const moodboardUrls = data.moodboards; // List for lightbox
+
+                data.moodboards.forEach((url, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'detail-card';
+
+                    // 1. 이미지: 클릭 시 확대 (Lightbox)
+                    const img = document.createElement('img');
+                    img.src = url;
+                    // [FIX] 16:9 비율, contain, 중앙 정렬
+                    img.style.aspectRatio = "16 / 9";
+                    img.style.objectFit = "contain";
+                    img.style.objectPosition = "center";
+                    img.style.backgroundColor = "#000";
+                    img.style.cursor = "zoom-in";
+                    img.onclick = (e) => {
+                        e.stopPropagation();
+                        openLightbox(url, moodboardUrls, idx);
+                    };
+
+                    // 2. 선택 버튼: 클릭 시 적용 (Select)
+                    const selectBtn = document.createElement('button');
+                    selectBtn.className = 'detail-upscale-btn';
+                    selectBtn.textContent = "SELECT THIS";
+                    selectBtn.style.marginTop = "0";
+
+                    selectBtn.onclick = async (e) => {
+                        e.stopPropagation();
+
+                        try {
+                            selectBtn.textContent = "Loading...";
+                            selectBtn.disabled = true;
+
+                            const fileRes = await fetch(url);
+                            const blob = await fileRes.blob();
+                            const file = new File([blob], `generated_moodboard_${idx}.jpg`, { type: 'image/jpeg' });
+
+                            handleMoodboardFile(file);
+                            mbGenModal.classList.add('hidden');
+                            showCustomAlert("Success", "Moodboard Applied!");
+                        } catch (err) {
+                            showCustomAlert("Error", "Failed to load selected moodboard.");
+                            selectBtn.textContent = "SELECT THIS";
+                            selectBtn.disabled = false;
+                        }
+                    };
+
+                    div.appendChild(img);
+                    div.appendChild(selectBtn);
+                    mbGenGrid.appendChild(div);
+                });
+            } else {
+                showCustomAlert("Error", "Failed to generate moodboards.");
+                // Go back to step 1 on failure
+                mbGenStep1.classList.remove('hidden');
+                mbGenStep2.classList.add('hidden');
+            }
+        } catch (err) {
+            mbGenLoading.classList.add('hidden');
+            showCustomAlert("Error", "Server Error: " + err.message);
+            mbGenStep1.classList.remove('hidden');
+            mbGenStep2.classList.add('hidden');
+        }
+    }
+
     function checkReady() {
         if (!renderBtn) return;
         let ready = false;
         if (selectedFile && selectedRoom && selectedStyle) {
-            if (selectedStyle === 'Test') ready = !!selectedMoodboardFile;
+            if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
             else ready = !!selectedVariant;
         }
         renderBtn.disabled = !ready;
@@ -281,12 +489,11 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBtn.addEventListener('click', async () => {
             let ready = false;
             if (selectedFile && selectedRoom && selectedStyle) {
-                if (selectedStyle === 'Test') ready = !!selectedMoodboardFile;
+                if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
                 else ready = !!selectedVariant;
             }
             if (!ready) return;
 
-            // [메인 렌더링] 이건 화면이 넘어가므로 본인만 잠궈도 충분함
             renderBtn.disabled = true;
             loadingOverlay.classList.remove('hidden');
             resultSection.classList.add('hidden');
@@ -325,6 +532,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (results.length > 0) resultAfter.src = results[0];
 
                 thumbnailContainer.innerHTML = "";
+
+                // [NEW] Thumbnail Lightbox Support
                 results.forEach((url, idx) => {
                     const img = document.createElement("img");
                     img.src = url;
@@ -341,6 +550,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         Array.from(thumbnailContainer.children).forEach(c => c.style.border = "3px solid transparent");
                         img.style.border = `3px solid ${THEME_COLOR}`;
                     };
+
+                    // Double click to open lightbox with list
+                    img.ondblclick = () => {
+                        openLightbox(url, results, idx);
+                    };
+
                     thumbnailContainer.appendChild(img);
                 });
 
@@ -483,7 +698,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
 
                 if (res.ok && data.details && data.details.length > 0) {
-                    data.details.forEach(item => { createDetailCard(item.url, item.index); });
+                    const detailUrls = data.details.map(d => d.url); // Extract URLs for lightbox
+
+                    data.details.forEach(item => {
+                        createDetailCard(item.url, item.index, detailUrls); // Pass full list
+                    });
+
                     detailSection.classList.remove('hidden');
                     setTimeout(() => detailSection.scrollIntoView({ behavior: 'smooth' }), 100);
                 } else {
@@ -500,13 +720,13 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function createDetailCard(url, styleIndex) {
+    function createDetailCard(url, styleIndex, fullList = null) {
         const card = document.createElement('div');
         card.className = 'detail-card';
 
         const img = document.createElement('img');
         img.src = url;
-        img.onclick = () => openLightbox(url);
+        img.onclick = () => openLightbox(url, fullList, styleIndex - 1); // [NEW] Pass list & index (0-based)
 
         const retryBtn = document.createElement('button');
         retryBtn.className = 'detail-retry-btn';
@@ -567,7 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok && data.url) {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
-                imgElement.onclick = () => openLightbox(data.url);
+                imgElement.onclick = () => openLightbox(data.url, [data.url], 0); // Single retry view
             } else {
                 showCustomAlert("Failed", "재생성 실패: " + (data.error || "Unknown error"));
             }
@@ -579,10 +799,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Lightbox
-    function openLightbox(src) {
+    // --- Lightbox with Keyboard Support ---
+    function openLightbox(src, imageList = null, index = 0) {
         lightboxImg.src = src;
         lightbox.classList.remove('hidden');
+
+        if (imageList && imageList.length > 0) {
+            lightboxImages = imageList;
+            currentLightboxIndex = index;
+        } else {
+            lightboxImages = [src];
+            currentLightboxIndex = 0;
+        }
+    }
+
+    // [NEW] Keyboard Event Listener
+    document.addEventListener('keydown', (e) => {
+        if (lightbox.classList.contains('hidden')) return;
+
+        if (e.key === 'Escape') {
+            lightbox.classList.add('hidden');
+        } else if (e.key === 'ArrowLeft') {
+            showPrevImage();
+        } else if (e.key === 'ArrowRight') {
+            showNextImage();
+        }
+    });
+
+    function showPrevImage() {
+        if (lightboxImages.length <= 1) return;
+        currentLightboxIndex = (currentLightboxIndex - 1 + lightboxImages.length) % lightboxImages.length;
+        lightboxImg.src = lightboxImages[currentLightboxIndex];
+    }
+
+    function showNextImage() {
+        if (lightboxImages.length <= 1) return;
+        currentLightboxIndex = (currentLightboxIndex + 1) % lightboxImages.length;
+        lightboxImg.src = lightboxImages[currentLightboxIndex];
     }
 
     if (closeLightbox) { closeLightbox.onclick = () => lightbox.classList.add('hidden'); }
