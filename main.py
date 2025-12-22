@@ -408,7 +408,9 @@ def render_room(
             if os.path.exists(target_dir):
                 files = sorted(os.listdir(target_dir))
                 for f in files:
-                    if variant in f: ref_path = os.path.join(target_dir, f); break
+                    if re.search(rf"(?:^|[\D]){re.escape(variant)}(?:[\D]|$)", f):
+                       ref_path = os.path.join(target_dir, f)
+                       break
                 if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
 
         generated_results = []
