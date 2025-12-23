@@ -263,20 +263,17 @@ def call_magnific_api(image_path, unique_id, start_time):
             
         payload = {
             "image": b64, 
-            "scale_factor": "2x", 
-            # [수정됨] 실사/화보 느낌을 위해 변경
+            "scale_factor": "4x", 
             "optimized_for": "films_n_photography", 
             "engine": "automatic",
-            "creativity": 2,
+            "creativity": 1,
             "hdr": 1,
             "resemblance": 10,
-            "fractality": 2,
+            "fractality": 1,
             "prompt": (
                 "enhance fabric texture with realistic folds, "
                 "please enhance with photorealistic quality, realistic textures and lighting, soft natural shadows, high detail, DSLR camera look, realistic depth of field, "
-                "add natural fabric wrinkles on sofas, cushions, and bedding with realistic fold shadows and soft volume, "
                 "avoid rendering wrinkles as dark stains or dirty marks, "
-                "enhance rug and textile materials with lifelike fiber texture and subtle directional shadows, maintain fabric softness and hair detail where applicable, "
                 "keep original object shapes, dimensions, and surface materials consistent, do not change furniture layout, color scheme, or finishes such as wood grain, marble texture, or metallic reflections, "
                 "ensure soft volumetric light and cinematic mood with accurate material response to lighting, "
                 "--no cartoon, illustration, digital painting, painting style, smudge"
