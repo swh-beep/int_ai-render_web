@@ -18,8 +18,7 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 import gc
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
+from google.generativeai.types import HarmCategory, HarmBlockThreshold, GenerationConfig
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
 # ---------------------------------------------------------
