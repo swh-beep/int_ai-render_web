@@ -209,7 +209,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
 
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
             "1. **GLOBAL ILLUMINATION:** Simulate how natural light from the window bounces off the floor and interacts with the furniture. The side of the furniture facing the window must be highlighted, while the opposite side has soft, natural shading.\n"
-            "2. **TURN ON LIGHTS:** TURN ON ALL artificial light sources in the room, including ceiling lights, pendant lights, wall sconces, and floor lamps. natural white light (5000K).\n" # [추가됨] 모든 조명 켜기 강제
+            "2. **TURN ON LIGHTS:** TURN ON ALL artificial light sources in the room, including ceiling lights, pendant lights, wall sconces, and floor lamps. natural white light (5000K).\n"
             "2. **SHADOW PHYSICS:** Generate 'Soft Shadows' that diffuse as they get further from the object. Shadows must exactly match the direction and intensity of the sunlight entering the room.\n"
             "3. **ATMOSPHERE:** Create a 'Sun-drenched' feel where the light wraps around the fabric/materials of the furniture (Subsurface Scattering), making it look soft and cozy, not like a 3D sticker.\n"
             "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with the natural light."
@@ -374,7 +374,7 @@ def render_room(
     room: str = Form(...), 
     style: str = Form(...), 
     variant: str = Form(...),
-    moodboard: UploadFile = File(None) # [NEW]
+    moodboard: UploadFile = File(None) 
 ):
     try:
         unique_id = uuid.uuid4().hex[:8]
@@ -392,7 +392,6 @@ def render_room(
         
         ref_path = None
         
-        # [수정] Customize 스타일이면 업로드된 무드보드 사용
         if style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
@@ -400,7 +399,6 @@ def render_room(
             ref_path = mb_path
             print(f">> [Style: Customize] Custom Moodboard Used: {mb_path}", flush=True)
         else:
-            # 기존 로직
             target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
             if os.path.exists(target_dir):
                 files = sorted(os.listdir(target_dir))
@@ -417,7 +415,6 @@ def render_room(
             sub_id = f"{unique_id}_v{index+1}"
             print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
             try:
-                # Customize 스타일일 경우 프롬프트 조정
                 current_style_prompt = STYLES.get(style, "Custom Moodboard Style" if style == "Customize" else STYLES.get("Modern", "Modern Style"))
                 
                 res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, start_time)
@@ -427,7 +424,8 @@ def render_room(
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # [수정: 동시성 개선] max_workers를 5 -> 6으로 증가시켜 조금 더 넉넉하게 처리
+        with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
                 res = future.result()
@@ -490,86 +488,99 @@ def upscale_and_download(req: UpscaleRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [Finalized] 10 Cinematic Detail Shots (Furniture Shape Focused)
+# [수정됨] SHOT_STYLES 재배치 (1~3: 가로 유리 / 4~10: 세로 유리)
 # -----------------------------------------------------------------------------
-
 SHOT_STYLES = [
-    # 1. [수정] 텍스처보다는 '암레스트의 형태'가 보이도록 줌 아웃
-    {
-        "name": "Fabric & Form Focus",
-        "prompt": "FOCUS: The entire armrest and a portion of the seat cushion.\nCOMPOSITION: Medium Shot (Zoom Out). Do not crop the edges of the armrest. Show the voluminous shape of the furniture along with the fabric texture.\nLIGHTING: Soft side-lighting to reveal volume."
-    },
-    # 2. [유지 - 약간 거리두기]
-    {
-        "name": "Tabletop Context",
-        "prompt": "FOCUS: Decorative objects on the Coffee Table, including the table edges.\nCOMPOSITION: Eye-level Medium Shot. Show the objects in relation to the table's surface area. Do not crop the table too tightly.\nATMOSPHERE: Curated, editorial lifestyle look."
-    },
-    # 3. [수정] 다리만 찍지 말고, 다리가 몸통에 붙어있는 구조를 보여줌
-    {
-        "name": "Structural Leg Detail",
-        "prompt": "FOCUS: The lower section of the furniture (Legs connected to the body frame).\nANGLE: Low Angle (Knee level). Show the structural connection between the leg and the main body. Capture the silhouette of the leg against the floor.\nGOAL: Show structural elegance."
-    },
-    # 4. [수정] 의자 전체 실루엣 강조
-    {
-        "name": "Solo Chair Silhouette",
-        "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Full Medium Shot. Capture the distinct outline and curves of the chair back and arms. Highlight the design silhouette.\nSTYLE: Hero shot of a distinct furniture piece."
-    },
-    # 5. [수정] 조명 + 천장/벽면의 공간감 확보
-    {
-        "name": "Lighting & Atmosphere",
-        "prompt": "FOCUS: The Pendant Light or Floor Lamp detail in the room context.\nCOMPOSITION: Wide Medium Shot looking up. Show how the lamp hangs in the space. \nLIGHTING: Pure White Daylight (Neutral 5000K). Clean, airy feel. NO yellow tones."
-    },
-    # 6. [수정] 쿠션만 보지 말고, 소파의 코너 형태를 보여줌
-    {
-        "name": "Sofa Corner Styling",
-        "prompt": "FOCUS: The corner section of the Sofa with cushion styling.\nCOMPOSITION: Medium Shot. Show the structural angle of the sofa back and seat. Capture the depth of the seating area.\nFEELING: Cozy, inviting, volumetric."
-    },
-    # 7. [수정] 모서리 '선'과 '두께감'을 보여줌 (매크로 금지)
-    {
-        "name": "Edge Profile",
-        "prompt": "FOCUS: The profile line of a Side furniture or storage edge.\nCOMPOSITION: Wide Close-up. Show the thickness of the tabletop and the curve of the edge. Establish the geometric shape of the furniture.\nTARGET: Craftsmanship and finishing."
-    },
-    # 8. [수정] 완전한 측면 뷰로 가구 라인 강조
-    {
-        "name": "Side Profile View",
-        "prompt": "FOCUS: The full side profile of the main furniture (Sofa or Chair).\nCOMPOSITION: Eye-level Side View (90 degrees). Capture the clean lines and proportions of the furniture from the side. Minimalist and geometric."
-    },
-    # 9. [수정] 빛이 떨어지는 가구의 '면'을 강조
-    {
-        "name": "Sunlight on Form",
-        "prompt": "FOCUS: A large section of the furniture (e.g., Sofa back or Rug area) bathed in light.\nCOMPOSITION: Medium Shot. Show how the light reveals the 3D form of the furniture.\nLIGHTING: Clean White Daylight (Noon time). Cool/Neutral natural light only. NO yellow/sunset."
-    },
-    # 10. [수정] 30도 쿼터뷰로 배치와 형태 동시 확보
+    # 1. [가로] 전체적인 배치와 공간감을 보여주는 쿼터뷰
     {
         "name": "Isometric Angle Context",
-        "prompt": "FOCUS: all Furniture group.\nCOMPOSITION: High Angle View (approx 30 degrees). Show the layout and the geometric relationship between the furniture pieces. NOT top-down.\nSTYLE: Modern, clean architectural view."
+        "prompt": "FOCUS: The Furniture group layout.\nCOMPOSITION: High Angle View (approx 30 degrees). Wide shot showing the geometric relationship between furniture pieces within the room context.\nSTYLE: Modern, clean architectural view, horizontal composition."
+    },
+    # 2. [가로] 테이블 위의 오브제와 넓은 상판
+    {
+        "name": "Tabletop Context",
+        "prompt": "FOCUS: Decorative objects on the Coffee Table, including the table edges.\nCOMPOSITION: Eye-level Medium Shot. Capture the spread of objects across the table's horizontal surface area. Do not crop the table too tightly.\nATMOSPHERE: Curated, editorial lifestyle look."
+    },
+    # 3. [가로] 소파나 긴 가구의 측면 라인
+    {
+        "name": "Side Profile View",
+        "prompt": "FOCUS: The full side profile of the main furniture (Sofa or Long Bench).\nCOMPOSITION: Eye-level Side View (90 degrees). Capture the long horizontal lines and proportions of the furniture from the side. Minimalist and geometric."
+    },
+    # -----------------------------------------------------------
+    # 여기서부터 세로(9:16) 비율로 생성됨
+    # -----------------------------------------------------------
+    # 4. [세로] 1인 체어의 수직 실루엣 강조
+    {
+        "name": "Solo Chair Silhouette",
+        "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Full Medium Shot (Portrait). Capture the vertical height, distinct outline, and curves of the chair back. Highlight the design silhouette top-to-bottom."
+    },
+    # 5. [세로] 천장에서 떨어지거나 서 있는 조명
+    {
+        "name": "Lighting & Atmosphere",
+        "prompt": "FOCUS: The Pendant Light or Floor Lamp.\nCOMPOSITION: Low Angle looking up or Eye-level vertical shot. Emphasize the vertical line of the lamp cord or stand. Show how the light hangs in the space.\nLIGHTING: Pure White Daylight."
+    },
+    # 6. [세로] 가구 다리와 바닥의 연결
+    {
+        "name": "Structural Leg Detail",
+        "prompt": "FOCUS: The vertical connection of the furniture leg to the body frame.\nANGLE: Low Angle (Ground level). Capture the height of the leg and its silhouette against the floor. Emphasize vertical structural elegance."
+    },
+    # 7. [세로] 암레스트와 쿠션의 층위
+    {
+        "name": "Fabric & Form Focus",
+        "prompt": "FOCUS: The armrest and seat cushion stacking.\nCOMPOSITION: Medium Close-up (Portrait). Show the vertical volume and shape of the furniture arm along with the fabric texture falling downwards.\nLIGHTING: Soft side-lighting."
+    },
+    # 8. [세로] 소파 코너의 깊이감
+    {
+        "name": "Sofa Corner Styling",
+        "prompt": "FOCUS: The corner section of the Sofa.\nCOMPOSITION: Vertical Medium Shot. Show the angle where the backrest meets the seat. Capture the cozy, enclosed vertical depth of the seating area."
+    },
+    # 9. [세로] 모서리 마감 라인
+    {
+        "name": "Edge Profile",
+        "prompt": "FOCUS: The vertical profile line of a furniture edge.\nCOMPOSITION: Close-up Portrait. Follow the vertical line of the edge from top to bottom. Show the thickness and craftsmanship."
+    },
+    # 10. [세로] 빛이 떨어지는 느낌
+    {
+        "name": "Sunlight on Form",
+        "prompt": "FOCUS: A section of furniture bathed in vertical sunlight.\nCOMPOSITION: Medium Shot. Capture the light falling from the top down onto the fabric or material. Show the play of light and shadow vertically."
     }
 ]
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
     try:
         img = Image.open(original_image_path)
+        
+        # [수정] 프롬프트로 비율 제어 (1~3: 16:9, 4~10: 9:16)
+        target_aspect_ratio_text = "16:9"
+        if 4 <= index <= 10:
+            target_aspect_ratio_text = "9:16"
+            
         final_prompt = (
             "TASK: Create a photorealistic interior detail shot based on the provided room image.\n"
             "STRICT CONSTRAINT: You must generate a close-up view of an object existing in the input image. Do not invent new furniture.\n\n"
-            # [추가된 전역 규칙] 가구 쉐입을 위해 너무 가까이 찍지 말라는 명령 추가
             "<GLOBAL RULE: DISTANCE & FORM>\n"
             "1. DO NOT ZOOM IN TOO MUCH. The 'Shape' and 'Silhouette' of the furniture are the most important elements.\n"
             "2. Keep the camera at a 'Medium Shot' distance to show the furniture's volume and structure.\n"
             "3. Avoid cutting off the edges of the main subject.\n\n"
             f"<PHOTOGRAPHY STYLE: {style_config['name']}>\n"
             f"{style_config['prompt']}\n\n"
+            # [핵심] 프롬프트 텍스트에 비율 명시 (Config 사용 안 함)
+            f"OUTPUT ASPECT RATIO: {target_aspect_ratio_text}\n" 
             "OUTPUT RULE: Return a high-quality, editorial composition matching the description."
         )
+        
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
+        
         content = [final_prompt, "Original Room Context (Source):", img]
         
+        # [수정] GenerationConfig 없이 호출 (비율은 프롬프트가 해결)
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
+        
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
@@ -604,7 +615,6 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
 
         unique_id = uuid.uuid4().hex[:6]
         style = SHOT_STYLES[req.style_index]
-        print(f"🔄 [Regenerate] Style {req.style_index}: {style['name']}", flush=True)
         
         res = generate_detail_view(local_path, style, unique_id, req.style_index + 1)
         
@@ -624,12 +634,13 @@ def generate_details_endpoint(req: DetailRequest):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
 
         unique_id = uuid.uuid4().hex[:6]
-        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Fixed Style Mode ===", flush=True)
+        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - 고정 스타일 모드 ===", flush=True)
 
-        generated_results = [] # Stores {index, url}
+        generated_results = []
         print(f"🚀 Generating {len(SHOT_STYLES)} Style Shots...", flush=True)
         
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        # [수정: 동시성 개선] 워커 수를 3 -> 6으로 증가시켜 딜레이 감소
+        with ThreadPoolExecutor(max_workers=6) as executor:
             futures = []
             for i, style in enumerate(SHOT_STYLES):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
@@ -645,7 +656,7 @@ def generate_details_endpoint(req: DetailRequest):
             return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
 
         return JSONResponse(content={
-            "details": generated_results, # List of objects
+            "details": generated_results,
             "message": "Detail views generated successfully"
         })
 
@@ -704,7 +715,6 @@ def generate_moodboard_logic(image_path, unique_id, index):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
         
-        # We invoke Gemini to generate the moodboard based on the prompt
         response = call_gemini_with_failover(MODEL_NAME, [MOODBOARD_SYSTEM_PROMPT, img], {'timeout': 45}, safety_settings)
         
         if response and hasattr(response, 'candidates') and response.candidates:
@@ -728,15 +738,14 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
         raw_path = os.path.join("outputs", f"ref_room_{timestamp}_{unique_id}_{safe_name}")
         
-        # Save uploaded reference image
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
         
         print(f"\n=== [Moodboard Gen] Starting 5 variations for {unique_id} ===", flush=True)
         
         generated_results = []
         
-        # Generate 5 options in parallel
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # [수정: 동시성 개선] 무드보드 생성도 6개씩 병렬 처리
+        with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1) for i in range(5)]
             for future in futures:
                 res = future.result()
