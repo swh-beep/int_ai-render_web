@@ -68,15 +68,16 @@ QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
-    max_retries = len(API_KEY_POOL) + 2
+    max_retries = len(API_KEY_POOL) + 5  # 재시도 횟수 좀 더 넉넉하게
     
     for attempt in range(max_retries):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         if not available_keys:
-            print("🔄 [System] 모든 키가 락 상태. 초기화 후 재시도.", flush=True)
+            # 키가 다 잠겼으면 좀 길게 쉬어야 함 (1초 -> 5초)
+            print("🔄 [System] 모든 키가 락 상태. 5초 쿨다운 후 초기화.", flush=True)
+            time.sleep(5) 
             QUOTA_EXCEEDED_KEYS.clear()
             available_keys = list(API_KEY_POOL)
-            time.sleep(1)
 
         current_key = random.choice(available_keys)
         masked_key = current_key[-4:]
@@ -90,12 +91,14 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
 
         except Exception as e:
             error_msg = str(e)
-            if any(x in error_msg for x in ["429", "403", "Quota", "limit"]):
-                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과.", flush=True)
+            if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
+                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과. (잠시 휴식)", flush=True)
                 QUOTA_EXCEEDED_KEYS.add(current_key)
+                # 에러 났을 때 바로 재시도하지 말고 대기 (점점 길게)
+                time.sleep(2 + attempt) 
             else:
                 print(f"⚠️ [Error] Key(...{masked_key}) 에러: {error_msg}", flush=True)
-            time.sleep(0.5)
+                time.sleep(1)
 
     print("❌ [Fatal] 모든 키 시도 실패.", flush=True)
     return None
@@ -427,7 +430,7 @@ def render_room(
             return None
 
         # [수정: 동시성 개선] max_workers를 5 -> 6으로 증가시켜 조금 더 넉넉하게 처리
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
                 res = future.result()
