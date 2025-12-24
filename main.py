@@ -111,19 +111,30 @@ def standardize_image(image_path, output_path=None):
             if img.mode != 'RGB': img = img.convert('RGB')
             
             width, height = img.size
-            target_ratio = 16 / 9
+            
+            # [수정됨] 이미지 비율에 따라 타겟 비율 자동 설정 (가로/세로 유지)
+            # 가로가 더 길면 16:9 (Landscape), 세로가 더 길면 9:16 (Portrait)
+            if width >= height:
+                target_ratio = 16 / 9
+                target_size = (1920, 1080)
+            else:
+                target_ratio = 9 / 16
+                target_size = (1080, 1920)
+
             current_ratio = width / height
 
             if current_ratio > target_ratio:
+                # 이미지가 타겟보다 더 납작함 -> 양옆 자르기
                 new_width = int(height * target_ratio)
                 offset = (width - new_width) // 2
                 img = img.crop((offset, 0, offset + new_width, height))
             else:
+                # 이미지가 타겟보다 더 길쭉함 -> 위아래 자르기
                 new_height = int(width / target_ratio)
                 offset = (height - new_height) // 2
                 img = img.crop((0, offset, width, offset + new_height))
 
-            img = img.resize((1920, 1080), Image.Resampling.LANCZOS)
+            img = img.resize(target_size, Image.Resampling.LANCZOS)
             
             base, _ = os.path.splitext(output_path)
             new_output_path = f"{base}.jpg"
