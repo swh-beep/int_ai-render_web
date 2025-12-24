@@ -4,6 +4,7 @@ import shutil
 import base64
 import uuid
 import requests
+import json  # JSON 파싱을 위해 추가
 import google.generativeai as genai
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -504,84 +505,97 @@ def upscale_and_download(req: UpscaleRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [수정됨] SHOT_STYLES 재배치 (1~3: 가로 유리 / 4~10: 세로 유리)
+# [NEW LOGIC] Dynamic Style Generation from Moodboard
 # -----------------------------------------------------------------------------
-SHOT_STYLES = [
-    # 1. [가로] 전체적인 배치와 공간감을 보여주는 쿼터뷰
-    {
-        "name": "Isometric Angle Context",
-        "prompt": "FOCUS: The Furniture group layout.\nCOMPOSITION: High Angle View (approx 30 degrees). Wide shot showing the geometric relationship between furniture pieces within the room context.\nSTYLE: Modern, clean architectural view, horizontal composition."
-    },
-    # 2. [가로] 테이블 위의 오브제와 넓은 상판
-    {
-        "name": "Tabletop Context",
-        "prompt": "FOCUS: Decorative objects on the Coffee Table, including the table edges.\nCOMPOSITION: Eye-level Medium Shot. Capture the spread of objects across the table's horizontal surface area. Do not crop the table too tightly.\nATMOSPHERE: Curated, editorial lifestyle look."
-    },
-    # 3. [가로] 소파나 긴 가구의 측면 라인
-    {
-        "name": "Side Profile View",
-        "prompt": "FOCUS: The full side profile of the main furniture (Sofa or Long Bench).\nCOMPOSITION: Eye-level Side View (90 degrees). Capture the long horizontal lines and proportions of the furniture from the side. Minimalist and geometric."
-    },
-    # -----------------------------------------------------------
-    # 여기서부터 세로(9:16) 비율로 생성됨
-    # -----------------------------------------------------------
-    # 4. [세로] 1인 체어의 수직 실루엣 강조
-    {
-        "name": "Solo Chair Silhouette",
-        "prompt": "FOCUS: A single Lounge Chair or Armchair isolated in the frame.\nCOMPOSITION: Full Medium Shot (Portrait). Capture the vertical height, distinct outline, and curves of the chair back. Highlight the design silhouette top-to-bottom."
-    },
-    # 5. [세로] 천장에서 떨어지거나 서 있는 조명
-    {
-        "name": "Lighting & Atmosphere",
-        "prompt": "FOCUS: The Pendant Light or Floor Lamp.\nCOMPOSITION: Low Angle looking up or Eye-level vertical shot. Emphasize the vertical line of the lamp cord or stand. Show how the light hangs in the space.\nLIGHTING: Pure White Daylight."
-    },
-    # 6. [세로] 가구 다리와 바닥의 연결
-    {
-        "name": "Structural Leg Detail",
-        "prompt": "FOCUS: The vertical connection of the furniture leg to the body frame.\nANGLE: Low Angle (Ground level). Capture the height of the leg and its silhouette against the floor. Emphasize vertical structural elegance."
-    },
-    # 7. [세로] 암레스트와 쿠션의 층위
-    {
-        "name": "Fabric & Form Focus",
-        "prompt": "FOCUS: The armrest and seat cushion stacking.\nCOMPOSITION: Medium Close-up (Portrait). Show the vertical volume and shape of the furniture arm along with the fabric texture falling downwards.\nLIGHTING: Soft side-lighting."
-    },
-    # 8. [세로] 소파 코너의 깊이감
-    {
-        "name": "Sofa Corner Styling",
-        "prompt": "FOCUS: The corner section of the Sofa.\nCOMPOSITION: Vertical Medium Shot. Show the angle where the backrest meets the seat. Capture the cozy, enclosed vertical depth of the seating area."
-    },
-    # 9. [세로] 모서리 마감 라인
-    {
-        "name": "Edge Profile",
-        "prompt": "FOCUS: The vertical profile line of a furniture edge.\nCOMPOSITION: Close-up Portrait. Follow the vertical line of the edge from top to bottom. Show the thickness and craftsmanship."
-    },
-    # 10. [세로] 빛이 떨어지는 느낌
-    {
-        "name": "Sunlight on Form",
-        "prompt": "FOCUS: A section of furniture bathed in vertical sunlight.\nCOMPOSITION: Medium Shot. Capture the light falling from the top down onto the fabric or material. Show the play of light and shadow vertically."
-    }
-]
+
+def analyze_moodboard_furniture(moodboard_path):
+    """
+    무드보드에서 가구 정보를 추출하고 부피순으로 정렬하여 리스트 반환
+    """
+    print(f">> [Moodboard Analysis] Analyzing {moodboard_path}...", flush=True)
+    try:
+        img = Image.open(moodboard_path)
+        
+        prompt = (
+            "Analyze this moodboard image. \n"
+            "1. Identify all FURNITURE items (e.g., Sofa, Chair, Table, Lamp, Rug) and their names/dimensions text if visible.\n"
+            "2. Sort them by PHYSICAL VOLUME (Largest to Smallest). \n"
+            "   (e.g., Large Sofa -> Table -> Armchair -> Lamp -> Small Decor)\n"
+            "3. Return ONLY a JSON list of strings describing each item.\n"
+            "   Example: ['3-Seater Beige Sofa', 'Marble Coffee Table', 'Leather Lounge Chair', ...]"
+        )
+        
+        response = call_gemini_with_failover(MODEL_NAME, [prompt, img], {'timeout': 30}, {})
+        
+        if response and response.text:
+            text = response.text.strip()
+            # Markdown code block 제거
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[0].strip()
+            
+            furniture_list = json.loads(text)
+            if isinstance(furniture_list, list) and len(furniture_list) > 0:
+                print(f">> [Moodboard Analysis] Detected {len(furniture_list)} items: {furniture_list}", flush=True)
+                return furniture_list
+    except Exception as e:
+        print(f"!! Moodboard Analysis Failed: {e}", flush=True)
+    
+    # 실패 시 기본 리스트 반환
+    return ["Main Sofa", "Lounge Chair", "Coffee Table", "Floor Lamp", "Rug", "Side Table"]
+
+def construct_dynamic_styles(furniture_list):
+    """
+    요청사항에 맞춰 15개의 스타일 리스트 생성
+    1-3: 고정 앵글 (Wide/Landscape)
+    4-15: 가구별 타겟 줌인 (Portrait)
+    """
+    styles = []
+    
+    # 1. Detail 1 (우측 상단 쿼터뷰) - Landscape
+    styles.append({
+        "name": "Top-Right Context View",
+        "prompt": "CAMERA ANGLE: High Angle / Isometric view from the TOP-RIGHT corner of the room.\nFOCUS: Show the overall layout and relationship between furniture pieces.\nCOMPOSITION: Wide shot, capturing the diagonal flow of the room.",
+        "ratio": "16:9"
+    })
+    
+    # 2. Detail 2 (좌측 상단 쿼터뷰) - Landscape
+    styles.append({
+        "name": "Top-Left Context View",
+        "prompt": "CAMERA ANGLE: High Angle / Isometric view from the TOP-LEFT corner of the room.\nFOCUS: Show the overall layout from the opposite diagonal.\nCOMPOSITION: Wide shot, capturing the full arrangement of the furniture group.",
+        "ratio": "16:9"
+    })
+    
+    # 3. Detail 3 (정면 뷰) - Landscape
+    styles.append({
+        "name": "Frontal Center View",
+        "prompt": "CAMERA ANGLE: Straight Frontal View (Eye-level or slightly higher).\nFOCUS: Look directly at the main wall or widest part of the room.\nCOMPOSITION: Symmetrical and balanced wide shot showing the furniture arrangement flat on.",
+        "ratio": "16:9"
+    })
+    
+    # 4-15. Detail 4~15 (가구별 줌인) - Portrait
+    # 가구 리스트가 12개보다 적으면 순환(Cycle)
+    for i in range(12):
+        target_furniture = furniture_list[i % len(furniture_list)]
+        styles.append({
+            "name": f"Detail Focus: {target_furniture}",
+            "prompt": f"CAMERA ANGLE: Medium Close-up / Slight Zoom-in.\nTARGET: Focus specifically on the '{target_furniture}'.\nCOMPOSITION: Show the details, texture, and form of this specific furniture item within the room context. Do not zoom in too extremely; keep the context visible.",
+            "ratio": "9:16"
+        })
+        
+    return styles
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
     try:
         img = Image.open(original_image_path)
         
-        # [수정] 프롬프트로 비율 제어 (1~3: 16:9, 4~10: 9:16)
-        target_aspect_ratio_text = "16:9"
-        if 4 <= index <= 10:
-            target_aspect_ratio_text = "9:16"
-            
         final_prompt = (
             "TASK: Create a photorealistic interior detail shot based on the provided room image.\n"
-            "STRICT CONSTRAINT: You must generate a close-up view of an object existing in the input image. Do not invent new furniture.\n\n"
-            "<GLOBAL RULE: DISTANCE & FORM>\n"
-            "1. DO NOT ZOOM IN TOO MUCH. The 'Shape' and 'Silhouette' of the furniture are the most important elements.\n"
-            "2. Keep the camera at a 'Medium Shot' distance to show the furniture's volume and structure.\n"
-            "3. Avoid cutting off the edges of the main subject.\n\n"
+            "STRICT CONSTRAINT: You must generate a view based on the input image. Do not invent new furniture.\n\n"
             f"<PHOTOGRAPHY STYLE: {style_config['name']}>\n"
             f"{style_config['prompt']}\n\n"
-            # [핵심] 프롬프트 텍스트에 비율 명시 (Config 사용 안 함)
-            f"OUTPUT ASPECT RATIO: {target_aspect_ratio_text}\n" 
+            f"OUTPUT ASPECT RATIO: {style_config.get('ratio', '16:9')}\n" 
             "OUTPUT RULE: Return a high-quality, editorial composition matching the description."
         )
         
@@ -594,14 +608,13 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         
         content = [final_prompt, "Original Room Context (Source):", img]
         
-        # [수정] GenerationConfig 없이 호출 (비율은 프롬프트가 해결)
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
         
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
                     timestamp = int(time.time())
-                    safe_style_name = style_config['name'].replace(" ", "")
+                    safe_style_name = "".join([c for c in style_config['name'] if c.isalnum()])[:20]
                     filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.jpg"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
@@ -613,10 +626,12 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
 
 class DetailRequest(BaseModel):
     image_url: str
+    moodboard_url: str = None  # [NEW] 무드보드 URL 선택적 입력
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
+    moodboard_url: str = None
 
 @app.post("/regenerate-single-detail")
 def regenerate_single_detail(req: RegenerateDetailRequest):
@@ -626,11 +641,21 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
         if not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
         
-        if req.style_index < 0 or req.style_index >= len(SHOT_STYLES):
+        # 가구 리스트 추출 및 스타일 구성
+        furniture_list = ["Main Furniture"] # Default
+        if req.moodboard_url:
+            mb_filename = os.path.basename(req.moodboard_url)
+            mb_path = os.path.join("outputs", mb_filename)
+            if os.path.exists(mb_path):
+                furniture_list = analyze_moodboard_furniture(mb_path)
+        
+        dynamic_styles = construct_dynamic_styles(furniture_list)
+        
+        if req.style_index < 0 or req.style_index >= len(dynamic_styles):
             return JSONResponse(content={"error": "Invalid style index"}, status_code=400)
 
         unique_id = uuid.uuid4().hex[:6]
-        style = SHOT_STYLES[req.style_index]
+        style = dynamic_styles[req.style_index]
         
         res = generate_detail_view(local_path, style, unique_id, req.style_index + 1)
         
@@ -650,15 +675,29 @@ def generate_details_endpoint(req: DetailRequest):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
 
         unique_id = uuid.uuid4().hex[:6]
-        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - 고정 스타일 모드 ===", flush=True)
+        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Dynamic Furniture Mode ===", flush=True)
 
-        generated_results = []
-        print(f"🚀 Generating {len(SHOT_STYLES)} Style Shots...", flush=True)
+        # 1. 무드보드 분석 (있으면)
+        furniture_list = ["Sofa", "Chair", "Table", "Lamp", "Rug", "Decor"] # Fallback
         
-        # [수정: 동시성 개선] 워커 수를 3 -> 6으로 증가시켜 딜레이 감소
+        if req.moodboard_url:
+            mb_filename = os.path.basename(req.moodboard_url)
+            mb_path = os.path.join("outputs", mb_filename)
+            if os.path.exists(mb_path):
+                furniture_list = analyze_moodboard_furniture(mb_path)
+            else:
+                print(f"!! Moodboard file not found at {mb_path}, using default.", flush=True)
+        
+        # 2. 동적 스타일 리스트 생성 (총 15개)
+        dynamic_styles = construct_dynamic_styles(furniture_list)
+        
+        generated_results = []
+        print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
+        
+        # 3. 병렬 생성
         with ThreadPoolExecutor(max_workers=6) as executor:
             futures = []
-            for i, style in enumerate(SHOT_STYLES):
+            for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
             
             for i, future in futures:
