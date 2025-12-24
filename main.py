@@ -263,20 +263,22 @@ def call_magnific_api(image_path, unique_id, start_time):
             
         payload = {
             "image": b64, 
-            "scale_factor": "4x", 
+            "scale_factor": "2x", 
             "optimized_for": "films_n_photography", 
             "engine": "automatic",
             "creativity": 1,
-            "hdr": 1,
+            "hdr": 0,
             "resemblance": 10,
-            "fractality": 1,
+            "fractality": 0,
             "prompt": (
-                "enhance fabric texture with realistic folds, "
-                "please enhance with photorealistic quality, realistic textures and lighting, soft natural shadows, high detail, DSLR camera look, realistic depth of field, "
-                "avoid rendering wrinkles as dark stains or dirty marks, "
-                "keep original object shapes, dimensions, and surface materials consistent, do not change furniture layout, color scheme, or finishes such as wood grain, marble texture, or metallic reflections, "
-                "ensure soft volumetric light and cinematic mood with accurate material response to lighting, "
-                "--no cartoon, illustration, digital painting, painting style, smudge"
+                "Professional interior photography, architectural digest style, "
+                "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
+                "natural daylight coming from window, soft shadows, subtle film grain, "
+                "hyper-realistic material textures, raw photo, 8k resolution, "
+                "imperfect details, dust particles in air, "
+                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, "
+                "plastic look, oversaturated, watermark, text, blur, distorted, "
+                "smudge, bad geometry, mutated, glossy skin, artificial light"
             )
         }
         headers = {
