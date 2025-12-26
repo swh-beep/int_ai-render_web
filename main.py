@@ -4,7 +4,7 @@ import shutil
 import base64
 import uuid
 import requests
-import json  # JSON 파싱을 위해 추가
+import json
 import google.generativeai as genai
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 import gc
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from typing import Optional 
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -69,12 +70,11 @@ QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
-    max_retries = len(API_KEY_POOL) + 5  # 재시도 횟수 좀 더 넉넉하게
+    max_retries = len(API_KEY_POOL) + 5
     
     for attempt in range(max_retries):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         if not available_keys:
-            # 키가 다 잠겼으면 좀 길게 쉬어야 함 (1초 -> 5초)
             print("🔄 [System] 모든 키가 락 상태. 5초 쿨다운 후 초기화.", flush=True)
             time.sleep(5) 
             QUOTA_EXCEEDED_KEYS.clear()
@@ -95,7 +95,6 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
             if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
                 print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과. (잠시 휴식)", flush=True)
                 QUOTA_EXCEEDED_KEYS.add(current_key)
-                # 에러 났을 때 바로 재시도하지 말고 대기 (점점 길게)
                 time.sleep(2 + attempt) 
             else:
                 print(f"⚠️ [Error] Key(...{masked_key}) 에러: {error_msg}", flush=True)
@@ -113,24 +112,20 @@ def standardize_image(image_path, output_path=None):
             
             width, height = img.size
             
-            # [수정됨] 이미지 비율에 따라 타겟 비율 자동 설정 (가로/세로 유지)
-            # 가로가 더 길면 16:9 (Landscape), 세로가 더 길면 9:16 (Portrait)
             if width >= height:
                 target_ratio = 16 / 9
                 target_size = (1920, 1080)
             else:
-                target_ratio = 9 / 16
-                target_size = (1080, 1920)
+                target_ratio = 4 / 5
+                target_size = (1080, 1350)
 
             current_ratio = width / height
 
             if current_ratio > target_ratio:
-                # 이미지가 타겟보다 더 납작함 -> 양옆 자르기
                 new_width = int(height * target_ratio)
                 offset = (width - new_width) // 2
                 img = img.crop((offset, 0, offset + new_width, height))
             else:
-                # 이미지가 타겟보다 더 길쭉함 -> 위아래 자르기
                 new_height = int(width / target_ratio)
                 offset = (height - new_height) // 2
                 img = img.crop((0, offset, width, offset + new_height))
@@ -282,13 +277,13 @@ def call_magnific_api(image_path, unique_id, start_time):
             "optimized_for": "films_n_photography", 
             "engine": "automatic",
             "creativity": 1,
-            "hdr": 0,
+            "hdr": 1,
             "resemblance": 10,
-            "fractality": 0,
+            "fractality": 1,
             "prompt": (
                 "Professional interior photography, architectural digest style, "
                 "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
-                "natural daylight coming from window, soft shadows, subtle film grain, "
+                "natural white daylight coming from window, sharp shadows, subtle film grain, "
                 "hyper-realistic material textures, raw photo, 8k resolution, "
                 "imperfect details, dust particles in air, "
                 "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, "
@@ -340,13 +335,10 @@ def call_magnific_api(image_path, unique_id, start_time):
                         return image_path
             return image_path
 
-        elif "generated" in data["data"]:
+        elif "generated" in data.get("data", {}):
              gen_list = data["data"]["generated"]
              if gen_list and len(gen_list) > 0:
                  return download_image(gen_list[0], unique_id) or image_path
-             else:
-                 print(f"!! [오류] 생성된 이미지 리스트가 비어있습니다. 응답: {data}", flush=True)
-                 return image_path
                  
         print(f"!! [오류] 알 수 없는 응답 형식: {data}", flush=True)
         return image_path
@@ -384,7 +376,7 @@ async def get_styles_for_room(room_type: str):
         styles = styles + ["Customize"]
     return JSONResponse(content=styles)
 
-# [수정] moodboard 파일 파라미터 추가
+# --- 메인 렌더링 엔드포인트 ---
 @app.post("/render")
 def render_room(
     file: UploadFile = File(...), 
@@ -404,44 +396,59 @@ def render_room(
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
         
         std_path = standardize_image(raw_path)
-        
         step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
         
         ref_path = None
+        mb_url = None
+
+        if style != "Customize":
+            safe_room = room.lower().replace(" ", "") 
+            safe_style = style.lower().replace(" ", "-").replace("_", "-")
+            assets_dir = os.path.join("assets", safe_room, safe_style)
+            if os.path.exists(assets_dir):
+                files = sorted(os.listdir(assets_dir))
+                found = False
+                import re 
+                pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
+                for f in files:
+                    if re.search(pattern, f):
+                        ref_path = os.path.join(assets_dir, f)
+                        # [핵심 수정] 찾은 에셋 경로를 URL 형태로 변환하여 mb_url에 저장!
+                        mb_url = f"/assets/{safe_room}/{safe_style}/{f}"
+                        print(f">> [Preset Style] Asset Found: {ref_path} -> URL: {mb_url}", flush=True)
+                        found = True
+                        break
+                if not found:
+                    if len(files) > 0:
+                        ref_path = os.path.join(assets_dir, files[0])
+                        # Fallback일 때도 URL 설정
+                        mb_url = f"/assets/{safe_room}/{safe_style}/{files[0]}"
+                        print(f"!! [Warning] Fallback used. URL: {mb_url}", flush=True)
+                    else:
+                        print(f"!! [Warning] Asset directory is empty: {assets_dir}", flush=True)
+            else:
+                print(f"!! [Warning] Asset directory not found: {assets_dir}", flush=True)
         
         if style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
             with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
             ref_path = mb_path
-            print(f">> [Style: Customize] Custom Moodboard Used: {mb_path}", flush=True)
-        else:
-            target_dir = os.path.join("assets", room.lower().replace(" ", ""), style.lower().replace(" ", "-").replace("_", "-"))
-            if os.path.exists(target_dir):
-                files = sorted(os.listdir(target_dir))
-                for f in files:
-                    if re.search(rf"(?:^|[\D]){re.escape(variant)}(?:[\D]|$)", f):
-                       ref_path = os.path.join(target_dir, f)
-                       break
-                if not ref_path and files: ref_path = os.path.join(target_dir, files[0])
+            mb_url = f"/outputs/{os.path.basename(mb_path)}"
+            print(f">> [Style: Customize] Custom Moodboard Saved: {mb_path}", flush=True)
 
         generated_results = []
         print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Furnishing)!", flush=True)
 
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
-            print(f"   ▶ [Variation {index+1}] 스타트!", flush=True)
             try:
-                current_style_prompt = STYLES.get(style, "Custom Moodboard Style" if style == "Customize" else STYLES.get("Modern", "Modern Style"))
-                
+                current_style_prompt = STYLES.get(style, "Custom Moodboard Style")
                 res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, start_time)
-                if res:
-                    print(f"   ✅ [Variation {index+1}] 성공!", flush=True)
-                    return f"/outputs/{os.path.basename(res)}"
+                if res: return f"/outputs/{os.path.basename(res)}"
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        # [수정: 동시성 개선] max_workers를 5 -> 6으로 증가시켜 조금 더 넉넉하게 처리
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
@@ -449,21 +456,7 @@ def render_room(
                 if res: generated_results.append(res)
                 gc.collect()
 
-        print(f"=== [{unique_id}] 가구 배치 완료: {len(generated_results)}장 ===", flush=True)
-        
         final_before_url = f"/outputs/{os.path.basename(step1_img)}"
-        if generated_results:
-            print(f"\n--- [Stage 3] 결과물 기반 Before 이미지 생성 시작 ---", flush=True)
-            try:
-                first_result_filename = os.path.basename(generated_results[0])
-                first_result_path = os.path.join("outputs", first_result_filename)
-                
-                final_before_path = generate_empty_room(first_result_path, unique_id + "_final", start_time, stage_name="Stage 3: Final Before View")
-                final_before_url = f"/outputs/{os.path.basename(final_before_path)}"
-                print(">> [성공] 최종 비교용 Before 이미지 생성 완료", flush=True)
-            except Exception as e:
-                print(f"!! [경고] Step 3 실패, Step 1 이미지 사용: {e}", flush=True)
-
         if not generated_results: generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
 
         return JSONResponse(content={
@@ -471,6 +464,7 @@ def render_room(
             "empty_room_url": final_before_url,
             "result_url": generated_results[0], 
             "result_urls": generated_results, 
+            "moodboard_url": mb_url, # 이제 Preset일 때도 값이 들어있음
             "message": "Complete"
         })
     except Exception as e:
@@ -480,136 +474,130 @@ def render_room(
 
 class UpscaleRequest(BaseModel): image_url: str
 
+class FinalizeRequest(BaseModel):
+    image_url: str
+
+@app.post("/finalize-download")
+def finalize_download(req: FinalizeRequest):
+    try:
+        unique_id = uuid.uuid4().hex[:6]
+        start_time = time.time()
+        print(f"\n=== [Finalize] Download Request for {req.image_url} ===", flush=True)
+
+        filename = os.path.basename(req.image_url)
+        local_path = os.path.join("outputs", filename)
+        if not os.path.exists(local_path): 
+            return JSONResponse(content={"error": "Original file not found"}, status_code=404)
+
+        print(">> [Step 1] Creating matched Empty Room...", flush=True)
+        empty_room_path = generate_empty_room(local_path, unique_id + "_final_empty", start_time, stage_name="Finalize: Empty Gen")
+        
+        print(">> [Step 2] Upscaling Empty Room...", flush=True)
+        final_empty_path = call_magnific_api(empty_room_path, unique_id + "_upscale_empty", start_time)
+
+        print(">> [Step 3] Upscaling Furnished Room...", flush=True)
+        final_furnished_path = call_magnific_api(local_path, unique_id + "_upscale_furnished", start_time)
+
+        return JSONResponse(content={
+            "upscaled_furnished": f"/outputs/{os.path.basename(final_furnished_path)}",
+            "upscaled_empty": f"/outputs/{os.path.basename(final_empty_path)}",
+            "message": "Success"
+        })
+
+    except Exception as e:
+        print(f"🔥🔥🔥 [Finalize Error] {e}")
+        traceback.print_exc()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.post("/upscale")
 def upscale_and_download(req: UpscaleRequest):
     try:
         filename = os.path.basename(req.image_url)
         local_path = os.path.join("outputs", filename)
-        
-        if not os.path.exists(local_path): 
-            return JSONResponse(content={"error": "File not found"}, status_code=404)
-        
+        if not os.path.exists(local_path): return JSONResponse(content={"error": "File not found"}, status_code=404)
         final_path = call_magnific_api(local_path, uuid.uuid4().hex[:8], time.time())
-        is_failed = os.path.abspath(final_path) == os.path.abspath(local_path)
-        
-        response_data = {
-            "upscaled_url": f"/outputs/{os.path.basename(final_path)}",
-            "message": "Success"
-        }
-        
-        if is_failed:
-            response_data["warning"] = "업스케일링에 실패하여 원본 이미지를 다운로드합니다.\n(서버 로그를 확인해주세요)"
-            
-        return JSONResponse(content=response_data)
-    except Exception as e: 
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(content={"upscaled_url": f"/outputs/{os.path.basename(final_path)}", "message": "Success"})
+    except Exception as e: return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [NEW LOGIC] Dynamic Style Generation from Moodboard
+# [NEW LOGIC] Detail Generation - Optional 처리 및 Path Resolution 수정
 # -----------------------------------------------------------------------------
 
 def analyze_moodboard_furniture(moodboard_path):
-    """
-    무드보드에서 가구 정보를 추출하고 부피순으로 정렬하여 리스트 반환
-    """
     print(f">> [Moodboard Analysis] Analyzing {moodboard_path}...", flush=True)
     try:
         img = Image.open(moodboard_path)
-        
         prompt = (
-            "Analyze this moodboard image. \n"
-            "1. Identify all FURNITURE items (e.g., Sofa, Chair, Table, Lamp, Rug) and their names/dimensions text if visible.\n"
-            "2. Sort them by PHYSICAL VOLUME (Largest to Smallest). \n"
-            "   (e.g., Large Sofa -> Table -> Armchair -> Lamp -> Small Decor)\n"
-            "3. Return ONLY a JSON list of strings describing each item.\n"
-            "   Example: ['3-Seater Beige Sofa', 'Marble Coffee Table', 'Leather Lounge Chair', ...]"
+            "Analyze this moodboard image strictly.\n"
+            "1. READ ALL TEXT LABELS in the image (e.g., 'sofa x 1ea', 'Side Table x 1 EA', 'Ottoman', 'Area Rug').\n"
+            "2. Identify VISUAL OBJECTS that match these labels.\n"
+            "3. List EVERY single distinct item found. DO NOT MISS 'Side Table', 'Ottoman', or 'Rug'.\n"
+            "4. Sort them by PHYSICAL VOLUME (Largest to Smallest). \n"
+            "5. Return ONLY a JSON list of strings describing each item.\n"
+            "   Example: ['3-Seater Beige Sofa', 'Black Lounge Chair', 'Oval Coffee Table', 'Floor Lamp', 'Round Ottoman', 'Side Table', 'Area Rug']"
         )
-        
         response = call_gemini_with_failover(MODEL_NAME, [prompt, img], {'timeout': 30}, {})
-        
         if response and response.text:
             text = response.text.strip()
-            # Markdown code block 제거
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0].strip()
-            elif "```" in text:
-                text = text.split("```")[0].strip()
-            
+            if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text: text = text.split("```")[0].strip()
             furniture_list = json.loads(text)
             if isinstance(furniture_list, list) and len(furniture_list) > 0:
                 print(f">> [Moodboard Analysis] Detected {len(furniture_list)} items: {furniture_list}", flush=True)
                 return furniture_list
     except Exception as e:
         print(f"!! Moodboard Analysis Failed: {e}", flush=True)
-    
-    # 실패 시 기본 리스트 반환
     return ["Main Sofa", "Lounge Chair", "Coffee Table", "Floor Lamp", "Rug", "Side Table"]
 
 def construct_dynamic_styles(furniture_list):
-    """
-    요청사항에 맞춰 15개의 스타일 리스트 생성
-    1-3: 고정 앵글 (Wide/Landscape)
-    4-15: 가구별 타겟 줌인 (Portrait)
-    """
     styles = []
     
-    # 1. Detail 1 (우측 상단 쿼터뷰) - Landscape
     styles.append({
-        "name": "Top-Right Context View",
-        "prompt": "CAMERA ANGLE: High Angle / Isometric view from the TOP-RIGHT corner of the room.\nFOCUS: Show the overall layout and relationship between furniture pieces.\nCOMPOSITION: Wide shot, capturing the diagonal flow of the room.",
+        "name": "Left Side Context", 
+        "prompt": "CAMERA TARGET: Focus primarily on the LEFT SIDE... ANGLE: 60-degree angle facing the wall.", 
+        "ratio": "16:9"
+    })
+    styles.append({
+        "name": "Right Side & Window", 
+        "prompt": "CAMERA TARGET: Focus primarily on the RIGHT SIDE... ANGLE: 45-degree angle facing the window.", 
+        "ratio": "16:9"
+    })
+    styles.append({
+        "name": "Full Room Symmetrical", 
+        "prompt": "CAMERA TARGET: Absolute Center... ANGLE: 45-degree high angle... LENS: Wide Angle Lens (24mm).", 
         "ratio": "16:9"
     })
     
-    # 2. Detail 2 (좌측 상단 쿼터뷰) - Landscape
-    styles.append({
-        "name": "Top-Left Context View",
-        "prompt": "CAMERA ANGLE: High Angle / Isometric view from the TOP-LEFT corner of the room.\nFOCUS: Show the overall layout from the opposite diagonal.\nCOMPOSITION: Wide shot, capturing the full arrangement of the furniture group.",
-        "ratio": "16:9"
-    })
-    
-    # 3. Detail 3 (정면 뷰) - Landscape
-    styles.append({
-        "name": "Frontal Center View",
-        "prompt": "CAMERA ANGLE: Straight Frontal View (Eye-level or slightly higher).\nFOCUS: Look directly at the main wall or widest part of the room.\nCOMPOSITION: Symmetrical and balanced wide shot showing the furniture arrangement flat on.",
-        "ratio": "16:9"
-    })
-    
-    # 4-15. Detail 4~15 (가구별 줌인) - Portrait
-    # 가구 리스트가 12개보다 적으면 순환(Cycle)
     for i in range(12):
         target_furniture = furniture_list[i % len(furniture_list)]
         styles.append({
-            "name": f"Detail Focus: {target_furniture}",
-            "prompt": f"CAMERA ANGLE: Medium Close-up / Slight Zoom-in.\nTARGET: Focus specifically on the '{target_furniture}'.\nCOMPOSITION: Show the details, texture, and form of this specific furniture item within the room context. Do not zoom in too extremely; keep the context visible.",
-            "ratio": "9:16"
+            "name": f"Editorial Detail: {target_furniture}",
+            "prompt": (
+                f"SUBJECT: Close-up editorial shot of the '{target_furniture}'.\n"
+                "COMPOSITION: The furniture must occupy 70% of the frame. Do not zoom out too much.\n"
+                "LENS & CAMERA: 85mm Portrait Lens, f/2.8 Aperture.\n"
+                "EFFECT: Shallow Depth of Field (Bokeh). Keep the furniture sharp and highly detailed, but make the background room slightly soft/blurred to retain context without distraction.\n"
+                "LIGHTING: Soft cinematic lighting hitting the furniture texture."
+            ),
+            "ratio": "4:5"
         })
-        
     return styles
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
     try:
         img = Image.open(original_image_path)
-        
+        target_ratio = style_config.get('ratio', '16:9')
         final_prompt = (
-            "TASK: Create a photorealistic interior detail shot based on the provided room image.\n"
-            "STRICT CONSTRAINT: You must generate a view based on the input image. Do not invent new furniture.\n\n"
+            "TASK: Create a photorealistic interior photograph based on the provided room image.\n"
             f"<PHOTOGRAPHY STYLE: {style_config['name']}>\n"
             f"{style_config['prompt']}\n\n"
-            f"OUTPUT ASPECT RATIO: {style_config.get('ratio', '16:9')}\n" 
-            "OUTPUT RULE: Return a high-quality, editorial composition matching the description."
+            f"OUTPUT ASPECT RATIO: {target_ratio}\n"
+            "CRITICAL INSTRUCTION: Ensure the image looks like a real photo of a room, not a 3D product render on a plain background. Keep the lighting and shadows consistent with the original room.\n" 
+            "OUTPUT RULE: Return a high-quality, editorial composition."
         )
-        
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
-        
+        safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         content = [final_prompt, "Original Room Context (Source):", img]
-        
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
-        
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
@@ -624,14 +612,15 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         print(f"!! Detail Generation Error: {e}")
         return None
 
+# [수정됨] Optional + Path Resolution Logic
 class DetailRequest(BaseModel):
     image_url: str
-    moodboard_url: str = None  # [NEW] 무드보드 URL 선택적 입력
+    moodboard_url: Optional[str] = None 
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
-    moodboard_url: str = None
+    moodboard_url: Optional[str] = None
 
 @app.post("/regenerate-single-detail")
 def regenerate_single_detail(req: RegenerateDetailRequest):
@@ -641,11 +630,16 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
         if not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
         
-        # 가구 리스트 추출 및 스타일 구성
-        furniture_list = ["Main Furniture"] # Default
+        furniture_list = ["Main Furniture"]
         if req.moodboard_url:
-            mb_filename = os.path.basename(req.moodboard_url)
-            mb_path = os.path.join("outputs", mb_filename)
+            # [수정됨] 전체 생성 로직과 동일하게 Assets/Outputs 경로 자동 판별 추가
+            if req.moodboard_url.startswith("/assets/"):
+                rel_path = req.moodboard_url.lstrip("/")
+                mb_path = os.path.join(*rel_path.split("/"))
+            else:
+                mb_filename = os.path.basename(req.moodboard_url)
+                mb_path = os.path.join("outputs", mb_filename)
+                
             if os.path.exists(mb_path):
                 furniture_list = analyze_moodboard_furniture(mb_path)
         
@@ -677,24 +671,29 @@ def generate_details_endpoint(req: DetailRequest):
         unique_id = uuid.uuid4().hex[:6]
         print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Dynamic Furniture Mode ===", flush=True)
 
-        # 1. 무드보드 분석 (있으면)
-        furniture_list = ["Sofa", "Chair", "Table", "Lamp", "Rug", "Decor"] # Fallback
+        furniture_list = ["Sofa", "Chair", "Table", "Lamp", "Rug", "Decor"] 
         
         if req.moodboard_url:
-            mb_filename = os.path.basename(req.moodboard_url)
-            mb_path = os.path.join("outputs", mb_filename)
+            # [핵심 수정] 경로 처리 로직 일원화
+            if req.moodboard_url.startswith("/assets/"):
+                rel_path = req.moodboard_url.lstrip("/")
+                mb_path = os.path.join(*rel_path.split("/"))
+            else:
+                mb_filename = os.path.basename(req.moodboard_url)
+                mb_path = os.path.join("outputs", mb_filename)
+
             if os.path.exists(mb_path):
                 furniture_list = analyze_moodboard_furniture(mb_path)
             else:
                 print(f"!! Moodboard file not found at {mb_path}, using default.", flush=True)
+        else:
+             print("!! No Moodboard URL provided, using default list.", flush=True)
         
-        # 2. 동적 스타일 리스트 생성 (총 15개)
         dynamic_styles = construct_dynamic_styles(furniture_list)
         
         generated_results = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
         
-        # 3. 병렬 생성
         with ThreadPoolExecutor(max_workers=6) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
@@ -721,7 +720,7 @@ def generate_details_endpoint(req: DetailRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [NEW] Moodboard Generator Feature
+# [NEW] Moodboard Generator Feature (이 부분은 파일 끝까지 그대로)
 # -----------------------------------------------------------------------------
 
 MOODBOARD_SYSTEM_PROMPT = """

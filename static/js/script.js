@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ script.js 로드됨 (Global Lock Removed - Parallel Execution Allowed)");
+    console.log("✅ script.js 로드됨 (Dynamic Detail View Supported)");
 
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
@@ -70,8 +70,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Step Elements
     const mbGenStep1 = document.getElementById('mb-gen-step1');
     const mbGenStep2 = document.getElementById('mb-gen-step2');
-    const mbStep2RefImg = document.getElementById('mb-step2-ref-img'); // [NEW] Step2 Original Image
-    const mbGenRetryBtn = document.getElementById('mb-gen-retry-btn'); // [NEW] Retry Button
+    const mbStep2RefImg = document.getElementById('mb-step2-ref-img');
+    const mbGenRetryBtn = document.getElementById('mb-gen-retry-btn');
 
     const mbGenGrid = document.getElementById('mb-gen-grid');
     const mbGenLoading = document.getElementById('mb-gen-loading');
@@ -102,13 +102,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailBtn = document.getElementById('detailBtn');
     const detailStatus = document.getElementById('detailStatus');
     const detailSection = document.getElementById('detail-section');
-    const detailGrid = document.getElementById('detail-grid');
+
+    // [수정] 두 개의 그리드 선택
+    const detailGridLandscape = document.getElementById('detail-grid-landscape');
+    const detailGridPortrait = document.getElementById('detail-grid-portrait');
 
     const lightbox = document.getElementById('lightbox');
     const lightboxImg = document.getElementById('lightbox-img');
     const closeLightbox = document.querySelector('.close-lightbox');
 
-    // [NEW] Lightbox State for Keyboard Navigation
     let lightboxImages = [];
     let currentLightboxIndex = 0;
 
@@ -120,6 +122,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedVariant = null;
     let selectedMoodboardFile = null;
     let currentDetailSourceUrl = null;
+
+    // [핵심] 현재 사용 중인 무드보드 URL 저장용 변수
+    let currentMoodboardUrl = null;
 
     // --- 데이터 로드 ---
     fetch('/room-types')
@@ -141,6 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedStyle = null;
         selectedVariant = null;
         selectedMoodboardFile = null;
+        currentMoodboardUrl = null;
 
         if (moodboardPreviewContainer) moodboardPreviewContainer.classList.add('hidden');
         if (moodboardUploadContainer) moodboardUploadContainer.classList.add('hidden');
@@ -185,27 +191,18 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let i = 1; i <= 30; i++) {
                 const variantBtn = document.createElement('div');
                 variantBtn.className = 'variant-img-btn';
-
                 const img = document.createElement('img');
                 const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
                 const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
                 const imgName = `${safeRoom}_${safeStyle}_${i}.png`;
-
                 img.src = `/static/thumbnails/${imgName}`;
                 img.alt = `Variant ${i}`;
-
-                // 이미지가 없으면 버튼 숨김 (20개를 다 안 채웠을 때를 대비)
-                img.onerror = () => {
-                    variantBtn.style.display = 'none';
-                };
-
+                img.onerror = () => { variantBtn.style.display = 'none'; };
                 const label = document.createElement('span');
                 label.className = 'variant-label';
                 label.textContent = i;
-
                 variantBtn.appendChild(img);
                 variantBtn.appendChild(label);
-
                 variantBtn.onclick = () => {
                     selectedVariant = i.toString();
                     document.querySelectorAll('.variant-img-btn').forEach(b => {
@@ -296,11 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // -----------------------------------------------------------
-    // [NEW] Moodboard Generator Logic (UI Update & Keyboard Nav)
-    // -----------------------------------------------------------
-
-    // [수정] 레퍼런스 이미지 클릭 시 라이트박스 열기
+    // [Moodboard Generator Logic]
     if (mbStep2RefImg) {
         mbStep2RefImg.onclick = () => {
             if (mbStep2RefImg.src) {
@@ -312,15 +305,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openMbGenBtn) {
         openMbGenBtn.onclick = () => {
             mbGenModal.classList.remove('hidden');
-
-            // Reset States
             mbGenSelectedFile = null;
             mbGenInput.value = '';
             mbGenPreviewContainer.classList.add('hidden');
             mbGenDropZone.classList.remove('hidden');
             mbGenActionBtn.disabled = true;
-
-            // Show Step 1, Hide Step 2
             mbGenStep1.classList.remove('hidden');
             mbGenStep2.classList.add('hidden');
             mbGenLoading.classList.add('hidden');
@@ -332,7 +321,6 @@ document.addEventListener('DOMContentLoaded', () => {
         mbGenCloseBtn.onclick = () => mbGenModal.classList.add('hidden');
     }
 
-    // File Upload (Step 1)
     if (mbGenDropZone) {
         mbGenDropZone.addEventListener('click', () => mbGenInput.click());
         mbGenDropZone.addEventListener('dragover', (e) => { e.preventDefault(); mbGenDropZone.style.borderColor = THEME_COLOR; });
@@ -368,14 +356,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Generate Action
     if (mbGenActionBtn) {
         mbGenActionBtn.onclick = async () => {
             await performMbGeneration();
         };
     }
 
-    // [NEW] Retry Button Action
     if (mbGenRetryBtn) {
         mbGenRetryBtn.onclick = async () => {
             if (!mbGenSelectedFile) {
@@ -388,14 +374,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function performMbGeneration() {
         if (!mbGenSelectedFile) return;
-
-        // [UI Update] Switch to Step 2 & Show Loading
         mbGenStep1.classList.add('hidden');
         mbGenStep2.classList.remove('hidden');
         mbGenLoading.classList.remove('hidden');
         mbGenGrid.innerHTML = '';
 
-        // [Logic] Copy Preview Image to Step 2 Reference
         if (mbGenPreview.src) {
             mbStep2RefImg.src = mbGenPreview.src;
         }
@@ -413,16 +396,14 @@ document.addEventListener('DOMContentLoaded', () => {
             mbGenLoading.classList.add('hidden');
 
             if (res.ok && data.moodboards && data.moodboards.length > 0) {
-                const moodboardUrls = data.moodboards; // List for lightbox
+                const moodboardUrls = data.moodboards;
 
                 data.moodboards.forEach((url, idx) => {
                     const div = document.createElement('div');
                     div.className = 'detail-card';
 
-                    // 1. 이미지: 클릭 시 확대 (Lightbox)
                     const img = document.createElement('img');
                     img.src = url;
-                    // [FIX] 16:9 비율, contain, 중앙 정렬
                     img.style.aspectRatio = "16 / 9";
                     img.style.objectFit = "contain";
                     img.style.objectPosition = "center";
@@ -433,7 +414,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         openLightbox(url, moodboardUrls, idx);
                     };
 
-                    // 2. 선택 버튼: 클릭 시 적용 (Select)
                     const selectBtn = document.createElement('button');
                     selectBtn.className = 'detail-upscale-btn';
                     selectBtn.textContent = "SELECT THIS";
@@ -441,7 +421,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     selectBtn.onclick = async (e) => {
                         e.stopPropagation();
-
                         try {
                             selectBtn.textContent = "Loading...";
                             selectBtn.disabled = true;
@@ -466,7 +445,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 showCustomAlert("Error", "Failed to generate moodboards.");
-                // Go back to step 1 on failure
                 mbGenStep1.classList.remove('hidden');
                 mbGenStep2.classList.add('hidden');
             }
@@ -527,17 +505,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!res.ok) throw new Error(`서버 에러 (${res.status})`);
                 const data = await res.json();
 
+                // [핵심 수정] 서버로부터 받은 Moodboard URL 저장
+                if (data.moodboard_url) {
+                    currentMoodboardUrl = data.moodboard_url;
+                    console.log("✅ Moodboard URL Saved:", currentMoodboardUrl);
+                } else {
+                    currentMoodboardUrl = null;
+                }
+
                 clearInterval(timerInterval);
                 loadingOverlay.classList.add('hidden');
                 resultSection.classList.remove('hidden');
 
+                // [수정] empty_room_url은 Step 1에서 만든 초기 빈 방 이미지
                 resultBefore.src = data.empty_room_url || data.original_url;
                 const results = data.result_urls || [];
                 if (results.length > 0) resultAfter.src = results[0];
 
                 thumbnailContainer.innerHTML = "";
-
-                // [NEW] Thumbnail Lightbox Support
                 results.forEach((url, idx) => {
                     const img = document.createElement("img");
                     img.src = url;
@@ -555,7 +540,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         img.style.border = `3px solid ${THEME_COLOR}`;
                     };
 
-                    // Double click to open lightbox with list
                     img.ondblclick = () => {
                         openLightbox(url, results, idx);
                     };
@@ -577,7 +561,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 슬라이더 ---
     function initSlider() {
         if (!compareSlider || !sliderHandle || !comparisonContainer) return;
         const beforeWrapper = document.querySelector('.image-wrapper.before');
@@ -603,51 +586,53 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.addEventListener('resize', initSlider);
 
-    // --- 업스케일링 ---
-    async function upscaleAndDownload(imgUrl, filenamePrefix) {
+    async function downloadFile(url, prefix) {
         try {
-            const res = await fetch("/upscale", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ image_url: imgUrl })
-            });
-            const data = await res.json();
-            if (data.upscaled_url) {
-                const link = document.createElement("a");
-                link.href = data.upscaled_url;
-                link.download = `${filenamePrefix}_HighRes.jpg`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                return true;
-            } else {
-                throw new Error(data.warning || "Unknown error");
-            }
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${prefix}_${Date.now()}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         } catch (e) {
             console.error(e);
-            return false;
         }
     }
 
     if (upscaleBtn) {
         upscaleBtn.onclick = async function () {
             const afterUrl = resultAfter ? resultAfter.src : null;
-            const beforeUrl = resultBefore ? resultBefore.src : null;
+            if (!afterUrl) { showCustomAlert("Warning", "이미지가 없습니다."); return; }
 
-            if (!afterUrl || !beforeUrl) { showCustomAlert("Warning", "이미지가 없습니다."); return; }
-
-            // [Lock] 본인만 잠금 (동시 실행 허용)
             upscaleBtn.disabled = true;
-            upscaleBtn.innerText = "PROCESSING...";
+            upscaleBtn.innerText = "PROCESSING (Empty Room Gen & Upscale)...";
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
             try {
-                const p1 = upscaleAndDownload(afterUrl, "Result_After");
-                const p2 = upscaleAndDownload(beforeUrl, "Result_Before");
-                await Promise.all([p1, p2]);
-                showCustomAlert("Success", "DOWNLOAD COMPLETE\n(Before & After)");
+                // 1. 서버에 '선택된 이미지'를 보내서 (빈방 생성 + 둘 다 업스케일) 요청
+                const res = await fetch("/finalize-download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ image_url: afterUrl })
+                });
+
+                const data = await res.json();
+
+                if (res.ok && data.upscaled_furnished && data.upscaled_empty) {
+                    // 2. 두 개의 결과물 다운로드
+                    await downloadFile(data.upscaled_furnished, "Result_After_HighRes");
+                    // 약간의 딜레이 후 두 번째 파일 다운로드 (브라우저 차단 방지)
+                    setTimeout(() => {
+                        downloadFile(data.upscaled_empty, "Result_Before_Empty_HighRes");
+                    }, 1000);
+
+                    showCustomAlert("Success", "Download Complete! (Before & After)");
+                } else {
+                    throw new Error(data.error || "Processing failed");
+                }
+
             } catch (err) {
-                showCustomAlert("Error", "Server Error during upscale.");
+                showCustomAlert("Error", "Server Error: " + err.message);
             } finally {
                 upscaleBtn.disabled = false;
                 upscaleBtn.innerText = "UPSCALE & DOWNLOAD";
@@ -672,14 +657,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!currentImgUrl) { showCustomAlert("Warning", "디테일 컷을 만들 이미지가 없습니다."); return; }
             currentDetailSourceUrl = currentImgUrl;
 
-            // [Lock] 본인만 잠금 (동시 실행 허용)
             detailBtn.disabled = true;
 
-            detailSection.classList.add('hidden');
-            detailGrid.innerHTML = '';
+            detailSection.classList.remove('hidden');
+            // [수정] 초기화 시 두 개의 그리드 비우기
+            if (detailGridLandscape) detailGridLandscape.innerHTML = '';
+            if (detailGridPortrait) detailGridPortrait.innerHTML = '';
 
-            const startTime = showLoading("Setting up Virtual Cameras...");
-            const msgs = ["Setting up Virtual Cameras...", "Capturing Light & Textures...", "Developing Editorial Shots...", "Finalizing Your Portfolio..."];
+            const startTime = showLoading("Generating Dynamic Detail Views...");
+            const msgs = ["Analysing Furniture...", "Setting up Angles...", "Rendering Close-ups...", "Finalizing..."];
             let step = 0;
 
             const timerInterval = setInterval(() => {
@@ -693,22 +679,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 4000);
 
             try {
+                const payload = {
+                    image_url: currentImgUrl,
+                    moodboard_url: currentMoodboardUrl
+                };
+
                 const res = await fetch("/generate-details", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ image_url: currentImgUrl })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await res.json();
 
                 if (res.ok && data.details && data.details.length > 0) {
-                    const detailUrls = data.details.map(d => d.url); // Extract URLs for lightbox
+                    const detailUrls = data.details.map(d => d.url);
 
                     data.details.forEach(item => {
-                        createDetailCard(item.url, item.index, detailUrls); // Pass full list
+                        createDetailCard(item.url, item.index, detailUrls);
                     });
 
-                    detailSection.classList.remove('hidden');
                     setTimeout(() => detailSection.scrollIntoView({ behavior: 'smooth' }), 100);
                 } else {
                     showCustomAlert("Failed", "디테일 뷰 생성 실패");
@@ -724,13 +714,40 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // [수정됨] script.js의 createDetailCard 함수 교체
     function createDetailCard(url, styleIndex, fullList = null) {
         const card = document.createElement('div');
         card.className = 'detail-card';
 
         const img = document.createElement('img');
         img.src = url;
-        img.onclick = () => openLightbox(url, fullList, styleIndex - 1); // [NEW] Pass list & index (0-based)
+
+        // [핵심 수정] 
+        // styleIndex (0부터 시작하는 리스트 인덱스라고 가정)
+        // 0, 1, 2번 (총 3장) -> 상단 가로줄 (Landscape)
+        // 3번 (즉, 4번째 이미지)부터 -> 하단 세로줄 (Portrait)
+        if (styleIndex < 3) {
+            // [상단] 1~3번 이미지
+            img.style.aspectRatio = "16 / 9";
+            card.appendChild(img);
+            appendButtonsToCard(card, img, url, styleIndex + 1, fullList); // 버튼 추가
+
+            const landscapeGrid = document.getElementById('detail-grid-landscape');
+            if (landscapeGrid) landscapeGrid.appendChild(card);
+        } else {
+            // [하단] 4~15번 이미지
+            img.style.aspectRatio = "4 / 5"; // 세로 비율 (4:5 추천)
+            card.appendChild(img);
+            appendButtonsToCard(card, img, url, styleIndex + 1, fullList); // 버튼 추가
+
+            const portraitGrid = document.getElementById('detail-grid-portrait');
+            if (portraitGrid) portraitGrid.appendChild(card);
+        }
+    }
+
+    // [수정됨] 디테일 컷 카드에 버튼 추가하는 함수 (버튼 먹통 방지 finally 추가)
+    function appendButtonsToCard(card, img, url, styleIndex, fullList) {
+        img.onclick = () => openLightbox(url, fullList, styleIndex - 1);
 
         const retryBtn = document.createElement('button');
         retryBtn.className = 'detail-retry-btn';
@@ -747,27 +764,42 @@ document.addEventListener('DOMContentLoaded', () => {
         const upBtn = document.createElement('button');
         upBtn.className = 'detail-upscale-btn';
         upBtn.textContent = "UPSCALE & DOWNLOAD";
+
         upBtn.onclick = async (e) => {
             e.stopPropagation();
-            // [Lock] 카드 내부 버튼만 잠금
+
+            // 중복 클릭 방지
+            if (upBtn.disabled) return;
+
             upBtn.disabled = true;
             upBtn.textContent = "Processing...";
 
-            await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
+            try {
+                // [핵심] 방금 추가한 upscaleAndDownload 함수를 여기서 호출합니다.
+                const success = await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
 
-            upBtn.textContent = "UPSCALE & DOWNLOAD";
-            upBtn.disabled = false;
-            showCustomAlert("Success", "Detail Shot Downloaded");
+                if (success) {
+                    showCustomAlert("Success", "다운로드가 완료되었습니다.");
+                } else {
+                    showCustomAlert("Error", "업스케일링에 실패했습니다.\n(잠시 후 다시 시도하거나 서버 로그를 확인하세요)");
+                }
+            } catch (err) {
+                console.error("Critical Error:", err);
+                showCustomAlert("Error", "알 수 없는 오류가 발생했습니다.");
+            } finally {
+                // [안전장치] 성공하든 실패하든 에러가 나든 버튼은 다시 살아나야 함
+                upBtn.textContent = "UPSCALE & DOWNLOAD";
+                upBtn.disabled = false;
+            }
         };
 
-        card.appendChild(img); card.appendChild(retryBtn); card.appendChild(upBtn);
-        detailGrid.appendChild(card);
+        card.appendChild(retryBtn);
+        card.appendChild(upBtn);
     }
 
     async function retrySingleDetail(cardElement, styleIndex) {
         if (!currentDetailSourceUrl) return;
 
-        // [Lock] 카드 내부 버튼만 잠금
         const buttons = cardElement.querySelectorAll('button');
         buttons.forEach(btn => btn.disabled = true);
 
@@ -784,14 +816,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
-                    style_index: styleIndex
+                    style_index: styleIndex - 1, // index 0-based adjustment
+                    // [핵심] 재생성 시에도 무드보드 정보 유지
+                    moodboard_url: currentMoodboardUrl
                 })
             });
             const data = await res.json();
             if (res.ok && data.url) {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
-                imgElement.onclick = () => openLightbox(data.url, [data.url], 0); // Single retry view
+                // 리스너 업데이트는 복잡하므로 단순 src 교체만 (Lightbox는 기존 리스트 유지됨 - 한계점)
+                imgElement.onclick = () => openLightbox(data.url, [data.url], 0);
             } else {
                 showCustomAlert("Failed", "재생성 실패: " + (data.error || "Unknown error"));
             }
@@ -803,7 +838,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Lightbox with Keyboard Support ---
     function openLightbox(src, imageList = null, index = 0) {
         lightboxImg.src = src;
         lightbox.classList.remove('hidden');
@@ -817,7 +851,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // [NEW] Keyboard Event Listener
     document.addEventListener('keydown', (e) => {
         if (lightbox.classList.contains('hidden')) return;
 
@@ -847,3 +880,41 @@ document.addEventListener('DOMContentLoaded', () => {
         lightbox.onclick = (e) => { if (e.target === lightbox) lightbox.classList.add('hidden'); };
     }
 });
+// [새로 추가] 업스케일링 및 다운로드 기능을 수행하는 함수
+async function upscaleAndDownload(imgUrl, filenamePrefix) {
+    try {
+        console.log("🚀 Upscaling start:", imgUrl);
+
+        const res = await fetch("/upscale", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_url: imgUrl })
+        });
+
+        // 서버 응답 자체가 에러인 경우 (500 등)
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Server Error (${res.status}): ${errText}`);
+        }
+
+        const data = await res.json();
+
+        if (data.upscaled_url) {
+            console.log("✅ Upscale success:", data.upscaled_url);
+            const link = document.createElement("a");
+            link.href = data.upscaled_url;
+            link.download = `${filenamePrefix}_${Date.now()}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            return true; // 성공 신호
+        } else {
+            throw new Error(data.error || data.warning || "Unknown error during upscale");
+        }
+    } catch (e) {
+        console.error("❌ Upscale failed:", e);
+        // 필요하다면 여기서 에러 메시지를 띄워줄 수도 있습니다.
+        // showCustomAlert("Error", "업스케일링 실패: " + e.message);
+        return false; // 실패 신호
+    }
+}
