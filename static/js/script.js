@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ script.js 로드됨 (Dynamic Detail View Supported)");
+    console.log("✅ script.js 로드됨 (Multi Option FP Generation)");
 
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
@@ -57,7 +57,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const moodboardPreview = document.getElementById('moodboard-preview');
     const removeMoodboardBtn = document.getElementById('remove-moodboard');
 
-    // [NEW] Moodboard Generator Elements
+    // [NEW] Floor Plan Generator Elements
+    const openFpGenBtn = document.getElementById('open-fp-gen-btn');
+    const fpGenModal = document.getElementById('floorplan-generator-modal');
+    const fpCloseBtn = document.getElementById('fp-close-btn');
+    const fpGenerateBtn = document.getElementById('fp-generate-btn'); // Main Generate
+    const fpRetryBtn = document.getElementById('fp-retry-btn'); // Try Again
+
+    // Plan Upload Elements
+    const fpPlanDropZone = document.getElementById('fp-plan-drop-zone');
+    const fpPlanInput = document.getElementById('fp-plan-input');
+    const fpPlanPreviewContainer = document.getElementById('fp-plan-preview-container');
+    const fpPlanPreview = document.getElementById('fp-plan-preview');
+    const fpPlanRemove = document.getElementById('fp-plan-remove');
+
+    // Ref Photo Upload Elements (Multiple)
+    const fpRefDropZone = document.getElementById('fp-ref-drop-zone');
+    const fpRefInput = document.getElementById('fp-ref-input');
+    const fpRefPreviewContainer = document.getElementById('fp-ref-preview-container');
+    const fpRefRemoveAll = document.getElementById('fp-ref-remove-all');
+
+    // Result Elements (Grid Logic)
+    const fpUseBtn = document.getElementById('fp-use-btn'); // No longer main selector
+    const fpLoading = document.getElementById('fp-loading');
+    const fpResultActions = document.getElementById('fp-result-actions');
+    const fpPlaceholderText = document.getElementById('fp-placeholder-text');
+    const fpGenGrid = document.getElementById('fp-gen-grid');
+
+    let fpPlanFile = null;
+    let fpRefFiles = [];
+
+    // [Moodboard Generator Elements]
     const openMbGenBtn = document.getElementById('open-mb-gen-btn');
     const mbGenModal = document.getElementById('moodboard-generator-modal');
     const mbGenDropZone = document.getElementById('mb-gen-drop-zone');
@@ -103,7 +133,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailStatus = document.getElementById('detailStatus');
     const detailSection = document.getElementById('detail-section');
 
-    // [수정] 두 개의 그리드 선택
     const detailGridLandscape = document.getElementById('detail-grid-landscape');
     const detailGridPortrait = document.getElementById('detail-grid-portrait');
 
@@ -122,8 +151,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedVariant = null;
     let selectedMoodboardFile = null;
     let currentDetailSourceUrl = null;
-
-    // [핵심] 현재 사용 중인 무드보드 URL 저장용 변수
     let currentMoodboardUrl = null;
 
     // --- 데이터 로드 ---
@@ -293,7 +320,238 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // [Moodboard Generator Logic]
+    // --- [NEW] Floor Plan Generator Logic ---
+    if (openFpGenBtn) {
+        openFpGenBtn.onclick = () => {
+            fpGenModal.classList.remove('hidden');
+            resetFpModal();
+        };
+    }
+
+    if (fpCloseBtn) {
+        fpCloseBtn.onclick = () => fpGenModal.classList.add('hidden');
+    }
+
+    function resetFpModal() {
+        fpPlanFile = null;
+        fpRefFiles = [];
+        fpPlanInput.value = '';
+        fpRefInput.value = '';
+
+        fpPlanPreviewContainer.classList.add('hidden');
+        fpPlanDropZone.classList.remove('hidden');
+
+        fpRefPreviewContainer.innerHTML = '';
+        fpRefPreviewContainer.classList.add('hidden');
+        fpRefDropZone.classList.remove('hidden');
+        fpRefRemoveAll.classList.add('hidden');
+
+        // Reset Result Panel
+        fpPlaceholderText.classList.remove('hidden');
+        fpGenGrid.innerHTML = '';
+        fpGenGrid.style.display = 'none';
+        fpResultActions.classList.add('hidden');
+        fpLoading.classList.add('hidden');
+
+        fpGenerateBtn.disabled = true;
+    }
+
+    // Plan Upload
+    if (fpPlanDropZone) {
+        fpPlanDropZone.addEventListener('click', () => fpPlanInput.click());
+        fpPlanDropZone.addEventListener('dragover', (e) => { e.preventDefault(); fpPlanDropZone.style.borderColor = THEME_COLOR; });
+        fpPlanDropZone.addEventListener('dragleave', () => fpPlanDropZone.style.borderColor = '#ccc');
+        fpPlanDropZone.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleFpPlan(e.dataTransfer.files[0]); });
+        fpPlanInput.addEventListener('change', (e) => { if (e.target.files.length) handleFpPlan(e.target.files[0]); });
+    }
+
+    function handleFpPlan(file) {
+        if (!file.type.startsWith('image/')) return;
+        fpPlanFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            fpPlanPreview.src = e.target.result;
+            fpPlanPreviewContainer.classList.remove('hidden');
+            fpPlanDropZone.classList.add('hidden');
+            checkFpReady();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    if (fpPlanRemove) {
+        fpPlanRemove.onclick = (e) => {
+            e.stopPropagation(); fpPlanFile = null; fpPlanInput.value = '';
+            fpPlanPreviewContainer.classList.add('hidden'); fpPlanDropZone.classList.remove('hidden'); checkFpReady();
+        };
+    }
+
+    // Ref Photos Upload
+    if (fpRefDropZone) {
+        fpRefDropZone.addEventListener('click', () => fpRefInput.click());
+        fpRefDropZone.addEventListener('dragover', (e) => { e.preventDefault(); fpRefDropZone.style.borderColor = THEME_COLOR; });
+        fpRefDropZone.addEventListener('dragleave', () => fpRefDropZone.style.borderColor = '#ccc');
+        fpRefDropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length) handleFpRefFiles(e.dataTransfer.files);
+        });
+        fpRefInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleFpRefFiles(e.target.files);
+        });
+    }
+
+    function handleFpRefFiles(files) {
+        if (!files || files.length === 0) return;
+        Array.from(files).forEach(file => {
+            if (file.type.startsWith('image/')) {
+                fpRefFiles.push(file);
+            }
+        });
+        updateRefPreviews();
+        checkFpReady();
+    }
+
+    function updateRefPreviews() {
+        fpRefPreviewContainer.innerHTML = '';
+        if (fpRefFiles.length > 0) {
+            fpRefPreviewContainer.classList.remove('hidden');
+            fpRefRemoveAll.classList.remove('hidden');
+            fpRefFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.className = 'unified-preview'; // using same CSS class for consistent look
+                    fpRefPreviewContainer.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            });
+        } else {
+            fpRefPreviewContainer.classList.add('hidden');
+            fpRefRemoveAll.classList.add('hidden');
+        }
+    }
+
+    if (fpRefRemoveAll) {
+        fpRefRemoveAll.onclick = (e) => {
+            e.stopPropagation();
+            fpRefFiles = [];
+            fpRefInput.value = '';
+            updateRefPreviews();
+            checkFpReady();
+        };
+    }
+
+    function checkFpReady() {
+        fpGenerateBtn.disabled = !(fpPlanFile && fpRefFiles.length > 0);
+    }
+
+    // --- Core Generation Logic (Shared by 'Generate' and 'Try Again') ---
+    async function performRoomGeneration() {
+        if (!fpPlanFile || fpRefFiles.length === 0) return;
+
+        // UI Setup for Loading
+        fpPlaceholderText.classList.add('hidden');
+        fpGenGrid.innerHTML = '';
+        fpGenGrid.style.display = 'none';
+        fpResultActions.classList.add('hidden');
+        fpLoading.classList.remove('hidden');
+
+        fpGenerateBtn.disabled = true;
+        if (fpRetryBtn) fpRetryBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.append('floor_plan', fpPlanFile);
+        fpRefFiles.forEach(file => {
+            formData.append('ref_photos', file);
+        });
+
+        try {
+            const res = await fetch('/generate-room-from-plan', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            if (res.ok && data.urls && data.urls.length > 0) {
+                // Success: Show Result Grid
+                const resultUrls = data.urls;
+                fpGenGrid.innerHTML = '';
+                fpGenGrid.style.display = 'flex'; // show grid
+
+                resultUrls.forEach((url, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'detail-card';
+
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.style.aspectRatio = "16 / 9";
+                    img.style.objectFit = "contain";
+                    img.style.backgroundColor = "#000";
+                    img.style.cursor = "zoom-in";
+                    img.onclick = (e) => {
+                        e.stopPropagation();
+                        openLightbox(url, resultUrls, idx);
+                    };
+
+                    const selectBtn = document.createElement('button');
+                    selectBtn.className = 'detail-upscale-btn';
+                    selectBtn.textContent = "SELECT THIS";
+                    selectBtn.style.marginTop = "0";
+
+                    selectBtn.onclick = async (e) => {
+                        e.stopPropagation();
+                        try {
+                            selectBtn.textContent = "Loading...";
+                            selectBtn.disabled = true;
+
+                            const fileRes = await fetch(url);
+                            const blob = await fileRes.blob();
+                            const file = new File([blob], `generated_empty_room_${idx}.png`, { type: 'image/png' });
+
+                            handleFile(file); // Set as main input
+                            fpGenModal.classList.add('hidden');
+                            showCustomAlert("Success", "Generated room set as main input!");
+
+                        } catch (err) {
+                            showCustomAlert("Error", "Failed to load selected image.");
+                            selectBtn.textContent = "SELECT THIS";
+                            selectBtn.disabled = false;
+                        }
+                    };
+
+                    div.appendChild(img);
+                    div.appendChild(selectBtn);
+                    fpGenGrid.appendChild(div);
+                });
+
+                fpResultActions.classList.remove('hidden');
+            } else {
+                // Failure
+                fpPlaceholderText.textContent = "Generation failed. Please try again.";
+                fpPlaceholderText.classList.remove('hidden');
+                showCustomAlert("Error", "Generation failed: " + (data.error || "Unknown error"));
+            }
+        } catch (err) {
+            fpPlaceholderText.textContent = "Server error.";
+            fpPlaceholderText.classList.remove('hidden');
+            showCustomAlert("Error", "Server error: " + err.message);
+        } finally {
+            fpLoading.classList.add('hidden');
+            fpGenerateBtn.disabled = false;
+            if (fpRetryBtn) fpRetryBtn.disabled = false;
+        }
+    }
+
+    // Bind Buttons
+    if (fpGenerateBtn) {
+        fpGenerateBtn.onclick = performRoomGeneration;
+    }
+
+    if (fpRetryBtn) {
+        fpRetryBtn.onclick = performRoomGeneration;
+    }
+
+    // --- Moodboard Generator Logic ---
     if (mbStep2RefImg) {
         mbStep2RefImg.onclick = () => {
             if (mbStep2RefImg.src) {
@@ -505,7 +763,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!res.ok) throw new Error(`서버 에러 (${res.status})`);
                 const data = await res.json();
 
-                // [핵심 수정] 서버로부터 받은 Moodboard URL 저장
                 if (data.moodboard_url) {
                     currentMoodboardUrl = data.moodboard_url;
                     console.log("✅ Moodboard URL Saved:", currentMoodboardUrl);
@@ -517,7 +774,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadingOverlay.classList.add('hidden');
                 resultSection.classList.remove('hidden');
 
-                // [수정] empty_room_url은 Step 1에서 만든 초기 빈 방 이미지
                 resultBefore.src = data.empty_room_url || data.original_url;
                 const results = data.result_urls || [];
                 if (results.length > 0) resultAfter.src = results[0];
@@ -609,7 +865,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
             try {
-                // 1. 서버에 '선택된 이미지'를 보내서 (빈방 생성 + 둘 다 업스케일) 요청
                 const res = await fetch("/finalize-download", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -619,9 +874,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
 
                 if (res.ok && data.upscaled_furnished && data.upscaled_empty) {
-                    // 2. 두 개의 결과물 다운로드
                     await downloadFile(data.upscaled_furnished, "Result_After_HighRes");
-                    // 약간의 딜레이 후 두 번째 파일 다운로드 (브라우저 차단 방지)
                     setTimeout(() => {
                         downloadFile(data.upscaled_empty, "Result_Before_Empty_HighRes");
                     }, 1000);
@@ -660,7 +913,6 @@ document.addEventListener('DOMContentLoaded', () => {
             detailBtn.disabled = true;
 
             detailSection.classList.remove('hidden');
-            // [수정] 초기화 시 두 개의 그리드 비우기
             if (detailGridLandscape) detailGridLandscape.innerHTML = '';
             if (detailGridPortrait) detailGridPortrait.innerHTML = '';
 
@@ -714,7 +966,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // [수정됨] script.js의 createDetailCard 함수 교체
     function createDetailCard(url, styleIndex, fullList = null) {
         const card = document.createElement('div');
         card.className = 'detail-card';
@@ -722,30 +973,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const img = document.createElement('img');
         img.src = url;
 
-        // [핵심 수정] 
-        // styleIndex (0부터 시작하는 리스트 인덱스라고 가정)
-        // 0, 1, 2번 (총 3장) -> 상단 가로줄 (Landscape)
-        // 3번 (즉, 4번째 이미지)부터 -> 하단 세로줄 (Portrait)
         if (styleIndex < 3) {
-            // [상단] 1~3번 이미지
             img.style.aspectRatio = "16 / 9";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, styleIndex + 1, fullList); // 버튼 추가
-
+            appendButtonsToCard(card, img, url, styleIndex + 1, fullList);
             const landscapeGrid = document.getElementById('detail-grid-landscape');
             if (landscapeGrid) landscapeGrid.appendChild(card);
         } else {
-            // [하단] 4~15번 이미지
-            img.style.aspectRatio = "4 / 5"; // 세로 비율 (4:5 추천)
+            img.style.aspectRatio = "4 / 5";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, styleIndex + 1, fullList); // 버튼 추가
-
+            appendButtonsToCard(card, img, url, styleIndex + 1, fullList);
             const portraitGrid = document.getElementById('detail-grid-portrait');
             if (portraitGrid) portraitGrid.appendChild(card);
         }
     }
 
-    // [수정됨] 디테일 컷 카드에 버튼 추가하는 함수 (버튼 먹통 방지 finally 추가)
     function appendButtonsToCard(card, img, url, styleIndex, fullList) {
         img.onclick = () => openLightbox(url, fullList, styleIndex - 1);
 
@@ -768,14 +1010,11 @@ document.addEventListener('DOMContentLoaded', () => {
         upBtn.onclick = async (e) => {
             e.stopPropagation();
 
-            // 중복 클릭 방지
             if (upBtn.disabled) return;
-
             upBtn.disabled = true;
             upBtn.textContent = "Processing...";
 
             try {
-                // [핵심] 방금 추가한 upscaleAndDownload 함수를 여기서 호출합니다.
                 const success = await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
 
                 if (success) {
@@ -787,7 +1026,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Critical Error:", err);
                 showCustomAlert("Error", "알 수 없는 오류가 발생했습니다.");
             } finally {
-                // [안전장치] 성공하든 실패하든 에러가 나든 버튼은 다시 살아나야 함
                 upBtn.textContent = "UPSCALE & DOWNLOAD";
                 upBtn.disabled = false;
             }
@@ -816,8 +1054,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
-                    style_index: styleIndex - 1, // index 0-based adjustment
-                    // [핵심] 재생성 시에도 무드보드 정보 유지
+                    style_index: styleIndex - 1,
                     moodboard_url: currentMoodboardUrl
                 })
             });
@@ -825,7 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok && data.url) {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
-                // 리스너 업데이트는 복잡하므로 단순 src 교체만 (Lightbox는 기존 리스트 유지됨 - 한계점)
                 imgElement.onclick = () => openLightbox(data.url, [data.url], 0);
             } else {
                 showCustomAlert("Failed", "재생성 실패: " + (data.error || "Unknown error"));
@@ -880,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lightbox.onclick = (e) => { if (e.target === lightbox) lightbox.classList.add('hidden'); };
     }
 });
-// [새로 추가] 업스케일링 및 다운로드 기능을 수행하는 함수
+
 async function upscaleAndDownload(imgUrl, filenamePrefix) {
     try {
         console.log("🚀 Upscaling start:", imgUrl);
@@ -891,7 +1127,6 @@ async function upscaleAndDownload(imgUrl, filenamePrefix) {
             body: JSON.stringify({ image_url: imgUrl })
         });
 
-        // 서버 응답 자체가 에러인 경우 (500 등)
         if (!res.ok) {
             const errText = await res.text();
             throw new Error(`Server Error (${res.status}): ${errText}`);
@@ -907,14 +1142,12 @@ async function upscaleAndDownload(imgUrl, filenamePrefix) {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            return true; // 성공 신호
+            return true;
         } else {
             throw new Error(data.error || data.warning || "Unknown error during upscale");
         }
     } catch (e) {
         console.error("❌ Upscale failed:", e);
-        // 필요하다면 여기서 에러 메시지를 띄워줄 수도 있습니다.
-        // showCustomAlert("Error", "업스케일링 실패: " + e.message);
-        return false; // 실패 신호
+        return false;
     }
 }

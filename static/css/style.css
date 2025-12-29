@@ -10,10 +10,14 @@
     --border-color: #333333;
     --radius: 10px;
     --transition: 0.3s ease;
+    /* [복구] 구버전에는 브랜드 컬러 변수가 없었거나 달랐을 수 있으나, 버튼 색상은 유지 */
+    --brand-color: #4A1215;
+    --brand-hover: #631a1e;
 }
 
 html {
     font-size: 80%;
+    /* [복구] 구버전 폰트 사이즈 */
 }
 
 * {
@@ -23,6 +27,7 @@ html {
 }
 
 body {
+    /* [복구] 구버전 폰트 패밀리 (Pretendard 우선) */
     font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     background-color: var(--bg-color);
     color: var(--text-color);
@@ -37,7 +42,6 @@ body {
 .container {
     width: 100%;
     max-width: 1200px;
-    /* [수정] 그리드가 넓어지므로 전체 폭을 조금 넓힘 */
 }
 
 header {
@@ -48,6 +52,7 @@ header {
 
 .logo {
     width: 250px;
+    /* [복구] 로고 사이즈 */
     height: 250px;
     object-fit: contain;
     display: block;
@@ -56,17 +61,76 @@ header {
 
 header h1 {
     font-size: 3rem;
+    /* [복구] 폰트 사이즈 */
     font-weight: 700;
     color: var(--text-color);
     margin-bottom: 1rem;
     letter-spacing: -0.02em;
+    /* Font-family 제거 (Body 상속) */
 }
 
 .subtitle-sub {
     font-size: 0.7rem;
+    /* [복구] */
     opacity: 0.6;
 }
 
+/* --- Buttons --- */
+button,
+.action-btn,
+.style-btn,
+.detail-upscale-btn {
+    /* Font-family 제거 (Body 상속) */
+    letter-spacing: 0.05em;
+    /* [복구] */
+    border-radius: var(--radius);
+    transition: all 0.2s ease;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 15px 30px;
+    /* [복구] 패딩 */
+    /* height 제거 (구버전은 padding으로 조절) */
+    font-size: 1.2rem;
+    /* [복구] */
+    font-weight: 600;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: none;
+    min-width: 140px;
+    background-color: #4A1215;
+    /* [복구] 직접 지정 */
+    color: white;
+}
+
+.action-btn:hover {
+    background-color: #631a1e;
+    transform: translateY(-2px);
+    /* [복구] 호버 효과 */
+}
+
+.action-btn:disabled {
+    background-color: #333333 !important;
+    color: #777777 !important;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.action-btn.secondary {
+    background-color: transparent;
+    border: 2px solid #ffffff;
+    /* [복구] 테두리 두께 */
+    color: #ffffff;
+}
+
+.action-btn.secondary:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* --- Upload Section --- */
 .upload-section {
     margin-bottom: 3rem;
 }
@@ -74,17 +138,34 @@ header h1 {
 .drop-zone {
     background-color: var(--card-bg);
     border: 1px solid var(--border-color);
+    /* [복구] 실선 */
     border-radius: var(--radius);
     padding: 4rem;
+    /* [복구] 패딩 */
     text-align: center;
     cursor: pointer;
     transition: var(--transition);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 200px;
 }
 
 .drop-zone:hover,
 .drop-zone.dragover {
     border-color: var(--primary-color);
     background-color: #1a1a1a;
+}
+
+.drop-zone p {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+.drop-zone strong {
+    color: #fff;
+    text-decoration: underline;
 }
 
 #preview-container {
@@ -100,16 +181,21 @@ header h1 {
     display: block;
 }
 
+/* [복구] 아이콘 버튼 (X 표시 등) */
 .icon-btn {
     position: absolute;
     top: 15px;
+    /* [복구] 위치 */
     right: 15px;
+    /* [복구] 위치 */
     background: rgba(0, 0, 0, 0.7);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 50%;
     width: 36px;
+    /* [복구] 크기 */
     height: 36px;
+    /* [복구] 크기 */
     cursor: pointer;
     font-size: 1.2rem;
     display: flex;
@@ -124,6 +210,7 @@ header h1 {
     border-color: white;
 }
 
+/* --- Style Selection --- */
 .style-section {
     margin-bottom: 3rem;
 }
@@ -131,18 +218,21 @@ header h1 {
 .style-section h2 {
     margin-bottom: 1.5rem;
     font-size: 1.5rem;
+    /* [복구] */
     font-weight: 600;
     color: var(--text-color);
     text-align: center;
+    /* Font-family 제거 */
 }
 
 .style-grid {
     display: flex;
     gap: 0.5rem;
+    /* [복구] 간격 */
     flex-wrap: wrap;
     justify-content: center;
-    overflow-x: visible;
     padding-bottom: 1rem;
+    overflow-x: visible;
 }
 
 .style-btn {
@@ -150,11 +240,13 @@ header h1 {
     border: 1px solid var(--border-color);
     color: var(--text-muted);
     padding: 1rem 2rem;
+    /* [복구] 패딩 */
+    height: auto;
+    /* [복구] 높이 자동 */
     border-radius: 100px;
     cursor: pointer;
-    transition: var(--transition);
-    font-family: inherit;
     font-size: 1rem;
+    /* [복구] */
     font-weight: 500;
     white-space: nowrap;
     flex-shrink: 0;
@@ -166,52 +258,122 @@ header h1 {
 }
 
 .style-btn.active {
+    background-color: transparent;
+    /* [복구] */
     border: 2px solid #ffffff;
+    /* [복구] 테두리 강조 */
     color: #ffffff;
     font-weight: 700;
+}
+
+/* --- Variant Grid (Step 3) [중앙 정렬 유지 + 구버전 스타일] --- */
+#variant-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 15px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto 2rem auto;
+    /* 중앙 정렬 */
+    justify-content: center;
+}
+
+.variant-img-btn {
+    width: 100%;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0;
+    gap: 10px;
+}
+
+.variant-img-btn img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 3px solid transparent;
+    background-color: #222;
+}
+
+.variant-label {
+    width: 100%;
+    padding: 0.5rem 0;
+    /* [복구] */
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    border-radius: 50px;
+    text-align: center;
+    font-size: 0.9rem;
+    /* [복구] */
+}
+
+.variant-img-btn.active img {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+.variant-img-btn.active .variant-label {
+    background-color: transparent;
+    /* [복구] */
+    border: 2px solid #ffffff;
+    /* [복구] */
+    color: #ffffff;
+    font-weight: 700;
+}
+
+/* --- Moodboard Preview (Step 3 Custom) [복구 및 수정] --- */
+#moodboard-upload-container {
+    width: 100%;
+    max-width: 1000px;
+    /* 너무 커지지 않게 제한 */
+    margin: 1rem auto;
+    /* 중앙 정렬 */
+}
+
+#moodboard-preview-container {
+    position: relative;
+    margin-top: 1rem;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    width: 100%;
+}
+
+/* [수정] 가로를 100%로 강제하고, 높이는 비율대로 늘어나게 변경 */
+#moodboard-preview {
+    width: 100%;
+    /* 가로 꽉 채움 (필수) */
+    height: auto;
+    /* 높이는 이미지 비율에 맞춰 자동 조절 */
+    display: block;
+    /* 이미지 하단 미세한 여백 제거 */
+    object-fit: unset;
+    /* contain/cover 속성 제거 (비율 왜곡 방지) */
 }
 
 .action-area {
     text-align: center;
     margin-bottom: 4rem;
+    margin-top: 2rem;
 }
 
 #render-btn {
-    background-color: #4A1215;
-    color: #ffffff;
-    border: none;
+    /* 이미 .action-btn 스타일이 적용됨, 추가 오버라이드 필요시 작성 */
     padding: 1.2rem 4rem;
+    /* [복구] */
     font-size: 1.2rem;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: var(--transition);
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    font-family: 'Outfit', sans-serif;
 }
 
-#render-btn:disabled {
-    background-color: #333333;
-    color: #777777;
-    cursor: not-allowed;
-}
-
-#render-btn:not(:disabled):hover {
-    background-color: #631a1e;
-    transform: translateY(-2px);
-}
-
-.result-section {
-    background-color: transparent;
-    padding: 0;
-    border: none;
-}
-
+/* --- Result Section --- */
 .result-section h2 {
     text-align: center;
     margin-bottom: 2rem;
     font-size: 2rem;
+    /* Font-family 제거 */
 }
 
 .comparison-container {
@@ -256,9 +418,11 @@ header h1 {
     position: absolute;
     top: 20px;
     padding: 6px 12px;
+    /* [복구] */
     background: rgba(0, 0, 0, 0.8);
     color: white;
     font-size: 0.9rem;
+    /* [복구] */
     font-weight: 500;
     border-radius: 4px;
     z-index: 100;
@@ -312,7 +476,9 @@ header h1 {
     top: 50%;
     left: 50%;
     width: 20px;
+    /* [복구] 크기 */
     height: 20px;
+    /* [복구] 크기 */
     background-color: white;
     border-radius: 50%;
     transform: translate(-50%, -50%);
@@ -321,11 +487,17 @@ header h1 {
     z-index: 11;
 }
 
+/* Slider Handle Text '< >' 제거 (구버전엔 없었음) */
+.slider-handle::after {
+    content: none;
+}
+
 #thumbnailContainer {
     display: flex;
     justify-content: center;
     gap: 10px;
     margin-top: 20px;
+    flex-wrap: wrap;
 }
 
 .download-area {
@@ -340,40 +512,121 @@ header h1 {
     margin-bottom: 1rem;
 }
 
-.action-btn {
+/* --- Detail View --- */
+#detail-section {
+    margin-top: 3rem;
+    /* [복구] */
+    text-align: center;
+    border-top: 1px solid var(--border-color);
+    padding-top: 2rem;
+    /* [복구] */
+    width: 100%;
+}
+
+#detail-section h3 {
+    font-size: 1.5rem;
+    /* [복구] */
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+}
+
+.detail-grid-landscape {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 15px;
+    /* [복구] 간격 */
+    width: 100%;
+    margin-bottom: 30px;
+}
+
+.detail-grid-portrait {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 15px;
+    /* [복구] 간격 */
+    width: 100%;
+}
+
+.detail-card {
+    position: relative;
+    border-radius: 10px;
+    /* [복구] */
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    transition: border-color 0.3s;
+    background-color: #000;
+}
+
+.detail-card:hover {
+    border-color: var(--primary-color);
+}
+
+.detail-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.5s;
+}
+
+/* [복구] 줌 효과 */
+.detail-card:hover img {
+    /* 구버전엔 줌 효과가 없거나 미미했으면 제거 가능, 일단 유지 */
+    transform: scale(1.03);
+}
+
+/* [복구] 디테일 뷰 리트라이 버튼 */
+.detail-retry-btn {
+    position: absolute;
+    top: 5px;
+    /* [복구] 위치 */
+    right: 5px;
+    /* [복구] 위치 */
+    width: 30px;
+    /* [복구] 크기 */
+    height: 30px;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.7);
+    /* [복구] 색상 */
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: 0.2s;
+}
+
+.detail-retry-btn:hover {
+    background-color: #fff;
+    color: #000;
+}
+
+.detail-upscale-btn {
+    width: 100%;
     background-color: #4A1215;
     color: white;
-    padding: 15px 30px;
     border: none;
-    border-radius: 8px;
-    font-size: 16px;
+    padding: 8px 0;
+    font-size: 0.8rem;
     font-weight: 600;
     text-transform: uppercase;
     cursor: pointer;
-    transition: background-color 0.3s;
-    font-family: 'Outfit', sans-serif;
-    letter-spacing: 0.5px;
+    transition: background 0.3s;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    z-index: 5;
+    opacity: 0.9;
 }
 
-.action-btn:hover {
-    background-color: #631a1e;
+.detail-card:hover .detail-upscale-btn {
+    opacity: 1;
 }
 
-.action-btn:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-}
-
-.action-btn.secondary {
-    background-color: transparent;
-    border: 2px solid #ffffff;
-    color: #ffffff;
-}
-
-.action-btn.secondary:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
+/* --- Modals & Loading --- */
 #loading-overlay {
     position: fixed;
     top: 0;
@@ -381,15 +634,17 @@ header h1 {
     width: 100%;
     height: 100%;
     background: rgba(0, 0, 0, 0.95);
+    /* [복구] 투명도 */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 5000;
 }
 
 .spinner {
     width: 60px;
+    /* [복구] 크기 */
     height: 60px;
     border: 2px solid rgba(255, 255, 255, 0.1);
     border-left-color: var(--text-color);
@@ -427,223 +682,10 @@ header h1 {
     display: none !important;
 }
 
-#variant-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 15px;
-    width: 100%;
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.variant-img-btn {
-    width: 100%;
-    height: auto;
-    background-color: transparent;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 0;
-    gap: 10px;
-}
-
-.variant-img-btn img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    border-radius: 12px;
-    border: 3px solid transparent;
-    background-color: #222;
-}
-
-.variant-label {
-    width: 100%;
-    padding: 0.5rem 0;
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
-    border-radius: 50px;
-    text-align: center;
-}
-
-.variant-img-btn.active img {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
-}
-
-.variant-img-btn.active .variant-label {
-    border: 2px solid #ffffff;
-    color: #ffffff;
-    font-weight: 700;
-}
-
-#moodboard-upload-container {
-    width: 100%;
-    margin-top: 1rem;
-}
-
-#moodboard-preview-container {
-    position: relative;
-    margin-top: 1rem;
-    border-radius: var(--radius);
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-}
-
-#moodboard-preview {
-    width: 100%;
-    display: block;
-}
-
-#detail-section {
-    margin-top: 3rem;
-    text-align: center;
-    border-top: 1px solid var(--border-color);
-    padding-top: 2rem;
-    width: 100%;
-    /* 전체 폭 사용 */
-}
-
-#detail-section h3 {
-    font-size: 1.5rem;
-    margin-bottom: 1.5rem;
-    color: var(--text-color);
-}
-
-/* [가로형 그리드] 1줄에 3장 (16:9) */
-.detail-grid-landscape {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr) !important;
-    /* 강제 3열 */
-    gap: 15px;
-    width: 100%;
-    margin-bottom: 30px;
-}
-
-/* [세로형 그리드] 1줄에 5장 (4:5) */
-.detail-grid-portrait {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr) !important;
-    /* 강제 5열 */
-    gap: 15px;
-    width: 100%;
-}
-
-/* 모바일 반응형 */
-@media (max-width: 1024px) {
-    .detail-grid-landscape {
-        grid-template-columns: repeat(1, 1fr) !important;
-    }
-
-    .detail-grid-portrait {
-        grid-template-columns: repeat(3, 1fr) !important;
-    }
-}
-
-@media (max-width: 768px) {
-    .detail-grid-portrait {
-        grid-template-columns: repeat(2, 1fr) !important;
-    }
-}
-
-.detail-card {
-    position: relative;
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    transition: border-color 0.3s;
-    background-color: #000;
-    /* 검은 배경 (이미지가 cover로 덮으면 안 보임) */
-}
-
-.detail-card:hover {
-    border-color: var(--primary-color);
-}
-
-.detail-card img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    /* [중요] 꽉 차게 */
-    object-position: center;
-    cursor: pointer;
-    display: block;
-}
-
-.detail-card-loader {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 20;
-}
-
-.mini-spinner {
-    width: 30px;
-    height: 30px;
-    border: 3px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #ffffff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-.detail-retry-btn {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background-color: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-}
-
-.detail-upscale-btn {
-    width: 100%;
-    background-color: #4A1215;
-    color: white;
-    border: none;
-    padding: 8px 0;
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: background 0.3s;
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    z-index: 5;
-    opacity: 0.9;
-}
-
-.detail-upscale-btn:hover {
-    background-color: #631a1e;
-    opacity: 1;
-}
-
-.detail-upscale-btn:disabled {
-    background-color: #333;
-    color: #777;
-    cursor: not-allowed;
-}
-
-/* Lightbox & Modal styles (Unchanged) */
+/* Lightbox */
 .lightbox {
     position: fixed;
-    z-index: 4000;
+    z-index: 10000;
     left: 0;
     top: 0;
     width: 100%;
@@ -668,8 +710,10 @@ header h1 {
     color: #f1f1f1;
     font-size: 40px;
     cursor: pointer;
+    z-index: 10001;
 }
 
+/* Modal */
 .custom-modal {
     position: fixed;
     top: 0;
@@ -680,34 +724,54 @@ header h1 {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 3000;
+    z-index: 4000;
 }
 
+/* Modal Content - Flex Column Layout */
 .modal-content {
     background-color: #1a1a1a;
-    padding: 2rem;
+    /* [복구] 배경색 */
+    padding: 0;
     border-radius: 12px;
     border: 1px solid var(--border-color);
     text-align: center;
     max-width: 400px;
     width: 90%;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+
+    display: flex;
+    flex-direction: column;
+    max-height: 85vh;
 }
 
 .modal-content h3 {
-    margin-bottom: 1rem;
-    color: var(--text-color);
+    margin: 0;
+    padding: 1.5rem;
+    background: #1a1a1a;
+    /* [복구] 배경색 통일 */
     font-size: 1.5rem;
+    /* [복구] 사이즈 */
+    color: var(--text-color);
+    flex-shrink: 0;
 }
 
 .modal-content p {
     color: var(--text-muted);
-    margin-bottom: 2rem;
+    margin: 0;
 }
 
+/* Footer Button Area */
 .modal-buttons {
+    padding: 1.2rem;
+    background: #1a1a1a;
+    border-top: 1px solid #333;
     display: flex;
+    flex-direction: row !important;
     gap: 1rem;
     justify-content: center;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
 }
 
 .modal-buttons button {
@@ -715,14 +779,124 @@ header h1 {
     min-width: 100px;
 }
 
-.detail-grid-portrait {
-    grid-template-columns: repeat(3, 1fr);
+/* Floor Plan Modal Layout */
+.fp-modal-split {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
+.fp-left-panel {
+    flex: 1;
+    border-right: 1px solid #333;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.fp-right-panel {
+    flex: 1.2;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: #111;
+    overflow-y: auto;
+}
+
+.fp-section-title {
+    color: #ccc;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    text-align: left;
+}
+
+/* Drop Zone Compact Override */
+#fp-plan-drop-zone,
+#fp-ref-drop-zone {
+    padding: 1rem;
+    min-height: auto;
+    border-style: dashed;
+}
+
+/* Unified size for modal previews */
+.unified-preview {
+    height: 100px;
+    width: auto;
+    object-fit: contain;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background-color: #000;
+    display: block;
+    margin: 0 auto;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Moodboard & FP Grid Styling */
+#mb-gen-grid,
+#fp-gen-grid {
+    display: flex !important;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    /* [선택] 간격도 15px에서 10px로 살짝 줄이면 더 안정적입니다 */
+    overflow-y: auto;
+    width: 100%;
+    padding-bottom: 1rem;
+    flex: 1;
+}
+
+#mb-gen-grid .detail-card,
+#fp-gen-grid .detail-card {
+    /* 너비는 그대로 33.333% 유지 */
+    width: calc(33.333% - 10px);
+    /* [수정] 최소 너비를 줄여야 좁은 공간에서도 3개가 구겨져 들어갑니다 */
+    min-width: 150px;
+    aspect-ratio: 16 / 9;
+}
+
+/* Mobile responsive */
+@media (max-width: 1024px) {
+    #variant-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .detail-grid-landscape {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+
+@media (max-width: 900px) {
+    .fp-modal-split {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .fp-left-panel {
+        border-right: none;
+        border-bottom: 1px solid #333;
+        overflow-y: visible;
+        flex: none;
+    }
+
+    #mb-gen-grid .detail-card,
+    #fp-gen-grid .detail-card {
+        width: calc(50% - 10px);
+    }
+}
 
 @media (max-width: 768px) {
-    .detail-grid-portrait {
+    #variant-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .detail-grid-portrait {
+        grid-template-columns: repeat(2, 1fr) !important;
     }
 
     .button-group {

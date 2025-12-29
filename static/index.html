@@ -6,7 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Interior Rendering Service</title>
     <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link
+        href="[https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap](https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap)"
+        rel="stylesheet">
 </head>
 
 <body>
@@ -26,6 +28,16 @@
                     <p>Drag & Drop your room photo here or <strong>Browse</strong></p>
                     <input type="file" id="file-input" accept="image/*" hidden>
                 </div>
+
+                <div style="text-align: center; margin-top: 1rem;">
+                    <p style="font-size: 0.9rem; color: #a1a1aa; margin-bottom: 0.5rem;">Only have a floor plan or bad
+                        angle photo?</p>
+                    <button id="open-fp-gen-btn" class="action-btn secondary"
+                        style="font-size: 0.9rem; padding: 10px 20px; border-color: #555; color: #ccc;">
+                        Generate Perfect Room from Floor Plan
+                    </button>
+                </div>
+
                 <div id="preview-container" class="hidden">
                     <img id="image-preview" src="" alt="Room Preview">
                     <button id="remove-image" class="icon-btn">×</button>
@@ -68,7 +80,7 @@
             </section>
 
             <div class="action-area">
-                <button id="render-btn" disabled>Start Rendering</button>
+                <button id="render-btn" class="action-btn" disabled>Start Rendering</button>
             </div>
 
             <section class="result-section hidden" id="result-section">
@@ -191,8 +203,7 @@
                             <p>Analyzing furniture & Creating layouts...</p>
                         </div>
 
-                        <div class="detail-grid" id="mb-gen-grid"
-                            style="grid-template-columns: repeat(3, 1fr); gap: 15px; overflow-y: auto; flex: 1; padding-bottom: 2rem; justify-content: center; align-content: center;">
+                        <div class="detail-grid" id="mb-gen-grid">
                         </div>
 
                         <div style="padding-top: 1rem; text-align: center; border-top: 1px solid #333;">
@@ -208,6 +219,88 @@
 
             <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
                 <button id="mb-gen-close-btn" class="action-btn secondary"
+                    style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="floorplan-generator-modal" class="custom-modal hidden">
+        <div class="modal-content" style="max-width: 1400px; width: 95%; height: 90vh; padding: 0;">
+
+            <div style="padding: 1.5rem; background: #1a1a1a; border-bottom: 1px solid #333;">
+                <h3 style="margin: 0; color: #fff; font-size: 1.5rem;">Generate Empty Room from Floor Plan</h3>
+                <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #a1a1aa;">
+                    Combine the structure of a floor plan with the textures from your photos.
+                </p>
+            </div>
+
+            <div class="fp-modal-split">
+                <div class="fp-left-panel">
+                    <div style="margin-bottom: 2rem;">
+                        <h4 class="fp-section-title">1. Floor Plan (Structure)</h4>
+                        <div class="drop-zone" id="fp-plan-drop-zone" style="border-style: dashed;">
+                            <p>Upload Floor Plan</p>
+                            <input type="file" id="fp-plan-input" accept="image/*" hidden>
+                        </div>
+                        <div id="fp-plan-preview-container" class="hidden"
+                            style="position: relative; margin-top: 10px;">
+                            <img id="fp-plan-preview" src="" class="unified-preview">
+                            <button id="fp-plan-remove" class="icon-btn"
+                                style="top: 5px; right: calc(50% - 15px); width: 25px; height: 25px; font-size: 1rem;">×</button>
+                        </div>
+                    </div>
+
+                    <div style="flex: 1; display: flex; flex-direction: column;">
+                        <h4 class="fp-section-title">2. Ref Photos (Material/Texture)</h4>
+                        <div class="drop-zone" id="fp-ref-drop-zone" style="border-style: dashed; flex: 1;">
+                            <p><strong>Add Photos</strong><br>(You can add multiple)</p>
+                            <input type="file" id="fp-ref-input" accept="image/*" multiple hidden>
+                        </div>
+
+                        <div id="fp-ref-preview-container" class="hidden"
+                            style="position: relative; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+                        </div>
+                        <button id="fp-ref-remove-all" class="action-btn secondary hidden"
+                            style="margin-top: 10px; font-size: 0.8rem; padding: 5px 10px; align-self: center;">Clear
+                            All</button>
+                    </div>
+
+                    <div style="margin-top: 2rem; text-align: center;">
+                        <button id="fp-generate-btn" class="action-btn" style="width: 100%;" disabled>GENERATE
+                            ROOM</button>
+                    </div>
+                </div>
+
+                <div class="fp-right-panel">
+                    <h4 class="fp-section-title" style="width: 100%; text-align: center;">Generated Options (Select
+                        Best)</h4>
+
+                    <div id="fp-placeholder-text"
+                        style="flex: 1; display: flex; align-items: center; justify-content: center; color: #555;">
+                        <p>Results will appear here</p>
+                    </div>
+
+                    <div id="fp-loading" class="hidden"
+                        style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                        <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                        <p>Constructing 3D Space (Generating 5 Options)...</p>
+                    </div>
+
+                    <div class="detail-grid" id="fp-gen-grid" style="display: none;">
+                    </div>
+
+                    <div id="fp-result-actions" class="hidden"
+                        style="width: 100%; margin-top: 1.5rem; text-align: center; border-top: 1px solid #333; padding-top: 1rem;">
+                        <button id="fp-retry-btn" class="action-btn secondary"
+                            style="width: 100%; padding: 12px; font-size: 0.9rem;">
+                            &#x21bb; REGENERATE ROOM (TRY AGAIN)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
+                <button id="fp-close-btn" class="action-btn secondary"
                     style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
             </div>
         </div>

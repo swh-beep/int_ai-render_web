@@ -20,13 +20,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 import gc
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from typing import Optional 
+from typing import Optional, List 
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
 # ---------------------------------------------------------
 load_dotenv()
 
+# [유지] 원본 모델명 유지
 MODEL_NAME = 'gemini-3-pro-image-preview'
 
 API_KEY_POOL = []
@@ -103,38 +104,36 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
     print("❌ [Fatal] 모든 키 시도 실패.", flush=True)
     return None
 
-def standardize_image(image_path, output_path=None):
+# [수정] keep_ratio 파라미터 추가 및 로직 조건부 실행
+def standardize_image(image_path, output_path=None, keep_ratio=False):
     try:
         if output_path is None: output_path = image_path
         with Image.open(image_path) as img:
             img = ImageOps.exif_transpose(img)
             if img.mode != 'RGB': img = img.convert('RGB')
-            
-            width, height = img.size
-            
-            if width >= height:
+
+            # [수정] keep_ratio가 False일 때만 16:9 비율 강제 적용
+            if not keep_ratio:
+                width, height = img.size
                 target_ratio = 16 / 9
                 target_size = (1920, 1080)
-            else:
-                target_ratio = 4 / 5
-                target_size = (1080, 1350)
 
-            current_ratio = width / height
+                current_ratio = width / height
 
-            if current_ratio > target_ratio:
-                new_width = int(height * target_ratio)
-                offset = (width - new_width) // 2
-                img = img.crop((offset, 0, offset + new_width, height))
-            else:
-                new_height = int(width / target_ratio)
-                offset = (height - new_height) // 2
-                img = img.crop((0, offset, width, offset + new_height))
+                if current_ratio > target_ratio:
+                    new_width = int(height * target_ratio)
+                    offset = (width - new_width) // 2
+                    img = img.crop((offset, 0, offset + new_width, height))
+                else:
+                    new_height = int(width / target_ratio)
+                    offset = (height - new_height) // 2
+                    img = img.crop((0, offset, width, offset + new_height))
 
-            img = img.resize(target_size, Image.Resampling.LANCZOS)
-            
+                img = img.resize(target_size, Image.Resampling.LANCZOS)
+
             base, _ = os.path.splitext(output_path)
-            new_output_path = f"{base}.jpg"
-            img.save(new_output_path, "JPEG", quality=90)
+            new_output_path = f"{base}.png"
+            img.save(new_output_path, "PNG")
             return new_output_path
     except Exception as e:
         print(f"!! 표준화 실패: {e}", flush=True)
@@ -179,7 +178,7 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                     if hasattr(part, 'inline_data'):
                         print(f">> [성공] 빈 방 이미지 생성됨! ({try_count+1}회차)", flush=True)
                         timestamp = int(time.time())
-                        filename = f"empty_{timestamp}_{unique_id}.jpg"
+                        filename = f"empty_{timestamp}_{unique_id}.png"
                         path = os.path.join("outputs", filename)
                         with open(path, 'wb') as f: f.write(part.inline_data.data)
                         return standardize_image(path)
@@ -210,7 +209,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
             "3. **STYLE:** Match the Reference Moodboard style.\n"
-            "4. **WINDOW TREATMENT (CURTAINS):** Add floor-to-ceiling curtains/drapes. They must be **OPEN and PULLED BACK** to the sides. Cover ONLY the outer 20-25% of the window width (leaving the center view completely visible). Use natural fabric with soft vertical folds.\n\n"
+            "4. **WINDOW TREATMENT (CURTAINS - LOCATION STRICT):** Add floor-to-ceiling **Sheer White Chiffon Curtains**. <CRITICAL>: Place them **ONLY** along the vertical edges of the GLASS WINDOW. **DO NOT** generate curtains on solid walls, corners without windows, or doors. They must **HANG STRAIGHT DOWN NATURALLY** (do not tie) covering only the outer 15% of the glass to frame the view.\n\n"
 
             "<CRITICAL: DIMENSIONAL TEXT ADHERENCE>\n"
             "1. **OCR & CONSTRAINTS:** Actively SCAN the 'Style Reference' image for any text indicating dimensions (e.g., '2400mm', 'W:200cm', '3-seater', '1800x900').\n"
@@ -248,7 +247,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, start_
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
                     timestamp = int(time.time())
-                    filename = f"result_{timestamp}_{unique_id}.jpg"
+                    filename = f"result_{timestamp}_{unique_id}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
                     return path
@@ -353,10 +352,11 @@ def download_image(url, unique_id):
         res = requests.get(url)
         if res.status_code == 200:
             timestamp = int(time.time())
-            filename = f"magnific_{timestamp}_{unique_id}.jpg"
+            filename = f"magnific_{timestamp}_{unique_id}.png"
             path = os.path.join("outputs", filename)
             with open(path, "wb") as f: f.write(res.content)
-            return standardize_image(path)
+            # [수정] keep_ratio=True를 전달하여 원본 비율(세로 등)을 유지
+            return standardize_image(path, keep_ratio=True)
         return None
     except: return None
 
@@ -413,7 +413,6 @@ def render_room(
                 for f in files:
                     if re.search(pattern, f):
                         ref_path = os.path.join(assets_dir, f)
-                        # [핵심 수정] 찾은 에셋 경로를 URL 형태로 변환하여 mb_url에 저장!
                         mb_url = f"/assets/{safe_room}/{safe_style}/{f}"
                         print(f">> [Preset Style] Asset Found: {ref_path} -> URL: {mb_url}", flush=True)
                         found = True
@@ -421,7 +420,6 @@ def render_room(
                 if not found:
                     if len(files) > 0:
                         ref_path = os.path.join(assets_dir, files[0])
-                        # Fallback일 때도 URL 설정
                         mb_url = f"/assets/{safe_room}/{safe_style}/{files[0]}"
                         print(f"!! [Warning] Fallback used. URL: {mb_url}", flush=True)
                     else:
@@ -464,7 +462,7 @@ def render_room(
             "empty_room_url": final_before_url,
             "result_url": generated_results[0], 
             "result_urls": generated_results, 
-            "moodboard_url": mb_url, # 이제 Preset일 때도 값이 들어있음
+            "moodboard_url": mb_url, 
             "message": "Complete"
         })
     except Exception as e:
@@ -603,7 +601,7 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
                 if hasattr(part, 'inline_data'):
                     timestamp = int(time.time())
                     safe_style_name = "".join([c for c in style_config['name'] if c.isalnum()])[:20]
-                    filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.jpg"
+                    filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
                     return f"/outputs/{filename}"
@@ -632,7 +630,6 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
         
         furniture_list = ["Main Furniture"]
         if req.moodboard_url:
-            # [수정됨] 전체 생성 로직과 동일하게 Assets/Outputs 경로 자동 판별 추가
             if req.moodboard_url.startswith("/assets/"):
                 rel_path = req.moodboard_url.lstrip("/")
                 mb_path = os.path.join(*rel_path.split("/"))
@@ -674,7 +671,6 @@ def generate_details_endpoint(req: DetailRequest):
         furniture_list = ["Sofa", "Chair", "Table", "Lamp", "Rug", "Decor"] 
         
         if req.moodboard_url:
-            # [핵심 수정] 경로 처리 로직 일원화
             if req.moodboard_url.startswith("/assets/"):
                 rel_path = req.moodboard_url.lstrip("/")
                 mb_path = os.path.join(*rel_path.split("/"))
@@ -720,7 +716,7 @@ def generate_details_endpoint(req: DetailRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------------------
-# [NEW] Moodboard Generator Feature (이 부분은 파일 끝까지 그대로)
+# [NEW] Moodboard Generator Feature
 # -----------------------------------------------------------------------------
 
 MOODBOARD_SYSTEM_PROMPT = """
@@ -775,7 +771,8 @@ def generate_moodboard_logic(image_path, unique_id, index):
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
                     timestamp = int(time.time())
-                    filename = f"gen_mb_{timestamp}_{unique_id}_{index}.jpg"
+                    # [유지] PNG 저장
+                    filename = f"gen_mb_{timestamp}_{unique_id}_{index}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
                     return f"/outputs/{filename}"
@@ -798,7 +795,6 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
         generated_results = []
         
-        # [수정: 동시성 개선] 무드보드 생성도 6개씩 병렬 처리
         with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1) for i in range(5)]
             for future in futures:
@@ -815,6 +811,122 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
     except Exception as e:
         print(f"🔥🔥🔥 [Moodboard Gen Error] {e}")
+        traceback.print_exc()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+# -----------------------------------------------------------------------------
+# [NEW] Generate Room from Floor Plan Feature
+# -----------------------------------------------------------------------------
+
+# Helper function to perform a single generation
+def generate_single_room_from_plan(plan_img, ref_images, unique_id, index):
+    try:
+        system_instruction = "You are an expert architectural visualizer."
+        
+        # [수정 Final 5] 가구 무시 강제(Ignore Furniture) + 구조/재질 분리 완벽 적용 (Prompt same as previous)
+        prompt = (
+            "TASK: Perform a Step-by-Step Architectural Visualization. Follow this strict pipeline to reconstruct the room accurately:\n\n"
+            
+            "INPUTS:\n"
+            "- Plan: The Blueprint. **Absolute Authority for 3D GEOMETRY & STRUCTURE.**\n"
+            f"- Ref Photos ({len(ref_images)} images): **Source for TEXTURE MAPPING & STYLE PROPORTIONS only.**\n\n"
+
+            "<STEP 1: CONSTRUCT THE 3D SHELL (Geometric Precision)>\n"
+            "1. **DETECT WALL OFFSETS (JOGS):** Look closely at the Plan's walls. **DO NOT assume straight lines.**\n"
+            "   - If a thick black wall line turns 90 degrees inward/outward (creating an 'L' shape or a niche), **YOU MUST RENDER THAT DEPTH.**\n"
+            "   - **Example:** A door located *after* a wall turns is a **RECESSED DOOR**. Do not draw it on the flat side wall. Draw the corner first, then the door in the recess.\n"
+            "2. **BREAK SYMMETRY:** Most plans are NOT symmetrical. Scan the Left and Right walls independently.\n"
+            "   - If the Left wall has a jog/door and the Right wall is solid, **RENDER IT ASYMMETRICALLY.** Do not mirror the features.\n"
+            "3. **Camera Setup:** Stand in the center, looking at the main window with a **28mm lens** (Natural Wide Angle, minimize distortion).\n\n"
+
+            "<STEP 2: SPATIAL MAPPING (Locate the References)>\n"
+            "1. **Map to Geometry:**\n"
+            "   - If the photo shows the **Window Wall**, apply that curtain/window style to the **Back Wall** of your 3D model.\n"
+            "   - If the photo shows a **Solid Wall**, apply that wallpaper/molding style to the **Side Walls**.\n"
+            "   - If the photo shows the **Ceiling**, apply that specific cove lighting (Well Ceiling) design. **Keep the exact width/depth ratio.**\n"
+            "2. **IGNORE FURNITURE:** Do NOT replicate the sofa, bed, TV, or rugs from the photos. **We need an EMPTY ROOM.** Only look *behind* the furniture to see the wall/floor textures.\n\n"
+
+            "<STEP 3: TEXTURE APPLICATION (Material Transfer)>\n"
+            "1. **Flooring:** Ignore the plan's yellow color. Extract the actual wood/tile texture from the photos (look past any rugs) and pave the entire floor.\n"
+            "2. **Baseboard & Molding:** Apply the same molding style/height found in the photos.\n\n"
+
+            "<STEP 4: THE 'CHAMELEON' RULE (In-fill Missing Elements)>\n"
+            "**Scenario:** The Plan shows a Door, but the Reference Photo does NOT show a door.\n"
+            "**Action:** Generate the object to **BLEND IN** with the room's base style.\n"
+            "1. **DOOR COLOR LOGIC:** Do NOT use a default wood texture or default white unless seen in photos. **Sample the surrounding WALL COLOR.**\n"
+            "2. **Tone-on-Tone:** Render the door and frame in the **SAME Base Color** as the wallpaper. It should look like a seamless, built-in architectural element.\n"
+            "3. **Consistency:** If unsure, follow the dominant wall tone. Never introduce a random contrasting material.\n\n"
+            
+            "OUTPUT RULE: 16:9 Image. Empty Unfurnished Room. Structure respects Plan's asymmetric geometry. Materials match Photos."
+        )
+        
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        
+        content_list = [prompt, plan_img] + ref_images
+        
+        response = call_gemini_with_failover(MODEL_NAME, content_list, {'timeout': 90}, safety_settings, system_instruction)
+        
+        if response and hasattr(response, 'candidates') and response.candidates:
+            for part in response.parts:
+                if hasattr(part, 'inline_data'):
+                    timestamp = int(time.time())
+                    out_filename = f"fp_result_{timestamp}_{unique_id}_{index}.png"
+                    out_path = os.path.join("outputs", out_filename)
+                    with open(out_path, 'wb') as f: f.write(part.inline_data.data)
+                    
+                    final_path = standardize_image(out_path)
+                    return f"/outputs/{os.path.basename(final_path)}"
+        return None
+    except Exception as e:
+        print(f"!! Single Room Gen Error {index}: {e}")
+        return None
+
+@app.post("/generate-room-from-plan")
+def generate_room_from_plan(
+    floor_plan: UploadFile = File(...),
+    ref_photos: List[UploadFile] = File(...) 
+):
+    try:
+        unique_id = uuid.uuid4().hex[:8]
+        timestamp = int(time.time())
+        print(f"\n=== [Floor Plan Gen] Starting 5 variations for {unique_id} ===", flush=True)
+
+        # 1. 파일 저장 (도면)
+        plan_path = os.path.join("outputs", f"fp_plan_{timestamp}_{unique_id}.png")
+        with open(plan_path, "wb") as buffer: shutil.copyfileobj(floor_plan.file, buffer)
+        plan_img = Image.open(plan_path)
+
+        # 2. 파일 저장 (레퍼런스 이미지들)
+        ref_images = []
+        for idx, ref_file in enumerate(ref_photos):
+            ref_path = os.path.join("outputs", f"fp_ref_{timestamp}_{unique_id}_{idx}.png")
+            with open(ref_path, "wb") as buffer: shutil.copyfileobj(ref_file.file, buffer)
+            ref_images.append(Image.open(ref_path))
+        
+        print(f">> Loaded {len(ref_images)} reference photos.", flush=True)
+
+        generated_results = []
+        
+        # [수정] 5장 병렬 생성
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(generate_single_room_from_plan, plan_img, ref_images, unique_id, i+1) for i in range(5)]
+            for future in futures:
+                res = future.result()
+                if res: generated_results.append(res)
+        
+        if generated_results:
+            # urls 리스트 반환
+            return JSONResponse(content={"urls": generated_results, "message": "Success"})
+        else:
+            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
+            
+    except Exception as e:
+        print(f"🔥🔥🔥 [Floor Plan Gen Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
