@@ -1,6 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     console.log("✅ script.js 로드됨 (Multi Option FP Generation)");
 
+    // [1] 가구 분석 데이터 저장용 변수 (백엔드에서 받은 데이터 캐싱)
+    let currentFurnitureData = null;
+
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
     const modalTitle = document.getElementById('modal-title');
@@ -57,12 +60,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const moodboardPreview = document.getElementById('moodboard-preview');
     const removeMoodboardBtn = document.getElementById('remove-moodboard');
 
-    // [NEW] Floor Plan Generator Elements
+    // Floor Plan Generator Elements
     const openFpGenBtn = document.getElementById('open-fp-gen-btn');
     const fpGenModal = document.getElementById('floorplan-generator-modal');
     const fpCloseBtn = document.getElementById('fp-close-btn');
-    const fpGenerateBtn = document.getElementById('fp-generate-btn'); // Main Generate
-    const fpRetryBtn = document.getElementById('fp-retry-btn'); // Try Again
+    const fpGenerateBtn = document.getElementById('fp-generate-btn');
+    const fpRetryBtn = document.getElementById('fp-retry-btn');
 
     // Plan Upload Elements
     const fpPlanDropZone = document.getElementById('fp-plan-drop-zone');
@@ -71,14 +74,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const fpPlanPreview = document.getElementById('fp-plan-preview');
     const fpPlanRemove = document.getElementById('fp-plan-remove');
 
-    // Ref Photo Upload Elements (Multiple)
+    // Ref Photo Upload Elements
     const fpRefDropZone = document.getElementById('fp-ref-drop-zone');
     const fpRefInput = document.getElementById('fp-ref-input');
     const fpRefPreviewContainer = document.getElementById('fp-ref-preview-container');
     const fpRefRemoveAll = document.getElementById('fp-ref-remove-all');
 
-    // Result Elements (Grid Logic)
-    const fpUseBtn = document.getElementById('fp-use-btn'); // No longer main selector
+    // Result Elements
     const fpLoading = document.getElementById('fp-loading');
     const fpResultActions = document.getElementById('fp-result-actions');
     const fpPlaceholderText = document.getElementById('fp-placeholder-text');
@@ -87,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let fpPlanFile = null;
     let fpRefFiles = [];
 
-    // [Moodboard Generator Elements]
+    // Moodboard Generator Elements
     const openMbGenBtn = document.getElementById('open-mb-gen-btn');
     const mbGenModal = document.getElementById('moodboard-generator-modal');
     const mbGenDropZone = document.getElementById('mb-gen-drop-zone');
@@ -420,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 reader.onload = (e) => {
                     const img = document.createElement('img');
                     img.src = e.target.result;
-                    img.className = 'unified-preview'; // using same CSS class for consistent look
+                    img.className = 'unified-preview';
                     fpRefPreviewContainer.appendChild(img);
                 };
                 reader.readAsDataURL(file);
@@ -445,11 +447,10 @@ document.addEventListener('DOMContentLoaded', () => {
         fpGenerateBtn.disabled = !(fpPlanFile && fpRefFiles.length > 0);
     }
 
-    // --- Core Generation Logic (Shared by 'Generate' and 'Try Again') ---
+    // --- Core Generation Logic ---
     async function performRoomGeneration() {
         if (!fpPlanFile || fpRefFiles.length === 0) return;
 
-        // UI Setup for Loading
         fpPlaceholderText.classList.add('hidden');
         fpGenGrid.innerHTML = '';
         fpGenGrid.style.display = 'none';
@@ -473,10 +474,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
 
             if (res.ok && data.urls && data.urls.length > 0) {
-                // Success: Show Result Grid
                 const resultUrls = data.urls;
                 fpGenGrid.innerHTML = '';
-                fpGenGrid.style.display = 'flex'; // show grid
+                fpGenGrid.style.display = 'flex';
 
                 resultUrls.forEach((url, idx) => {
                     const div = document.createElement('div');
@@ -508,7 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const blob = await fileRes.blob();
                             const file = new File([blob], `generated_empty_room_${idx}.png`, { type: 'image/png' });
 
-                            handleFile(file); // Set as main input
+                            handleFile(file);
                             fpGenModal.classList.add('hidden');
                             showCustomAlert("Success", "Generated room set as main input!");
 
@@ -526,7 +526,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 fpResultActions.classList.remove('hidden');
             } else {
-                // Failure
                 fpPlaceholderText.textContent = "Generation failed. Please try again.";
                 fpPlaceholderText.classList.remove('hidden');
                 showCustomAlert("Error", "Generation failed: " + (data.error || "Unknown error"));
@@ -542,7 +541,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Bind Buttons
     if (fpGenerateBtn) {
         fpGenerateBtn.onclick = performRoomGeneration;
     }
@@ -763,6 +761,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!res.ok) throw new Error(`서버 에러 (${res.status})`);
                 const data = await res.json();
 
+                // [2] 분석 데이터 저장 (캐싱)
+                if (data.furniture_data) {
+                    console.log("📦 가구 분석 데이터 저장 완료:", data.furniture_data.length + "개");
+                    currentFurnitureData = data.furniture_data;
+                }
+
                 if (data.moodboard_url) {
                     currentMoodboardUrl = data.moodboard_url;
                     console.log("✅ Moodboard URL Saved:", currentMoodboardUrl);
@@ -933,7 +937,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const payload = {
                     image_url: currentImgUrl,
-                    moodboard_url: currentMoodboardUrl
+                    moodboard_url: currentMoodboardUrl,
+                    furniture_data: currentFurnitureData // [3] 저장된 데이터 전송
                 };
 
                 const res = await fetch("/generate-details", {
@@ -1007,11 +1012,24 @@ document.addEventListener('DOMContentLoaded', () => {
         upBtn.className = 'detail-upscale-btn';
         upBtn.textContent = "UPSCALE & DOWNLOAD";
 
+        // [script.js] appendButtonsToCard 함수 내부의 upBtn.onclick 부분 교체
+
         upBtn.onclick = async (e) => {
             e.stopPropagation();
 
             if (upBtn.disabled) return;
             upBtn.disabled = true;
+
+            // [수정] 1. 로딩 오버레이 생성 및 부착
+            const loader = document.createElement('div');
+            loader.className = 'detail-card-loader';
+            const spinner = document.createElement('div');
+            spinner.className = 'mini-spinner';
+            loader.appendChild(spinner);
+            card.appendChild(loader); // 카드 위에 덮어씌움
+
+            // 버튼 텍스트 변경 (선택사항)
+            const originalText = upBtn.textContent;
             upBtn.textContent = "Processing...";
 
             try {
@@ -1026,7 +1044,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Critical Error:", err);
                 showCustomAlert("Error", "알 수 없는 오류가 발생했습니다.");
             } finally {
-                upBtn.textContent = "UPSCALE & DOWNLOAD";
+                // [수정] 2. 로딩 오버레이 제거 및 버튼 복구
+                if (loader && loader.parentNode) {
+                    loader.parentNode.removeChild(loader);
+                }
+                upBtn.textContent = originalText;
                 upBtn.disabled = false;
             }
         };
@@ -1055,7 +1077,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
                     style_index: styleIndex - 1,
-                    moodboard_url: currentMoodboardUrl
+                    moodboard_url: currentMoodboardUrl,
+                    // [4] 개별 재생성 시에도 캐시된 데이터 전송 (빠른 재생성)
+                    furniture_data: currentFurnitureData
                 })
             });
             const data = await res.json();

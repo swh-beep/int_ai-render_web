@@ -80,9 +80,7 @@ button,
 .action-btn,
 .style-btn,
 .detail-upscale-btn {
-    /* Font-family 제거 (Body 상속) */
-    letter-spacing: 0.05em;
-    /* [복구] */
+    letter-spacing: 0.5px;
     border-radius: var(--radius);
     transition: all 0.2s ease;
 }
@@ -91,18 +89,15 @@ button,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 15px 30px;
-    /* [복구] 패딩 */
-    /* height 제거 (구버전은 padding으로 조절) */
-    font-size: 1.2rem;
-    /* [복구] */
+    padding: 0 24px;
+    height: 48px;
+    font-size: 0.95rem;
     font-weight: 600;
     text-transform: uppercase;
     cursor: pointer;
     border: none;
     min-width: 140px;
     background-color: #4A1215;
-    /* [복구] 직접 지정 */
     color: white;
 }
 
@@ -901,5 +896,47 @@ button,
 
     .button-group {
         flex-direction: column;
+    }
+}
+
+/* --- [NEW] 카드별 로딩 오버레이 (회색 블러 + 스피너) --- */
+.detail-card-loader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    /* 회색/검정 반투명 */
+    backdrop-filter: blur(4px);
+    /* 뽀샤시한 블러 처리 */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 50;
+    /* 이미지랑 버튼 위를 덮음 */
+    border-radius: 10px;
+    /* 카드 둥근 모서리에 맞춤 */
+    animation: fadeIn 0.3s ease;
+}
+
+/* 동글동글 돌아가는 미니 스피너 */
+.mini-spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    /* 하얀색 꼬리 */
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
     }
 }
