@@ -147,6 +147,110 @@ def standardize_image(image_path, output_path=None, keep_ratio=False):
         print(f"!! 표준화 실패: {e}", flush=True)
         return image_path
 
+
+# ---------------------------------------------------------
+# [NEW] Output Aspect Ratio Enforcement
+# - Gemini가 무드보드 비율/레이아웃을 따라가거나,
+#   하단에 흰 배경(카탈로그/텍스트) 영역을 붙여서 내보내는 케이스를
+#   "방 사진 캔버스" 기준으로 강제 보정합니다.
+# ---------------------------------------------------------
+
+def _is_bottom_strip_mostly_white(img: Image.Image, strip_ratio: float = 0.22, white_thresh: int = 245) -> bool:
+    """하단 strip이 '거의 흰색'인지 휴리스틱으로 판단합니다.
+
+    - 무드보드/인벤토리 시트가 하단에 붙는 경우 흰 배경이 대량 포함되는 패턴이 많아서
+      landscape 강제 크롭 시 '위쪽 고정(top anchor)' 여부를 결정하는 데 사용합니다.
+    """
+    try:
+        w, h = img.size
+        if w <= 0 or h <= 0:
+            return False
+
+        strip_h = max(1, int(h * strip_ratio))
+        y0 = max(0, h - strip_h)
+        strip = img.crop((0, y0, w, h))
+
+        # 계산 비용을 낮추기 위해 축소 후 판단
+        strip = strip.resize((256, max(1, int(256 * strip_ratio))), Image.Resampling.BILINEAR)
+        gray = strip.convert('L')
+        pixels = list(gray.getdata())
+        if not pixels:
+            return False
+
+        white_count = sum(1 for p in pixels if p >= white_thresh)
+        white_ratio = white_count / len(pixels)
+
+        # 35% 이상이 순백(근처)이면 "하단이 흰 시트"일 확률이 높다고 가정
+        return white_ratio >= 0.35
+    except Exception:
+        return False
+
+
+def standardize_image_to_reference_canvas(
+    image_path: str,
+    reference_path: str,
+    output_path: Optional[str] = None,
+) -> str:
+    """생성 결과물을 'reference 이미지(=빈 방 캔버스)'의 비율/해상도로 강제 통일합니다.
+
+    - 핵심: 무드보드가 세로여도 최종 결과는 방 사진 캔버스(16:9 또는 4:5)로 강제.
+    - 추가: 결과 이미지가 세로로 튀면서 하단에 흰 인벤토리 영역이 붙는 케이스를
+            top-anchor 크롭으로 잘라내는 휴리스틱을 적용.
+    """
+    try:
+        with Image.open(reference_path) as ref_img:
+            ref_img = ImageOps.exif_transpose(ref_img)
+            ref_w, ref_h = ref_img.size
+            if ref_w <= 0 or ref_h <= 0:
+                return image_path
+
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            w, h = img.size
+            if w <= 0 or h <= 0:
+                return image_path
+
+            target_ratio = ref_w / ref_h
+            current_ratio = w / h
+
+            # 이미 목표 캔버스와 동일하면 그대로 PNG로만 저장 (안전)
+            if abs(current_ratio - target_ratio) < 1e-3 and (w, h) == (ref_w, ref_h):
+                base, _ = os.path.splitext(output_path or image_path)
+                out_path = f"{base}.png"
+                img.save(out_path, "PNG")
+                return out_path
+
+            if current_ratio > target_ratio:
+                # 너무 넓음: 좌우 크롭
+                new_w = int(h * target_ratio)
+                x0 = max(0, (w - new_w) // 2)
+                img = img.crop((x0, 0, x0 + new_w, h))
+            else:
+                # 너무 높음: 상하 크롭
+                new_h = int(w / target_ratio)
+                new_h = min(new_h, h)
+
+                # 하단에 흰 시트가 붙는 패턴이면 위쪽 기준으로 크롭 (하단 제거)
+                if ref_w >= ref_h and _is_bottom_strip_mostly_white(img):
+                    y0 = 0
+                else:
+                    y0 = max(0, (h - new_h) // 2)
+
+                img = img.crop((0, y0, w, y0 + new_h))
+
+            img = img.resize((ref_w, ref_h), Image.Resampling.LANCZOS)
+
+            base, _ = os.path.splitext(output_path or image_path)
+            out_path = f"{base}_fit.png"
+            img.save(out_path, "PNG")
+            return out_path
+    except Exception as e:
+        print(f"!! [Canvas Fit Failed] {e}", flush=True)
+        return image_path
+
 # -----------------------------------------------------------------------------
 # [CORE] Analysis Logic (Global Definition)
 # -----------------------------------------------------------------------------
@@ -184,7 +288,6 @@ def detect_furniture_boxes(moodboard_path):
     
     return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
 
-# [수정] 배경/텍스트/구도에 대한 묘사를 원천 차단하는 프롬프트
 def analyze_cropped_item(moodboard_path, item_data):
     try:
         box = item_data.get('box_2d')
@@ -203,7 +306,6 @@ def analyze_cropped_item(moodboard_path, item_data):
         else:
             cropped_img = img
 
-        # [핵심 수정] "배경 무시해", "글자 읽지 마" 명령 추가
         prompt = (
             f"Describe the visual traits of this '{label}' for a 3D artist.\n"
             "Focus ONLY on:\n"
@@ -273,7 +375,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                         filename = f"empty_{timestamp}_{unique_id}.png"
                         path = os.path.join("outputs", filename)
                         with open(path, 'wb') as f: f.write(part.inline_data.data)
-                        return standardize_image(path)
+                        # [FIX] Stage 1 결과도 입력 캔버스(원본 방 사진) 비율/해상도로 강제 통일
+                        return standardize_image_to_reference_canvas(path, image_path)
             else:
                 print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
         print(f"⚠️ [Retry] 시도 {try_count+1} 실패. 재시도...", flush=True)
@@ -281,7 +384,7 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
     print(">> [실패] 빈 방 생성 불가. 원본 사용.", flush=True)
     return image_path
 
-# [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지
+# [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시
 def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furniture_specs=None, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     try:
@@ -305,7 +408,6 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                 "--------------------------------------------------\n"
             )
 
-        # [유지] 개발자님의 원본 프롬프트 (토씨 하나 안 바꾸고 그대로 둡니다)
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
@@ -334,7 +436,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with the natural white daylight."
         )
 
-        # [조립] 원본 프롬프트 뒤에 '비율 고정' 및 '텍스트 금지' 명령을 추가 (Overwrite 방지)
+        # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
             f"{specs_context}\n" 
@@ -343,7 +445,9 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             f"<CRITICAL: OUTPUT FORMAT ENFORCEMENT -> {ratio_instruction}>\n"
             "1. **FULL BLEED CANVAS:** The output image MUST fill the entire canvas from edge to edge. **NO WHITE BARS.** NO SPLIT SCREENS.\n"
             "2. **NO TEXT OVERLAY:** Do NOT write any dimensions, labels, or watermarks on the final image. It must be a clean photo.\n"
-            "3. **ASPECT RATIO LOCK:** Keep the aspect ratio of the 'Empty Room' input. Do not crop the ceiling or floor."
+            "3. **ASPECT RATIO LOCK:** Keep the aspect ratio of the 'Empty Room' input. Do not crop the ceiling or floor.\n"
+            "4. **IGNORE REFERENCE RATIO:** Even if the Style Reference (Moodboard) is vertical, you MUST output a " + ratio_instruction + " image. Do not mimic the moodboard's shape.\n"
+            "5. **NO MULTI-PANEL OUTPUT:** Output must be ONE single staged room photograph only. Do NOT append catalog sheets, white inventory panels, split layouts, or include the reference image anywhere."
         )
         
         content = [prompt, "Empty Room (Target Canvas - KEEP THIS):", room_img]
@@ -372,7 +476,8 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                     filename = f"result_{timestamp}_{unique_id}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
-                    return path
+                    # [FIX] 무드보드 비율/레이아웃 영향을 받더라도 최종 결과를 "방 캔버스"로 강제 통일
+                    return standardize_image_to_reference_canvas(path, room_path)
         return None
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
@@ -488,35 +593,32 @@ async def get_styles_for_room(room_type: str):
     if "Customize" not in styles:
         styles = styles + ["Customize"]
     return JSONResponse(content=styles)
+
 @app.get("/api/thumbnails/{room_name}/{style_name}")
 def get_available_thumbnails(room_name: str, style_name: str):
-    # 1. 프론트엔드와 동일한 파일명 규칙 적용
     safe_room = room_name.lower().replace(" ", "")
     safe_style = style_name.lower().replace(" ", "-").replace("_", "-")
     prefix = f"{safe_room}_{safe_style}_"
     
-    # 2. 썸네일 폴더 스캔
     base_dir = "static/thumbnails"
     if not os.path.exists(base_dir): return []
 
     valid_indices = []
     try:
-        # 해당 스타일로 시작하는 파일만 찾기
         for f in os.listdir(base_dir):
             if f.startswith(prefix) and f.endswith(".png"):
-                # "livingroom_modern_24.png" -> 24 추출
                 try:
                     num_part = f.replace(prefix, "").replace(".png", "")
                     if num_part.isdigit():
                         valid_indices.append(int(num_part))
                 except: continue
         
-        # 3. 번호순 정렬해서 반환 (예: [1, 2, 3, ..., 24])
         valid_indices.sort()
         return valid_indices
     except Exception as e:
         print(f"Thumbnail Scan Error: {e}")
         return []
+
 # --- 메인 렌더링 엔드포인트 ---
 @app.post("/render")
 def render_room(
@@ -568,25 +670,19 @@ def render_room(
             ref_path = mb_path
             mb_url = f"/outputs/{os.path.basename(mb_path)}"
 
-        # -----------------------------------------------------------
-        # [핵심] 초반에 모든 분석 끝내기 (모든 가구 대상)
-        # -----------------------------------------------------------
         furniture_specs_text = None
-        full_analyzed_data = [] # [NEW] 디테일 컷을 위해 저장할 전체 데이터
+        full_analyzed_data = [] 
 
         if ref_path and os.path.exists(ref_path):
             print(f">> [Global Analysis] Analyzing furniture in {ref_path}...", flush=True)
             try:
-                # 1. 모든 가구 감지 (Detect All)
                 detected = detect_furniture_boxes(ref_path)
                 
-                # 2. 모든 가구 분석 (병렬 처리)
                 print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
                 with ThreadPoolExecutor(max_workers=30) as executor:
                     futures = [executor.submit(analyze_cropped_item, ref_path, item) for item in detected]
                     full_analyzed_data = [f.result() for f in futures]
                 
-                # 4. 텍스트 스펙 생성 (모든 가구 포함)
                 specs_list = []
                 for idx, item in enumerate(full_analyzed_data):
                     specs_list.append(f"{idx+1}. {item['label']}: {item['description']}")
@@ -650,14 +746,27 @@ def finalize_download(req: FinalizeRequest):
         if not os.path.exists(local_path): 
             return JSONResponse(content={"error": "Original file not found"}, status_code=404)
 
-        print(">> [Step 1] Creating matched Empty Room...", flush=True)
-        empty_room_path = generate_empty_room(local_path, unique_id + "_final_empty", start_time, stage_name="Finalize: Empty Gen")
-        
-        print(">> [Step 2] Upscaling Empty Room...", flush=True)
-        final_empty_path = call_magnific_api(empty_room_path, unique_id + "_upscale_empty", start_time)
+        # [업그레이드]
+        # 1) 가구방 업스케일을 먼저 시작해두고(백그라운드 스레드),
+        # 2) 그 동안 빈방 생성 -> 빈방 업스케일 시작
+        # => 체감 대기시간을 줄입니다.
+        final_empty_path = ""
+        final_furnished_path = ""
 
-        print(">> [Step 3] Upscaling Furnished Room...", flush=True)
-        final_furnished_path = call_magnific_api(local_path, unique_id + "_upscale_furnished", start_time)
+        # 업스케일링도 5-worker로 병렬 처리 (동시 요청 처리 여유)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            print(">> [Step 1] Upscaling Furnished in parallel...", flush=True)
+            future_furnished = executor.submit(call_magnific_api, local_path, unique_id + "_upscale_furnished", start_time)
+
+            print(">> [Step 2] Creating matched Empty Room...", flush=True)
+            empty_room_path = generate_empty_room(local_path, unique_id + "_final_empty", start_time, stage_name="Finalize: Empty Gen")
+
+            print(">> [Step 3] Upscaling Empty Room...", flush=True)
+            future_empty = executor.submit(call_magnific_api, empty_room_path, unique_id + "_upscale_empty", start_time)
+
+            # 결과 대기
+            final_furnished_path = future_furnished.result()
+            final_empty_path = future_empty.result()
 
         return JSONResponse(content={
             "upscaled_furnished": f"/outputs/{os.path.basename(final_furnished_path)}",
@@ -680,11 +789,8 @@ def upscale_and_download(req: UpscaleRequest):
         return JSONResponse(content={"upscaled_url": f"/outputs/{os.path.basename(final_path)}", "message": "Success"})
     except Exception as e: return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# [수정] 디테일 뷰 스타일 정의: '배치 고정(Layout Freeze)' 및 '주변 맥락(Context)' 강화
 def construct_dynamic_styles(analyzed_items):
     styles = []
-    
-    # 1. CCTV 스타일 (전체 구조 유지 확인용 - 그대로 유지)
     styles.append({
         "name": "High Angle Overview", 
         "prompt": (
@@ -694,8 +800,6 @@ def construct_dynamic_styles(analyzed_items):
         ), 
         "ratio": "16:9"
     })
-
-    # 2. 대각선 뷰 (그대로 유지)
     styles.append({
         "name": "Diagonal Perspective (Left to Right)", 
         "prompt": (
@@ -705,7 +809,6 @@ def construct_dynamic_styles(analyzed_items):
         ), 
         "ratio": "16:9"
     })
-
     styles.append({
         "name": "Diagonal Perspective (Right to Left)", 
         "prompt": (
@@ -716,31 +819,26 @@ def construct_dynamic_styles(analyzed_items):
         "ratio": "16:9"
     })
     
-    # [핵심 수정] 가구별 디테일 뷰: "손대지 마(Don't Touch)" 전략 적용
     count = 0
     for item in analyzed_items:
         if count >= 20: break
         
         label = item['label']
         desc = item.get('description', '')
-        # 좌표 정보 가져오기
         box = item.get('box_2d', [0,0,1000,1000])
         
-# 기본 설정 (일반 가구)
-        lens_type = "85mm Telephoto Lens" # 일반 가구는 당겨서 찍음
+        lens_type = "85mm Telephoto Lens"
         context_instruction = "Include parts of neighboring furniture to prove location."
         position_instruction = "Do NOT move this item. Shoot it exactly where it stands."
         
-        # [특수 로직 1] 러그/카펫 (바닥 깔림 강조)
         if "rug" in label.lower() or "carpet" in label.lower():
             position_instruction = "CRITICAL: The rug MUST be UNDER the sofas/tables. Show furniture legs pressing on it."
-            lens_type = "50mm Standard Lens" # 러그는 넓게 찍어야 보임
+            lens_type = "50mm Standard Lens"
 
-        # [특수 로직 2] 조명/샹들리에 (천장/공간 관계 강조)
         elif any(x in label.lower() for x in ["light", "lamp", "chandelier", "pendant", "sconce"]):
             position_instruction = "CRITICAL: Show the connection to the ceiling/wall. Do NOT crop the cord or chain."
             context_instruction = "ZOOM OUT significantly. You MUST show what this light is illuminating below (e.g., the table or floor). Do NOT fill the frame with just the bulb."
-            lens_type = "35mm Wide Lens" # 조명은 주변을 보여줘야 함 (덜 부담스럽게)
+            lens_type = "35mm Wide Lens"
 
         styles.append({
             "name": f"Detail: {label}",
@@ -768,20 +866,16 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         img = Image.open(original_image_path)
         target_ratio = style_config.get('ratio', '16:9')
         
-        # [핵심 수정] 시스템 프롬프트에 '사진가' 역할 부여
         final_prompt = (
             f"{style_config['prompt']}\n\n"
-            
             "<OUTPUT REQUIREMENTS>\n"
             "1. **PHOTOREALISM:** The output must look like a raw photograph taken from the main image scene.\n"
             "2. **LIGHTING MATCH:** The lighting direction and shadows must match the original main image exactly.\n"
             "3. **COLOR CONSISTENCY:** Do not change the color of the walls or floor.\n\n"
-            
             f"OUTPUT ASPECT RATIO: {target_ratio}"
         )
         
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
-        # 입력 이미지에 대한 라벨을 'Reference'가 아닌 'Reality'로 변경하여 강제성 부여
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
         
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
@@ -799,17 +893,16 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         print(f"!! Detail Generation Error: {e}")
         return None
 
-# [수정] DetailRequest에 cached_data 필드 추가
 class DetailRequest(BaseModel):
     image_url: str
     moodboard_url: Optional[str] = None
-    furniture_data: Optional[List[Dict[str, Any]]] = None # [NEW] 프론트에서 받은 분석 데이터
+    furniture_data: Optional[List[Dict[str, Any]]] = None 
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
     moodboard_url: Optional[str] = None
-    furniture_data: Optional[List[Dict[str, Any]]] = None # [NEW] 개별 재생성 최적화용
+    furniture_data: Optional[List[Dict[str, Any]]] = None 
 
 @app.post("/regenerate-single-detail")
 def regenerate_single_detail(req: RegenerateDetailRequest):
@@ -819,13 +912,11 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
         if not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
         
-        # [핵심 로직] 캐시된 데이터가 있으면 바로 사용 (분석 생략 -> 속도 향상)
         analyzed_items = []
         if req.furniture_data and len(req.furniture_data) > 0:
             print(">> [Single Retry] Using cached furniture data!", flush=True)
             analyzed_items = req.furniture_data
         else:
-            # 캐시가 없으면 간략하게 처리 (Fallback)
             analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
         
         dynamic_styles = construct_dynamic_styles(analyzed_items)
@@ -858,12 +949,10 @@ def generate_details_endpoint(req: DetailRequest):
 
         analyzed_items = []
         
-        # [핵심] 프론트엔드가 이미 분석된 데이터를 줬다면, 그걸 그대로 씁니다. (속도 2배)
         if req.furniture_data and len(req.furniture_data) > 0:
             print(">> [Smart Cache] Using pre-analyzed furniture data!", flush=True)
             analyzed_items = req.furniture_data
         else:
-            # 데이터가 없으면 예전처럼 직접 분석 (Fallback)
             print(">> [Smart Cache] No cached data found. Analyzing now...", flush=True)
             if req.moodboard_url:
                 if req.moodboard_url.startswith("/assets/"):
@@ -915,10 +1004,6 @@ def generate_details_endpoint(req: DetailRequest):
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# -----------------------------------------------------------------------------
-# [수정됨] Moodboard Generator Feature with Analysis Injection
-# -----------------------------------------------------------------------------
-
 MOODBOARD_SYSTEM_PROMPT = """
 ACT AS: An Expert Image Retoucher and Cataloguer.
 TASK: Create a "Furniture Inventory Mood Board" by cropping and arranging the ACTUAL furniture from the input photos.
@@ -958,7 +1043,6 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
     try:
         img = Image.open(image_path)
         
-        # [수정] 가구 스펙이 있다면 프롬프트에 컨텍스트로 추가
         final_prompt = MOODBOARD_SYSTEM_PROMPT
         if furniture_specs:
             final_prompt += f"\n\n<CONTEXT: DETECTED FURNITURE LIST>\nUse this list to ensure you capture all key items:\n{furniture_specs}"
@@ -997,12 +1081,10 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
         print(f"\n=== [Moodboard Gen] Starting 5 variations for {unique_id} ===", flush=True)
 
-        # [NEW] 무드보드 생성 전에도 원본 이미지 분석 수행 (입력 사진에 뭐가 있는지 파악)
         furniture_specs_text = None
         try:
             print(">> [Moodboard Gen] Analyzing input photo context...", flush=True)
             detected = detect_furniture_boxes(raw_path)
-            # 여기서는 딥 분석까지는 안 가고, 라벨링(이름) 정도만 파악해서 목록을 줌
             specs_list = [f"- {item['label']}" for item in detected]
             furniture_specs_text = "\n".join(specs_list)
         except:
@@ -1010,7 +1092,6 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
         generated_results = []
         
-        # [수정] 분석된 텍스트 컨텍스트 전달
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(5)]
             for future in futures:
@@ -1030,15 +1111,10 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# -----------------------------------------------------------------------------
-# [유지] Generate Room from Floor Plan Feature
-# -----------------------------------------------------------------------------
-# Helper function to perform a single generation
 def generate_single_room_from_plan(plan_img, ref_images, unique_id, index):
     try:
         system_instruction = "You are an expert architectural visualizer."
         
-        # [수정 Final 6] 사진의 구조 무시 강제 + 도면의 꺾임(Jog) 최우선 적용
         prompt = (
             "TASK: Reconstruct an empty room strictly based on the Floor Plan's geometry, applying materials from Reference Photos.\n\n"
             
@@ -1095,7 +1171,7 @@ def generate_single_room_from_plan(plan_img, ref_images, unique_id, index):
     except Exception as e:
         print(f"!! Single Room Gen Error {index}: {e}")
         return None
-# [누락된 엔드포인트 추가]
+
 @app.post("/generate-room-from-plan")
 def generate_room_from_plan(
     floor_plan: UploadFile = File(...),
@@ -1106,12 +1182,10 @@ def generate_room_from_plan(
         timestamp = int(time.time())
         print(f"\n=== [Floor Plan Gen] Starting 5 variations for {unique_id} ===", flush=True)
 
-        # 1. 파일 저장 (도면)
         plan_path = os.path.join("outputs", f"fp_plan_{timestamp}_{unique_id}.png")
         with open(plan_path, "wb") as buffer: shutil.copyfileobj(floor_plan.file, buffer)
         plan_img = Image.open(plan_path)
 
-        # 2. 파일 저장 (레퍼런스 이미지들)
         ref_images = []
         for idx, ref_file in enumerate(ref_photos):
             ref_path = os.path.join("outputs", f"fp_ref_{timestamp}_{unique_id}_{idx}.png")
@@ -1122,7 +1196,6 @@ def generate_room_from_plan(
 
         generated_results = []
         
-        # 5장 병렬 생성 실행
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(generate_single_room_from_plan, plan_img, ref_images, unique_id, i+1) for i in range(5)]
             for future in futures:
@@ -1138,6 +1211,37 @@ def generate_room_from_plan(
         print(f"🔥🔥🔥 [Floor Plan Gen Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+# --- Auto Cleanup System ---
+RETENTION_SECONDS = 3600 
+CLEANUP_INTERVAL = 600
+
+def auto_cleanup_task():
+    while True:
+        try:
+            now = time.time()
+            deleted_count = 0
+            folder = "outputs"
+            if os.path.exists(folder):
+                for filename in os.listdir(folder):
+                    file_path = os.path.join(folder, filename)
+                    if os.path.isfile(file_path) and filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                        file_age = now - os.path.getmtime(file_path)
+                        if file_age > RETENTION_SECONDS:
+                            try:
+                                os.remove(file_path)
+                                deleted_count += 1
+                            except Exception: pass
+            if deleted_count > 0:
+                print(f"✨ [System] Cleaned up {deleted_count} old files.", flush=True)
+        except Exception as e:
+            print(f"!! [Cleanup Error] {e}", flush=True)
+        time.sleep(CLEANUP_INTERVAL)
+
+import threading
+cleanup_thread = threading.Thread(target=auto_cleanup_task, daemon=True)
+cleanup_thread.start()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=False, log_level="info")
