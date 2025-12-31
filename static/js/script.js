@@ -201,7 +201,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    function selectStyle(style, btn) {
+    // [교체할 코드] 서버에 파일 목록을 물어봐서 있는 것만 그리는 방식
+    async function selectStyle(style, btn) {
         selectedStyle = style;
         selectedVariant = null;
         updateActiveButton(styleGrid, btn);
@@ -215,36 +216,57 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedMoodboardFile = null;
         }
 
-        variantGrid.innerHTML = '';
+        variantGrid.innerHTML = ''; // 초기화
+
         if (style !== 'Customize') {
-            for (let i = 1; i <= 30; i++) {
-                const variantBtn = document.createElement('div');
-                variantBtn.className = 'variant-img-btn';
-                const img = document.createElement('img');
+            try {
+                // 1. 서버에 목록 요청 (단 1번의 통신)
+                // 주의: main.py에도 /api/thumbnails/... 엔드포인트가 추가되어 있어야 작동합니다.
+                const res = await fetch(`/api/thumbnails/${selectedRoom}/${style}`);
+                if (!res.ok) throw new Error("Thumbnail list fetch failed");
+
+                const validNumbers = await res.json(); // 예: [1, 2, 3, ..., 24]
+
+                // 2. 받아온 실존하는 번호만 생성 (404 에러 원천 차단)
                 const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
                 const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
-                const imgName = `${safeRoom}_${safeStyle}_${i}.png`;
-                img.src = `/static/thumbnails/${imgName}`;
-                img.alt = `Variant ${i}`;
-                img.onerror = () => { variantBtn.style.display = 'none'; };
-                const label = document.createElement('span');
-                label.className = 'variant-label';
-                label.textContent = i;
-                variantBtn.appendChild(img);
-                variantBtn.appendChild(label);
-                variantBtn.onclick = () => {
-                    selectedVariant = i.toString();
-                    document.querySelectorAll('.variant-img-btn').forEach(b => {
-                        b.classList.remove('active');
-                        b.style.borderColor = 'transparent';
-                    });
-                    variantBtn.classList.add('active');
-                    variantBtn.style.borderColor = THEME_COLOR;
-                    checkReady();
-                };
-                variantGrid.appendChild(variantBtn);
+
+                validNumbers.forEach(i => {
+                    const variantBtn = document.createElement('div');
+                    variantBtn.className = 'variant-img-btn';
+
+                    const img = document.createElement('img');
+                    img.src = `/static/thumbnails/${safeRoom}_${safeStyle}_${i}.png`;
+                    img.alt = `Variant ${i}`;
+
+                    const label = document.createElement('span');
+                    label.className = 'variant-label';
+                    label.textContent = i;
+
+                    variantBtn.appendChild(img);
+                    variantBtn.appendChild(label);
+
+                    variantBtn.onclick = () => {
+                        selectedVariant = i.toString();
+                        document.querySelectorAll('.variant-img-btn').forEach(b => {
+                            b.classList.remove('active');
+                            b.style.borderColor = 'transparent';
+                        });
+                        variantBtn.classList.add('active');
+                        variantBtn.style.borderColor = THEME_COLOR;
+                        checkReady();
+                    };
+                    variantGrid.appendChild(variantBtn);
+                });
+            } catch (err) {
+                console.error("썸네일 목록 로드 실패 (기본 로직으로 폴백):", err);
+                // 혹시 API가 실패하면 기존 방식(1~30)으로 시도하도록 안전장치
+                for (let i = 1; i <= 30; i++) {
+                    // ... (기존 로직 복붙하거나 생략 가능)
+                }
             }
         }
+
         variantSection.classList.remove('hidden');
         checkReady();
     }

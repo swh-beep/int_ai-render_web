@@ -488,7 +488,35 @@ async def get_styles_for_room(room_type: str):
     if "Customize" not in styles:
         styles = styles + ["Customize"]
     return JSONResponse(content=styles)
+@app.get("/api/thumbnails/{room_name}/{style_name}")
+def get_available_thumbnails(room_name: str, style_name: str):
+    # 1. 프론트엔드와 동일한 파일명 규칙 적용
+    safe_room = room_name.lower().replace(" ", "")
+    safe_style = style_name.lower().replace(" ", "-").replace("_", "-")
+    prefix = f"{safe_room}_{safe_style}_"
+    
+    # 2. 썸네일 폴더 스캔
+    base_dir = "static/thumbnails"
+    if not os.path.exists(base_dir): return []
 
+    valid_indices = []
+    try:
+        # 해당 스타일로 시작하는 파일만 찾기
+        for f in os.listdir(base_dir):
+            if f.startswith(prefix) and f.endswith(".png"):
+                # "livingroom_modern_24.png" -> 24 추출
+                try:
+                    num_part = f.replace(prefix, "").replace(".png", "")
+                    if num_part.isdigit():
+                        valid_indices.append(int(num_part))
+                except: continue
+        
+        # 3. 번호순 정렬해서 반환 (예: [1, 2, 3, ..., 24])
+        valid_indices.sort()
+        return valid_indices
+    except Exception as e:
+        print(f"Thumbnail Scan Error: {e}")
+        return []
 # --- 메인 렌더링 엔드포인트 ---
 @app.post("/render")
 def render_room(
@@ -554,7 +582,7 @@ def render_room(
                 
                 # 2. 모든 가구 분석 (병렬 처리)
                 print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
-                with ThreadPoolExecutor(max_workers=6) as executor:
+                with ThreadPoolExecutor(max_workers=30) as executor:
                     futures = [executor.submit(analyze_cropped_item, ref_path, item) for item in detected]
                     full_analyzed_data = [f.result() for f in futures]
                 
@@ -581,7 +609,7 @@ def render_room(
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(5)]
             for future in futures:
                 res = future.result()
@@ -652,15 +680,11 @@ def upscale_and_download(req: UpscaleRequest):
         return JSONResponse(content={"upscaled_url": f"/outputs/{os.path.basename(final_path)}", "message": "Success"})
     except Exception as e: return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# -----------------------------------------------------------------------------
-# [수정됨] Detail Generation - Cached Data Logic
-# -----------------------------------------------------------------------------
-
-# [수정] 디테일 뷰 생성 로직: 가구 이동 금지 및 '있는 그대로' 촬영 강제
+# [수정] 디테일 뷰 스타일 정의: '배치 고정(Layout Freeze)' 및 '주변 맥락(Context)' 강화
 def construct_dynamic_styles(analyzed_items):
     styles = []
     
-    # 1. CCTV 스타일 (전체 구조 유지 확인용)
+    # 1. CCTV 스타일 (전체 구조 유지 확인용 - 그대로 유지)
     styles.append({
         "name": "High Angle Overview", 
         "prompt": (
@@ -671,52 +695,67 @@ def construct_dynamic_styles(analyzed_items):
         "ratio": "16:9"
     })
 
-    # 2. 대각선 뷰 1
+    # 2. 대각선 뷰 (그대로 유지)
     styles.append({
         "name": "Diagonal Perspective (Left to Right)", 
         "prompt": (
-            "CAMERA POSITION: Eye-level shot from the back left corner.\n"
+            "CAMERA POSITION: Eye-level shot from the back left corner(near left wall).\n"
             "SUBJECT: Wide angle view of the room.\n"
             "CRITICAL: Maintain the exact furniture positions relative to the windows."
         ), 
         "ratio": "16:9"
     })
 
-    # 3. 대각선 뷰 2
     styles.append({
         "name": "Diagonal Perspective (Right to Left)", 
         "prompt": (
-            "CAMERA POSITION: Eye-level shot from the back right corner.\n"
+            "CAMERA POSITION: Eye-level shot from the back right corner(near right wall).\n"
             "SUBJECT: Wide angle view of the room.\n"
             "CRITICAL: Maintain the exact furniture positions relative to the windows."
         ), 
         "ratio": "16:9"
     })
     
-    # 가구별 디테일 뷰 (Strict Freeze Mode)
+    # [핵심 수정] 가구별 디테일 뷰: "손대지 마(Don't Touch)" 전략 적용
     count = 0
     for item in analyzed_items:
-        if count >= 12: break
+        if count >= 20: break
         
         label = item['label']
         desc = item.get('description', '')
-        # [NEW] 좌표 정보 추출 (없으면 기본값)
+        # 좌표 정보 가져오기
         box = item.get('box_2d', [0,0,1000,1000])
-        # [핵심 수정] 가구 이동 금지, 가려짐 허용, 러그 특수 처리
-        position_instruction = "Do NOT move this item. Shoot it exactly where it stands in the room."
-        if "rug" in label.lower() or "carpet" in label.lower():
-            position_instruction = "CRITICAL: The rug MUST be UNDER the sofas and tables. Do NOT clear the floor. Show the furniture legs standing ON the rug."
         
+# 기본 설정 (일반 가구)
+        lens_type = "85mm Telephoto Lens" # 일반 가구는 당겨서 찍음
+        context_instruction = "Include parts of neighboring furniture to prove location."
+        position_instruction = "Do NOT move this item. Shoot it exactly where it stands."
+        
+        # [특수 로직 1] 러그/카펫 (바닥 깔림 강조)
+        if "rug" in label.lower() or "carpet" in label.lower():
+            position_instruction = "CRITICAL: The rug MUST be UNDER the sofas/tables. Show furniture legs pressing on it."
+            lens_type = "50mm Standard Lens" # 러그는 넓게 찍어야 보임
+
+        # [특수 로직 2] 조명/샹들리에 (천장/공간 관계 강조)
+        elif any(x in label.lower() for x in ["light", "lamp", "chandelier", "pendant", "sconce"]):
+            position_instruction = "CRITICAL: Show the connection to the ceiling/wall. Do NOT crop the cord or chain."
+            context_instruction = "ZOOM OUT significantly. You MUST show what this light is illuminating below (e.g., the table or floor). Do NOT fill the frame with just the bulb."
+            lens_type = "35mm Wide Lens" # 조명은 주변을 보여줘야 함 (덜 부담스럽게)
+
         styles.append({
             "name": f"Detail: {label}",
             "prompt": (
-                f"TASK: Telephoto Zoom Shot of the '{label}' in its current position.\n"
-                f"VISUAL SPECS: {desc}\n"
-                f"<CRITICAL: LAYOUT FREEZE>\n"
+                f"ACT AS: Documentary Interior Photographer.\n"
+                f"TASK: Take a candid shot of the '{label}' strictly IN-SITU.\n\n"
+                
+                f"TARGET VISUALS: {desc}\n"
+                f"TARGET COORDINATES: Focus on area {box} (Normalized 0-1000).\n\n"
+                
+                f"<CRITICAL: ABSOLUTE LAYOUT FREEZE>\n"
                 f"1. {position_instruction}\n"
-                "2. **ALLOW OCCLUSION:** It is okay if the object is partially blocked by other furniture (e.g., a chair back blocking a table). This adds realism.\n"
-                "3. **CONTEXT:** Keep the surrounding furniture visible in the background/foreground. Do not isolate the object on a blank background.\n"
-                "4. **LENS:** 70mm Zoom Lens. Shallow depth of field (blurred background) is okay, but DO NOT change the room layout."
+                f"2. {context_instruction}\n"
+                "3. **ALLOW OCCLUSION:** It is okay if the object is partially blocked. This adds realism.\n"
+                f"4. **LENS:** {lens_type}. Depth of Field is allowed, but geometry change is NOT."
             ),
             "ratio": "4:5"
         })
@@ -729,24 +768,21 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         img = Image.open(original_image_path)
         target_ratio = style_config.get('ratio', '16:9')
         
-        # [수정] In-painting/Out-painting이 아니라 'Photography' 관점으로 접근
+        # [핵심 수정] 시스템 프롬프트에 '사진가' 역할 부여
         final_prompt = (
-            "ACT AS: Architectural Photographer using a Zoom Lens.\n"
-            "TASK: Take a photo of a specific part of the room provided in the input image.\n\n"
-            
-            f"<TARGET SHOT: {style_config['name']}>\n"
             f"{style_config['prompt']}\n\n"
             
-            "<CRITICAL: INPUT FIDELITY>\n"
-            "1. **STRICTLY PRESERVE LAYOUT:** The input image represents the ACTUAL room reality. You are just a camera. You cannot move heavy furniture.\n"
-            "2. **CONSISTENCY:** The wall colors, floor texture, and lighting direction must match the original wide shot exactly.\n"
-            "3. **NO PRODUCT PHOTOGRAPHY:** Do not make it look like a catalog cut-out. It is a 'Candid Room Shot'.\n\n"
+            "<OUTPUT REQUIREMENTS>\n"
+            "1. **PHOTOREALISM:** The output must look like a raw photograph taken from the main image scene.\n"
+            "2. **LIGHTING MATCH:** The lighting direction and shadows must match the original main image exactly.\n"
+            "3. **COLOR CONSISTENCY:** Do not change the color of the walls or floor.\n\n"
             
             f"OUTPUT ASPECT RATIO: {target_ratio}"
         )
         
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
-        content = [final_prompt, "Original Room Reality (Don't Change Layout):", img]
+        # 입력 이미지에 대한 라벨을 'Reference'가 아닌 'Reality'로 변경하여 강제성 부여
+        content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
         
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
         if response and hasattr(response, 'candidates') and response.candidates:
@@ -854,7 +890,7 @@ def generate_details_endpoint(req: DetailRequest):
         generated_results = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
         
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
@@ -975,7 +1011,7 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         generated_results = []
         
         # [수정] 분석된 텍스트 컨텍스트 전달
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(5)]
             for future in futures:
                 res = future.result()
