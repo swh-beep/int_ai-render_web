@@ -940,3 +940,144 @@ button,
         opacity: 1;
     }
 }
+
+/* =========================
+   Video MVP Modal
+   ========================= */
+.video-mvp-modal-content {
+  width: min(980px, 95vw);
+}
+
+.video-mvp-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px 0;
+}
+
+.video-mvp-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  flex: 1;
+}
+
+.video-mvp-control label {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.video-mvp-control select {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+}
+
+.video-mvp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 42vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.video-mvp-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.video-mvp-item-left {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.video-mvp-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  background: rgba(0,0,0,0.35);
+}
+
+.video-mvp-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-mvp-label {
+  min-width: 0;
+}
+
+.video-mvp-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.video-mvp-url {
+  font-size: 11px;
+  opacity: 0.65;
+  word-break: break-all;
+}
+
+.video-mvp-item-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.video-mvp-preset {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+}
+
+.video-mvp-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.video-mvp-status {
+  font-size: 12px;
+  opacity: 0.85;
+  min-height: 18px;
+}
+
+.video-mvp-result {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#videoMvpPreview {
+  width: 100%;
+  border-radius: var(--radius);
+  background: rgba(0,0,0,0.35);
+}
+
+.video-mvp-empty {
+  opacity: 0.75;
+  padding: 12px;
+  border: 1px dashed rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+}

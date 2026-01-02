@@ -5,6 +5,7 @@ import base64
 import uuid
 import requests
 import json
+import threading
 import google.generativeai as genai
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
 from PIL import Image, ImageOps
+from pathlib import Path
 import re
 import traceback
 import random
@@ -428,12 +430,21 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "2. **SCALE ENFORCEMENT:** If dimensions are present, YOU MUST calibrate the size of the generated furniture to match these specific measurements relative to the room's perspective.\n"
             "3. **LOGIC CHECK:** Do not generate furniture that contradicts the text (e.g., if text says '1-person chair', do not generate a '3-person sofa').\n\n"
 
+            "<CRITICAL: WINDOW LIGHT MUST BE ABUNDANT (PRIORITY #1)>\n"
+            "1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
+            "2. **DIRECT SUNLIGHT BEAMS:** Clearly visible sun rays / beams entering from the window and spreading across the room.\n"
+            "3. **BRIGHT & AIRY EXPOSURE:** Overall exposure is bright and airy, but preserve highlight detail (no blown-out pure white).\n"
+            "4. **SHADOWS MUST READ:** Strong but soft-edged sun-cast shadows must be visible on the floor and walls.\n"
+            "5. **NO DIM MOOD:** Do NOT generate dim, underexposed, moody, nighttime, cloudy, or flat lighting.\n"
+            "6. **WHITE BALANCE LOCK (ANTI-YELLOW):** Keep color temperature neutral/cool daylight ONLY (5500K~6500K). NOT warm, NOT yellow.\n"
+            "7. **ANTI-WARM BAN:** Strictly avoid golden-hour, sunset, tungsten, orange/yellow cast.\n\n"
+
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
-            "1. **GLOBAL ILLUMINATION:** Simulate how natural white(not warm) daylight from the window bounces off the floor and interacts with the furniture. The side of the furniture facing the window must be highlighted, while the opposite side has soft, natural shading.\n"
-            "2. **TURN ON LIGHTS:** TURN ON ALL artificial light sources in the room, including ceiling lights, pendant lights, wall sconces, and floor lamps. natural white light (5000K).\n"
-            "2. **SHADOW PHYSICS:** Generate 'Soft Shadows' that diffuse as they get further from the object. Shadows must exactly match the direction and intensity of the sunlight entering the room.\n"
-            "3. **ATMOSPHERE:** Create a 'Sun-drenched' feel where the light wraps around the fabric/materials of the furniture (Subsurface Scattering), making it look soft and cozy, not like a 3D sticker.\n"
-            "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with the natural white daylight."
+            "1. **GLOBAL ILLUMINATION:** Simulate realistic daylight bounce from the window. Window-side surfaces are brighter, opposite side has soft shading.\n"
+            "2. **ARTIFICIAL LIGHTS (NEUTRAL ONLY):** If any lamps/ceiling lights appear ON, they MUST be neutral white (5000K~6000K). Never warm bulbs.\n"
+            "3. **NO COLOR SHIFT:** Do NOT change wall/floor color temperature. Keep whites clean and neutral (no yellow tint).\n"
+            "4. **PHYSICAL CONSISTENCY:** Shadows direction/intensity must match the window light direction.\n"
+            "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with strong neutral daylight from the window."
         )
 
         # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
@@ -868,13 +879,19 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         
         final_prompt = (
             f"{style_config['prompt']}\n\n"
+            "<CRITICAL: LAYOUT FREEZE (PRIORITY #0)>\n"
+            "1. **DO NOT MOVE / REARRANGE ANYTHING:** Every existing furniture, lighting fixture, decor item, and their positions must remain EXACTLY the same as the input image.\n"
+            "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
+            "3. **NO REMOVALS:** Do NOT remove existing objects either.\n"
+            "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
             "<OUTPUT REQUIREMENTS>\n"
-            "1. **PHOTOREALISM:** The output must look like a raw photograph taken from the main image scene.\n"
-            "2. **LIGHTING MATCH:** The lighting direction and shadows must match the original main image exactly.\n"
-            "3. **COLOR CONSISTENCY:** Do not change the color of the walls or floor.\n\n"
+            "1. Generate a photorealistic high-quality detail view based on the selected camera shot.\n"
+            "2. Keep the overall interior style consistent with the main furnished room.\n"
+            "3. IMPORTANT: focus on the specified target area only (close-up composition).\n"
+            "4. DO NOT add text, labels, logos, or watermarks.\n"
             f"OUTPUT ASPECT RATIO: {target_ratio}"
         )
-        
+
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
         
@@ -1212,8 +1229,329 @@ def generate_room_from_plan(
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+
+# =========================
+# Video MVP (Kling Image-to-Video via Freepik API)
+# =========================
+class VideoClip(BaseModel):
+    url: str
+    preset: str = "detail_pan_lr"
+
+class VideoCreateRequest(BaseModel):
+    clips: List[VideoClip]
+    duration: str = "5"          # Provider side (we still receive 5s clips)
+    cfg_scale: float = 0.85
+
+# Use Freepik API key for Kling as well (same header: x-freepik-api-key)
+FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY")  # fallback for existing env
+KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-5-pro")  # e.g. kling-v2-1-pro, kling-v2-5-pro
+KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", f"https://api.freepik.com/v1/ai/image-to-video/{KLING_MODEL}")
+
+# Concurrency controls (avoid 429 bursts)
+VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "2"))
+_video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
+
+# Stitching rules: use only the middle 3 seconds (cut 1s head + 1s tail from 5s)
+VIDEO_TRIM_HEAD_SEC = float(os.getenv("VIDEO_TRIM_HEAD_SEC", "1.0"))
+VIDEO_TRIM_KEEP_SEC = float(os.getenv("VIDEO_TRIM_KEEP_SEC", "3.0"))
+
+# Make playback a bit faster (1.2 => 20% faster). Set to 1.0 to disable.
+VIDEO_SPEED_FACTOR = float(os.getenv("VIDEO_SPEED_FACTOR", "1.2"))
+
+VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "24"))
+VIDEO_CRF = int(os.getenv("VIDEO_CRF", "18"))
+
+video_jobs: Dict[str, Dict[str, Any]] = {}
+video_jobs_lock = threading.Lock()
+video_executor = ThreadPoolExecutor(max_workers=2)
+
+def _safe_filename_from_url(url: str) -> str:
+    try:
+        p = urlparse(url).path
+        name = os.path.basename(p)
+        return name or f"clip_{uuid.uuid4().hex}.png"
+    except:
+        return f"clip_{uuid.uuid4().hex}.png"
+
+def _download_to_path(url: str, out_path: Path):
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    out_path.write_bytes(r.content)
+
+def _run_ffmpeg(cmd: List[str]):
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "ffmpeg failed")
+
+def _ffmpeg_trim_speed(in_path: Path, out_path: Path, start_sec: float, dur_sec: float, speed: float, fps: int):
+    # trim -> reset timestamps -> speed up -> fps
+    setpts_expr = f"(PTS-STARTPTS)/{speed}" if speed and abs(speed - 1.0) > 1e-6 else "(PTS-STARTPTS)"
+    vf = f"trim=start={start_sec}:duration={dur_sec},setpts={setpts_expr},fps={fps}"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(in_path),
+        "-vf", vf,
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", str(VIDEO_CRF),
+        "-preset", "veryfast",
+        str(out_path),
+    ]
+    _run_ffmpeg(cmd)
+
+def _ffprobe_wh(path: Path):
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json",
+        str(path),
+    ]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "ffprobe failed")
+    data = json.loads(proc.stdout or "{}")
+    st = (data.get("streams") or [{}])[0]
+    return int(st.get("width") or 0), int(st.get("height") or 0)
+
+def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h: int, fps: int):
+    # Scale to fit, pad with blurred background (no black bars)
+    vf = (
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"split=2[fg][bg];"
+        f"[bg]scale={target_w}:{target_h},boxblur=10:1[bg2];"
+        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2,fps={fps}"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(in_path),
+        "-filter_complex", vf,
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", str(VIDEO_CRF),
+        "-preset", "veryfast",
+        str(out_path),
+    ]
+    _run_ffmpeg(cmd)
+
+def _kling_prompts_for_preset(preset: str) -> Dict[str, str]:
+    # Keep prompts short + strict to reduce hallucinated object changes.
+    base_keep = (
+        "Keep ALL objects and layout exactly the same as the input image. "
+        "No new objects, no removals, no warping. Photorealistic."
+    )
+    daylight = (
+        "Strong neutral daylight from the window (5200–5600K), no warm/yellow cast. "
+        "Sunlight is slightly stronger than usual with crisp but soft-edged shadows."
+    )
+
+    if preset == "main_sunlight":
+        p = f"{base_keep} {daylight} Gentle cinematic camera move, slightly more dynamic than static."
+    elif preset == "orbit_rotate":
+        p = f"{base_keep} {daylight} Slow orbit rotation around the main furniture (10–15° arc), keep subject centered."
+    elif preset == "orbit_rotate_ccw":
+        p = f"{base_keep} {daylight} Slow orbit rotation (counter-clockwise 10–15° arc), keep subject centered."
+    elif preset == "detail_pan_lr":
+        p = f"{base_keep} {daylight} Close-up shot. Camera pans left-to-right with a bit faster motion, smooth and premium."
+    elif preset == "detail_pan_rl":
+        p = f"{base_keep} {daylight} Close-up shot. Camera pans right-to-left with a bit faster motion, smooth and premium."
+    elif preset == "detail_dolly_in":
+        p = f"{base_keep} {daylight} Close-up shot. Camera dolly-in (push-in) toward the subject, smooth premium movement."
+    elif preset == "detail_dolly_out":
+        p = f"{base_keep} {daylight} Close-up shot. Camera dolly-out (pull-back), smooth premium movement."
+    elif preset == "tilt_down":
+        p = f"{base_keep} {daylight} Camera tilts down slightly to reveal the main subject, smooth premium movement."
+    elif preset == "static":
+        p = f"{base_keep} {daylight} Almost static shot with extremely subtle camera drift."
+    else:
+        p = f"{base_keep} {daylight} Smooth premium camera move."
+
+    neg = (
+        "warm yellow lighting, tungsten, sepia, orange cast, "
+        "object teleporting, new decor, extra vases, cats, shelves, lamps, "
+        "geometry distortion, flicker, text, watermark, logo, frame borders"
+    )
+    return {"prompt": p, "negative_prompt": neg}
+
+def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str, duration: str, cfg_scale: float) -> str:
+    if not FREEPIK_API_KEY:
+        raise RuntimeError("FREEPIK_API_KEY (or MAGNIFIC_API_KEY) is not set.")
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "duration": duration,
+        "cfg_scale": cfg_scale,
+        "image": {"base64": image_b64}
+    }
+    headers = {"x-freepik-api-key": FREEPIK_API_KEY, "Content-Type": "application/json"}
+    with _video_sem:
+        r = requests.post(KLING_ENDPOINT, headers=headers, json=payload, timeout=180)
+    if r.status_code == 429:
+        raise RuntimeError("Kling/Freepik rate limit hit (429). Try again later or lower VIDEO_MAX_CONCURRENCY.")
+    if not r.ok:
+        raise RuntimeError(f"Kling create failed ({r.status_code}): {r.text[:500]}")
+    data = r.json()
+    task_id = data.get("task_id") or data.get("id")
+    if not task_id:
+        raise RuntimeError("No task_id returned from Kling create.")
+    return task_id
+
+def _freepik_kling_poll(task_id: str, timeout_sec: int = 600) -> str:
+    headers = {"x-freepik-api-key": FREEPIK_API_KEY}
+    start = time.time()
+    while True:
+        if time.time() - start > timeout_sec:
+            raise RuntimeError("Kling task timeout.")
+        with _video_sem:
+            r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
+        if not r.ok:
+            raise RuntimeError(f"Kling status failed ({r.status_code}): {r.text[:300]}")
+        st = r.json()
+        status = (st.get("status") or "").upper()
+        if status in ("COMPLETED", "SUCCEEDED", "SUCCESS"):
+            out = st.get("result") or st.get("output") or {}
+            url = out.get("video") or out.get("url") or st.get("result_url")
+            if not url:
+                # some schemas: result.videos[0].url
+                vids = out.get("videos") or []
+                if vids and isinstance(vids, list):
+                    url = vids[0].get("url")
+            if not url:
+                raise RuntimeError("Kling completed but no result URL.")
+            return url
+        if status in ("FAILED", "ERROR"):
+            raise RuntimeError(st.get("error") or "Kling task failed.")
+        time.sleep(2)
+
+def _image_url_to_b64(url: str) -> str:
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    return base64.b64encode(r.content).decode("utf-8")
+
+def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale: float):
+    try:
+        with video_jobs_lock:
+            video_jobs[job_id]["status"] = "RUNNING"
+            video_jobs[job_id]["message"] = "Preparing clips..."
+            video_jobs[job_id]["progress"] = 1
+
+        out_dir = Path("outputs")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1) Generate each clip (5s), download, then trim to middle 3s (and optionally speed up)
+        generated_paths = []
+        for i, clip in enumerate(clips):
+            with video_jobs_lock:
+                video_jobs[job_id]["message"] = f"Generating clip {i+1}/{len(clips)}..."
+                video_jobs[job_id]["progress"] = int((i / max(1, len(clips))) * 60) + 5
+
+            prompts = _kling_prompts_for_preset(clip.preset)
+            img_b64 = _image_url_to_b64(clip.url)
+            task_id = _freepik_kling_create_task(img_b64, prompts["prompt"], prompts["negative_prompt"], duration, cfg_scale)
+            video_url = _freepik_kling_poll(task_id)
+
+            raw_path = out_dir / f"video_raw_{job_id}_{i}.mp4"
+            _download_to_path(video_url, raw_path)
+
+            trimmed_path = out_dir / f"video_trim_{job_id}_{i}.mp4"
+            _ffmpeg_trim_speed(raw_path, trimmed_path, VIDEO_TRIM_HEAD_SEC, VIDEO_TRIM_KEEP_SEC, VIDEO_SPEED_FACTOR, VIDEO_TARGET_FPS)
+            generated_paths.append(trimmed_path)
+
+        if not generated_paths:
+            raise RuntimeError("No clips generated.")
+
+        # 2) Normalize all to a common size (use first clip as reference)
+        ref_w, ref_h = _ffprobe_wh(generated_paths[0])
+        if ref_w <= 0 or ref_h <= 0:
+            ref_w, ref_h = 1280, 720
+
+        normalized_paths = []
+        for i, p in enumerate(generated_paths):
+            with video_jobs_lock:
+                video_jobs[job_id]["message"] = f"Normalizing clip {i+1}/{len(generated_paths)}..."
+                video_jobs[job_id]["progress"] = 70 + int((i / max(1, len(generated_paths))) * 15)
+
+            norm = out_dir / f"video_norm_{job_id}_{i}.mp4"
+            _ffmpeg_normalize_to(p, norm, ref_w, ref_h, VIDEO_TARGET_FPS)
+            normalized_paths.append(norm)
+
+        # 3) Concat
+        with video_jobs_lock:
+            video_jobs[job_id]["message"] = "Stitching final video..."
+            video_jobs[job_id]["progress"] = 90
+
+        list_file = out_dir / f"video_concat_{job_id}.txt"
+        list_lines = [f"file '{p.as_posix()}'" for p in normalized_paths]
+        list_file.write_text("\n".join(list_lines), encoding="utf-8")
+
+        final_path = out_dir / f"video_final_{job_id}.mp4"
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            str(final_path),
+        ]
+        # concat copy can fail if streams mismatch; if so, fallback to re-encode.
+        try:
+            _run_ffmpeg(cmd)
+        except Exception:
+            cmd2 = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-crf", str(VIDEO_CRF),
+                "-preset", "veryfast",
+                "-an",
+                str(final_path),
+            ]
+            _run_ffmpeg(cmd2)
+
+        result_url = f"/outputs/{final_path.name}"
+
+        with video_jobs_lock:
+            video_jobs[job_id]["status"] = "COMPLETED"
+            video_jobs[job_id]["message"] = "Completed"
+            video_jobs[job_id]["progress"] = 100
+            video_jobs[job_id]["result_url"] = result_url
+
+    except Exception as e:
+        with video_jobs_lock:
+            video_jobs[job_id]["status"] = "FAILED"
+            video_jobs[job_id]["error"] = str(e)
+            video_jobs[job_id]["message"] = "FAILED"
+            video_jobs[job_id]["progress"] = 0
+
+@app.post("/video-mvp/create")
+async def video_mvp_create(req: VideoCreateRequest):
+    job_id = uuid.uuid4().hex
+    with video_jobs_lock:
+        video_jobs[job_id] = {
+            "status": "QUEUED",
+            "message": "Queued",
+            "progress": 0,
+            "result_url": None,
+            "error": None,
+        }
+    video_executor.submit(_run_video_job, job_id, req.clips, req.duration, req.cfg_scale)
+    return {"job_id": job_id}
+
+@app.get("/video-mvp/status/{job_id}")
+async def video_mvp_status(job_id: str):
+    with video_jobs_lock:
+        st = video_jobs.get(job_id)
+    if not st:
+        return JSONResponse({"status": "NOT_FOUND", "message": "Job not found"}, status_code=404)
+    return st
+
+
 # --- Auto Cleanup System ---
-RETENTION_SECONDS = 3600 
+RETENTION_SECONDS = 7 * 24 * 60 * 60  # 7 days 
 CLEANUP_INTERVAL = 600
 
 def auto_cleanup_task():
@@ -1225,7 +1563,7 @@ def auto_cleanup_task():
             if os.path.exists(folder):
                 for filename in os.listdir(folder):
                     file_path = os.path.join(folder, filename)
-                    if os.path.isfile(file_path) and filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    if os.path.isfile(file_path) and filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.mp4')):
                         file_age = now - os.path.getmtime(file_path)
                         if file_age > RETENTION_SECONDS:
                             try:
@@ -1239,6 +1577,9 @@ def auto_cleanup_task():
         time.sleep(CLEANUP_INTERVAL)
 
 import threading
+import subprocess
+from urllib.parse import urlparse
+from pathlib import Path
 cleanup_thread = threading.Thread(target=auto_cleanup_task, daemon=True)
 cleanup_thread.start()
 

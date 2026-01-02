@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentLightboxIndex = 0;
 
     const THEME_COLOR = "#ffffff";
+    let persistedSliderValue = 50;
 
     let selectedFile = null;
     let selectedRoom = null;
@@ -838,8 +839,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const beforeImage = document.getElementById('result-before');
         const afterImage = document.getElementById('result-after');
 
-        const initialValue = 50;
+        // ✅ 기존 50 고정 대신, 저장된 값 사용
+        const initialValue = (typeof persistedSliderValue === 'number' ? persistedSliderValue : 50);
         compareSlider.value = initialValue;
+
         if (beforeWrapper) beforeWrapper.style.width = `${initialValue}%`;
         if (afterWrapper) afterWrapper.style.width = "100%";
         sliderHandle.style.left = `${initialValue}%`;
@@ -849,6 +852,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (afterImage) afterImage.style.width = `${containerWidth}px`;
 
         compareSlider.oninput = function () {
+            // ✅ 사용자가 움직일 때마다 값 저장
+            persistedSliderValue = Math.max(0, Math.min(100, parseInt(this.value, 10) || 0));
+
             const sliderValue = this.value + "%";
             if (beforeWrapper) beforeWrapper.style.width = sliderValue;
             sliderHandle.style.left = sliderValue;
@@ -1179,3 +1185,220 @@ async function upscaleAndDownload(imgUrl, filenamePrefix) {
         return false;
     }
 }
+
+
+// =========================
+// Video MVP (Kling Image-to-Video)
+// =========================
+document.addEventListener('DOMContentLoaded', () => {
+    const videoBtn = document.getElementById('videoMvpBtn');
+    const modal = document.getElementById('video-mvp-modal');
+    if (!videoBtn || !modal) return;
+
+    const closeBtn = document.getElementById('videoMvpClose');
+    const listEl = document.getElementById('videoMvpList');
+    const statusEl = document.getElementById('videoMvpStatus');
+    const startBtn = document.getElementById('videoMvpStart');
+
+    const durationSel = document.getElementById('videoMvpDuration');
+    const mainPresetSel = document.getElementById('videoMvpMainPreset');
+    const detailPresetSel = document.getElementById('videoMvpDetailPreset');
+
+    const resultWrap = document.getElementById('videoMvpResult');
+    const preview = document.getElementById('videoMvpPreview');
+    const download = document.getElementById('videoMvpDownload');
+
+    function openModal() {
+        modal.classList.remove('hidden');
+        resultWrap?.classList.add('hidden');
+        if (preview) preview.src = "";
+        if (download) download.href = "#";
+        buildClipList();
+        if (statusEl) statusEl.textContent = "";
+    }
+
+    function closeModal() {
+        modal.classList.add('hidden');
+    }
+
+    function getDetailUrls() {
+        const urls = [];
+        document.querySelectorAll('.detail-card img').forEach(img => {
+            if (img && img.src) urls.push(img.src);
+        });
+        return Array.from(new Set(urls));
+    }
+
+    function presetSelectHtml(defaultPreset) {
+        const opts = [
+            ["main_sunlight", "Main: Sunlight (Dynamic)"],
+            ["orbit_rotate", "Main: Orbit Rotate ↻"],
+            ["orbit_rotate_ccw", "Main: Orbit Rotate ↺"],
+            ["detail_pan_lr", "Detail: Pan L→R"],
+            ["detail_pan_rl", "Detail: Pan R→L"],
+            ["detail_dolly_in", "Detail: Dolly-in"],
+            ["detail_dolly_out", "Detail: Dolly-out"],
+            ["tilt_down", "Detail: Tilt Down"],
+            ["static", "Almost Static"],
+        ];
+        return `<select class="video-mvp-preset">
+            ${opts.map(([v, t]) => `<option value="${v}" ${v === defaultPreset ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>`;
+    }
+
+    function buildClipList() {
+        if (!listEl) return;
+        listEl.innerHTML = "";
+
+        const beforeImg = document.getElementById('result-before');
+        const afterImg = document.getElementById('result-after');
+
+        const clips = [];
+
+        if (beforeImg && beforeImg.src) {
+            clips.push({
+                label: "Before (Empty Room)",
+                url: beforeImg.src,
+                defaultPreset: "detail_dolly_in"
+            });
+        }
+
+        if (afterImg && afterImg.src) {
+            clips.push({
+                label: "Main Shot (After)",
+                url: afterImg.src,
+                defaultPreset: mainPresetSel ? mainPresetSel.value : "main_sunlight"
+            });
+        }
+
+        const detailUrls = getDetailUrls();
+        detailUrls.forEach((u, idx) => {
+            clips.push({
+                label: `Detail ${idx + 1}`,
+                url: u,
+                defaultPreset: detailPresetSel ? detailPresetSel.value : "detail_pan_lr"
+            });
+        });
+
+        if (clips.length === 0) {
+            listEl.innerHTML = `<div class="video-mvp-empty">아직 결과 이미지가 없습니다. 먼저 렌더링/디테일 생성 후 열어주세요.</div>`;
+            return;
+        }
+
+        clips.forEach((c) => {
+            const row = document.createElement('div');
+            row.className = 'video-mvp-item';
+            row.innerHTML = `
+                <div class="video-mvp-item-left">
+                    <input type="checkbox" class="video-mvp-check" checked />
+                    <div class="video-mvp-thumb"><img src="${c.url}" /></div>
+                    <div class="video-mvp-label">
+                        <div class="video-mvp-title">${c.label}</div>
+                        <div class="video-mvp-url">${c.url}</div>
+                    </div>
+                </div>
+                <div class="video-mvp-item-right">
+                    ${presetSelectHtml(c.defaultPreset)}
+                </div>
+            `;
+            row.dataset.url = c.url;
+            listEl.appendChild(row);
+        });
+    }
+
+    if (mainPresetSel) mainPresetSel.addEventListener('change', buildClipList);
+    if (detailPresetSel) detailPresetSel.addEventListener('change', buildClipList);
+
+    async function startJob() {
+        if (!listEl) return;
+
+        const items = Array.from(listEl.querySelectorAll('.video-mvp-item'));
+        const clips = [];
+        items.forEach(it => {
+            const checked = it.querySelector('.video-mvp-check')?.checked;
+            if (!checked) return;
+            const url = it.dataset.url;
+            const preset = it.querySelector('.video-mvp-preset')?.value || "detail_pan_lr";
+            if (url) clips.push({ url, preset });
+        });
+
+        if (clips.length === 0) {
+            if (statusEl) statusEl.textContent = "선택된 이미지가 없습니다.";
+            return;
+        }
+
+        startBtn.disabled = true;
+        if (statusEl) statusEl.textContent = "Creating job...";
+
+        try {
+            const res = await fetch('/video-mvp/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clips,
+                    duration: durationSel ? durationSel.value : "5",
+                    cfg_scale: 0.85
+                })
+            });
+
+            if (!res.ok) {
+                const t = await res.text();
+                throw new Error(`Create failed (${res.status}): ${t}`);
+            }
+
+            const data = await res.json();
+            const jobId = data.job_id;
+            if (!jobId) throw new Error("No job_id returned");
+
+            await pollJob(jobId);
+        } catch (e) {
+            console.error(e);
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+        } finally {
+            startBtn.disabled = false;
+        }
+    }
+
+    async function pollJob(jobId) {
+        if (statusEl) statusEl.textContent = `Running... (${jobId})`;
+
+        return new Promise((resolve) => {
+            const iv = setInterval(async () => {
+                try {
+                    const r = await fetch(`/video-mvp/status/${jobId}`);
+                    if (!r.ok) return;
+
+                    const st = await r.json();
+                    const msg = st.message || st.status || "";
+                    const prog = (st.progress != null) ? `${st.progress}%` : "";
+                    if (statusEl) statusEl.textContent = `${msg} ${prog}`;
+
+                    if (st.status === "COMPLETED" && st.result_url) {
+                        clearInterval(iv);
+                        if (preview) preview.src = st.result_url;
+                        if (download) download.href = st.result_url;
+                        if (resultWrap) resultWrap.classList.remove('hidden');
+                        resolve();
+                    }
+
+                    if (st.status === "FAILED") {
+                        clearInterval(iv);
+                        if (statusEl) statusEl.textContent = `FAILED: ${st.error || 'unknown error'}`;
+                        resolve();
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }, 2000);
+        });
+    }
+
+    videoBtn.addEventListener('click', openModal);
+    closeBtn?.addEventListener('click', closeModal);
+
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    startBtn?.addEventListener('click', startJob);
+});
