@@ -6,6 +6,7 @@
   let preview, download;
 
   const PRESETS = [
+    { value: "ref_auto", label: "Reference Auto (Vision)" }, // ✅ 추가
     { value: "sunlight_slow_pan", label: "Sunlight • Slow Pan" },
     { value: "sunlight_gentle_parallax", label: "Sunlight • Gentle Parallax" },
     { value: "right_to_left_smooth", label: "Pan • Right → Left" },
@@ -23,138 +24,78 @@
     statusEl.textContent = msg || "";
   }
 
-  function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, (m) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;",
-    }[m]));
+  function setResult(url) {
+    if (!url) return;
+    const wrap = $("resultWrap");
+    const vid = $("resultVideo");
+    const dl = $("downloadLink");
+    if (wrap) wrap.classList.remove("hidden");
+    if (vid) vid.src = url;
+    if (dl) dl.href = url;
   }
 
-  async function apiListRecent() {
-    const res = await fetch("/api/outputs/list?limit=200", { cache: "no-store" });
-    if (!res.ok) throw new Error(`list failed: ${res.status}`);
-    const data = await res.json();
-    const items = Array.isArray(data.items) ? data.items : [];
-    return items.filter(it => it && it.url);
+  function escapeHtml(s) {
+    return (s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
-  function renderRecent(items) {
-    if (!recentGrid) return;
-    recentGrid.innerHTML = "";
-    if (!items.length) {
-      if (recentEmpty) recentEmpty.style.display = "block";
-      return;
-    }
-    if (recentEmpty) recentEmpty.style.display = "none";
-
-    for (const it of items) {
-      const div = document.createElement("div");
-      div.className = "vs-thumb"; // 기존 클래스 유지
-      div.title = it.filename || it.url;
-      div.dataset.url = it.url;
-
-      // [UX Improvement] 업스케일 된 파일(magnific_)인지 확인
-      const isUpscaled = (it.filename || "").toLowerCase().includes("magnific");
-
-      // 썸네일 컨테이너 (position: relative 필요)
-      div.style.position = "relative";
-
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.src = it.url;
-      img.alt = it.filename || "image";
-      div.appendChild(img);
-
-      // [UX] 고화질 파일이면 'HQ' 배지 부착
-      if (isUpscaled) {
-        const badge = document.createElement("span");
-        badge.textContent = "HQ";
-        badge.style.position = "absolute";
-        badge.style.top = "6px";
-        badge.style.right = "6px";
-        badge.style.background = "rgba(74, 18, 21, 0.9)"; // 브랜드 컬러
-        badge.style.color = "#fff";
-        badge.style.fontSize = "10px";
-        badge.style.fontWeight = "bold";
-        badge.style.padding = "2px 6px";
-        badge.style.borderRadius = "4px";
-        badge.style.boxShadow = "0 2px 4px rgba(0,0,0,0.5)";
-        div.appendChild(badge);
-      }
-
-      // 파일명 오버레이 (선택 사항 - 원하시면 주석 해제)
-      /*
-      const label = document.createElement("div");
-      label.textContent = isUpscaled ? "High Res" : "Raw";
-      label.style.position = "absolute";
-      label.style.bottom = "0";
-      label.style.left = "0";
-      label.style.width = "100%";
-      label.style.background = "rgba(0,0,0,0.6)";
-      label.style.color = "#fff";
-      label.style.fontSize = "10px";
-      label.style.padding = "4px";
-      label.style.textAlign = "center";
-      div.appendChild(label);
-      */
-
-      div.addEventListener("click", () => addSelected(it.url));
-      recentGrid.appendChild(div);
-    }
-  }
-
-  function presetSelectHtml(current) {
-    const opts = PRESETS.map(p => {
-      const sel = p.value === current ? "selected" : "";
-      return `<option value="${p.value}" ${sel}>${escapeHtml(p.label)}</option>`;
-    }).join("");
-    return `<select class="vs-select" data-role="preset">${opts}</select>`;
+  function buildPresetSelect(value, onChange) {
+    const sel = document.createElement("select");
+    sel.className = "vs-select";
+    PRESETS.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.value;
+      opt.textContent = p.label;
+      if (p.value === value) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", (e) => onChange(e.target.value));
+    return sel;
   }
 
   function renderSelected() {
     if (!selectedList) return;
-
-    Array.from(selectedList.children).forEach(child => {
-      if (child !== selectedEmpty) {
-        child.remove();
-      }
-    });
+    selectedList.innerHTML = "";
 
     if (!selected.length) {
-      if (selectedEmpty) selectedEmpty.style.display = "block";
+      if (selectedEmpty) selectedEmpty.classList.remove("hidden");
       return;
     }
-    if (selectedEmpty) selectedEmpty.style.display = "none";
+    if (selectedEmpty) selectedEmpty.classList.add("hidden");
 
-    selected.forEach((clip, idx) => {
+    selected.forEach((item, idx) => {
       const row = document.createElement("div");
       row.className = "vs-selected-row";
-      row.dataset.idx = String(idx);
 
       row.innerHTML = `
-        <div class="thumb"><img src="${clip.url}" alt="thumb" /></div>
-        <div style="min-width:0;">
-          <div style="font-weight:600; font-size:0.95rem;">Clip ${idx + 1}</div>
-          <div class="vs-upload-hint" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(clip.url)}</div>
+        <div class="vs-selected-thumb">
+          <img src="${escapeHtml(item.url)}" alt="thumb" />
         </div>
-        ${presetSelectHtml(clip.preset)}
-        <button class="vs-mini-btn" type="button" data-role="remove" title="Remove">✕</button>
+        <div class="vs-selected-meta">
+          <div class="vs-selected-url muted">${escapeHtml(item.url)}</div>
+        </div>
+        <div class="vs-selected-actions"></div>
       `;
 
-      const presetSel = row.querySelector('select[data-role="preset"]');
-      presetSel?.addEventListener("change", (e) => {
-        const val = e.target.value;
+      const actions = row.querySelector(".vs-selected-actions");
+
+      const presetSel = buildPresetSelect(item.preset || "ref_auto", (val) => {
         selected[idx].preset = val;
       });
 
-      const removeBtn = row.querySelector('button[data-role="remove"]');
-      removeBtn?.addEventListener("click", () => {
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "action-btn";
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", () => {
         selected.splice(idx, 1);
         renderSelected();
       });
+
+      actions.appendChild(presetSel);
+      actions.appendChild(removeBtn);
 
       selectedList.appendChild(row);
     });
@@ -163,7 +104,7 @@
   function addSelected(url) {
     if (!url) return;
     if (selected.some(s => s.url === url)) return;
-    selected.push({ url, preset: "sunlight_slow_pan" });
+    selected.push({ url, preset: "ref_auto" }); // ✅ 기본 preset만 변경
     renderSelected();
     setStatus("");
   }
@@ -177,51 +118,121 @@
         const fd = new FormData();
         fd.append("file", file);
 
-        const res = await fetch("/api/outputs/upload", {
+        const res = await fetch("/api/uploads/upload", {
           method: "POST",
-          body: fd
+          body: fd,
         });
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          throw new Error(`upload failed (${res.status}): ${txt}`);
-        }
-        const data = await res.json();
-        if (data && data.url) {
-          addSelected(data.url);
-        }
+        if (!res.ok) throw new Error(`upload failed: ${res.status}`);
       }
+
+      setStatus("Upload complete. Refreshing recent images...");
       await refreshRecent();
-      setStatus("");
-    } catch (err) {
-      console.error(err);
+      setStatus("Ready.");
+    } catch (e) {
+      console.error(e);
       setStatus("Upload failed. Check server logs.");
     }
   }
 
+  async function apiListRecent() {
+    const res = await fetch("/api/outputs/list?limit=200", { cache: "no-store" });
+    if (!res.ok) throw new Error(`list failed: ${res.status}`);
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    return items.filter(it => it && it.url);
+  }
+
+  function renderRecent(items) {
+    if (!recentGrid) return;
+    recentGrid.innerHTML = "";
+
+    if (!items.length) {
+      if (recentEmpty) recentEmpty.classList.remove("hidden");
+      return;
+    }
+    if (recentEmpty) recentEmpty.classList.add("hidden");
+
+    items.forEach(it => {
+      const btn = document.createElement("button");
+      btn.className = "vs-thumb";
+      btn.type = "button";
+      btn.innerHTML = `
+        <div class="vs-thumb-img"><img src="${escapeHtml(it.url)}" alt="recent" /></div>
+        <div class="vs-thumb-label muted">${escapeHtml(it.filename || "")}</div>
+      `;
+      btn.addEventListener("click", () => addSelected(it.url));
+      recentGrid.appendChild(btn);
+    });
+  }
+
   async function refreshRecent() {
-    try {
-      const items = await apiListRecent();
-      renderRecent(items);
-    } catch (e) {
-      console.error(e);
-      renderRecent([]);
-      setStatus("Failed to load recent images. Is the server running?");
+    const items = await apiListRecent();
+    renderRecent(items);
+  }
+
+  function bindUploadUI() {
+    if (!uploadZone || !uploadInput || !browseBtn) return;
+
+    browseBtn.addEventListener("click", () => uploadInput.click());
+    uploadInput.addEventListener("change", (e) => {
+      const files = Array.from(e.target.files || []);
+      uploadFiles(files);
+      uploadInput.value = "";
+    });
+
+    uploadZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      uploadZone.classList.add("dragover");
+    });
+    uploadZone.addEventListener("dragleave", () => {
+      uploadZone.classList.remove("dragover");
+    });
+    uploadZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove("dragover");
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith("image/"));
+      uploadFiles(files);
+    });
+  }
+
+  async function pollJob(jobId) {
+    const poll = async () => {
+      const res = await fetch(`/video-mvp/status/${jobId}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`status failed: ${res.status}`);
+      const state = await res.json();
+      setStatus(state.message || state.status || "Working...");
+      if (state.status === "COMPLETED" && state.result_url) return state.result_url;
+      if (state.status === "FAILED") throw new Error(state.error || "job failed");
+      return null;
+    };
+
+    while (true) {
+      const out = await poll();
+      if (out) return out;
+      await new Promise(r => setTimeout(r, 1200));
     }
   }
 
-  async function createVideo() {
-    if (!selected.length) return;
+  async function startCreateVideo() {
+    if (!selected.length) {
+      setStatus("Select at least one image.");
+      return;
+    }
 
-    outputEl.innerHTML = "";
     createBtn.disabled = true;
 
     // ✅ 문자열로 유지
     const duration = durationSelect?.value || "5";
 
     const payload = {
-      clips: selected.map(s => ({ url: s.url, preset: s.preset || "default" })),
+      clips: selected.map(s => ({ url: s.url, preset: s.preset || "ref_auto" })),
       duration: String(duration),  // ✅ 명시적으로 문자열 변환
-      cfg_scale: 0.85  // ✅ 0.85로 변경 (서버 기본값과 동일)
+      cfg_scale: 0.85,  // ✅ 0.85로 변경 (서버 기본값과 동일)
+
+      // ✅ auto_ref 동작을 위한 필드(서버에서 backward compatible)
+      mode: selected.some(s => (s.preset || "ref_auto") === "ref_auto") ? "auto_ref" : "manual",
+      target_total_sec: 20.0,
+      include_intro_outro: true
     };
 
     try {
@@ -229,18 +240,20 @@
       const res = await fetch("/video-mvp/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
+      if (!res.ok) throw new Error(`create failed: ${res.status}`);
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`create failed (${res.status}): ${txt}`);
-      }
       const data = await res.json();
       const jobId = data.job_id;
       if (!jobId) throw new Error("missing job_id");
 
-      await pollJob(jobId);
+      setStatus("Job started. Generating...");
+      const resultUrl = await pollJob(jobId);
+
+      setStatus("Done.");
+      setResult(resultUrl);
+      createBtn.disabled = false;
     } catch (e) {
       console.error(e);
       setStatus("Failed to start video generation. Check server logs.");
@@ -248,105 +261,28 @@
     }
   }
 
-  async function pollJob(jobId) {
-    const poll = async () => {
-      try {
-        const res = await fetch(`/video-mvp/status/${jobId}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`status failed: ${res.status}`);
-
-        const state = await res.json();
-
-        // ✅ 방어적 코딩: state가 객체인지 확인
-        if (typeof state !== 'object' || state === null) {
-          console.error("Invalid state response:", state);
-          throw new Error("Invalid response format");
-        }
-
-        const msg = state.message || state.status || "";
-        const progress = state.progress ? ` (${state.progress}%)` : "";
-
-        if (state.status === "COMPLETED") {
-          setStatus("Done.");
-          createBtn.disabled = false;
-
-          const url = state.result_url;
-          if (url) {
-            outputEl.innerHTML = `
-            <div class="vs-subtitle" style="margin-bottom:10px;">Output</div>
-            <video src="${url}" controls style="width:100%; border-radius: 16px; border: 1px solid rgba(255,255,255,0.12);"></video>
-            <div style="margin-top:10px;">
-              <a href="${url}" download class="vs-mini-btn" style="display:inline-flex; text-decoration:none;">Download</a>
-            </div>
-          `;
-          } else {
-            outputEl.innerHTML = `<div class="vs-subtitle">Video complete, but no output URL was returned.</div>`;
-          }
-          refreshRecent();
-          return;
-        }
-
-        if (state.status === "FAILED") {
-          setStatus(`Error: ${state.error || "Unknown error"}`);
-          createBtn.disabled = false;
-          return;
-        }
-
-        setStatus(`${msg}${progress}`);
-        setTimeout(poll, 1500);
-
-      } catch (e) {
-        console.error("Poll error:", e);
-        setStatus(`Error: ${e.message}`);
-        createBtn.disabled = false;
-      }
-    };
-
-    await poll();
-  }
-
-  document.addEventListener("DOMContentLoaded", () => {
+  function init() {
     recentGrid = $("recentGrid");
     recentEmpty = $("vsRecentEmpty");
-    uploadZone = $("uploadDrop");
-    uploadInput = $("fileInput");
+    uploadZone = $("uploadZone");
+    uploadInput = $("uploadInput");
     browseBtn = $("browseBtn");
-    durationSelect = $("clipDuration");
-    selectedList = $("vsSelectedList");
-    selectedEmpty = $("vsSelectedEmpty");
+
+    durationSelect = $("durationSelect");
+    selectedList = $("selectedList");
+    selectedEmpty = $("selectedEmpty");
     createBtn = $("createVideoBtn");
     statusEl = $("status");
-    outputEl = $("resultWrap");
-    preview = $("resultVideo");
-    download = $("downloadLink");
 
-    browseBtn?.addEventListener("click", () => uploadInput?.click());
+    bindUploadUI();
 
-    uploadInput?.addEventListener("change", (e) => {
-      const files = e.target.files ? Array.from(e.target.files) : [];
-      e.target.value = "";
-      uploadFiles(files);
+    createBtn?.addEventListener("click", startCreateVideo);
+
+    refreshRecent().catch(e => {
+      console.error(e);
+      setStatus("Failed to load recent images.");
     });
+  }
 
-    if (uploadZone) {
-      const prevent = (e) => { e.preventDefault(); e.stopPropagation(); };
-      ["dragenter", "dragover", "dragleave", "drop"].forEach(ev =>
-        uploadZone.addEventListener(ev, prevent)
-      );
-
-      uploadZone.addEventListener("dragenter", () => uploadZone.classList.add("dragover"));
-      uploadZone.addEventListener("dragover", () => uploadZone.classList.add("dragover"));
-      uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
-      uploadZone.addEventListener("drop", (e) => {
-        uploadZone.classList.remove("dragover");
-        const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
-        uploadFiles(files);
-      });
-    }
-
-    createBtn?.addEventListener("click", createVideo);
-
-    if (outputEl) outputEl.classList.add("hidden");
-    renderSelected();
-    refreshRecent();
-  });
+  window.addEventListener("DOMContentLoaded", init);
 })();

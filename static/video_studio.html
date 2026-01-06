@@ -15,9 +15,11 @@
 
         <header class="vs-header">
           <div>
-            <h1 class="vs-title">Video Studio</h1>
-            <p class="vs-subtitle">Create Kling clips from existing images and automatically merge them into one video.
-            </p>
+            <h1>Video Studio</h1>
+            <p class="muted">Select images → generate 5s clips → stitch into a final video</p>
+          </div>
+          <div class="vs-header-actions">
+            <a class="action-btn" href="/">Home</a>
           </div>
         </header>
 
@@ -34,54 +36,44 @@
           <section class="vs-card">
             <div class="vs-card-head">
               <h2>Upload Your Images</h2>
-              <p class="muted">Drag & drop or browse files. Uploaded files are saved to /outputs.</p>
+              <p class="muted">Drag & drop or browse images to upload into /uploads.</p>
             </div>
 
-            <div id="uploadDrop" class="vs-dropzone" tabindex="0">
+            <div id="uploadZone" class="vs-dropzone">
               <div class="vs-dropzone-inner">
-                <div class="vs-dropzone-title">Drag & Drop images here</div>
-                <div class="vs-dropzone-or">or</div>
-                <button id="browseBtn" type="button" class="action-btn secondary vs-browse-btn">Browse files</button>
-                <input id="fileInput" type="file" accept="image/*" multiple class="hidden" />
+                <div class="vs-dropzone-title">Drop images here</div>
+                <div class="vs-dropzone-sub muted">or</div>
+                <button id="browseBtn" class="action-btn">Browse</button>
+                <input id="uploadInput" type="file" accept="image/*" multiple class="hidden" />
               </div>
             </div>
 
-            <div class="vs-options">
-              <div class="vs-option">
-                <label class="vs-label" for="clipDuration">Clip Duration</label>
-                <select id="clipDuration" class="vs-select">
-                  <option value="5">5s (default)</option>
-                </select>
-              </div>
-              <div class="vs-help muted">Each image becomes one Kling clip, then we merge them into a single video.
-              </div>
+            <div class="vs-row">
+              <label class="muted">Duration</label>
+              <select id="durationSelect" class="vs-select">
+                <option value="5" selected>5s</option>
+              </select>
+            </div>
+
+            <div class="vs-row">
+              <label class="muted">Selected Clips</label>
+            </div>
+
+            <div id="selectedList" class="vs-selected"></div>
+            <div id="selectedEmpty" class="vs-empty muted">No images selected.</div>
+
+            <div class="vs-actions">
+              <button id="createVideoBtn" class="action-btn primary">CREATE VIDEO</button>
+              <div id="status" class="vs-status"></div>
+            </div>
+
+            <div id="resultWrap" class="vs-result hidden">
+              <video id="resultVideo" controls class="vs-video"></video>
+              <a id="downloadLink" class="vs-download" href="#" download>DOWNLOAD</a>
             </div>
           </section>
+
         </div>
-
-        <section class="vs-card vs-selected-card">
-          <div class="vs-card-head">
-            <h2>Selected Clips</h2>
-            <p class="muted">You can mix presets per image. The output video is generated after all clips are ready.</p>
-          </div>
-
-          <div id="vsSelectedList" class="vs-selected-list">
-            <div id="vsSelectedEmpty" class="vs-empty muted">No image selected yet. Pick one on the left or upload new
-              images.</div>
-          </div>
-
-          <div class="vs-actions">
-            <button id="createVideoBtn" class="action-btn primary">CREATE VIDEO</button>
-            <div id="status" class="vs-status"></div>
-          </div>
-
-
-          <div id="resultWrap" class="vs-result hidden">
-            <video id="resultVideo" controls class="vs-video"></video>
-            <a id="downloadLink" class="vs-download" href="#" download>DOWNLOAD</a>
-          </div>
-        </section>
-
       </div>
     </div>
   </div>

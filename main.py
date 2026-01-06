@@ -854,27 +854,31 @@ def construct_dynamic_styles(analyzed_items):
     styles.append({
         "name": "High Angle Overview", 
         "prompt": (
-            "CAMERA POSITION: High-angle security camera view from the ceiling corner.\n"
+            "CAMERA POSITION: High-angle view looking down from the ceiling.\n"
             "SUBJECT: The entire room layout exactly as shown in the original image.\n"
+        ), 
+        "ratio": "16:9"
+    })
+    # [수정 1] 좌측 공간 강조 (카메라 이동 X, 프레임 집중 O)
+    styles.append({
+        "name": "Side Composition (Focus Left)", 
+        "prompt": (
+            "COMPOSITION: Asymmetrical framing focusing heavily on the LEFT SIDE of the room.\n"
+            "VISUAL PRIORITY: Highlight the furniture and details located near the left wall.\n"
+            "CAMERA ANGLE: Slight pan to the left, but keep the original standing position.\n"
             "CRITICAL: Do not move any furniture. Keep the exact arrangement."
         ), 
         "ratio": "16:9"
     })
+
+    # [수정 2] 우측 공간 강조
     styles.append({
-        "name": "Diagonal Perspective (Left to Right)", 
+        "name": "Side Composition (Focus Right)", 
         "prompt": (
-            "CAMERA POSITION: Eye-level shot from the back left corner(near left wall).\n"
-            "SUBJECT: Wide angle view of the room.\n"
-            "CRITICAL: Maintain the exact furniture positions relative to the windows."
-        ), 
-        "ratio": "16:9"
-    })
-    styles.append({
-        "name": "Diagonal Perspective (Right to Left)", 
-        "prompt": (
-            "CAMERA POSITION: Eye-level shot from the back right corner(near right wall).\n"
-            "SUBJECT: Wide angle view of the room.\n"
-            "CRITICAL: Maintain the exact furniture positions relative to the windows."
+            "COMPOSITION: Asymmetrical framing focusing heavily on the RIGHT SIDE of the room.\n"
+            "VISUAL PRIORITY: Highlight the furniture and details located near the right wall.\n"
+            "CAMERA ANGLE: Slight pan to the right, but keep the original standing position.\n"
+            "CRITICAL: Do not move any furniture. Keep the exact arrangement."
         ), 
         "ratio": "16:9"
     })
@@ -1288,8 +1292,15 @@ class VideoClip(BaseModel):
 
 class VideoCreateRequest(BaseModel):
     clips: List[VideoClip]
-    duration: str = "5"          # Provider side (we still receive 5s clips)
+    duration: str = "5"          # Provider side (Kling fixed: always 5s clips)
     cfg_scale: float = 0.85
+
+    # --- Auto "reference-style" mode (optional, backward compatible) ---
+    # If mode is omitted, the server auto-detects by checking for preset == "ref_auto".
+    mode: Optional[str] = None              # "auto_ref" | "manual"
+    target_total_sec: Optional[float] = None  # default 20.0
+    include_intro_outro: Optional[bool] = None # default True
+
 
 # Use Freepik API key for Kling as well (same header: x-freepik-api-key)
 FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY")  # fallback for existing env
@@ -1300,14 +1311,19 @@ KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", f"https://api.freepik.com/v1/ai/ima
 VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "2"))
 _video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
 
-# Stitching rules: use only the middle 3 seconds (cut 1s head + 1s tail from 5s)
-VIDEO_TRIM_HEAD_SEC = float(os.getenv("VIDEO_TRIM_HEAD_SEC", "1.0"))
-VIDEO_TRIM_KEEP_SEC = float(os.getenv("VIDEO_TRIM_KEEP_SEC", "3.0"))
-
-# Make playback a bit faster (1.2 => 20% faster). Set to 1.0 to disable.
-VIDEO_SPEED_FACTOR = float(os.getenv("VIDEO_SPEED_FACTOR", "1.2"))
-
 VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "24"))
+
+# Provider side: Kling always returns 5 second clips.
+VIDEO_PROVIDER_CLIP_SEC = float(os.getenv("VIDEO_PROVIDER_CLIP_SEC", "5.0"))
+
+# Trimming rules (seconds, on the ORIGINAL clip before speed-up).
+# In manual mode we default to using the full 5s clip. In auto_ref mode we override per-scene.
+VIDEO_TRIM_HEAD_SEC = float(os.getenv("VIDEO_TRIM_HEAD_SEC", "0.0"))
+VIDEO_TRIM_KEEP_SEC = float(os.getenv("VIDEO_TRIM_KEEP_SEC", str(VIDEO_PROVIDER_CLIP_SEC)))
+
+# Requirement: ALWAYS speed up x2 after generation to get snappier motion safely.
+VIDEO_SPEED_FACTOR = float(os.getenv("VIDEO_SPEED_FACTOR", "2.0"))
+
 VIDEO_CRF = int(os.getenv("VIDEO_CRF", "18"))
 
 video_jobs: Dict[str, Dict[str, Any]] = {}
@@ -1385,6 +1401,338 @@ def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h:
         str(out_path),
     ]
     _run_ffmpeg(cmd)
+import io
+import math
+
+# -------------------------
+# Auto Reference-Style Video (Vision + Motion Prompts)
+# -------------------------
+
+# Reference video pacing (measured from /mnt/data/AI영상 리소스1.mp4)
+# Content scenes (excluding black intro/outro), in seconds:
+# 1) 3.49, 2) 0.76, 3) 0.63, 4) 1.53, 5) 0.86, 6) 1.26, 7) 0.63, 8) 0.83, 9) 1.00
+REF_STYLE_SCENE_DURS_SEC = [3.49, 0.76, 0.63, 1.53, 0.86, 1.26, 0.63, 0.83, 1.00]
+REF_STYLE_SCENES = [
+    {"scene_type": "establish_push",     "prefer": {"shot_type": "wide"}},
+    {"scene_type": "kitchen_corner_slide","prefer": {"tags_any": ["kitchen", "counter", "cabinet"]}},
+    {"scene_type": "sink_texture_pan",   "prefer": {"tags_any": ["sink", "counter", "tile"]}},
+    {"scene_type": "pendant_reveal_tilt", "prefer": {"flags_any": ["has_pendant_light", "has_lamp", "has_table"]}},
+    {"scene_type": "window_sunlight_reveal","prefer": {"flags_any": ["has_window", "has_blinds_or_curtain"]}},
+    {"scene_type": "corridor_slide_forward","prefer": {"shot_type": "wide"}},
+    {"scene_type": "desk_close_push",    "prefer": {"flags_any": ["has_desk"]}},
+    {"scene_type": "chair_detail_pan",   "prefer": {"tags_any": ["chair", "stool", "armchair"]}},
+    {"scene_type": "entry_mirror_pullback","prefer": {"flags_any": ["has_mirror", "has_entryway"]}},
+]
+
+def _safe_extract_json(text: str) -> Dict[str, Any]:
+    """Extract a JSON object from Gemini text safely."""
+    if not text:
+        return {}
+    t = text.strip()
+    if "```json" in t:
+        t = t.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in t:
+        t = t.split("```", 1)[1].split("```", 1)[0].strip() if t.count("```") >= 2 else t.split("```", 1)[0].strip()
+    try:
+        obj = json.loads(t)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    try:
+        a = t.find("{")
+        b = t.rfind("}")
+        if a != -1 and b != -1 and b > a:
+            obj = json.loads(t[a:b+1])
+            return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+def _clip_url_to_image_bytes(url: str) -> bytes:
+    """Supports data URI, local path (/...), and remote URL."""
+    if url.startswith("data:image/"):
+        try:
+            _, encoded = url.split(",", 1)
+            return base64.b64decode(encoded)
+        except Exception:
+            return base64.b64decode(url)
+    if url.startswith("/"):
+        local_path = url.lstrip("/")
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Image not found on server: {local_path}")
+        return Path(local_path).read_bytes()
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+def _vision_analyze_for_video_motion(img_bytes: bytes) -> Dict[str, Any]:
+    """
+    Vision analysis (Gemini-3-flash-preview) to choose a focal subject and safe motion.
+    Returns a dict with keys used by the prompt builder.
+    """
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+        img = ImageOps.exif_transpose(img).convert("RGB")
+
+        prompt = (
+            "You are a meticulous vision analyst for interior photography.\n"
+            "Analyze the provided image and output STRICT JSON only (no markdown).\n\n"
+            "Return keys:\n"
+            "{\n"
+            '  "shot_type": "wide" | "detail",\n'
+            '  "focal_object": "short noun phrase (e.g., pendant light, desk, blinds, sofa, mirror)",\n'
+            '  "key_objects": ["list of notable objects, short nouns"],\n'
+            '  "tags": ["kitchen","sink","counter","window","desk","chair","mirror","sofa","lamp","table","blinds","curtain","art","plant","bed","bathroom","entryway"],\n'
+            '  "has_window": true/false,\n'
+            '  "has_blinds_or_curtain": true/false,\n'
+            '  "has_pendant_light": true/false,\n'
+            '  "has_lamp": true/false,\n'
+            '  "has_desk": true/false,\n'
+            '  "has_mirror": true/false,\n'
+            '  "has_entryway": true/false,\n'
+            '  "composition": "where is the focal object (center/left/right/foreground/background)",\n'
+            '  "lighting": "daylight/soft daylight/low light/unknown"\n'
+            "}\n\n"
+            "Rules:\n"
+            "- Do NOT invent objects that are not visible.\n"
+            "- If unsure, be conservative and set booleans to false.\n"
+        )
+        resp = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 45}, {})
+        data = _safe_extract_json(resp.text if resp else "")
+        if not data:
+            raise ValueError("Empty JSON from vision")
+
+        data.setdefault("tags", [])
+        data.setdefault("key_objects", [])
+        data.setdefault("shot_type", "detail")
+        data.setdefault("focal_object", "main focal point")
+        for k in ["has_window","has_blinds_or_curtain","has_pendant_light","has_lamp","has_desk","has_mirror","has_entryway"]:
+            if k not in data:
+                data[k] = False
+        return data
+    except Exception as e:
+        print(f"⚠️ [Vision Analyze Failed] {e}", flush=True)
+        return {
+            "shot_type": "detail",
+            "focal_object": "main focal point",
+            "key_objects": [],
+            "tags": [],
+            "has_window": False,
+            "has_blinds_or_curtain": False,
+            "has_pendant_light": False,
+            "has_lamp": False,
+            "has_desk": False,
+            "has_mirror": False,
+            "has_entryway": False,
+            "composition": "unknown",
+            "lighting": "unknown",
+        }
+
+def _find_static_image(prefix: str) -> Optional[Path]:
+    """
+    Finds static/{prefix}.* (png/jpg/jpeg/webp). Example: intro.png, outro.jpg
+    """
+    static_dir = Path("static")
+    if not static_dir.exists():
+        return None
+    exts = ["png", "jpg", "jpeg", "webp"]
+    cand = []
+    for ext in exts:
+        cand.extend(static_dir.glob(f"{prefix}*.{ext}"))
+        cand.extend(static_dir.glob(f"{prefix.upper()}*.{ext}"))
+        cand.extend(static_dir.glob(f"{prefix.capitalize()}*.{ext}"))
+    cand = sorted(set(cand))
+    return cand[0] if cand else None
+
+def _ffmpeg_image_to_video(image_path: Path, out_path: Path, dur_sec: float, target_w: int, target_h: int, fps: int):
+    """
+    Turns a still image into a short video segment (used for intro/outro).
+    """
+    fade_d = 0.25
+    fade_out_st = max(0.0, dur_sec - fade_d)
+    vf = (
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+        f"crop={target_w}:{target_h},setsar=1,fps={fps},"
+        f"fade=t=in:st=0:d={fade_d},fade=t=out:st={fade_out_st}:d={fade_d}"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", str(image_path),
+        "-t", str(dur_sec),
+        "-vf", vf,
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", str(VIDEO_CRF),
+        "-preset", "veryfast",
+        str(out_path),
+    ]
+    _run_ffmpeg(cmd)
+
+def _pick_best_url(all_urls: List[str], analyses: Dict[str, Dict[str, Any]], prefer: Dict[str, Any], used: set) -> str:
+    """
+    Simple heuristic selector for a scene. Falls back to first URL.
+    """
+    def score(u: str) -> int:
+        a = analyses.get(u, {})
+        sc = 0
+        if prefer.get("shot_type") and a.get("shot_type") == prefer["shot_type"]:
+            sc += 3
+        tags_any = prefer.get("tags_any") or []
+        if tags_any:
+            at = set([t.lower() for t in (a.get("tags") or [])])
+            if any(t in at for t in [x.lower() for x in tags_any]):
+                sc += 3
+        flags_any = prefer.get("flags_any") or []
+        if flags_any and any(bool(a.get(f)) for f in flags_any):
+            sc += 3
+        if u not in used:
+            sc += 1
+        return sc
+
+    urls = list(all_urls)
+    urls.sort(key=score, reverse=True)
+    return urls[0] if urls else ""
+
+def _build_auto_ref_plan(
+    input_clips: List[VideoClip],
+    analyses: Dict[str, Dict[str, Any]],
+    target_total_sec: float,
+    include_intro_outro: bool,
+) -> List[Dict[str, Any]]:
+    """
+    Build a shot plan that matches the reference video's pacing,
+    scales it to ~target_total_sec, and reuses images if necessary.
+    """
+    speed = VIDEO_SPEED_FACTOR if VIDEO_SPEED_FACTOR > 0 else 2.0
+    max_out_per_clip = VIDEO_PROVIDER_CLIP_SEC / speed  # e.g., 5/2 = 2.5s
+
+    intro_out = 1.0
+    outro_out = 1.0
+    intro_src = intro_out * speed
+    outro_src = outro_out * speed
+
+    plan: List[Dict[str, Any]] = []
+    used_urls = set()
+
+    if include_intro_outro:
+        intro_img = _find_static_image("intro")
+        if intro_img:
+            plan.append({"kind": "still", "scene_type": "intro", "image_path": str(intro_img), "src_dur": intro_src})
+
+    urls = [c.url for c in input_clips]
+    content_target = max(
+        2.0,
+        target_total_sec
+        - (intro_out if (include_intro_outro and _find_static_image("intro")) else 0.0)
+        - (outro_out if (include_intro_outro and _find_static_image("outro")) else 0.0)
+    )
+    ref_sum = sum(REF_STYLE_SCENE_DURS_SEC) or 1.0
+    scale = content_target / ref_sum
+    scaled_out_durs = [d * scale for d in REF_STYLE_SCENE_DURS_SEC]
+
+    leftover = 0.0
+    for idx, scene in enumerate(REF_STYLE_SCENES):
+        scene_type = scene["scene_type"]
+        desired_out = scaled_out_durs[idx]
+        req = min(2, math.ceil(desired_out / max_out_per_clip))
+        per_out = min(desired_out / req, max_out_per_clip)
+        produced_out = per_out * req
+        if produced_out + 1e-6 < desired_out:
+            leftover += (desired_out - produced_out)
+
+        url = _pick_best_url(urls, analyses, scene.get("prefer", {}), used_urls)
+        if url:
+            used_urls.add(url)
+
+        for k in range(req):
+            plan.append({
+                "kind": "kling",
+                "scene_type": scene_type if req == 1 else f"{scene_type}_part{k+1}",
+                "url": url,
+                "src_dur": min(VIDEO_PROVIDER_CLIP_SEC, per_out * speed),
+            })
+
+    if leftover > 0.25:
+        filler_url = _pick_best_url(urls, analyses, {"shot_type": "wide"}, used_urls) or (urls[0] if urls else "")
+        plan.append({
+            "kind": "kling",
+            "scene_type": "closing_hold",
+            "url": filler_url,
+            "src_dur": min(VIDEO_PROVIDER_CLIP_SEC, leftover * speed),
+        })
+
+    if include_intro_outro:
+        outro_img = _find_static_image("outro")
+        if outro_img:
+            plan.append({"kind": "still", "scene_type": "outro", "image_path": str(outro_img), "src_dur": outro_src})
+
+    return plan
+
+def _kling_prompts_for_ref_auto(scene_type: str, vision: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Prompt builder that tries to replicate the reference video's 'premium interior walkthrough' feel,
+    while staying robust for arbitrary interior images.
+    """
+    base_keep = (
+        "Keep ALL objects, materials, and room layout EXACTLY the same as the input image. "
+        "Do not add or remove anything. No warping, no melting, no object morphing. Photorealistic."
+    )
+    daylight = (
+        "Neutral daylight (5200–5600K). Natural contrast, clean whites, no warm/yellow cast. "
+        "Crisp but soft-edged shadows."
+    )
+    subject = (vision.get("focal_object") or "main focal point").strip()
+    motion_common = "Motion should be smooth and moderate (will be sped up 2x later). Gimbal-stabilized, premium."
+
+    window_fx = ""
+    if vision.get("has_window") and vision.get("has_blinds_or_curtain"):
+        window_fx = "If blinds/curtains are visible, make a VERY subtle movement that reveals slightly stronger sunlight (no deformation). "
+
+    pendant_fx = ""
+    if vision.get("has_pendant_light") or vision.get("has_lamp"):
+        pendant_fx = "If a light fixture is visible, allow extremely subtle sway (1–2 degrees) and realistic specular highlights. "
+
+    if scene_type.startswith("establish_push"):
+        cam = "Slow dolly-in with a tiny pan to the right, slight parallax, maintain straight verticals."
+    elif scene_type.startswith("kitchen_corner_slide"):
+        cam = "Smooth lateral slide (left) with a slight tilt, like a short slider move."
+    elif scene_type.startswith("sink_texture_pan"):
+        cam = "Close-up texture shot. Camera pans left-to-right across surfaces, shallow depth of field."
+    elif scene_type.startswith("pendant_reveal_tilt"):
+        cam = "Start closer to the ceiling/fixture area then tilt down slightly to reveal the tabletop/space, smooth and premium."
+    elif scene_type.startswith("window_sunlight_reveal"):
+        cam = "Wide shot. Gentle pan and micro push-in toward the window area, emphasizing daylight."
+    elif scene_type.startswith("corridor_slide_forward"):
+        cam = "Wide shot. Smooth forward slide through the space with a slight pan, like a walkthrough reveal."
+    elif scene_type.startswith("desk_close_push"):
+        cam = "Close-up. Slow push-in toward the desk/work area with a subtle rack-focus feel (no focus hunting)."
+    elif scene_type.startswith("chair_detail_pan"):
+        cam = "Close-up. Pan right-to-left across the chair/seating detail, smooth premium movement."
+    elif scene_type.startswith("entry_mirror_pullback"):
+        cam = "Wide-ish shot. Slow pull-back (dolly-out) to reveal the entry/mirror area, stable geometry."
+    elif scene_type.startswith("closing_hold"):
+        cam = "Almost static hold with extremely subtle drift, like a calm ending beat."
+    else:
+        cam = "Smooth cinematic camera move, premium and stable."
+
+    prompt = (
+        f"{base_keep} {daylight} "
+        f"Hero focus: {subject}. "
+        f"{cam} {motion_common} "
+        f"{window_fx}{pendant_fx}"
+        "No people."
+    )
+
+    neg = (
+        "warm yellow lighting, tungsten, sepia, orange cast, "
+        "object teleporting, new decor, extra furniture, extra lamps, extra shelves, "
+        "people, hands, faces, text, watermark, logo, frame borders, "
+        "geometry distortion, melting, wobble, flicker, rolling shutter, "
+        "changing materials, changing room layout, changing perspective"
+    )
+    return {"prompt": prompt, "negative_prompt": neg}
 
 def _kling_prompts_for_preset(preset: str) -> Dict[str, str]:
     # Keep prompts short + strict to reduce hallucinated object changes.
@@ -1599,7 +1947,25 @@ def _image_url_to_b64(url: str) -> str:
     r.raise_for_status()
     return base64.b64encode(r.content).decode("utf-8")
 
-def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale: float):
+def _run_video_job(
+    job_id: str,
+    clips: List[VideoClip],
+    duration: str,
+    cfg_scale: float,
+    mode: Optional[str],
+    target_total_sec: Optional[float],
+    include_intro_outro: Optional[bool],
+):
+    """
+    Video job runner.
+
+    - manual mode: uses the client-provided clip list and preset prompts.
+    - auto_ref mode: ignores per-clip presets and generates a reference-style shot plan:
+        * vision analysis (gemini-3-flash-preview) for each input image
+        * scene pacing modeled after the reference video
+        * intro/outro from static/intro.* and static/outro.* (if present)
+        * every Kling clip is generated as 5s, then sped up x2 (and optionally trimmed) before stitching
+    """
     try:
         with video_jobs_lock:
             video_jobs[job_id]["status"] = "RUNNING"
@@ -1609,52 +1975,107 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
         out_dir = Path("outputs")
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # Kling duration is fixed (always 5s on provider side)
+        duration = "5"
+
+        # Mode resolution (backward compatible)
+        effective_mode = (mode or "").strip().lower()
+        if not effective_mode:
+            effective_mode = "auto_ref" if any((c.preset or "") == "ref_auto" for c in clips) else "manual"
+
+        tgt_total = float(target_total_sec) if target_total_sec else 20.0
+        use_intro_outro = True if include_intro_outro is None else bool(include_intro_outro)
+
+        # Cache image bytes/b64 for reuse + vision results
+        bytes_cache: Dict[str, bytes] = {}
+        b64_cache: Dict[str, str] = {}
+        vision_cache: Dict[str, Dict[str, Any]] = {}
+
+        def get_bytes(url: str) -> bytes:
+            if url not in bytes_cache:
+                bytes_cache[url] = _clip_url_to_image_bytes(url)
+            return bytes_cache[url]
+
+        def get_b64(url: str) -> str:
+            if url not in b64_cache:
+                b64_cache[url] = base64.b64encode(get_bytes(url)).decode("utf-8")
+            return b64_cache[url]
+
+        # Build plan
+        if effective_mode == "auto_ref":
+            # Vision analysis for each unique input image
+            unique_urls = list(dict.fromkeys([c.url for c in clips]))
+            for u in unique_urls:
+                vision_cache[u] = _vision_analyze_for_video_motion(get_bytes(u))
+
+            plan = _build_auto_ref_plan(
+                input_clips=clips,
+                analyses=vision_cache,
+                target_total_sec=tgt_total,
+                include_intro_outro=use_intro_outro,
+            )
+        else:
+            # Manual mode: 1 input image -> 1 clip
+            plan = [{"kind": "kling", "scene_type": c.preset, "url": c.url, "src_dur": VIDEO_TRIM_KEEP_SEC} for c in clips]
+
+        # Count Kling tasks for progress UI
+        total_kling = sum(1 for p in plan if p.get("kind") == "kling")
+        kling_idx = 0
+
         generated_paths = []
-        for i, clip in enumerate(clips):
-            with video_jobs_lock:
-                video_jobs[job_id]["message"] = f"Generating clip {i+1}/{len(clips)}..."
-                video_jobs[job_id]["progress"] = int((i / max(1, len(clips))) * 60) + 5
+        for plan_idx, item in enumerate(plan):
+            kind = item.get("kind")
+            scene_type = item.get("scene_type", "scene")
+            src_dur = float(item.get("src_dur") or VIDEO_TRIM_KEEP_SEC)
 
-            prompts = _kling_prompts_for_preset(clip.preset)
-            
-            # [FIX] Base64 Data URI 처리 로직 추가 및 경로 처리 강화
-            if clip.url.startswith("data:image/"):
-                # "data:image/png;base64,..." 형태에서 헤더 제거
-                try:
-                    header, encoded = clip.url.split(",", 1)
-                    img_b64 = encoded
-                except ValueError:
-                    # 헤더가 없는 순수 base64일 경우 대비
-                    img_b64 = clip.url
-            elif clip.url.startswith('/'):
-                local_path = clip.url.lstrip('/')
-                if not os.path.exists(local_path):
-                    # 파일이 없으면 에러 대신 로그 남기고 스킵하거나 에러 처리 (여기선 에러 발생)
-                    raise FileNotFoundError(f"Image not found on server: {local_path}")
-                with open(local_path, 'rb') as f:
-                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
+            if kind == "still":
+                with video_jobs_lock:
+                    video_jobs[job_id]["message"] = f"Preparing {scene_type}..."
+                    video_jobs[job_id]["progress"] = min(65, 5 + int((plan_idx / max(1, len(plan))) * 60))
+
+                raw_path = out_dir / f"video_raw_{job_id}_{plan_idx}.mp4"
+                img_path = Path(item["image_path"])
+                _ffmpeg_image_to_video(img_path, raw_path, src_dur, 1080, 1350, VIDEO_TARGET_FPS)
+
             else:
-                img_b64 = _image_url_to_b64(clip.url)
-            
-            task_id = _freepik_kling_create_task(img_b64, prompts["prompt"], prompts["negative_prompt"], duration, cfg_scale)
-            
-            # ... (이하 동일, polling 및 download 부분) ...
-            video_url = _freepik_kling_poll(task_id, job_id, i, len(clips))
+                # Kling clip
+                with video_jobs_lock:
+                    video_jobs[job_id]["message"] = f"Generating clip {kling_idx+1}/{total_kling} ({scene_type})..."
+                    video_jobs[job_id]["progress"] = int((kling_idx / max(1, total_kling)) * 60) + 5
 
-            raw_path = out_dir / f"video_raw_{job_id}_{i}.mp4"
-            _download_to_path(video_url, raw_path)
+                url = item["url"]
 
-            trimmed_path = out_dir / f"video_trim_{job_id}_{i}.mp4"
-            _ffmpeg_trim_speed(raw_path, trimmed_path, VIDEO_TRIM_HEAD_SEC, VIDEO_TRIM_KEEP_SEC, VIDEO_SPEED_FACTOR, VIDEO_TARGET_FPS)
+                if effective_mode == "auto_ref":
+                    prompts = _kling_prompts_for_ref_auto(scene_type, vision_cache.get(url, {}))
+                else:
+                    prompts = _kling_prompts_for_preset(item.get("scene_type") or "smooth_zoom")
+
+                img_b64 = get_b64(url)
+
+                task_id = _freepik_kling_create_task(
+                    img_b64,
+                    prompts["prompt"],
+                    prompts["negative_prompt"],
+                    duration,
+                    cfg_scale,
+                )
+
+                video_url = _freepik_kling_poll(task_id, job_id, kling_idx, total_kling)
+                kling_idx += 1
+
+                raw_path = out_dir / f"video_raw_{job_id}_{plan_idx}.mp4"
+                _download_to_path(video_url, raw_path)
+
+            # Trim (optional) + speed-up x2 (required) for each segment
+            trimmed_path = out_dir / f"video_trim_{job_id}_{plan_idx}.mp4"
+            _ffmpeg_trim_speed(raw_path, trimmed_path, 0.0, src_dur, VIDEO_SPEED_FACTOR, VIDEO_TARGET_FPS)
             generated_paths.append(trimmed_path)
 
         if not generated_paths:
             raise RuntimeError("No clips generated.")
 
-        # 2) Normalize
-        # [FIX] 해상도를 4:5 비율 (1080x1350)로 강제 고정
+        # 2) Normalize (force 4:5 1080x1350)
         ref_w, ref_h = 1080, 1350
-
         normalized_paths = []
         for i, p in enumerate(generated_paths):
             with video_jobs_lock:
@@ -1671,8 +2092,6 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
             video_jobs[job_id]["progress"] = 90
 
         list_file = out_dir / f"video_concat_{job_id}.txt"
-        
-        # [FIX] Concat 시 절대 경로(resolve) 사용으로 경로 문제 해결
         list_lines = [f"file '{p.resolve().as_posix()}'" for p in normalized_paths]
         list_file.write_text("\n".join(list_lines), encoding="utf-8")
 
@@ -1684,7 +2103,6 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
             "-c", "copy",
             str(final_path),
         ]
-        # concat copy can fail if streams mismatch; if so, fallback to re-encode.
         try:
             _run_ffmpeg(cmd)
         except Exception:
@@ -1716,6 +2134,7 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
             video_jobs[job_id]["message"] = "FAILED"
             video_jobs[job_id]["progress"] = 0
 
+
 @app.post("/video-mvp/create")
 async def video_mvp_create(req: VideoCreateRequest):
     job_id = uuid.uuid4().hex
@@ -1727,7 +2146,7 @@ async def video_mvp_create(req: VideoCreateRequest):
             "result_url": None,
             "error": None,
         }
-    video_executor.submit(_run_video_job, job_id, req.clips, req.duration, req.cfg_scale)
+    video_executor.submit(_run_video_job, job_id, req.clips, req.duration, req.cfg_scale, req.mode, req.target_total_sec, req.include_intro_outro)
     return {"job_id": job_id}
 
 @app.get("/video-mvp/status/{job_id}")
