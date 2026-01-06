@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const PAGE = document.body?.dataset?.page || 'home';
+    if (PAGE !== 'home') return;
     console.log("✅ script.js 로드됨 (Multi Option FP Generation)");
 
     let currentFurnitureData = null;
@@ -122,6 +124,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const upscaleStatus = document.getElementById('upscaleStatus');
 
     const detailBtn = document.getElementById('detailBtn');
+
+    const videoStudioBtn = document.getElementById('videoStudioBtn');
+    if (videoStudioBtn) {
+        videoStudioBtn.onclick = () => {
+            window.location.href = '/video-studio';
+        };
+    }
+
     const detailStatus = document.getElementById('detailStatus');
     const detailSection = document.getElementById('detail-section');
 
@@ -800,7 +810,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     img.style.width = "19%";
                     img.style.height = "auto";
                     img.style.aspectRatio = "16/9";
-                    img.style.objectFit = "cover";
+                    img.style.objectFit = "contain";
+                    img.style.backgroundColor = "#000";
                     img.style.cursor = "pointer";
                     img.style.borderRadius = "8px";
                     img.style.border = idx === 0 ? `3px solid ${THEME_COLOR}` : "3px solid transparent";
@@ -1401,4 +1412,275 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     startBtn?.addEventListener('click', startJob);
+});
+
+
+// =========================
+// Video Studio Page (standalone)
+// =========================
+document.addEventListener('DOMContentLoaded', () => {
+    const PAGE = document.body?.dataset?.page || '';
+    if (PAGE !== 'video-studio') return;
+
+    const backBtn = document.getElementById('vsBackBtn');
+    const refreshBtn = document.getElementById('vsRefreshBtn');
+
+    const dropZone = document.getElementById('vsDropZone');
+    const uploadInput = document.getElementById('vsUploadInput');
+    const uploadStatus = document.getElementById('vsUploadStatus');
+
+    const gallery = document.getElementById('vsGallery');
+    const clipListEl = document.getElementById('vsClipList');
+
+    const durationSel = document.getElementById('vsDuration');
+    const startBtn = document.getElementById('vsStartBtn');
+    const statusEl = document.getElementById('vsStatus');
+
+    const resultWrap = document.getElementById('vsResult');
+    const preview = document.getElementById('vsPreview');
+    const download = document.getElementById('vsDownload');
+
+    const clips = []; // { url, preset, checked }
+
+    function presetOptions(defaultPreset) {
+        const opts = [
+            ["main_sunlight", "Main: Sunlight Shift"],
+            ["detail_pan_lr", "Detail: Pan L→R"],
+            ["detail_dolly_in", "Detail: Dolly-in"],
+            ["curtain_breeze", "Curtain Breeze"],
+            ["static", "Almost Static"],
+        ];
+        return opts.map(([v, t]) => `<option value="${v}" ${v === defaultPreset ? 'selected' : ''}>${t}</option>`).join('');
+    }
+
+    function renderClips() {
+        if (!clipListEl) return;
+        clipListEl.innerHTML = "";
+
+        if (clips.length === 0) {
+            clipListEl.innerHTML = `<div class="vs-empty">아직 선택된 이미지가 없습니다. 왼쪽에서 클릭하거나 업로드로 추가하세요.</div>`;
+            return;
+        }
+
+        clips.forEach((c, idx) => {
+            const row = document.createElement('div');
+            row.className = 'vs-clip-row';
+            row.dataset.idx = String(idx);
+            row.innerHTML = `
+                <div class="vs-clip-left">
+                    <input type="checkbox" class="vs-clip-check" ${c.checked ? 'checked' : ''} />
+                    <div class="vs-clip-thumb"><img src="${c.url}" /></div>
+                    <div class="vs-clip-meta">
+                        <div class="vs-clip-title">Clip ${idx + 1}</div>
+                        <div class="vs-clip-url">${c.url}</div>
+                    </div>
+                </div>
+                <div class="vs-clip-right">
+                    <select class="vs-clip-preset">${presetOptions(c.preset || "detail_pan_lr")}</select>
+                    <div class="vs-clip-actions">
+                        <button class="vs-mini-btn" data-act="up" title="Move up">↑</button>
+                        <button class="vs-mini-btn" data-act="down" title="Move down">↓</button>
+                        <button class="vs-mini-btn danger" data-act="remove" title="Remove">✕</button>
+                    </div>
+                </div>
+            `;
+
+            // wire
+            row.querySelector('.vs-clip-check')?.addEventListener('change', (e) => {
+                clips[idx].checked = !!e.target.checked;
+            });
+            row.querySelector('.vs-clip-preset')?.addEventListener('change', (e) => {
+                clips[idx].preset = e.target.value;
+            });
+            row.querySelectorAll('.vs-mini-btn')?.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const act = btn.dataset.act;
+                    if (act === "remove") {
+                        clips.splice(idx, 1);
+                        renderClips();
+                        return;
+                    }
+                    if (act === "up" && idx > 0) {
+                        const tmp = clips[idx - 1];
+                        clips[idx - 1] = clips[idx];
+                        clips[idx] = tmp;
+                        renderClips();
+                        return;
+                    }
+                    if (act === "down" && idx < clips.length - 1) {
+                        const tmp = clips[idx + 1];
+                        clips[idx + 1] = clips[idx];
+                        clips[idx] = tmp;
+                        renderClips();
+                        return;
+                    }
+                });
+            });
+
+            clipListEl.appendChild(row);
+        });
+    }
+
+    function addClip(url, preset = "detail_pan_lr") {
+        if (!url) return;
+        // avoid duplicates
+        if (clips.some(c => c.url === url)) return;
+        clips.push({ url, preset, checked: true });
+        renderClips();
+    }
+
+    async function loadGallery() {
+        if (!gallery) return;
+        gallery.innerHTML = `<div class="vs-loading">불러오는 중...</div>`;
+
+        try {
+            const res = await fetch('/api/outputs/list?limit=200');
+            const data = await res.json();
+            const items = data.items || [];
+
+            if (items.length === 0) {
+                gallery.innerHTML = `<div class="vs-empty">최근 이미지가 없습니다.</div>`;
+                return;
+            }
+
+            gallery.innerHTML = "";
+            items.forEach(it => {
+                const btn = document.createElement('button');
+                btn.type = "button";
+                btn.className = "vs-gallery-item";
+                btn.title = "클립 목록에 추가";
+                btn.innerHTML = `<img src="${it.url}" /><div class="vs-gallery-cap">${it.filename}</div>`;
+                btn.addEventListener('click', () => addClip(it.url, "detail_pan_lr"));
+                gallery.appendChild(btn);
+            });
+        } catch (e) {
+            console.error(e);
+            gallery.innerHTML = `<div class="vs-empty">목록을 불러오지 못했습니다.</div>`;
+        }
+    }
+
+    async function uploadFiles(fileList) {
+        if (!fileList || fileList.length === 0) return;
+        if (uploadStatus) uploadStatus.textContent = `업로드 중... (${fileList.length}개)`;
+
+        for (const file of Array.from(fileList)) {
+            if (!file.type.startsWith('image/')) continue;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                const res = await fetch('/api/outputs/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (res.ok && data.url) {
+                    addClip(data.url, "detail_pan_lr");
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        if (uploadStatus) uploadStatus.textContent = "";
+        await loadGallery();
+    }
+
+    async function startJob() {
+        if (!startBtn || !statusEl) return;
+
+        const selected = clips.filter(c => c.checked).map(c => ({
+            url: c.url,
+            preset: c.preset || "detail_pan_lr",
+        }));
+
+        if (selected.length === 0) {
+            statusEl.textContent = "선택된 이미지가 없습니다.";
+            return;
+        }
+
+        startBtn.disabled = true;
+        statusEl.textContent = "Creating job...";
+
+        try {
+            const res = await fetch('/video-mvp/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clips: selected,
+                    duration: durationSel ? durationSel.value : "5",
+                    cfg_scale: 0.85
+                })
+            });
+
+            if (!res.ok) {
+                const t = await res.text();
+                throw new Error(`Create failed (${res.status}): ${t}`);
+            }
+
+            const data = await res.json();
+            const jobId = data.job_id;
+            if (!jobId) throw new Error("No job_id returned");
+
+            await pollJob(jobId);
+        } catch (e) {
+            console.error(e);
+            statusEl.textContent = `Error: ${e.message}`;
+        } finally {
+            startBtn.disabled = false;
+        }
+    }
+
+    async function pollJob(jobId) {
+        statusEl.textContent = `Running... (${jobId})`;
+
+        return new Promise((resolve) => {
+            const iv = setInterval(async () => {
+                try {
+                    const r = await fetch(`/video-mvp/status/${jobId}`);
+                    if (!r.ok) return;
+
+                    const st = await r.json();
+                    const msg = st.message || st.status || "";
+                    const prog = (st.progress != null) ? `${st.progress}%` : "";
+                    statusEl.textContent = `${msg} ${prog}`;
+
+                    if (st.status === "COMPLETED" && st.result_url) {
+                        clearInterval(iv);
+                        if (preview) preview.src = st.result_url;
+                        if (download) download.href = st.result_url;
+                        if (resultWrap) resultWrap.classList.remove('hidden');
+                        resolve();
+                    }
+
+                    if (st.status === "FAILED") {
+                        clearInterval(iv);
+                        statusEl.textContent = `FAILED: ${st.error || 'unknown error'}`;
+                        resolve();
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }, 2000);
+        });
+    }
+
+    // events
+    backBtn?.addEventListener('click', () => window.location.href = '/');
+    refreshBtn?.addEventListener('click', loadGallery);
+
+    if (dropZone && uploadInput) {
+        dropZone.addEventListener('click', () => uploadInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = "#ffffff"; });
+        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = "#ccc"; });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = "#ccc";
+            uploadFiles(e.dataTransfer.files);
+        });
+        uploadInput.addEventListener('change', (e) => uploadFiles(e.target.files));
+    }
+
+    startBtn?.addEventListener('click', startJob);
+
+    // init
+    if (resultWrap) resultWrap.classList.add('hidden');
+    renderClips();
+    loadGallery();
 });

@@ -35,6 +35,7 @@ body {
     min-height: 100vh;
     display: flex;
     justify-content: center;
+    align-items: center;
     padding: 2rem;
     padding-bottom: 30rem;
 }
@@ -83,12 +84,14 @@ button,
     letter-spacing: 0.5px;
     border-radius: var(--radius);
     transition: all 0.2s ease;
+    margin: 0;
 }
 
 .action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    align-items: center;
     padding: 0 24px;
     height: 48px;
     font-size: 0.95rem;
@@ -144,6 +147,7 @@ button,
     flex-direction: column;
     justify-content: center;
     align-items: center;
+    align-items: center;
     min-height: 200px;
 }
 
@@ -196,6 +200,7 @@ button,
     display: flex;
     align-items: center;
     justify-content: center;
+    align-items: center;
     transition: var(--transition);
     z-index: 100;
 }
@@ -226,15 +231,25 @@ button,
     /* [복구] 간격 */
     flex-wrap: wrap;
     justify-content: center;
+    align-items: center;
     padding-bottom: 1rem;
     overflow-x: visible;
 }
 
 .style-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-items: center;
+    width: auto;
+    min-width: 0;
+    max-width: 260px;
+    flex: 0 0 auto;
+
     background-color: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-muted);
-    padding: 1rem 2rem;
+    padding: 0.85rem 1.6rem;
     /* [복구] 패딩 */
     height: auto;
     /* [복구] 높이 자동 */
@@ -246,6 +261,7 @@ button,
     white-space: nowrap;
     flex-shrink: 0;
 }
+
 
 .style-btn:hover {
     border-color: var(--primary-color);
@@ -271,6 +287,7 @@ button,
     margin: 0 auto 2rem auto;
     /* 중앙 정렬 */
     justify-content: center;
+    align-items: center;
 }
 
 .variant-img-btn {
@@ -490,6 +507,7 @@ button,
 #thumbnailContainer {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: 10px;
     margin-top: 20px;
     flex-wrap: wrap;
@@ -503,6 +521,7 @@ button,
 .button-group {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: 1rem;
     margin-bottom: 1rem;
 }
@@ -590,6 +609,7 @@ button,
     display: flex;
     align-items: center;
     justify-content: center;
+    align-items: center;
     z-index: 10;
     transition: 0.2s;
 }
@@ -634,6 +654,7 @@ button,
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    align-items: center;
     z-index: 5000;
 }
 
@@ -690,6 +711,7 @@ button,
     display: flex;
     justify-content: center;
     align-items: center;
+    align-items: center;
 }
 
 .lightbox-content {
@@ -719,6 +741,7 @@ button,
     display: flex;
     align-items: center;
     justify-content: center;
+    align-items: center;
     z-index: 4000;
 }
 
@@ -765,6 +788,7 @@ button,
     flex-direction: row !important;
     gap: 1rem;
     justify-content: center;
+    align-items: center;
     flex-wrap: nowrap;
     flex-shrink: 0;
 }
@@ -797,6 +821,7 @@ button,
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     align-items: center;
     background-color: #111;
     overflow-y: auto;
@@ -838,6 +863,7 @@ button,
     display: flex !important;
     flex-wrap: wrap;
     justify-content: center;
+    align-items: center;
     gap: 10px;
     /* [선택] 간격도 15px에서 10px로 살짝 줄이면 더 안정적입니다 */
     overflow-y: auto;
@@ -913,6 +939,7 @@ button,
     display: flex;
     justify-content: center;
     align-items: center;
+    align-items: center;
     z-index: 50;
     /* 이미지랑 버튼 위를 덮음 */
     border-radius: 10px;
@@ -945,139 +972,871 @@ button,
    Video MVP Modal
    ========================= */
 .video-mvp-modal-content {
-  width: min(980px, 95vw);
+    width: min(980px, 95vw);
 }
 
 .video-mvp-controls {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 10px 0 14px 0;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 10px 0 14px 0;
 }
 
 .video-mvp-control {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 180px;
-  flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    max-width: 260px;
+    flex: 0 0 auto;
+    flex: 1;
 }
 
 .video-mvp-control label {
-  font-size: 12px;
-  opacity: 0.85;
+    font-size: 12px;
+    opacity: 0.85;
 }
 
 .video-mvp-control select {
-  padding: 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(0,0,0,0.2);
-  color: #fff;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
 }
 
 .video-mvp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 42vh;
-  overflow: auto;
-  padding-right: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 42vh;
+    overflow: auto;
+    padding-right: 4px;
 }
 
 .video-mvp-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px;
-  border-radius: var(--radius);
-  background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px;
+    border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .video-mvp-item-left {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
 }
 
 .video-mvp-thumb {
-  width: 64px;
-  height: 64px;
-  border-radius: 10px;
-  overflow: hidden;
-  flex: 0 0 auto;
-  background: rgba(0,0,0,0.35);
+    width: 64px;
+    height: 64px;
+    border-radius: 10px;
+    overflow: hidden;
+    flex: 0 0 auto;
+    background: rgba(0, 0, 0, 0.35);
 }
 
 .video-mvp-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .video-mvp-label {
-  min-width: 0;
+    min-width: 0;
 }
 
 .video-mvp-title {
-  font-weight: 700;
-  font-size: 13px;
+    font-weight: 700;
+    font-size: 13px;
 }
 
 .video-mvp-url {
-  font-size: 11px;
-  opacity: 0.65;
-  word-break: break-all;
+    font-size: 11px;
+    opacity: 0.65;
+    word-break: break-all;
 }
 
 .video-mvp-item-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
 }
 
 .video-mvp-preset {
-  padding: 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(0,0,0,0.2);
-  color: #fff;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
 }
 
 .video-mvp-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
 }
 
 .video-mvp-status {
-  font-size: 12px;
-  opacity: 0.85;
-  min-height: 18px;
+    font-size: 12px;
+    opacity: 0.85;
+    min-height: 18px;
 }
 
 .video-mvp-result {
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 #videoMvpPreview {
-  width: 100%;
-  border-radius: var(--radius);
-  background: rgba(0,0,0,0.35);
+    width: 100%;
+    border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 .video-mvp-empty {
-  opacity: 0.75;
-  padding: 12px;
-  border: 1px dashed rgba(255,255,255,0.15);
-  border-radius: var(--radius);
+    opacity: 0.75;
+    padding: 12px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius);
+}
+
+
+/* =========================
+   Video Studio Page
+   ========================= */
+.video-studio {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+}
+
+.video-studio-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.video-studio-header h1 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: 0.2px;
+}
+
+.video-studio-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.video-studio-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 16px;
+}
+
+.video-studio-panel {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius);
+    padding: 14px;
+}
+
+.video-studio-panel h2 {
+    margin: 0 0 10px;
+    font-size: 16px;
+    opacity: 0.95;
+}
+
+.video-studio-panel.full {
+    grid-column: 1 / -1;
+}
+
+.vs-gallery {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    max-height: 520px;
+    overflow: auto;
+    padding-right: 6px;
+}
+
+.vs-gallery-item {
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+    padding: 8px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.vs-gallery-item img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 8px;
+    display: block;
+    background: #000;
+}
+
+.vs-gallery-cap {
+    margin-top: 6px;
+    font-size: 11px;
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vs-clip-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vs-clip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 12px;
+    padding: 10px;
+}
+
+.vs-clip-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.vs-clip-thumb img {
+    width: 96px;
+    height: 54px;
+    object-fit: cover;
+    border-radius: 8px;
+    display: block;
+    background: #000;
+}
+
+.vs-clip-meta {
+    min-width: 0;
+}
+
+.vs-clip-title {
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+
+.vs-clip-url {
+    font-size: 11px;
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 520px;
+}
+
+.vs-clip-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.vs-clip-preset {
+    background: rgba(0, 0, 0, 0.35) !important;
+    /* ✅ 강제 적용 */
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    color: #fff !important;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.vs-clip-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.vs-mini-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    cursor: pointer;
+}
+
+.vs-mini-btn.danger {
+    border-color: rgba(255, 100, 100, 0.35);
+}
+
+.vs-empty,
+.vs-loading {
+    font-size: 13px;
+    opacity: 0.75;
+    padding: 10px 0;
+}
+
+.video-studio-result video {
+    width: 100%;
+    border-radius: var(--radius);
+    background: #000;
+    display: block;
+    margin-top: 12px;
+}
+
+@media (max-width: 980px) {
+    .video-studio-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vs-gallery {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-height: 380px;
+    }
+
+    .vs-clip-url {
+        max-width: 260px;
+    }
+}
+
+
+/* Header actions */
+.header-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.header-btn {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-items: center;
+}
+
+
+/* Header CTA should not stretch full width */
+.header-actions .action-btn {
+    width: auto;
+}
+
+
+/* Defensive radius consistency */
+.action-btn,
+.action-btn.secondary {
+    border-radius: var(--radius);
+}
+
+
+/* 기존 .vs-select, .vs-clip-preset 스타일을 찾아서 이렇게 수정 */
+
+.vs-select,
+.vs-clip-preset,
+.video-mvp-preset {
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(0, 0, 0, 0.35);
+    /* ✅ 다크 배경 */
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    /* ✅ 흰색 텍스트 */
+    padding: 10px 12px;
+    border-radius: 12px;
+    outline: none;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.vs-select:focus,
+.vs-clip-preset:focus,
+.video-mvp-preset:focus {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(0, 0, 0, 0.50);
+    /* ✅ 포커스 시 더 진한 배경 */
+}
+
+/* ✅ 드롭다운 옵션 스타일 */
+.vs-select option,
+.vs-clip-preset option,
+.video-mvp-preset option {
+    background-color: #1a1a1a;
+    /* ✅ 다크 배경 */
+    color: #ffffff;
+    /* ✅ 흰색 텍스트 */
+    padding: 10px;
+}
+
+.vs-select option:hover,
+.vs-clip-preset option:hover,
+.video-mvp-preset option:hover {
+    background-color: #2a2a2a;
+    /* ✅ 호버 시 밝은 회색 */
+}
+
+/* ✅ 선택된 옵션 스타일 */
+.vs-select option:checked,
+.vs-clip-preset option:checked,
+.video-mvp-preset option:checked {
+    background-color: #333333;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.vs-upload-zone {
+    border: 1px dashed rgba(255, 255, 255, 0.22);
+    border-radius: 16px;
+    padding: 18px;
+    background: rgba(255, 255, 255, 0.02);
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+}
+
+.vs-upload-zone.dragover {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.vs-upload-hint {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.vs-thumb {
+    cursor: pointer;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
+    transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.vs-thumb:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.vs-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.vs-selected-row {
+    display: grid;
+    grid-template-columns: 92px 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vs-selected-row:first-child {
+    border-top: none;
+}
+
+.vs-selected-row .thumb {
+    width: 92px;
+    height: 64px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.vs-selected-row .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.vs-mini-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vs-mini-btn:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* =========================================================
+   Video Studio (standalone page)
+   - Styled to match the Floor Plan modal look
+========================================================= */
+
+.vs-shell {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 28px;
+    padding: 28px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+.vs-header {
+    margin-bottom: 20px;
+}
+
+.vs-title {
+    margin: 0;
+    font-size: 36px;
+    letter-spacing: -0.02em;
+}
+
+.vs-subtitle {
+    margin: 10px 0 0;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.vs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+@media (max-width: 980px) {
+    .vs-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vs-card {
+    background: rgba(0, 0, 0, 0.30);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 22px;
+    padding: 18px;
+}
+
+.vs-card-head h2 {
+    margin: 0;
+    font-size: 20px;
+}
+
+.vs-card-head .muted {
+    margin: 8px 0 0;
+}
+
+.vs-empty {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.60);
+    font-size: 13px;
+}
+
+.vs-thumb-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+
+    /* ✅ 스크롤 추가 */
+    max-height: 520px;
+    overflow-y: auto;
+    padding-right: 6px;
+    /* 스크롤바 여백 */
+}
+
+/* ✅ 스크롤바 스타일링 (선택사항) */
+.vs-thumb-grid::-webkit-scrollbar {
+    width: 8px;
+}
+
+.vs-thumb-grid::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.vs-thumb-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+
+.vs-thumb-grid::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+@media (max-width: 980px) {
+    .vs-thumb-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .vs-thumb-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.vs-recent-thumb {
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: #0b0b0b;
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.vs-recent-thumb:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.28);
+}
+
+.vs-recent-img {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+}
+
+.vs-dropzone {
+    border: 1px dashed rgba(255, 255, 255, 0.22);
+    border-radius: 20px;
+    padding: 22px;
+    background: rgba(0, 0, 0, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 150px;
+    outline: none;
+}
+
+.vs-dropzone:hover {
+    border-color: rgba(255, 255, 255, 0.38);
+}
+
+.vs-dropzone.dragover {
+    border-color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.vs-dropzone-title {
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.vs-dropzone-or {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    margin: 8px 0;
+}
+
+.vs-browse-btn {
+    padding: 10px 18px;
+    min-width: 180px;
+}
+
+.vs-options {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vs-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.vs-label {
+    min-width: 110px;
+    color: rgba(255, 255, 255, 0.70);
+    font-size: 13px;
+}
+
+.vs-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    outline: none;
+    min-width: 220px;
+}
+
+.vs-select:focus {
+    border-color: rgba(255, 255, 255, 0.30);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.vs-selected-card {
+    padding: 18px;
+}
+
+.vs-selected-list {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.vs-selected-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
+    border-radius: 18px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.vs-selected-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+}
+
+.vs-selected-thumb {
+    width: 160px;
+    aspect-ratio: 16 / 9;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    flex: 0 0 auto;
+}
+
+.vs-selected-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.vs-selected-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.vs-selected-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin: 0;
+}
+
+.vs-selected-url {
+    margin-top: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    word-break: break-all;
+}
+
+.vs-selected-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+
+.vs-mini-btn {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.vs-mini-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+}
+
+.vs-actions {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vs-status {
+    min-height: 18px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+}
+
+.vs-result {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.vs-video {
+    width: 100%;
+    max-height: 520px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: #000;
+}
+
+.vs-download {
+    display: inline-block;
+    margin-top: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.vs-download:hover {
+    text-decoration: underline;
+}
+
+/* Make the top action buttons (Video Studio / Floor Plan) not full-width */
+#open-video-studio-btn,
+#open-fp-gen-btn {
+    width: 100% !important;
+    max-width: 680px;
+    margin: 0 auto;
+}
+
+/* Keep the top CTA buttons from becoming full-width bars */
+#open-video-studio-btn,
+#open-fp-gen-btn {
+    width: min(680px, 100%) !important;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    justify-content: center;
 }

@@ -1,11 +1,14 @@
 import os
 import time
+import threading
+from pathlib import Path
+import subprocess
+from urllib.parse import urlparse
 import shutil
 import base64
 import uuid
 import requests
 import json
-import threading
 import google.generativeai as genai
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
 from PIL import Image, ImageOps
-from pathlib import Path
 import re
 import traceback
 import random
@@ -283,6 +285,7 @@ def detect_furniture_boxes(moodboard_path):
             
             items = json.loads(text)
             if isinstance(items, list) and len(items) > 0:
+
                 print(f">> [Detection] Found {len(items)} items (Sorted): {[i.get('label') for i in items]}", flush=True)
                 return items
     except Exception as e:
@@ -431,20 +434,18 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "3. **LOGIC CHECK:** Do not generate furniture that contradicts the text (e.g., if text says '1-person chair', do not generate a '3-person sofa').\n\n"
 
             "<CRITICAL: WINDOW LIGHT MUST BE ABUNDANT (PRIORITY #1)>\n"
-            "1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
-            "2. **DIRECT SUNLIGHT BEAMS:** Clearly visible sun rays / beams entering from the window and spreading across the room.\n"
-            "3. **BRIGHT & AIRY EXPOSURE:** Overall exposure is bright and airy, but preserve highlight detail (no blown-out pure white).\n"
-            "4. **SHADOWS MUST READ:** Strong but soft-edged sun-cast shadows must be visible on the floor and walls.\n"
-            "5. **NO DIM MOOD:** Do NOT generate dim, underexposed, moody, nighttime, cloudy, or flat lighting.\n"
-            "6. **WHITE BALANCE LOCK (ANTI-YELLOW):** Keep color temperature neutral/cool daylight ONLY (5500K~6500K). NOT warm, NOT yellow.\n"
-            "7. **ANTI-WARM BAN:** Strictly avoid golden-hour, sunset, tungsten, orange/yellow cast.\n\n"
+"1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
+"2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
+"3. **LIGHT DIRECTION:** Clearly visible light direction from the window; cast soft but present shadows across the floor.\n"
+"4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
+"5. **WHITE BALANCE:** Neutral/cool daylight white balance (around 5200–5600K). **NO warm/yellow cast.**\n\n"
+"<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
+"1. **DAYLIGHT DOMINANT:** Daylight from the window is the KEY light. Simulate how neutral daylight bounces and interacts with furniture.\n"
+"2. **ARTIFICIAL LIGHTS RULE:** Do NOT add warm/tungsten lighting. If there are existing fixtures, keep them neutral white (5000–5600K) and subtle. If turning lights on would introduce a yellow tint, keep them OFF.\n"
+"3. **SHADOW PHYSICS:** Generate soft shadows that match the direction and intensity of the sunlight entering the room.\n"
+"4. **ATMOSPHERE:** Sun-filled, fresh, high-end interior photography 느낌 — but keep colors neutral and clean (no sepia).\n"
+"OUTPUT RULE: Return the original room image with furniture added, perfectly blended with neutral daylight.\n"
 
-            "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
-            "1. **GLOBAL ILLUMINATION:** Simulate realistic daylight bounce from the window. Window-side surfaces are brighter, opposite side has soft shading.\n"
-            "2. **ARTIFICIAL LIGHTS (NEUTRAL ONLY):** If any lamps/ceiling lights appear ON, they MUST be neutral white (5000K~6000K). Never warm bulbs.\n"
-            "3. **NO COLOR SHIFT:** Do NOT change wall/floor color temperature. Keep whites clean and neutral (no yellow tint).\n"
-            "4. **PHYSICAL CONSISTENCY:** Shadows direction/intensity must match the window light direction.\n"
-            "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with strong neutral daylight from the window."
         )
 
         # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
@@ -591,6 +592,54 @@ def download_image(url, unique_id):
 
 @app.get("/")
 async def read_index(): return FileResponse("static/index.html")
+
+
+# =========================
+# Video Studio (separate page)
+# =========================
+@app.get("/video-studio")
+def video_studio_page():
+    # Standalone page so users can build videos from existing images without re-rendering
+    return FileResponse(os.path.join("static", "video_studio.html"))
+
+@app.get("/api/outputs/list")
+def api_outputs_list(limit: int = 200):
+    """List recently generated/uploaded images in /outputs for Video Studio selection."""
+    limit = max(1, min(int(limit or 200), 500))
+    out_dir = Path("outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    exts = {".png", ".jpg", ".jpeg", ".webp"}
+    items = []
+    for p in out_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() in exts:
+            st = p.stat()
+            rel = p.relative_to(out_dir).as_posix()
+            items.append({"filename": rel, "url": f"/outputs/{rel}", "mtime": st.st_mtime})
+
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return {"items": items[:limit]}
+
+@app.post("/api/outputs/upload")
+async def api_outputs_upload(file: UploadFile = File(...)):
+    """Upload an image to /outputs and return a URL usable by the video pipeline."""
+    out_dir = Path("outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    orig = (file.filename or "upload.png").strip()
+    # keep filename safe
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", orig)
+    stamp = int(time.time())
+    uid = uuid.uuid4().hex[:8]
+    filename = f"upload_{stamp}_{uid}_{safe}"
+    out_path = out_dir / filename
+
+    content = await file.read()
+    with open(out_path, "wb") as f:
+        f.write(content)
+
+    return {"filename": filename, "url": f"/outputs/{filename}"}
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon(): return FileResponse("static/logo2.png")
@@ -1316,13 +1365,13 @@ def _ffprobe_wh(path: Path):
     return int(st.get("width") or 0), int(st.get("height") or 0)
 
 def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h: int, fps: int):
-    # Scale to fit, pad with blurred background (no black bars)
+    # [FIX] 16:9 가로 -> 4:5 세로 강제 중앙 크롭 (Shorts/Reels 스타일)
+    # 복잡한 패딩/블러 로직을 제거하고, 화면을 꽉 채운 뒤 중앙을 자르는 방식 적용
     vf = (
-        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
-        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"split=2[fg][bg];"
-        f"[bg]scale={target_w}:{target_h},boxblur=10:1[bg2];"
-        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2,fps={fps}"
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase," # 1. 빈공간 없이 꽉 채우도록 확대 (비율 유지)
+        f"crop={target_w}:{target_h}," # 2. 목표 해상도만큼 중앙을 잘라냄
+        f"setsar=1," # 3. 픽셀 비율 1:1 강제 (병합 오류 방지)
+        f"fps={fps}" # 4. 프레임레이트 통일
     )
     cmd = [
         "ffmpeg", "-y",
@@ -1384,7 +1433,7 @@ def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str
         "negative_prompt": negative_prompt,
         "duration": duration,
         "cfg_scale": cfg_scale,
-        "image": {"base64": image_b64}
+        "image": image_b64
     }
     headers = {"x-freepik-api-key": FREEPIK_API_KEY, "Content-Type": "application/json"}
     with _video_sem:
@@ -1393,37 +1442,156 @@ def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str
         raise RuntimeError("Kling/Freepik rate limit hit (429). Try again later or lower VIDEO_MAX_CONCURRENCY.")
     if not r.ok:
         raise RuntimeError(f"Kling create failed ({r.status_code}): {r.text[:500]}")
+    
     data = r.json()
-    task_id = data.get("task_id") or data.get("id")
+    
+    # ✅ 디버깅: 실제 응답 구조 출력
+    print(f"🔍 [DEBUG] Kling API Response: {json.dumps(data, indent=2)}", flush=True)
+    
+    # 여러 가능한 필드 시도
+    task_id = (
+        data.get("task_id") or 
+        data.get("id") or 
+        data.get("data", {}).get("task_id") or 
+        data.get("data", {}).get("id") or
+        data.get("result", {}).get("task_id") or
+        data.get("taskId")
+    )
+    
     if not task_id:
-        raise RuntimeError("No task_id returned from Kling create.")
+        print(f"❌ [ERROR] Could not find task_id. Full response keys: {list(data.keys())}", flush=True)
+        raise RuntimeError(f"No task_id returned from Kling create. Response: {json.dumps(data)[:300]}")
+    
+    print(f"✅ [SUCCESS] Task created: {task_id}", flush=True)
     return task_id
 
-def _freepik_kling_poll(task_id: str, timeout_sec: int = 600) -> str:
+import math # 함수 상단이나 파일 최상단에 import math 필요
+
+def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips: int, timeout_sec: int = 600) -> str:
     headers = {"x-freepik-api-key": FREEPIK_API_KEY}
     start = time.time()
+    poll_count = 0
+    
+    # [UX] 각 클립당 할당할 최대 진행률 (전체의 90%를 클립 생성에 분배)
+    # 예: 클립이 1개면 90%까지, 2개면 개당 45%까지 할당
+    clip_share_percent = 90 / max(1, total_clips)
+    clip_start_percent = clip_index * clip_share_percent
+
     while True:
         if time.time() - start > timeout_sec:
             raise RuntimeError("Kling task timeout.")
-        with _video_sem:
-            r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
-        if not r.ok:
-            raise RuntimeError(f"Kling status failed ({r.status_code}): {r.text[:300]}")
-        st = r.json()
-        status = (st.get("status") or "").upper()
-        if status in ("COMPLETED", "SUCCEEDED", "SUCCESS"):
-            out = st.get("result") or st.get("output") or {}
-            url = out.get("video") or out.get("url") or st.get("result_url")
+        
+        poll_count += 1
+        
+        # 1. API 호출 (네트워크 에러 방어)
+        try:
+            with _video_sem:
+                r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
+            
+            if not r.ok:
+                # 500 에러 등은 잠시 대기 후 재시도
+                if r.status_code >= 500:
+                    print(f"⚠️ [Server Warning] {r.status_code}. Retrying...", flush=True)
+                    time.sleep(3)
+                    continue
+                raise RuntimeError(f"Kling status failed ({r.status_code}): {r.text[:300]}")
+                
+            st = r.json()
+            
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ [Network Warning] Polling failed temporarily: {e}. Retrying...", flush=True)
+            time.sleep(3)
+            continue
+
+        # 2. [FIX] 데이터 구조 방어 로직 (AttributeError 'str' object 방지)
+        data = st.get("data", {})
+        status = "UNKNOWN"
+
+        if isinstance(data, dict):
+            status = data.get("status", "").upper()
+        elif isinstance(st, dict):
+             # data가 없거나 문자열이면 top-level에서 status 확인
+            status = st.get("status", "").upper()
+        
+        # 3. [FIX] 진행률 로직 개선 (15% 멈춤 해결)
+        # 로그 함수를 사용하여 시간이 지날수록 천천히 오르지만 100%는 넘지 않게 설정
+        # poll_count가 늘어날수록 clip_share_percent의 95% 수준까지 점진적으로 접근
+        simulated_progress = clip_share_percent * 0.95 * (1 - math.exp(-0.05 * poll_count))
+        
+        current_total_progress = int(clip_start_percent + simulated_progress)
+        
+        # 로그 출력 (사용자 안심용)
+        if poll_count <= 3 or poll_count % 5 == 0:
+            print(f"🔍 [Poll #{poll_count}] Clip {clip_index+1}/{total_clips} Status: {status} (Progress: {current_total_progress}%)", flush=True)
+
+        with video_jobs_lock:
+            if job_id in video_jobs:
+                video_jobs[job_id]["progress"] = current_total_progress
+                # 메시지에 실제 서버 상태 포함
+                video_jobs[job_id]["message"] = f"Generating clip {clip_index+1}/{total_clips}: {status}..."
+        
+        # 4. 완료 처리
+        if status in ("COMPLETED", "SUCCEEDED", "SUCCESS", "DONE"):
+            print(f"✅ [COMPLETED] Clip {clip_index+1}/{total_clips}. Fetching URL...", flush=True)
+            
+            # generated 필드 안전 추출
+            generated = []
+            if isinstance(data, dict):
+                generated = data.get("generated", [])
+            elif isinstance(st, dict):
+                generated = st.get("generated", [])
+
+            # 완료되었는데 URL이 바로 안 뜨는 경우 대기
+            retry_count = 0
+            while not generated and retry_count < 5:
+                print(f"⏳ [WAIT] Generated array empty, retrying... ({retry_count+1}/5)", flush=True)
+                time.sleep(2)
+                retry_count += 1
+                
+                with _video_sem:
+                    r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
+                if r.ok:
+                    st = r.json()
+                    data = st.get("data", {})
+                    if isinstance(data, dict):
+                        generated = data.get("generated", [])
+                    else:
+                        generated = st.get("generated", [])
+
+            # URL 찾기
+            url = None
+            if generated and len(generated) > 0:
+                first = generated[0]
+                if isinstance(first, dict):
+                    url = first.get("url") or first.get("video")
+                elif isinstance(first, str):
+                    url = first
+            
+            if not url and isinstance(data, dict):
+                 url = data.get("video_url") or data.get("url") or data.get("video")
+            
             if not url:
-                # some schemas: result.videos[0].url
-                vids = out.get("videos") or []
-                if vids and isinstance(vids, list):
-                    url = vids[0].get("url")
-            if not url:
-                raise RuntimeError("Kling completed but no result URL.")
-            return url
-        if status in ("FAILED", "ERROR"):
-            raise RuntimeError(st.get("error") or "Kling task failed.")
+                url = st.get("result_url") or st.get("video_url")
+
+            if url:
+                print(f"✅ [SUCCESS] Found URL: {url[:60]}...", flush=True)
+                return url
+            
+            print(f"❌ [ERROR] Completed but no URL. Response dump:", flush=True)
+            print(json.dumps(st, indent=2), flush=True)
+            raise RuntimeError("Kling completed but no result URL found.")
+        
+        if status in ("FAILED", "ERROR", "CANCELLED"):
+            error_msg = "Unknown error"
+            if isinstance(data, dict):
+                error_msg = data.get("error") or data.get("message") or error_msg
+            elif isinstance(data, str):
+                error_msg = data
+            elif isinstance(st, dict):
+                 error_msg = st.get("error") or st.get("message") or error_msg
+            
+            raise RuntimeError(f"Kling task failed: {error_msg}")
+        
         time.sleep(2)
 
 def _image_url_to_b64(url: str) -> str:
@@ -1441,7 +1609,6 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
         out_dir = Path("outputs")
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) Generate each clip (5s), download, then trim to middle 3s (and optionally speed up)
         generated_paths = []
         for i, clip in enumerate(clips):
             with video_jobs_lock:
@@ -1449,9 +1616,30 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
                 video_jobs[job_id]["progress"] = int((i / max(1, len(clips))) * 60) + 5
 
             prompts = _kling_prompts_for_preset(clip.preset)
-            img_b64 = _image_url_to_b64(clip.url)
+            
+            # [FIX] Base64 Data URI 처리 로직 추가 및 경로 처리 강화
+            if clip.url.startswith("data:image/"):
+                # "data:image/png;base64,..." 형태에서 헤더 제거
+                try:
+                    header, encoded = clip.url.split(",", 1)
+                    img_b64 = encoded
+                except ValueError:
+                    # 헤더가 없는 순수 base64일 경우 대비
+                    img_b64 = clip.url
+            elif clip.url.startswith('/'):
+                local_path = clip.url.lstrip('/')
+                if not os.path.exists(local_path):
+                    # 파일이 없으면 에러 대신 로그 남기고 스킵하거나 에러 처리 (여기선 에러 발생)
+                    raise FileNotFoundError(f"Image not found on server: {local_path}")
+                with open(local_path, 'rb') as f:
+                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
+            else:
+                img_b64 = _image_url_to_b64(clip.url)
+            
             task_id = _freepik_kling_create_task(img_b64, prompts["prompt"], prompts["negative_prompt"], duration, cfg_scale)
-            video_url = _freepik_kling_poll(task_id)
+            
+            # ... (이하 동일, polling 및 download 부분) ...
+            video_url = _freepik_kling_poll(task_id, job_id, i, len(clips))
 
             raw_path = out_dir / f"video_raw_{job_id}_{i}.mp4"
             _download_to_path(video_url, raw_path)
@@ -1463,10 +1651,9 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
         if not generated_paths:
             raise RuntimeError("No clips generated.")
 
-        # 2) Normalize all to a common size (use first clip as reference)
-        ref_w, ref_h = _ffprobe_wh(generated_paths[0])
-        if ref_w <= 0 or ref_h <= 0:
-            ref_w, ref_h = 1280, 720
+        # 2) Normalize
+        # [FIX] 해상도를 4:5 비율 (1080x1350)로 강제 고정
+        ref_w, ref_h = 1080, 1350
 
         normalized_paths = []
         for i, p in enumerate(generated_paths):
@@ -1484,7 +1671,9 @@ def _run_video_job(job_id: str, clips: List[VideoClip], duration: str, cfg_scale
             video_jobs[job_id]["progress"] = 90
 
         list_file = out_dir / f"video_concat_{job_id}.txt"
-        list_lines = [f"file '{p.as_posix()}'" for p in normalized_paths]
+        
+        # [FIX] Concat 시 절대 경로(resolve) 사용으로 경로 문제 해결
+        list_lines = [f"file '{p.resolve().as_posix()}'" for p in normalized_paths]
         list_file.write_text("\n".join(list_lines), encoding="utf-8")
 
         final_path = out_dir / f"video_final_{job_id}.mp4"
@@ -1558,6 +1747,8 @@ def auto_cleanup_task():
     while True:
         try:
             now = time.time()
+            
+            # 1. 파일 정리 (기존 로직 유지)
             deleted_count = 0
             folder = "outputs"
             if os.path.exists(folder):
@@ -1570,8 +1761,24 @@ def auto_cleanup_task():
                                 os.remove(file_path)
                                 deleted_count += 1
                             except Exception: pass
+            
+            # 2. [FIX] 메모리 정리: 완료되었거나 오래된 Job ID 삭제 (메모리 누수 방지)
+            # Job 생성 후 24시간(86400초) 지난 기록은 삭제
+            JOB_RETENTION = 86400 
+            with video_jobs_lock:
+                # 딕셔너리를 순회하며 삭제해야 하므로 키 리스트 복사 사용
+                for jid in list(video_jobs.keys()):
+                    # progress가 100이거나 failed인 상태에서 오래된 것, 혹은 그냥 너무 오래된 것 삭제
+                    # 여기서는 단순하게 생성 시간을 별도 추적 안하므로, 일단 100% 완료된 건 바로 지우지 않고(다운로드 위해),
+                    # 리스트 관리 정책이 필요함.
+                    # 간단하게: video_jobs에 timestamp 필드를 추가하는 것이 정석이나,
+                    # 현재 구조상 '너무 많아지면 강제 정리' 방식으로 구현.
+                    if len(video_jobs) > 1000: # 혹시 1000개가 넘어가면
+                        video_jobs.pop(jid, None) # 앞에서부터 하나 지움 (Python 3.7+ 딕셔너리는 삽입 순서 유지되므로 가장 오래된 것 삭제됨)
+            
             if deleted_count > 0:
                 print(f"✨ [System] Cleaned up {deleted_count} old files.", flush=True)
+                
         except Exception as e:
             print(f"!! [Cleanup Error] {e}", flush=True)
         time.sleep(CLEANUP_INTERVAL)

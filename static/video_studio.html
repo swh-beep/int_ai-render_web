@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Studio</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+
+<body>
+  <div class="layout">
+    <div class="container">
+      <div class="vs-shell">
+
+        <header class="vs-header">
+          <div>
+            <h1 class="vs-title">Video Studio</h1>
+            <p class="vs-subtitle">Create Kling clips from existing images and automatically merge them into one video.
+            </p>
+          </div>
+        </header>
+
+        <div class="vs-grid">
+          <section class="vs-card">
+            <div class="vs-card-head">
+              <h2>Recent Images</h2>
+              <p class="muted">Click an image to add it to Selected Clips.</p>
+            </div>
+            <div id="recentGrid" class="vs-thumb-grid"></div>
+            <div id="vsRecentEmpty" class="vs-empty muted hidden">No recent images found in /outputs.</div>
+          </section>
+
+          <section class="vs-card">
+            <div class="vs-card-head">
+              <h2>Upload Your Images</h2>
+              <p class="muted">Drag & drop or browse files. Uploaded files are saved to /outputs.</p>
+            </div>
+
+            <div id="uploadDrop" class="vs-dropzone" tabindex="0">
+              <div class="vs-dropzone-inner">
+                <div class="vs-dropzone-title">Drag & Drop images here</div>
+                <div class="vs-dropzone-or">or</div>
+                <button id="browseBtn" type="button" class="action-btn secondary vs-browse-btn">Browse files</button>
+                <input id="fileInput" type="file" accept="image/*" multiple class="hidden" />
+              </div>
+            </div>
+
+            <div class="vs-options">
+              <div class="vs-option">
+                <label class="vs-label" for="clipDuration">Clip Duration</label>
+                <select id="clipDuration" class="vs-select">
+                  <option value="5">5s (default)</option>
+                </select>
+              </div>
+              <div class="vs-help muted">Each image becomes one Kling clip, then we merge them into a single video.
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="vs-card vs-selected-card">
+          <div class="vs-card-head">
+            <h2>Selected Clips</h2>
+            <p class="muted">You can mix presets per image. The output video is generated after all clips are ready.</p>
+          </div>
+
+          <div id="vsSelectedList" class="vs-selected-list">
+            <div id="vsSelectedEmpty" class="vs-empty muted">No image selected yet. Pick one on the left or upload new
+              images.</div>
+          </div>
+
+          <div class="vs-actions">
+            <button id="createVideoBtn" class="action-btn primary">CREATE VIDEO</button>
+            <div id="status" class="vs-status"></div>
+          </div>
+
+
+          <div id="resultWrap" class="vs-result hidden">
+            <video id="resultVideo" controls class="vs-video"></video>
+            <a id="downloadLink" class="vs-download" href="#" download>DOWNLOAD</a>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/video_studio.js"></script>
+</body>
+
+</html>
