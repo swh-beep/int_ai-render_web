@@ -1006,44 +1006,68 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+# [수정] main.py 내부의 generate_details_endpoint 함수 교체
+
 @app.post("/generate-details")
 def generate_details_endpoint(req: DetailRequest):
     try:
+        # 1. 대상 이미지 경로 확보
         filename = os.path.basename(req.image_url)
         local_path = os.path.join("outputs", filename)
         if not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
 
         unique_id = uuid.uuid4().hex[:6]
-        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Smart Cache Mode ===", flush=True)
+        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Smart Analysis Mode ===", flush=True)
 
         analyzed_items = []
         
+        # 2. 가구 데이터 확인 (캐시 or 신규 분석)
         if req.furniture_data and len(req.furniture_data) > 0:
             print(">> [Smart Cache] Using pre-analyzed furniture data!", flush=True)
             analyzed_items = req.furniture_data
         else:
-            print(">> [Smart Cache] No cached data found. Analyzing now...", flush=True)
+            print(">> [Smart Cache] No cached data found. Starting Analysis...", flush=True)
+            
+            # [NEW] 분석할 대상 이미지 결정 로직 (무드보드 우선 -> 없으면 메인 이미지 사용)
+            target_analysis_path = None
+            
             if req.moodboard_url:
+                # A. 무드보드 URL이 있는 경우 (경로 파싱)
                 if req.moodboard_url.startswith("/assets/"):
                     rel_path = req.moodboard_url.lstrip("/")
-                    mb_path = os.path.join(*rel_path.split("/"))
+                    target_analysis_path = os.path.join(*rel_path.split("/"))
                 else:
                     mb_filename = os.path.basename(req.moodboard_url)
-                    mb_path = os.path.join("outputs", mb_filename)
-
-                if os.path.exists(mb_path):
-                    detected_items = detect_furniture_boxes(mb_path)
-                    print(f">> [Deep Analysis] Analyzing {len(detected_items)} items...", flush=True)
-                    with ThreadPoolExecutor(max_workers=5) as executor:
-                        futures = [executor.submit(analyze_cropped_item, mb_path, item) for item in detected_items]
-                        analyzed_items = [f.result() for f in futures]
-                else:
-                    print(f"!! Moodboard file not found at {mb_path}, using default.", flush=True)
+                    target_analysis_path = os.path.join("outputs", mb_filename)
             else:
-                 print("!! No Moodboard URL provided, using default list.", flush=True)
+                # B. [핵심 수정] 무드보드가 없으면? -> 메인 이미지를 분석 대상으로 설정!
+                print(">> [Info] No Moodboard provided. Analyzing the Main Image itself.", flush=True)
+                target_analysis_path = local_path
+
+            # 3. 실제 분석 실행
+            if target_analysis_path and os.path.exists(target_analysis_path):
+                try:
+                    detected_items = detect_furniture_boxes(target_analysis_path)
+                    print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
+                    
+                    with ThreadPoolExecutor(max_workers=10) as executor: # Worker 수 약간 증량
+                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
+                        analyzed_items = [f.result() for f in futures]
+                        
+                    print(f">> [Analysis Done] Items: {[item['label'] for item in analyzed_items]}", flush=True)
+                except Exception as e:
+                    print(f"!! Analysis Failed: {e}. Using defaults.", flush=True)
+                    analyzed_items = []
+            else:
+                 print(f"!! Target path not found: {target_analysis_path}", flush=True)
+
+            # 4. 분석 실패 시 최후의 보루 (기본값)
+            if not analyzed_items:
+                 print("!! Fallback to default list.", flush=True)
                  analyzed_items = [{"label": "Sofa"}, {"label": "Chair"}, {"label": "Table"}]
         
+        # 5. 동적 스타일 구성 및 생성 요청
         dynamic_styles = construct_dynamic_styles(analyzed_items)
         
         generated_results = []

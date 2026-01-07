@@ -734,7 +734,94 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         renderBtn.disabled = !ready;
     }
+    // [추가] script.js: 메인 렌더링 로직(renderBtn) 근처에 추가
 
+    const directUploadZone = document.getElementById('direct-upload-zone');
+    const directUploadInput = document.getElementById('direct-upload-input');
+
+    if (directUploadZone && directUploadInput) {
+        directUploadZone.addEventListener('click', () => directUploadInput.click());
+
+        directUploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            directUploadZone.style.borderColor = THEME_COLOR;
+            directUploadZone.style.backgroundColor = '#1a1a1a';
+        });
+
+        directUploadZone.addEventListener('dragleave', () => {
+            directUploadZone.style.borderColor = '#444';
+            directUploadZone.style.backgroundColor = '';
+        });
+
+        directUploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            directUploadZone.style.borderColor = '#444';
+            directUploadZone.style.backgroundColor = '';
+            if (e.dataTransfer.files.length) handleDirectUpload(e.dataTransfer.files[0]);
+        });
+
+        directUploadInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleDirectUpload(e.target.files[0]);
+        });
+    }
+
+    async function handleDirectUpload(file) {
+        if (!file.type.startsWith('image/')) {
+            showCustomAlert("Error", "이미지 파일만 업로드 가능합니다.");
+            return;
+        }
+
+        // 로딩 표시
+        loadingOverlay.classList.remove('hidden');
+        if (loadingStatus) loadingStatus.textContent = "Uploading Main Cut...";
+        if (timerElement) timerElement.textContent = "";
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            // 기존에 존재하는 API 엔드포인트 활용 (/api/outputs/upload)
+            const res = await fetch('/api/outputs/upload', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            if (res.ok && data.url) {
+                // 1. Result 섹션 강제 활성화
+                resultSection.classList.remove('hidden');
+
+                // 2. 이미지 매핑 (Before가 없으므로 After 이미지를 둘 다 넣어 슬라이더 오류 방지)
+                resultAfter.src = data.url;
+                resultBefore.src = data.url;
+
+                // 3. 슬라이더 초기화
+                // 이미지가 로드된 후 슬라이더 높이/비율을 잡기 위해 onload 사용
+                resultAfter.onload = () => {
+                    const isPortrait = resultAfter.naturalHeight > resultAfter.naturalWidth;
+                    if (comparisonContainer) {
+                        comparisonContainer.style.aspectRatio = isPortrait ? "4 / 5" : "16 / 9";
+                    }
+                    initSlider();
+                    resultSection.scrollIntoView({ behavior: 'smooth' });
+                };
+
+                // 4. 컨텍스트 초기화 (기존 렌더링 데이터가 섞이지 않도록)
+                currentFurnitureData = null; // null이면 디테일 생성 시 백엔드가 알아서 다시 분석함
+                currentMoodboardUrl = null;
+
+                // 5. 썸네일 컨테이너 비우기
+                if (thumbnailContainer) thumbnailContainer.innerHTML = '';
+
+            } else {
+                throw new Error("Upload failed");
+            }
+        } catch (err) {
+            showCustomAlert("Error", "업로드 중 오류가 발생했습니다: " + err.message);
+        } finally {
+            loadingOverlay.classList.add('hidden');
+        }
+    }
     // --- 메인 렌더링 ---
     if (renderBtn) {
         renderBtn.addEventListener('click', async () => {

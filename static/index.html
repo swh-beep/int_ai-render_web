@@ -83,7 +83,20 @@
             <div class="action-area">
                 <button id="render-btn" class="action-btn" disabled>Start Rendering</button>
             </div>
+            <div class="action-area" style="margin-top: 0; padding-top: 0;">
+                <div style="display: flex; align-items: center; justify-content: center; margin: 2rem 0;">
+                    <span style="height: 1px; background: #333; width: 100px;"></span>
+                    <span style="margin: 0 15px; color: #666; font-size: 0.9rem;">OR SKIP RENDER</span>
+                    <span style="height: 1px; background: #333; width: 100px;"></span>
+                </div>
 
+                <div class="drop-zone" id="direct-upload-zone"
+                    style="padding: 2rem; min-height: 150px; border-style: dashed; border-color: #444;">
+                    <p style="margin-bottom: 0.5rem; color: #fff;">Already have a Main Cut?</p>
+                    <p style="font-size: 0.85rem;">Upload here to generate <strong>Detail Views</strong> directly</p>
+                    <input type="file" id="direct-upload-input" accept="image/*" hidden>
+                </div>
+            </div>
             <section class="result-section hidden" id="result-section">
                 <h2>Result</h2>
 
