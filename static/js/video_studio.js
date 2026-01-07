@@ -2,19 +2,29 @@
   const $ = (id) => document.getElementById(id);
 
   let recentGrid, recentEmpty, uploadZone, uploadInput, browseBtn;
-  let durationSelect, selectedList, selectedEmpty, createBtn, statusEl, outputEl;
-  let preview, download;
+  let selectedList, selectedEmpty, createBtn, statusEl;
 
-  const PRESETS = [
-    { value: "ref_auto", label: "Reference Auto (Vision)" }, // ✅ 추가
-    { value: "sunlight_slow_pan", label: "Sunlight • Slow Pan" },
-    { value: "sunlight_gentle_parallax", label: "Sunlight • Gentle Parallax" },
-    { value: "right_to_left_smooth", label: "Pan • Right → Left" },
-    { value: "left_to_right_smooth", label: "Pan • Left → Right" },
-    { value: "push_in_slow", label: "Zoom • Push-in (Slow)" },
-    { value: "orbit_rotate", label: "Orbit • Rotation (Subtle)" },
-    { value: "closeup_luxury_detail", label: "Close-up • Luxury Detail" },
-    { value: "default", label: "Default" }
+  // [유지] Motion Options
+  const MOTION_OPTIONS = [
+    { value: "static", label: "1. 기본 (움직임 없음)" },
+    { value: "orbit_r_slow", label: "2. 회전 (우측 천천히)" },
+    { value: "orbit_l_slow", label: "3. 회전 (좌측 천천히)" },
+    { value: "orbit_r_fast", label: "4. 회전 (우측 빠르게)" },
+    { value: "orbit_l_fast", label: "5. 회전 (좌측 빠르게)" },
+    { value: "zoom_in_slow", label: "6. 줌인 (아이레벨 천천히)" },
+    { value: "zoom_out_slow", label: "7. 줌아웃 (아이레벨 천천히)" },
+    { value: "zoom_in_fast", label: "8. 줌인 (아이레벨 빠르게)" },
+    { value: "zoom_out_fast", label: "9. 줌아웃 (아이레벨 빠르게)" }
+  ];
+
+  // [유지] Effect Options
+  const EFFECT_OPTIONS = [
+    { value: "none", label: "효과 없음" },
+    { value: "sunlight", label: "1. 햇살 이동" },
+    { value: "lights_on", label: "2. 조명 켜짐" },
+    { value: "blinds", label: "3. 블라인드/커튼 움직임" },
+    { value: "plants", label: "4. 식물 흔들림" },
+    { value: "door_open", label: "5. 문 열림" }
   ];
 
   let selected = [];
@@ -42,14 +52,18 @@
       .replace(/"/g, "&quot;");
   }
 
-  function buildPresetSelect(value, onChange) {
+  // [유지] 드롭다운 생성 헬퍼
+  function buildSelect(options, currentValue, onChange) {
     const sel = document.createElement("select");
     sel.className = "vs-select";
-    PRESETS.forEach(p => {
+    sel.style.width = "100%";
+    sel.style.marginBottom = "5px";
+
+    options.forEach(p => {
       const opt = document.createElement("option");
       opt.value = p.value;
       opt.textContent = p.label;
-      if (p.value === value) opt.selected = true;
+      if (p.value === currentValue) opt.selected = true;
       sel.appendChild(opt);
     });
     sel.addEventListener("change", (e) => onChange(e.target.value));
@@ -70,20 +84,28 @@
       const row = document.createElement("div");
       row.className = "vs-selected-row";
 
+      // [수정] 파일명 표시 제거 (깔끔하게 비워둠)
       row.innerHTML = `
         <div class="vs-selected-thumb">
           <img src="${escapeHtml(item.url)}" alt="thumb" />
         </div>
-        <div class="vs-selected-meta">
-          <div class="vs-selected-url muted">${escapeHtml(item.url)}</div>
-        </div>
+        <div class="vs-selected-meta"></div>
         <div class="vs-selected-actions"></div>
       `;
 
       const actions = row.querySelector(".vs-selected-actions");
+      actions.style.display = "flex";
+      actions.style.flexDirection = "column";
+      actions.style.gap = "4px";
 
-      const presetSel = buildPresetSelect(item.preset || "ref_auto", (val) => {
-        selected[idx].preset = val;
+      // Motion Select
+      const motionSel = buildSelect(MOTION_OPTIONS, item.motion || "static", (val) => {
+        selected[idx].motion = val;
+      });
+
+      // Effect Select
+      const effectSel = buildSelect(EFFECT_OPTIONS, item.effect || "none", (val) => {
+        selected[idx].effect = val;
       });
 
       const removeBtn = document.createElement("button");
@@ -94,17 +116,21 @@
         renderSelected();
       });
 
-      actions.appendChild(presetSel);
+      actions.appendChild(motionSel);
+      actions.appendChild(effectSel);
       actions.appendChild(removeBtn);
 
       selectedList.appendChild(row);
     });
   }
 
+  // [수정] 파일명 인자 제거
   function addSelected(url) {
     if (!url) return;
     if (selected.some(s => s.url === url)) return;
-    selected.push({ url, preset: "ref_auto" }); // ✅ 기본 preset만 변경
+
+    // 파일명 저장 없이 url과 설정값만 저장
+    selected.push({ url, motion: "static", effect: "none" });
     renderSelected();
     setStatus("");
   }
@@ -118,7 +144,7 @@
         const fd = new FormData();
         fd.append("file", file);
 
-        const res = await fetch("/api/uploads/upload", {
+        const res = await fetch("/api/outputs/upload", {
           method: "POST",
           body: fd,
         });
@@ -156,10 +182,13 @@
       const btn = document.createElement("button");
       btn.className = "vs-thumb";
       btn.type = "button";
+      // 썸네일 그리드 쪽 라벨은 유지할지 여부를 말씀 안하셔서 일단 유지하되,
+      // 선택 시 addSelected에는 url만 넘깁니다.
       btn.innerHTML = `
         <div class="vs-thumb-img"><img src="${escapeHtml(it.url)}" alt="recent" /></div>
         <div class="vs-thumb-label muted">${escapeHtml(it.filename || "")}</div>
       `;
+      // [수정] 파일명 전달 제거
       btn.addEventListener("click", () => addSelected(it.url));
       recentGrid.appendChild(btn);
     });
@@ -221,16 +250,16 @@
 
     createBtn.disabled = true;
 
-    // ✅ 문자열로 유지
-    const duration = durationSelect?.value || "5";
-
+    // [유지] Motion/Effect 값 전송
     const payload = {
-      clips: selected.map(s => ({ url: s.url, preset: s.preset || "ref_auto" })),
-      duration: String(duration),  // ✅ 명시적으로 문자열 변환
-      cfg_scale: 0.85,  // ✅ 0.85로 변경 (서버 기본값과 동일)
-
-      // ✅ auto_ref 동작을 위한 필드(서버에서 backward compatible)
-      mode: selected.some(s => (s.preset || "ref_auto") === "ref_auto") ? "auto_ref" : "manual",
+      clips: selected.map(s => ({
+        url: s.url,
+        motion: s.motion || "static",
+        effect: s.effect || "none"
+      })),
+      duration: "5",
+      cfg_scale: 0.85,
+      mode: "manual",
       target_total_sec: 20.0,
       include_intro_outro: true
     };
@@ -267,8 +296,6 @@
     uploadZone = $("uploadZone");
     uploadInput = $("uploadInput");
     browseBtn = $("browseBtn");
-
-    durationSelect = $("durationSelect");
     selectedList = $("selectedList");
     selectedEmpty = $("selectedEmpty");
     createBtn = $("createVideoBtn");

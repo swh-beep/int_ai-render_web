@@ -18,11 +18,11 @@
             <p class="subtitle-sub">해당 웹 및 앱은 사내용입니다</p>
             <p class="subtitle-sub">담당자 외 배포 금지</p>
 
-        
-        <div class="header-actions">
-            <a id="videoStudioBtn" href="/video-studio" class="action-btn secondary header-btn">VIDEO STUDIO</a>
-        </div>
-</header>
+
+            <div class="header-actions">
+                <a id="videoStudioBtn" href="/video-studio" class="action-btn secondary header-btn">VIDEO STUDIO</a>
+            </div>
+        </header>
 
         <main>
             <section class="upload-section" id="upload-area">
@@ -111,7 +111,7 @@
                     <div class="button-group">
                         <button id="upscaleBtn" class="action-btn">Upscale & Download</button>
                         <button id="detailBtn" class="action-btn secondary">Generate Detail View</button>
-                <button id="videoStudioBtn" class="action-btn secondary">VIDEO STUDIO</button>
+                        <button id="videoStudioBtn" class="action-btn secondary">VIDEO STUDIO</button>
                     </div>
                     <p id="upscaleStatus" class="hidden">고화질 변환 중입니다... (약 30~60초 소요)</p>
                     <p id="detailStatus" class="hidden">촬영 중입니다... (약 40~60초)</p>
@@ -309,60 +309,6 @@
     </div>
 
     <script src="/static/js/script.js"></script>
-
-  <!-- Video MVP Modal -->
-  <div id="video-mvp-modal" class="custom-modal hidden">
-    <div class="modal-content video-mvp-modal-content">
-      <div class="modal-header">
-        <h2>Video MVP (Kling)</h2>
-        <button id="videoMvpClose" class="close-btn">&times;</button>
-      </div>
-
-      <div class="video-mvp-controls">
-        <div class="video-mvp-control">
-          <label>Duration</label>
-          <select id="videoMvpDuration">
-            <option value="5" selected>5s (provider)</option>
-          </select>
-        </div>
-
-        <div class="video-mvp-control">
-          <label>Main Default Preset</label>
-          <select id="videoMvpMainPreset">
-            <option value="main_sunlight" selected>Main: Sunlight (Dynamic)</option>
-            <option value="orbit_rotate">Main: Orbit Rotate ↻</option>
-            <option value="orbit_rotate_ccw">Main: Orbit Rotate ↺</option>
-            <option value="static">Almost Static</option>
-          </select>
-        </div>
-
-        <div class="video-mvp-control">
-          <label>Detail Default Preset</label>
-          <select id="videoMvpDetailPreset">
-            <option value="detail_pan_lr" selected>Detail: Pan L→R</option>
-            <option value="detail_pan_rl">Detail: Pan R→L</option>
-            <option value="detail_dolly_in">Detail: Dolly-in</option>
-            <option value="detail_dolly_out">Detail: Dolly-out</option>
-            <option value="tilt_down">Detail: Tilt Down</option>
-            <option value="static">Almost Static</option>
-          </select>
-        </div>
-      </div>
-
-      <div id="videoMvpList" class="video-mvp-list"></div>
-
-      <div class="video-mvp-footer">
-        <div id="videoMvpStatus" class="video-mvp-status"></div>
-        <button id="videoMvpStart" class="action-btn">CREATE VIDEO</button>
-      </div>
-
-      <div id="videoMvpResult" class="video-mvp-result hidden">
-        <video id="videoMvpPreview" controls playsinline></video>
-        <a id="videoMvpDownload" class="action-btn secondary" href="#" download>DOWNLOAD</a>
-      </div>
-    </div>
-  </div>
-
 </body>
 
 </html>
