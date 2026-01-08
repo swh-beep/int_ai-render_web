@@ -663,18 +663,24 @@ def get_available_thumbnails(room_name: str, style_name: str):
     base_dir = "static/thumbnails"
     if not os.path.exists(base_dir): return []
 
-    valid_indices = []
+    valid_items = [] # [변경] 단순 숫자 리스트가 아니라 객체 리스트로 변경
+    valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+
     try:
         for f in os.listdir(base_dir):
-            if f.startswith(prefix) and f.endswith(".png"):
+            f_lower = f.lower()
+            if f_lower.startswith(prefix) and f_lower.endswith(valid_exts):
                 try:
-                    num_part = f.replace(prefix, "").replace(".png", "")
+                    name_part = f_lower.replace(prefix, "")
+                    num_part = os.path.splitext(name_part)[0]
                     if num_part.isdigit():
-                        valid_indices.append(int(num_part))
+                        # [변경] 번호와 '실제 파일명'을 함께 저장
+                        valid_items.append({"index": int(num_part), "file": f})
                 except: continue
         
-        valid_indices.sort()
-        return valid_indices
+        # 번호 순서대로 정렬
+        valid_items.sort(key=lambda x: x["index"])
+        return valid_items
     except Exception as e:
         print(f"Thumbnail Scan Error: {e}")
         return []
@@ -707,21 +713,56 @@ def render_room(
         if style != "Customize":
             safe_room = room.lower().replace(" ", "") 
             safe_style = style.lower().replace(" ", "-").replace("_", "-")
-            assets_dir = os.path.join("assets", safe_room, safe_style)
-            if os.path.exists(assets_dir):
+            
+            # [수정] 폴더 대소문자 무시하고 찾기 로직
+            target_path = os.path.join("assets", safe_room, safe_style)
+            assets_dir = None
+
+            # 1. 정확한 경로가 있으면 사용
+            if os.path.exists(target_path):
+                assets_dir = target_path
+            else:
+                # 2. 없으면 대소문자 무시하고 탐색 (assets 폴더 안을 뒤짐)
+                # 예: 코드는 'livingroom'을 찾지만 폴더는 'LivingRoom'이어도 찾게 함
+                root_assets = "assets"
+                if os.path.exists(root_assets):
+                    # Room 찾기
+                    found_room = next((d for d in os.listdir(root_assets) if d.lower() == safe_room), None)
+                    if found_room:
+                        room_path = os.path.join(root_assets, found_room)
+                        # Style 찾기
+                        found_style = next((d for d in os.listdir(room_path) if d.lower() == safe_style), None)
+                        if found_style:
+                            assets_dir = os.path.join(room_path, found_style)
+
+            # 폴더를 찾았으면 파일 검색 시작
+            if assets_dir and os.path.exists(assets_dir):
                 files = sorted(os.listdir(assets_dir))
                 found = False
                 import re 
+                
+                # 파일명 검색 (대소문자 무시 플래그 re.IGNORECASE 추가)
                 pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
+                
+                # 지원할 확장자
+                valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+
                 for f in files:
-                    if re.search(pattern, f):
+                    # 확장자 체크 & 번호 매칭 (대소문자 무시)
+                    if f.lower().endswith(valid_exts) and re.search(pattern, f, re.IGNORECASE):
                         ref_path = os.path.join(assets_dir, f)
-                        mb_url = f"/assets/{safe_room}/{safe_style}/{f}"
+                        # URL 경로 생성 시 역슬래시(\)를 슬래시(/)로 바꿔야 웹에서 안깨짐
+                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
                         found = True
                         break
-                if not found and len(files) > 0:
-                    ref_path = os.path.join(assets_dir, files[0])
-                    mb_url = f"/assets/{safe_room}/{safe_style}/{files[0]}"
+                
+                # 못 찾았는데 파일이 있다면 첫번째 파일 사용 (확장자 맞는 것 중)
+                if not found:
+                    valid_files = [f for f in files if f.lower().endswith(valid_exts)]
+                    if valid_files:
+                        f = valid_files[0]
+                        ref_path = os.path.join(assets_dir, f)
+                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
         
         if style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])

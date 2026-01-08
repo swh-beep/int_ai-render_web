@@ -223,17 +223,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/thumbnails/${selectedRoom}/${style}`);
                 if (!res.ok) throw new Error("Thumbnail list fetch failed");
 
-                const validNumbers = await res.json();
+                // [변경] 서버에서 {index, file} 형태의 리스트를 받음
+                const validItems = await res.json();
 
-                const safeRoom = selectedRoom.toLowerCase().replace(/ /g, '');
-                const safeStyle = style.toLowerCase().replace(/ /g, '-').replace(/_/g, '-');
+                validItems.forEach(item => {
+                    // [변경] item.index와 item.file을 사용
+                    const i = item.index;
+                    const fileName = item.file;
 
-                validNumbers.forEach(i => {
                     const variantBtn = document.createElement('div');
                     variantBtn.className = 'variant-img-btn';
 
                     const img = document.createElement('img');
-                    img.src = `/static/thumbnails/${safeRoom}_${safeStyle}_${i}.png`;
+                    // [핵심 수정] 무조건 .png 붙이는 게 아니라 서버가 준 파일명 그대로 사용
+                    img.src = `/static/thumbnails/${fileName}`;
                     img.alt = `Variant ${i}`;
 
                     const label = document.createElement('span');
@@ -256,9 +259,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     variantGrid.appendChild(variantBtn);
                 });
             } catch (err) {
-                console.error("썸네일 목록 로드 실패 (기본 로직으로 폴백):", err);
-                for (let i = 1; i <= 30; i++) {
-                }
+                console.error("썸네일 목록 로드 실패:", err);
+                // 폴백 로직이 필요하다면 여기에 작성
             }
         }
 
