@@ -341,7 +341,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Floor Plan Logic ---
+    // --- [수정됨] Frontal View Generator Logic ---
+    // 기존의 Floor Plan 변수들을 재활용하되, 도면(Plan) 입력은 무시합니다.
+
+    // 버튼 텍스트 변경 (옵션)
+    if (openFpGenBtn) openFpGenBtn.textContent = "Auto-Correct Perspective (Frontal View)";
+
     if (openFpGenBtn) {
         openFpGenBtn.onclick = () => {
             fpGenModal.classList.remove('hidden');
@@ -354,55 +359,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function resetFpModal() {
-        fpPlanFile = null;
+        // fpPlanFile은 더 이상 안 씀
         fpRefFiles = [];
-        fpPlanInput.value = '';
-        fpRefInput.value = '';
+        if (fpRefInput) fpRefInput.value = '';
 
-        fpPlanPreviewContainer.classList.add('hidden');
-        fpPlanDropZone.classList.remove('hidden');
+        // 미리보기 초기화
+        if (fpRefPreviewContainer) {
+            fpRefPreviewContainer.innerHTML = '';
+            fpRefPreviewContainer.classList.add('hidden');
+        }
+        if (fpRefDropZone) fpRefDropZone.classList.remove('hidden');
+        if (fpRefRemoveAll) fpRefRemoveAll.classList.add('hidden');
 
-        fpRefPreviewContainer.innerHTML = '';
-        fpRefPreviewContainer.classList.add('hidden');
-        fpRefDropZone.classList.remove('hidden');
-        fpRefRemoveAll.classList.add('hidden');
+        // 결과창 초기화
+        if (fpPlaceholderText) fpPlaceholderText.classList.remove('hidden');
+        if (fpGenGrid) {
+            fpGenGrid.innerHTML = '';
+            fpGenGrid.style.display = 'none';
+        }
+        if (fpResultActions) fpResultActions.classList.add('hidden');
+        if (fpLoading) fpLoading.classList.add('hidden');
 
-        fpPlaceholderText.classList.remove('hidden');
-        fpGenGrid.innerHTML = '';
-        fpGenGrid.style.display = 'none';
-        fpResultActions.classList.add('hidden');
-        fpLoading.classList.add('hidden');
-
-        fpGenerateBtn.disabled = true;
+        if (fpGenerateBtn) fpGenerateBtn.disabled = true;
     }
 
-    if (fpPlanDropZone) {
-        fpPlanDropZone.addEventListener('click', () => fpPlanInput.click());
-        fpPlanDropZone.addEventListener('dragover', (e) => { e.preventDefault(); fpPlanDropZone.style.borderColor = THEME_COLOR; });
-        fpPlanDropZone.addEventListener('dragleave', () => fpPlanDropZone.style.borderColor = '#ccc');
-        fpPlanDropZone.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleFpPlan(e.dataTransfer.files[0]); });
-        fpPlanInput.addEventListener('change', (e) => { if (e.target.files.length) handleFpPlan(e.target.files[0]); });
-    }
-
-    function handleFpPlan(file) {
-        if (!file.type.startsWith('image/')) return;
-        fpPlanFile = file;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            fpPlanPreview.src = e.target.result;
-            fpPlanPreviewContainer.classList.remove('hidden');
-            fpPlanDropZone.classList.add('hidden');
-            checkFpReady();
-        };
-        reader.readAsDataURL(file);
-    }
-
-    if (fpPlanRemove) {
-        fpPlanRemove.onclick = (e) => {
-            e.stopPropagation(); fpPlanFile = null; fpPlanInput.value = '';
-            fpPlanPreviewContainer.classList.add('hidden'); fpPlanDropZone.classList.remove('hidden'); checkFpReady();
-        };
-    }
+    // 도면 드롭존(fpPlanDropZone) 관련 코드는 지우거나 무시해도 됩니다.
+    // 여기서는 "사진 업로드 드롭존(fpRefDropZone)"이 메인입니다.
 
     if (fpRefDropZone) {
         fpRefDropZone.addEventListener('click', () => fpRefInput.click());
@@ -429,23 +411,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateRefPreviews() {
+        if (!fpRefPreviewContainer) return;
         fpRefPreviewContainer.innerHTML = '';
         if (fpRefFiles.length > 0) {
             fpRefPreviewContainer.classList.remove('hidden');
-            fpRefRemoveAll.classList.remove('hidden');
+            if (fpRefRemoveAll) fpRefRemoveAll.classList.remove('hidden');
             fpRefFiles.forEach(file => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const img = document.createElement('img');
                     img.src = e.target.result;
                     img.className = 'unified-preview';
+                    // 스타일 살짝 수정 (사진 여러장 보기 좋게)
+                    img.style.width = "80px";
+                    img.style.height = "80px";
+                    img.style.objectFit = "cover";
                     fpRefPreviewContainer.appendChild(img);
                 };
                 reader.readAsDataURL(file);
             });
         } else {
             fpRefPreviewContainer.classList.add('hidden');
-            fpRefRemoveAll.classList.add('hidden');
+            if (fpRefRemoveAll) fpRefRemoveAll.classList.add('hidden');
         }
     }
 
@@ -460,11 +447,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function checkFpReady() {
-        fpGenerateBtn.disabled = !(fpPlanFile && fpRefFiles.length > 0);
+        // 사진이 1장 이상이면 생성 가능
+        if (fpGenerateBtn) fpGenerateBtn.disabled = !(fpRefFiles.length > 0);
     }
 
     async function performRoomGeneration() {
-        if (!fpPlanFile || fpRefFiles.length === 0) return;
+        if (fpRefFiles.length === 0) return;
 
         fpPlaceholderText.classList.add('hidden');
         fpGenGrid.innerHTML = '';
@@ -476,13 +464,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fpRetryBtn) fpRetryBtn.disabled = true;
 
         const formData = new FormData();
-        formData.append('floor_plan', fpPlanFile);
+        // [중요] input_photos 라는 키값으로 파일들을 보냅니다 (백엔드와 일치)
         fpRefFiles.forEach(file => {
-            formData.append('ref_photos', file);
+            formData.append('input_photos', file);
         });
 
         try {
-            const res = await fetch('/generate-room-from-plan', {
+            // [중요] 엔드포인트 변경 (/generate-frontal-view)
+            const res = await fetch('/generate-frontal-view', {
                 method: 'POST',
                 body: formData
             });
@@ -505,7 +494,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     img.style.cursor = "zoom-in";
                     img.onclick = (e) => {
                         e.stopPropagation();
-                        openLightbox(url, resultUrls, idx);
+                        // openLightbox 함수가 있다면 사용
+                        if (typeof openLightbox === 'function') openLightbox(url, resultUrls, idx);
                     };
 
                     const selectBtn = document.createElement('button');
@@ -521,11 +511,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             const fileRes = await fetch(url);
                             const blob = await fileRes.blob();
-                            const file = new File([blob], `generated_empty_room_${idx}.png`, { type: 'image/png' });
+                            const file = new File([blob], `generated_frontal_${idx}.png`, { type: 'image/png' });
 
-                            handleFile(file);
+                            handleFile(file); // 메인 화면으로 파일 전달
                             fpGenModal.classList.add('hidden');
-                            showCustomAlert("Success", "Generated room set as main input!");
+                            showCustomAlert("Success", "Frontal view set as main input!");
 
                         } catch (err) {
                             showCustomAlert("Error", "Failed to load selected image.");
@@ -563,7 +553,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fpRetryBtn) {
         fpRetryBtn.onclick = performRoomGeneration;
     }
-
     // --- Moodboard Generator Logic ---
     if (mbStep2RefImg) {
         mbStep2RefImg.onclick = () => {

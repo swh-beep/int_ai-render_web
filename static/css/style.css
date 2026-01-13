@@ -10,14 +10,12 @@
     --border-color: #333333;
     --radius: 10px;
     --transition: 0.3s ease;
-    /* [복구] 구버전에는 브랜드 컬러 변수가 없었거나 달랐을 수 있으나, 버튼 색상은 유지 */
     --brand-color: #4A1215;
     --brand-hover: #631a1e;
 }
 
 html {
     font-size: 80%;
-    /* [복구] 구버전 폰트 사이즈 */
 }
 
 * {
@@ -27,7 +25,6 @@ html {
 }
 
 body {
-    /* [복구] 구버전 폰트 패밀리 (Pretendard 우선) */
     font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     background-color: var(--bg-color);
     color: var(--text-color);
@@ -40,9 +37,26 @@ body {
     padding-bottom: 30rem;
 }
 
+/* [기본 레이아웃] 메인 페이지 등 일반 페이지용 (최대폭 제한) */
 .container {
     width: 100%;
     max-width: 1200px;
+    /* 기본값 복구 */
+}
+
+/* [중요] Video Studio 페이지(.vs-page)일 때만 넓게 확장 */
+.vs-page .container {
+    /* 여기에 원하는 최대 픽셀 값을 입력하세요 (예: 1600px, 1800px 등) */
+    max-width: 1800px !important;
+
+    /* 화면이 작을 때는 95%를 유지 */
+    width: 95% !important;
+}
+
+.vs-page .layout {
+    width: 100%;
+    display: flex;
+    justify-content: center;
 }
 
 header {
@@ -53,7 +67,6 @@ header {
 
 .logo {
     width: 250px;
-    /* [복구] 로고 사이즈 */
     height: 250px;
     object-fit: contain;
     display: block;
@@ -62,17 +75,14 @@ header {
 
 header h1 {
     font-size: 3rem;
-    /* [복구] 폰트 사이즈 */
     font-weight: 700;
     color: var(--text-color);
     margin-bottom: 1rem;
     letter-spacing: -0.02em;
-    /* Font-family 제거 (Body 상속) */
 }
 
 .subtitle-sub {
     font-size: 0.7rem;
-    /* [복구] */
     opacity: 0.6;
 }
 
@@ -91,7 +101,6 @@ button,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    align-items: center;
     padding: 0 24px;
     height: 48px;
     font-size: 0.95rem;
@@ -107,7 +116,6 @@ button,
 .action-btn:hover {
     background-color: #631a1e;
     transform: translateY(-2px);
-    /* [복구] 호버 효과 */
 }
 
 .action-btn:disabled {
@@ -120,7 +128,6 @@ button,
 .action-btn.secondary {
     background-color: transparent;
     border: 2px solid #ffffff;
-    /* [복구] 테두리 두께 */
     color: #ffffff;
 }
 
@@ -136,17 +143,14 @@ button,
 .drop-zone {
     background-color: var(--card-bg);
     border: 1px solid var(--border-color);
-    /* [복구] 실선 */
     border-radius: var(--radius);
     padding: 4rem;
-    /* [복구] 패딩 */
     text-align: center;
     cursor: pointer;
     transition: var(--transition);
     display: flex;
     flex-direction: column;
     justify-content: center;
-    align-items: center;
     align-items: center;
     min-height: 200px;
 }
@@ -180,27 +184,21 @@ button,
     display: block;
 }
 
-/* [복구] 아이콘 버튼 (X 표시 등) */
 .icon-btn {
     position: absolute;
     top: 15px;
-    /* [복구] 위치 */
     right: 15px;
-    /* [복구] 위치 */
     background: rgba(0, 0, 0, 0.7);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 50%;
     width: 36px;
-    /* [복구] 크기 */
     height: 36px;
-    /* [복구] 크기 */
     cursor: pointer;
     font-size: 1.2rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    align-items: center;
     transition: var(--transition);
     z-index: 100;
 }
@@ -218,17 +216,14 @@ button,
 .style-section h2 {
     margin-bottom: 1.5rem;
     font-size: 1.5rem;
-    /* [복구] */
     font-weight: 600;
     color: var(--text-color);
     text-align: center;
-    /* Font-family 제거 */
 }
 
 .style-grid {
     display: flex;
     gap: 0.5rem;
-    /* [복구] 간격 */
     flex-wrap: wrap;
     justify-content: center;
     align-items: center;
@@ -240,28 +235,22 @@ button,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    align-items: center;
     width: auto;
     min-width: 0;
     max-width: 260px;
     flex: 0 0 auto;
-
     background-color: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-muted);
     padding: 0.85rem 1.6rem;
-    /* [복구] 패딩 */
     height: auto;
-    /* [복구] 높이 자동 */
     border-radius: 100px;
     cursor: pointer;
     font-size: 1rem;
-    /* [복구] */
     font-weight: 500;
     white-space: nowrap;
     flex-shrink: 0;
 }
-
 
 .style-btn:hover {
     border-color: var(--primary-color);
@@ -270,14 +259,12 @@ button,
 
 .style-btn.active {
     background-color: transparent;
-    /* [복구] */
     border: 2px solid #ffffff;
-    /* [복구] 테두리 강조 */
     color: #ffffff;
     font-weight: 700;
 }
 
-/* --- Variant Grid (Step 3) [중앙 정렬 유지 + 구버전 스타일] --- */
+/* --- Variant Grid --- */
 #variant-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -285,7 +272,6 @@ button,
     width: 100%;
     max-width: 1200px;
     margin: 0 auto 2rem auto;
-    /* 중앙 정렬 */
     justify-content: center;
     align-items: center;
 }
@@ -314,13 +300,11 @@ button,
 .variant-label {
     width: 100%;
     padding: 0.5rem 0;
-    /* [복구] */
     border: 1px solid var(--border-color);
     color: var(--text-muted);
     border-radius: 50px;
     text-align: center;
     font-size: 0.9rem;
-    /* [복구] */
 }
 
 .variant-img-btn.active img {
@@ -330,20 +314,16 @@ button,
 
 .variant-img-btn.active .variant-label {
     background-color: transparent;
-    /* [복구] */
     border: 2px solid #ffffff;
-    /* [복구] */
     color: #ffffff;
     font-weight: 700;
 }
 
-/* --- Moodboard Preview (Step 3 Custom) [복구 및 수정] --- */
+/* --- Moodboard Preview --- */
 #moodboard-upload-container {
     width: 100%;
     max-width: 1000px;
-    /* 너무 커지지 않게 제한 */
     margin: 1rem auto;
-    /* 중앙 정렬 */
 }
 
 #moodboard-preview-container {
@@ -355,16 +335,11 @@ button,
     width: 100%;
 }
 
-/* [수정] 가로를 100%로 강제하고, 높이는 비율대로 늘어나게 변경 */
 #moodboard-preview {
     width: 100%;
-    /* 가로 꽉 채움 (필수) */
     height: auto;
-    /* 높이는 이미지 비율에 맞춰 자동 조절 */
     display: block;
-    /* 이미지 하단 미세한 여백 제거 */
     object-fit: unset;
-    /* contain/cover 속성 제거 (비율 왜곡 방지) */
 }
 
 .action-area {
@@ -374,9 +349,7 @@ button,
 }
 
 #render-btn {
-    /* 이미 .action-btn 스타일이 적용됨, 추가 오버라이드 필요시 작성 */
     padding: 1.2rem 4rem;
-    /* [복구] */
     font-size: 1.2rem;
 }
 
@@ -385,7 +358,6 @@ button,
     text-align: center;
     margin-bottom: 2rem;
     font-size: 2rem;
-    /* Font-family 제거 */
 }
 
 .comparison-container {
@@ -430,11 +402,9 @@ button,
     position: absolute;
     top: 20px;
     padding: 6px 12px;
-    /* [복구] */
     background: rgba(0, 0, 0, 0.8);
     color: white;
     font-size: 0.9rem;
-    /* [복구] */
     font-weight: 500;
     border-radius: 4px;
     z-index: 100;
@@ -488,9 +458,7 @@ button,
     top: 50%;
     left: 50%;
     width: 20px;
-    /* [복구] 크기 */
     height: 20px;
-    /* [복구] 크기 */
     background-color: white;
     border-radius: 50%;
     transform: translate(-50%, -50%);
@@ -499,7 +467,6 @@ button,
     z-index: 11;
 }
 
-/* Slider Handle Text '< >' 제거 (구버전엔 없었음) */
 .slider-handle::after {
     content: none;
 }
@@ -529,17 +496,14 @@ button,
 /* --- Detail View --- */
 #detail-section {
     margin-top: 3rem;
-    /* [복구] */
     text-align: center;
     border-top: 1px solid var(--border-color);
     padding-top: 2rem;
-    /* [복구] */
     width: 100%;
 }
 
 #detail-section h3 {
     font-size: 1.5rem;
-    /* [복구] */
     margin-bottom: 1.5rem;
     color: var(--text-color);
 }
@@ -548,7 +512,6 @@ button,
     display: grid;
     grid-template-columns: repeat(3, 1fr) !important;
     gap: 15px;
-    /* [복구] 간격 */
     width: 100%;
     margin-bottom: 30px;
 }
@@ -557,14 +520,12 @@ button,
     display: grid;
     grid-template-columns: repeat(5, 1fr) !important;
     gap: 15px;
-    /* [복구] 간격 */
     width: 100%;
 }
 
 .detail-card {
     position: relative;
     border-radius: 10px;
-    /* [복구] */
     overflow: hidden;
     border: 1px solid var(--border-color);
     transition: border-color 0.3s;
@@ -583,25 +544,18 @@ button,
     transition: transform 0.5s;
 }
 
-/* [복구] 줌 효과 */
 .detail-card:hover img {
-    /* 구버전엔 줌 효과가 없거나 미미했으면 제거 가능, 일단 유지 */
     transform: scale(1.03);
 }
 
-/* [복구] 디테일 뷰 리트라이 버튼 */
 .detail-retry-btn {
     position: absolute;
     top: 5px;
-    /* [복구] 위치 */
     right: 5px;
-    /* [복구] 위치 */
     width: 30px;
-    /* [복구] 크기 */
     height: 30px;
     border-radius: 50%;
     background-color: rgba(0, 0, 0, 0.7);
-    /* [복구] 색상 */
     border: 1px solid rgba(255, 255, 255, 0.3);
     color: white;
     font-size: 16px;
@@ -609,7 +563,6 @@ button,
     display: flex;
     align-items: center;
     justify-content: center;
-    align-items: center;
     z-index: 10;
     transition: 0.2s;
 }
@@ -649,18 +602,15 @@ button,
     width: 100%;
     height: 100%;
     background: rgba(0, 0, 0, 0.95);
-    /* [복구] 투명도 */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    align-items: center;
     z-index: 5000;
 }
 
 .spinner {
     width: 60px;
-    /* [복구] 크기 */
     height: 60px;
     border: 2px solid rgba(255, 255, 255, 0.1);
     border-left-color: var(--text-color);
@@ -698,7 +648,7 @@ button,
     display: none !important;
 }
 
-/* Lightbox */
+/* Lightbox & Modal Common */
 .lightbox {
     position: fixed;
     z-index: 10000;
@@ -710,7 +660,6 @@ button,
     background-color: rgba(0, 0, 0, 0.9);
     display: flex;
     justify-content: center;
-    align-items: center;
     align-items: center;
 }
 
@@ -730,7 +679,6 @@ button,
     z-index: 10001;
 }
 
-/* Modal */
 .custom-modal {
     position: fixed;
     top: 0;
@@ -741,14 +689,11 @@ button,
     display: flex;
     align-items: center;
     justify-content: center;
-    align-items: center;
     z-index: 4000;
 }
 
-/* Modal Content - Flex Column Layout */
 .modal-content {
     background-color: #1a1a1a;
-    /* [복구] 배경색 */
     padding: 0;
     border-radius: 12px;
     border: 1px solid var(--border-color);
@@ -757,7 +702,6 @@ button,
     width: 90%;
     overflow: hidden;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-
     display: flex;
     flex-direction: column;
     max-height: 85vh;
@@ -767,9 +711,7 @@ button,
     margin: 0;
     padding: 1.5rem;
     background: #1a1a1a;
-    /* [복구] 배경색 통일 */
     font-size: 1.5rem;
-    /* [복구] 사이즈 */
     color: var(--text-color);
     flex-shrink: 0;
 }
@@ -779,7 +721,6 @@ button,
     margin: 0;
 }
 
-/* Footer Button Area */
 .modal-buttons {
     padding: 1.2rem;
     background: #1a1a1a;
@@ -822,7 +763,6 @@ button,
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    align-items: center;
     background-color: #111;
     overflow-y: auto;
 }
@@ -836,7 +776,6 @@ button,
     text-align: left;
 }
 
-/* Drop Zone Compact Override */
 #fp-plan-drop-zone,
 #fp-ref-drop-zone {
     padding: 1rem;
@@ -844,7 +783,6 @@ button,
     border-style: dashed;
 }
 
-/* Unified size for modal previews */
 .unified-preview {
     height: 100px;
     width: auto;
@@ -857,7 +795,6 @@ button,
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
-/* Moodboard & FP Grid Styling */
 #mb-gen-grid,
 #fp-gen-grid {
     display: flex !important;
@@ -865,7 +802,6 @@ button,
     justify-content: center;
     align-items: center;
     gap: 10px;
-    /* [선택] 간격도 15px에서 10px로 살짝 줄이면 더 안정적입니다 */
     overflow-y: auto;
     width: 100%;
     padding-bottom: 1rem;
@@ -874,14 +810,11 @@ button,
 
 #mb-gen-grid .detail-card,
 #fp-gen-grid .detail-card {
-    /* 너비는 그대로 33.333% 유지 */
     width: calc(33.333% - 10px);
-    /* [수정] 최소 너비를 줄여야 좁은 공간에서도 3개가 구겨져 들어갑니다 */
     min-width: 150px;
     aspect-ratio: 16 / 9;
 }
 
-/* Mobile responsive */
 @media (max-width: 1024px) {
     #variant-grid {
         grid-template-columns: repeat(3, 1fr);
@@ -925,7 +858,6 @@ button,
     }
 }
 
-/* --- [NEW] 카드별 로딩 오버레이 (회색 블러 + 스피너) --- */
 .detail-card-loader {
     position: absolute;
     top: 0;
@@ -933,27 +865,20 @@ button,
     width: 100%;
     height: 100%;
     background-color: rgba(0, 0, 0, 0.6);
-    /* 회색/검정 반투명 */
     backdrop-filter: blur(4px);
-    /* 뽀샤시한 블러 처리 */
     display: flex;
     justify-content: center;
     align-items: center;
-    align-items: center;
     z-index: 50;
-    /* 이미지랑 버튼 위를 덮음 */
     border-radius: 10px;
-    /* 카드 둥근 모서리에 맞춤 */
     animation: fadeIn 0.3s ease;
 }
 
-/* 동글동글 돌아가는 미니 스피너 */
 .mini-spinner {
     width: 30px;
     height: 30px;
     border: 3px solid rgba(255, 255, 255, 0.3);
     border-top-color: #fff;
-    /* 하얀색 꼬리 */
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -968,572 +893,34 @@ button,
     }
 }
 
-/* =========================
-   Video MVP Modal
-   ========================= */
-.video-mvp-modal-content {
-    width: min(980px, 95vw);
-}
+/* =========================================================
+   Video Studio Styles (Fixed & Final Version)
+   ========================================================= */
 
-.video-mvp-controls {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin: 10px 0 14px 0;
-}
-
-.video-mvp-control {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-    max-width: 260px;
-    flex: 0 0 auto;
-    flex: 1;
-}
-
-.video-mvp-control label {
-    font-size: 12px;
-    opacity: 0.85;
-}
-
-.video-mvp-control select {
-    padding: 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(0, 0, 0, 0.2);
-    color: #fff;
-}
-
-.video-mvp-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: 42vh;
-    overflow: auto;
-    padding-right: 4px;
-}
-
-.video-mvp-item {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px;
-    border-radius: var(--radius);
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.video-mvp-item-left {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex: 1;
-    min-width: 0;
-}
-
-.video-mvp-thumb {
-    width: 64px;
-    height: 64px;
-    border-radius: 10px;
-    overflow: hidden;
-    flex: 0 0 auto;
-    background: rgba(0, 0, 0, 0.35);
-}
-
-.video-mvp-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.video-mvp-label {
-    min-width: 0;
-}
-
-.video-mvp-title {
-    font-weight: 700;
-    font-size: 13px;
-}
-
-.video-mvp-url {
-    font-size: 11px;
-    opacity: 0.65;
-    word-break: break-all;
-}
-
-.video-mvp-item-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex: 0 0 auto;
-}
-
-.video-mvp-preset {
-    padding: 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(0, 0, 0, 0.2);
-    color: #fff;
-}
-
-.video-mvp-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-top: 14px;
-}
-
-.video-mvp-status {
-    font-size: 12px;
-    opacity: 0.85;
-    min-height: 18px;
-}
-
-.video-mvp-result {
-    margin-top: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-#videoMvpPreview {
-    width: 100%;
-    border-radius: var(--radius);
-    background: rgba(0, 0, 0, 0.35);
-}
-
-.video-mvp-empty {
-    opacity: 0.75;
-    padding: 12px;
-    border: 1px dashed rgba(255, 255, 255, 0.15);
-    border-radius: var(--radius);
-}
-
-
-/* =========================
-   Video Studio Page
-   ========================= */
 .video-studio {
-    max-width: 1280px;
+    width: 100%;
     margin: 0 auto;
     padding: 24px 16px 60px;
 }
 
-.video-studio-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 18px;
-}
-
-.video-studio-header h1 {
-    margin: 0;
-    font-size: 22px;
-    letter-spacing: 0.2px;
-}
-
-.video-studio-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-
-.video-studio-grid {
-    display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 16px;
-}
-
-.video-studio-panel {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--radius);
-    padding: 14px;
-}
-
-.video-studio-panel h2 {
-    margin: 0 0 10px;
-    font-size: 16px;
-    opacity: 0.95;
-}
-
-.video-studio-panel.full {
-    grid-column: 1 / -1;
-}
-
-.vs-gallery {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    max-height: 520px;
-    overflow: auto;
-    padding-right: 6px;
-}
-
-.vs-gallery-item {
-    appearance: none;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
-    padding: 8px;
-    cursor: pointer;
-    text-align: left;
-}
-
-.vs-gallery-item img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    border-radius: 8px;
-    display: block;
-    background: #000;
-}
-
-.vs-gallery-cap {
-    margin-top: 6px;
-    font-size: 11px;
-    opacity: 0.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.vs-clip-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.vs-clip-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background: rgba(0, 0, 0, 0.18);
-    border-radius: 12px;
-    padding: 10px;
-}
-
-.vs-clip-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-}
-
-.vs-clip-thumb img {
-    width: 96px;
-    height: 54px;
-    object-fit: cover;
-    border-radius: 8px;
-    display: block;
-    background: #000;
-}
-
-.vs-clip-meta {
-    min-width: 0;
-}
-
-.vs-clip-title {
-    font-size: 13px;
-    margin-bottom: 2px;
-}
-
-.vs-clip-url {
-    font-size: 11px;
-    opacity: 0.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 520px;
-}
-
-.vs-clip-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.vs-clip-preset {
-    background: rgba(0, 0, 0, 0.35) !important;
-    /* ✅ 강제 적용 */
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
-    color: #fff !important;
-    border-radius: 10px;
-    padding: 8px 10px;
-}
-
-.vs-clip-actions {
-    display: flex;
-    gap: 6px;
-}
-
-.vs-mini-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(0, 0, 0, 0.25);
-    color: #fff;
-    cursor: pointer;
-}
-
-.vs-mini-btn.danger {
-    border-color: rgba(255, 100, 100, 0.35);
-}
-
-.vs-empty,
-.vs-loading {
-    font-size: 13px;
-    opacity: 0.75;
-    padding: 10px 0;
-}
-
-.video-studio-result video {
-    width: 100%;
-    border-radius: var(--radius);
-    background: #000;
-    display: block;
-    margin-top: 12px;
-}
-
-@media (max-width: 980px) {
-    .video-studio-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .vs-gallery {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        max-height: 380px;
-    }
-
-    .vs-clip-url {
-        max-width: 260px;
-    }
-}
-
-
-/* Header actions */
-.header-actions {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-top: 12px;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.header-btn {
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    align-items: center;
-}
-
-
-/* Header CTA should not stretch full width */
-.header-actions .action-btn {
-    width: auto;
-}
-
-
-/* Defensive radius consistency */
-.action-btn,
-.action-btn.secondary {
-    border-radius: var(--radius);
-}
-
-
-/* 기존 .vs-select, .vs-clip-preset 스타일을 찾아서 이렇게 수정 */
-
-.vs-select,
-.vs-clip-preset,
-.video-mvp-preset {
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(0, 0, 0, 0.35);
-    /* ✅ 다크 배경 */
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: #ffffff;
-    /* ✅ 흰색 텍스트 */
-    padding: 10px 12px;
-    border-radius: 12px;
-    outline: none;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.vs-select:focus,
-.vs-clip-preset:focus,
-.video-mvp-preset:focus {
-    border-color: rgba(255, 255, 255, 0.28);
-    background: rgba(0, 0, 0, 0.50);
-    /* ✅ 포커스 시 더 진한 배경 */
-}
-
-/* ✅ 드롭다운 옵션 스타일 */
-.vs-select option,
-.vs-clip-preset option,
-.video-mvp-preset option {
-    background-color: #1a1a1a;
-    /* ✅ 다크 배경 */
-    color: #ffffff;
-    /* ✅ 흰색 텍스트 */
-    padding: 10px;
-}
-
-.vs-select option:hover,
-.vs-clip-preset option:hover,
-.video-mvp-preset option:hover {
-    background-color: #2a2a2a;
-    /* ✅ 호버 시 밝은 회색 */
-}
-
-/* ✅ 선택된 옵션 스타일 */
-.vs-select option:checked,
-.vs-clip-preset option:checked,
-.video-mvp-preset option:checked {
-    background-color: #333333;
-    color: #ffffff;
-    font-weight: 600;
-}
-
-.vs-upload-zone {
-    border: 1px dashed rgba(255, 255, 255, 0.22);
-    border-radius: 16px;
-    padding: 18px;
-    background: rgba(255, 255, 255, 0.02);
-    min-height: 150px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    align-items: center;
-    gap: 8px;
-    text-align: center;
-}
-
-.vs-upload-zone.dragover {
-    border-color: rgba(255, 255, 255, 0.45);
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.vs-upload-hint {
-    color: var(--text-muted);
-    font-size: 0.9rem;
-}
-
-.vs-thumb {
-    cursor: pointer;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.2);
-    transition: transform 0.12s ease, border-color 0.12s ease;
-}
-
-.vs-thumb:hover {
-    transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.22);
-}
-
-.vs-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.vs-selected-row {
-    display: grid;
-    grid-template-columns: 92px 1fr auto auto;
-    gap: 12px;
-    align-items: center;
-    padding: 10px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.vs-selected-row:first-child {
-    border-top: none;
-}
-
-.vs-selected-row .thumb {
-    width: 92px;
-    height: 64px;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.25);
-}
-
-.vs-selected-row .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.vs-mini-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: var(--text);
-    border-radius: 999px;
-    padding: 8px 10px;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.vs-mini-btn:hover {
-    border-color: rgba(255, 255, 255, 0.28);
-    background: rgba(255, 255, 255, 0.04);
-}
-
-/* =========================================================
-   Video Studio (standalone page)
-   - Styled to match the Floor Plan modal look
-========================================================= */
-
+/* Components */
 .vs-shell {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 28px;
     padding: 28px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.vs-page .vs-shell {
+    width: 100% !important;
+    max-width: 100% !important;
 }
 
 .vs-header {
     margin-bottom: 20px;
-}
-
-.vs-title {
-    margin: 0;
-    font-size: 36px;
-    letter-spacing: -0.02em;
-}
-
-.vs-subtitle {
-    margin: 10px 0 0;
-    color: rgba(255, 255, 255, 0.65);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.vs-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-    margin-bottom: 18px;
-}
-
-@media (max-width: 980px) {
-    .vs-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 .vs-card {
@@ -1552,291 +939,654 @@ button,
     margin: 8px 0 0;
 }
 
-.vs-empty {
-    margin-top: 14px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.60);
-    font-size: 13px;
-}
-
-.vs-thumb-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 14px;
-
-    /* ✅ 스크롤 추가 */
-    max-height: 520px;
-    overflow-y: auto;
-    padding-right: 6px;
-    /* 스크롤바 여백 */
-}
-
-/* ✅ 스크롤바 스타일링 (선택사항) */
-.vs-thumb-grid::-webkit-scrollbar {
-    width: 8px;
-}
-
-.vs-thumb-grid::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-}
-
-.vs-thumb-grid::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-}
-
-.vs-thumb-grid::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
-}
-
-@media (max-width: 980px) {
-    .vs-thumb-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 600px) {
-    .vs-thumb-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-.vs-recent-thumb {
-    padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background: #0b0b0b;
-    border-radius: 16px;
-    overflow: hidden;
-    cursor: pointer;
-    transition: transform 0.12s ease, border-color 0.12s ease;
-}
-
-.vs-recent-thumb:hover {
-    transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.28);
-}
-
-.vs-recent-img {
-    width: 100%;
-    height: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
+.vs-page .vs-card-head p,
+.vs-page .vs-card-head .muted {
+    margin-bottom: 40px !important;
     display: block;
 }
 
-.vs-dropzone {
-    border: 1px dashed rgba(255, 255, 255, 0.22);
-    border-radius: 20px;
-    padding: 22px;
-    background: rgba(0, 0, 0, 0.18);
+/* --- 2-Column Grid Layout --- */
+.vs-editor-grid {
+    display: grid;
+    grid-template-columns: 350px 1fr;
+    gap: 15px;
+    height: calc(100vh - 120px);
+    min-height: 600px;
+}
+
+/* Left Panel */
+.area-source-manager {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 8px;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 15px;
+}
+
+.vs-dropzone-compact {
+    border: 1px dashed #555;
+    border-radius: 8px;
+    padding: 20px;
     text-align: center;
-    min-height: 150px;
-    outline: none;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.02);
+    margin-bottom: 15px;
+    transition: 0.2s;
 }
 
-.vs-dropzone:hover {
-    border-color: rgba(255, 255, 255, 0.38);
+.vs-dropzone-compact:hover {
+    border-color: #888;
+    background: rgba(255, 255, 255, 0.05);
 }
 
-.vs-dropzone.dragover {
-    border-color: rgba(255, 255, 255, 0.55);
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.vs-dropzone-title {
-    font-weight: 700;
-    margin-bottom: 10px;
-}
-
-.vs-dropzone-or {
-    color: rgba(255, 255, 255, 0.55);
+.vs-dropzone-compact p {
+    margin: 5px 0 0;
     font-size: 12px;
-    margin: 8px 0;
+    color: #aaa;
 }
 
-.vs-browse-btn {
-    padding: 10px 18px;
-    min-width: 180px;
+.vs-dropzone-compact .material-symbols-outlined {
+    font-size: 24px;
+    color: #777;
 }
 
-.vs-options {
-    margin-top: 16px;
+.vs-clip-list {
+    flex: 1;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    margin-bottom: 15px;
+    padding-right: 5px;
 }
 
-.vs-option {
+.vs-source-item {
     display: flex;
+    gap: 10px;
+    background: #252525;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #333;
     align-items: center;
-    gap: 12px;
 }
 
-.vs-label {
-    min-width: 110px;
-    color: rgba(255, 255, 255, 0.70);
-    font-size: 13px;
+.vs-source-thumb {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: #000;
 }
 
-.vs-select {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: #fff;
-    padding: 10px 12px;
-    border-radius: 12px;
-    font-size: 13px;
-    outline: none;
-    min-width: 220px;
-}
-
-.vs-select:focus {
-    border-color: rgba(255, 255, 255, 0.30);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-}
-
-.vs-selected-card {
-    padding: 18px;
-}
-
-.vs-selected-list {
-    margin-top: 14px;
+.vs-source-controls {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 5px;
 }
 
-.vs-selected-row {
+.vs-select-mini {
+    background: #111;
+    border: 1px solid #444;
+    color: #ccc;
+    font-size: 11px;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+/* Right Panel Group */
+.area-right-group {
     display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px;
-    border-radius: 18px;
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-}
-
-.vs-selected-row input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-}
-
-.vs-selected-thumb {
-    width: 160px;
-    aspect-ratio: 16 / 9;
-    border-radius: 14px;
+    flex-direction: column;
+    gap: 15px;
     overflow: hidden;
-    background: #000;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    flex: 0 0 auto;
 }
 
-.vs-selected-thumb img {
+.area-preview {
+    flex: 1.5;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+}
+
+.preview-stage {
+    flex: 1;
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    display: block;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #0a0a0a;
+    position: relative;
+    overflow: hidden;
 }
 
-.vs-selected-meta {
+#previewImage,
+#previewVideo,
+#resultVideo {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+    display: block;
+    pointer-events: none;
+}
+
+.panel-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #aaa;
+    z-index: 5;
+}
+
+#resultOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+.vs-btn-download {
+    position: absolute;
+    bottom: 20px;
+    background: #00E5FF;
+    color: #000;
+    padding: 10px 20px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 12px;
+    pointer-events: auto;
+}
+
+.vs-btn-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+/* Timeline */
+.area-timeline {
     flex: 1;
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    min-height: 250px;
+}
+
+.timeline-toolbar {
+    height: 30px;
+    background: #222;
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+}
+
+.timeline-title {
+    font-size: 11px;
+    color: #888;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.timeline-controls-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    flex: 1;
+}
+
+.icon-btn-play {
+    background: transparent;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn-play:hover {
+    color: #00E5FF;
+}
+
+/* Timeline Container */
+.timeline-container {
+    flex: 1;
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: #121212;
+    cursor: text;
+}
+
+.timeline-ruler {
+    height: 24px;
+    background: #252525;
+    border-bottom: 1px solid #444;
+    position: relative;
+    min-width: 100%;
+}
+
+.timeline-track-area {
+    padding: 30px 0 10px 0;
+    /* 패딩 제거 (눈금 오차 해결) */
+    min-width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: flex-start;
+}
+
+/* Playhead (Scrubber) */
+.timeline-playhead {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 100%;
+    background-color: #fff;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    transition: left 0.05s linear;
+}
+
+.timeline-playhead::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -5px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 8px solid #fff;
+}
+
+/* Timeline Clip Block */
+.timeline-block {
+    height: 70px;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 4px;
+    position: relative;
+    margin: 0;
+    /* 간격 제거 */
+    cursor: pointer;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    /* 테두리 포함 */
+    z-index: 1;
+}
+
+.timeline-block.selected {
+    border: 2px solid #00E5FF;
+    z-index: 10;
+}
+
+.timeline-block-thumbs {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    opacity: 1;
+    /* 마스크 제거 */
+}
+
+.timeline-block-thumbs img {
+    height: 100%;
+    flex: 1;
+    object-fit: cover;
+    pointer-events: none;
     min-width: 0;
 }
 
-.vs-selected-title {
-    font-weight: 700;
-    font-size: 14px;
-    margin: 0;
+.timeline-block-info {
+    position: absolute;
+    bottom: 2px;
+    left: 4px;
+    font-size: 10px;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1px 3px;
+    border-radius: 2px;
+    pointer-events: none;
 }
 
-.vs-selected-url {
-    margin-top: 6px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    word-break: break-all;
-}
-
-.vs-selected-actions {
+/* Timeline Properties & Bottom Actions */
+.timeline-properties {
+    height: 40px;
+    background: #222;
+    border-top: 1px solid #333;
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex: 0 0 auto;
+    padding: 0 15px;
+    gap: 20px;
 }
 
-.vs-mini-btn {
-    padding: 8px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.06);
+.prop-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: #aaa;
+}
+
+.vs-input-small {
+    width: 50px;
+    background: #111;
+    border: 1px solid #444;
     color: #fff;
-    font-size: 12px;
+    padding: 2px 5px;
+}
+
+.vs-select-small {
+    background: #111;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 2px 5px;
+}
+
+/* 버튼 중앙 정렬 */
+.vs-actions-right {
+    padding: 15px;
+    background: #1e1e1e;
+    border-top: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.vs-status-text {
+    font-size: 11px;
+    color: #aaa;
+    text-align: center;
+    margin-top: 5px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* [FIX] 로딩 스피너 (회색) */
+.vs-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    border-top-color: #888 !important;
+    animation: vs-spin 0.8s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+@keyframes vs-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Mobile */
+@media (max-width: 1024px) {
+    .vs-editor-grid {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+}
+
+/* ==========================================================================
+   Image Studio - Workspace UI (Refined Style)
+   ========================================================================== */
+
+/* 전체 워크스페이스 컨테이너 */
+.is-workspace {
+    display: none;
+    /* 기본 숨김 */
+    flex-direction: column;
+    height: 100vh;
+    background-color: #000;
+}
+
+/* 상단 네비게이션 (Back 버튼 등) */
+.workspace-header {
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.btn-back-menu {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    padding: 0;
+    transition: color 0.2s;
+}
+
+.btn-back-menu:hover {
+    color: #fff;
+}
+
+/* 메인 스플릿 레이아웃 (카드 형태의 컨테이너 안에서 좌우 분할) */
+.is-workspace-card {
+    flex: 1;
+    margin: 0 40px 40px 40px;
+    /* 화면 가장자리 여백 */
+    background-color: #111;
+    /* 카드 배경색 */
+    border: 1px solid #333;
+    border-radius: 24px;
+    display: flex;
+    /* 좌우 분할 */
+    overflow: hidden;
+    /* 내부 스크롤 제어 */
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* [왼쪽] 입력 패널 */
+.is-panel-left {
+    flex: 0 0 450px;
+    /* 너비 고정 (약 450px) */
+    border-right: 1px solid #222;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    background-color: #161616;
+    /* 왼쪽만 살짝 밝게 하거나 동일하게 */
+    overflow-y: auto;
+}
+
+/* [오른쪽] 결과 패널 */
+.is-panel-right {
+    flex: 1;
+    /* 나머지 공간 채움 */
+    background-color: #0e0e0e;
+    /* 더 어두운 배경 (프리뷰 강조) */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+    position: relative;
+    overflow-y: auto;
+}
+
+/* 타이틀 스타일 */
+.is-section-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: -0.5px;
+}
+
+.is-section-desc {
+    color: #888;
+    font-size: 0.95rem;
+    margin-bottom: 2.5rem;
+    line-height: 1.5;
+}
+
+/* 업로드 박스 스타일 (레퍼런스 이미지와 유사하게) */
+.is-upload-box {
+    border: 1px dashed #444;
+    border-radius: 16px;
+    background-color: transparent;
+    min-height: 250px;
+    /* 높이 확보 */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.is-upload-box:hover {
+    border-color: #666;
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.is-upload-box.dragover {
+    border-color: #fff;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.is-upload-icon {
+    font-size: 3rem;
+    color: #fff;
+    margin-bottom: 1rem;
+    opacity: 0.8;
+}
+
+.is-upload-label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+}
+
+.is-upload-sub {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+/* 하단 생성 버튼 */
+.is-generate-btn {
+    margin-top: auto;
+    /* 바닥에 붙이기 */
+    width: 100%;
+    padding: 18px;
+    background-color: #222;
+    color: #555;
+    border: none;
+    border-radius: 50px;
+    /* 둥근 버튼 */
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: not-allowed;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+}
+
+.is-generate-btn:not(:disabled) {
+    background-color: #fff;
+    /* 활성 시 흰색 배경 */
+    color: #000;
+    /* 검은 글씨 */
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+}
+
+.is-generate-btn:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 25px rgba(255, 255, 255, 0.3);
+}
+
+/* 파일 리스트 (업로드 박스 아래에 작게 표시) */
+.is-file-list {
+    margin-bottom: 20px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.is-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    background: #222;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    border: 1px solid #333;
+}
+
+.is-file-name {
+    font-size: 0.85rem;
+    color: #ccc;
+}
+
+.is-file-remove {
+    background: none;
+    border: none;
+    color: #666;
     cursor: pointer;
 }
 
-.vs-mini-btn:hover {
-    background: rgba(255, 255, 255, 0.10);
+.is-file-remove:hover {
+    color: #fff;
 }
 
-.vs-actions {
-    margin-top: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+/* 오른쪽 결과 플레이스홀더 */
+.is-placeholder {
+    text-align: center;
+    color: #333;
 }
 
-.vs-status {
-    min-height: 18px;
-    color: rgba(255, 255, 255, 0.75);
-    font-size: 13px;
-}
-
-.vs-result {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.10);
-}
-
-.vs-video {
-    width: 100%;
-    max-height: 520px;
-    border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    background: #000;
-}
-
-.vs-download {
-    display: inline-block;
-    margin-top: 12px;
-    color: rgba(255, 255, 255, 0.9);
-    text-decoration: none;
-    font-weight: 700;
-}
-
-.vs-download:hover {
-    text-decoration: underline;
-}
-
-/* Make the top action buttons (Video Studio / Floor Plan) not full-width */
-#open-video-studio-btn,
-#open-fp-gen-btn {
-    width: 100% !important;
-    max-width: 680px;
-    margin: 0 auto;
-}
-
-/* Keep the top CTA buttons from becoming full-width bars */
-#open-video-studio-btn,
-#open-fp-gen-btn {
-    width: min(680px, 100%) !important;
-    margin-left: auto;
-    margin-right: auto;
-    display: flex;
-    justify-content: center;
+.is-placeholder-icon {
+    font-size: 80px;
+    margin-bottom: 20px;
+    opacity: 0.2;
 }

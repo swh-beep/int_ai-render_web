@@ -107,7 +107,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
     print("❌ [Fatal] 모든 키 시도 실패.", flush=True)
     return None
 
-def standardize_image(image_path, output_path=None, keep_ratio=False):
+def standardize_image(image_path, output_path=None, keep_ratio=False, force_landscape=False):
     try:
         if output_path is None: output_path = image_path
         with Image.open(image_path) as img:
@@ -116,13 +116,15 @@ def standardize_image(image_path, output_path=None, keep_ratio=False):
 
             width, height = img.size
             
-            # [수정] 가로/세로 비율 판단 및 타겟 해상도 설정
-            if width >= height:
-                # Landscape (가로형) -> 16:9
+            # [FIX] force_landscape가 True면 -> 무조건 16:9 (1920x1080) 설정
+            if force_landscape:
+                target_size = (1920, 1080)
+                target_ratio = 16 / 9
+            # 기존 로직 (자동 감지)
+            elif width >= height:
                 target_size = (1920, 1080)
                 target_ratio = 16 / 9
             else:
-                # Portrait (세로형) -> 4:5 (인테리어 표준 세로 비율)
                 target_size = (1080, 1350)
                 target_ratio = 4 / 5
 
@@ -150,8 +152,6 @@ def standardize_image(image_path, output_path=None, keep_ratio=False):
     except Exception as e:
         print(f"!! 표준화 실패: {e}", flush=True)
         return image_path
-
-
 # ---------------------------------------------------------
 # [NEW] Output Aspect Ratio Enforcement
 # - Gemini가 무드보드 비율/레이아웃을 따라가거나,
@@ -334,6 +334,150 @@ def analyze_cropped_item(moodboard_path, item_data):
     
     return {"label": label, "description": f"A high quality {label}."}
 
+# [최종 복구 및 업그레이드] 분석(Flash) -> 생성(Pro-Image) 2단계 파이프라인
+# 구글 AI 스튜디오의 "Generative Reconstruction" 로직 이식
+def generate_frontal_room_from_photos(photo_paths, unique_id, index):
+    try:
+        print(f"   [Frontal Gen] Step 1: Analyzing {len(photo_paths)} photos with Flash (Spatial Mapping)...", flush=True)
+        
+        # 1. 이미지 로드
+        input_images = []
+        for path in photo_paths:
+            try:
+                img = Image.open(path)
+                img.thumbnail((1536, 1536))
+                input_images.append(img)
+            except: pass
+
+        if not input_images:
+            return None
+
+        # ---------------------------------------------------------
+        # [Step 1] Flash 모델로 "공간 구조 및 3D 매핑" 분석
+        # AI 스튜디오의 "Comprehending Spatial Data" 단계를 수행
+        # ---------------------------------------------------------
+        analysis_prompt = (
+            "You are a Spatial Architect AI. Analyze these multiple photos of the SAME room taken from different angles.\n"
+            "Your goal is to build a mental 3D model of this space to reconstruct a 'Perfect Frontal View'.\n\n"
+            "OUTPUT THE FOLLOWING SPATIAL BLUEPRINT:\n"
+            "1. **Anchor Elements:** Identify fixed structures (e.g., 'Large window on far wall', 'Black wall on left', 'Pillar on right').\n"
+            "2. **Geometry & Materials:** Describe the ceiling (e.g., recessed, lighting type) and floor (e.g., tile reflection, pattern) in detail.\n"
+            "3. **Symmetry Plan:** If we place a camera in the exact center of the room facing the main window, describe what should be seen on the Left, Center, and Right to achieve perfect symmetry.\n"
+            "Output ONLY the spatial blueprint description."
+        )
+        
+        # 분석 모델 호출
+        analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 45}, {})
+        spatial_blueprint = analysis_res.text if (analysis_res and analysis_res.text) else "A modern living room with large windows and tiled floor."
+        
+        print(f"   [Frontal Gen] Step 2: Synthesizing Frontal View based on Spatial Blueprint...", flush=True)
+
+        # ---------------------------------------------------------
+        # [Step 2] Pro Image 모델로 "생성형 재구성(Generative Reconstruction)"
+        # AI 스튜디오의 "Defining the Frontal View" & "Spatial Fidelity" 로직 이식
+        # ---------------------------------------------------------
+        generation_prompt = (
+            f"TASK: Generative Space Reconstruction (Multi-View to Single Frontal View).\n"
+            f"ACT AS: High-end Architectural Photographer.\n\n"
+            
+            f"<SPATIAL BLUEPRINT (SOURCE TRUTH)>\n"
+            f"{spatial_blueprint}\n"
+            f"--------------------------------------------------\n\n"
+            
+            "VIRTUAL CAMERA SETUP:\n"
+            "- **Position:** Place the virtual camera in the DEAD CENTER of the room.\n"
+            "- **Target:** Face strictly forward towards the main focal point (usually the window).\n"
+            "- **Lens:** 10mm Wide-Angle Rectilinear Lens (Capture the full width, NO fish-eye distortion).\n"
+            "- **Height:** Eye-level (approx 130cm).\n\n"
+            
+            "COMPOSITION RULES (STRICT SYMMETRY):\n"
+            "1. **Reconstruct the Space:** Synthesize a single, coherent 1-point perspective view using features from ALL input images.\n"
+            "2. **Alignment:** Vertical lines (pillars, window frames) must be perfectly vertical. Horizontal lines (floor/ceiling) must converge to a single center vanishing point.\n"
+            "3. **Consistency:** Ensure the 'Black Wall' (if present) and 'Pillars' are placed correctly relative to the center view as defined in the blueprint.\n\n"
+            
+            "LIGHTING & FIDELITY:\n"
+            "- **Reflections:** Render accurate reflections on the floor tiles matching the ceiling lights.\n"
+            "- **Lighting:** Uniform, bright, high-end interior lighting. No dark corners.\n"
+            "- **Resolution:** 8k, extremely sharp, photorealistic.\n\n"
+            
+            "NEGATIVE CONSTRAINTS:\n"
+            "- Do NOT produce a collage or grid. Output ONE single image.\n"
+            "- No text, watermarks, blurred textures, or distorted geometry.\n"
+            "- Do not simply crop one image; SYNTHESIZE the complete view."
+            "- **Zoomed in, Close-up, Cropped views.** (CRITICAL FAIL)\n"
+            "- **DO NOT include text, watermark, username, interface, subtitle.**\n"
+            "- Distorted pillars, curved horizon, fisheye curvature."
+        )
+
+        # 이미지 생성 모델 호출
+        # input_images를 함께 넣어주어 시각적 텍스처(Texture)를 참조하게 함
+        content_list = [generation_prompt] + input_images
+        
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
+        response = call_gemini_with_failover(MODEL_NAME, content_list, {'timeout': 100}, safety_settings)
+
+        if response and hasattr(response, 'candidates') and response.candidates:
+            for part in response.parts:
+                if hasattr(part, 'inline_data'):
+                    timestamp = int(time.time())
+                    out_filename = f"frontal_view_{timestamp}_{unique_id}_{index}.png"
+                    out_path = os.path.join("outputs", out_filename)
+                    with open(out_path, 'wb') as f: f.write(part.inline_data.data)
+                    
+                    # [유지] 표준화 함수 (에러 없이 호출)
+                    final_path = standardize_image(out_path)
+                    return f"/outputs/{os.path.basename(final_path)}"
+        return None
+
+    except Exception as e:
+        print(f"!! Frontal Gen Error: {e}", flush=True)
+        return None
+
+# [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
+@app.post("/generate-frontal-view")
+def generate_frontal_view_endpoint(
+    input_photos: List[UploadFile] = File(...) 
+):
+    try:
+        unique_id = uuid.uuid4().hex[:8]
+        timestamp = int(time.time())
+        print(f"\n=== [Frontal View Gen] Processing {len(input_photos)} photos ===", flush=True)
+
+        # 1. 업로드된 사진들 저장
+        saved_photo_paths = []
+        for idx, photo in enumerate(input_photos):
+            # 파일명 안전하게 처리
+            safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
+            path = os.path.join("outputs", f"src_{timestamp}_{unique_id}_{idx}_{safe_name}")
+            
+            with open(path, "wb") as buffer: 
+                shutil.copyfileobj(photo.file, buffer)
+            saved_photo_paths.append(path)
+        
+        generated_results = []
+        
+        # 2. 병렬 생성 (5장 시도)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(generate_frontal_room_from_photos, saved_photo_paths, unique_id, i+1) for i in range(5)]
+            for future in futures:
+                res = future.result()
+                if res: generated_results.append(res)
+        
+        if generated_results:
+            return JSONResponse(content={"urls": generated_results, "message": "Success"})
+        else:
+            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
+            
+    except Exception as e:
+        print(f"🔥🔥🔥 [Error] {e}")
+        traceback.print_exc()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 # -----------------------------------------------------------------------------
 # Generation Logic
 # -----------------------------------------------------------------------------
@@ -515,18 +659,16 @@ def call_magnific_api(image_path, unique_id, start_time):
             "optimized_for": "films_n_photography", 
             "engine": "automatic",
             "creativity": 1,
-            "hdr": 1,
+            "hdr": 0,
             "resemblance": 10,
             "fractality": 1,
             "prompt": (
                 "Professional interior photography, architectural digest style, "
                 "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
-                "natural white daylight coming from window, sharp shadows, subtle film grain, "
+                "natural white daylight coming from window, sharp shadows, "
                 "hyper-realistic material textures, raw photo, 8k resolution, "
-                "imperfect details, dust particles in air, "
-                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, "
-                "plastic look, oversaturated, watermark, text, blur, distorted, "
-                "smudge, bad geometry, mutated, glossy skin, artificial light"
+                "imperfect details. "
+                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
             )
         }
         headers = {
@@ -593,10 +735,12 @@ def download_image(url, unique_id):
 @app.get("/")
 async def read_index(): return FileResponse("static/index.html")
 
+# [NEW] Image Studio Page Route
+@app.get("/image-studio")
+def image_studio_page():
+    return FileResponse(os.path.join("static", "image_studio.html"))
 
-# =========================
 # Video Studio (separate page)
-# =========================
 @app.get("/video-studio")
 def video_studio_page():
     # Standalone page so users can build videos from existing images without re-rendering
@@ -1082,7 +1226,7 @@ def generate_details_endpoint(req: DetailRequest):
                     mb_filename = os.path.basename(req.moodboard_url)
                     target_analysis_path = os.path.join("outputs", mb_filename)
             else:
-                # B. [핵심 수정] 무드보드가 없으면? -> 메인 이미지를 분석 대상으로 설정!
+                # B. [핵심 수정] 무드보드가 없으면? -> 메인 이미지 분석 대상을 설정!
                 print(">> [Info] No Moodboard provided. Analyzing the Main Image itself.", flush=True)
                 target_analysis_path = local_path
 
@@ -1246,115 +1390,15 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-def generate_single_room_from_plan(plan_img, ref_images, unique_id, index):
-    try:
-        system_instruction = "You are an expert architectural visualizer."
-        
-        prompt = (
-            "TASK: Reconstruct an empty room strictly based on the Floor Plan's geometry, applying materials from Reference Photos.\n\n"
-            
-            "INPUTS:\n"
-            "- Plan: **THE ONLY TRUTH FOR GEOMETRY.** (Black lines = Walls. White spaces = Openings).\n"
-            f"- Ref Photos ({len(ref_images)} images): **TEXTURE PALETTE ONLY.** (Do NOT copy the room shape from these photos.)\n\n"
-
-            "<CRITICAL: GEOMETRY ENFORCEMENT - IGNORE REFERENCE SHAPE>\n"
-            "1. **THE PHOTOS ARE A LIE:** The Reference Photos show a DIFFERENT room shape (flat walls). **IGNORE THE SHAPE IN THE PHOTOS.**\n"
-            "2. **READ THE PLAN'S KINKS:** Look at the Floor Plan. It is NOT a simple rectangle.\n"
-            "   - **Right Wall:** Does the line step back? Is there a niche or a pillar? **Render that 90-degree corner/jog visibly.** Create a shadow in that corner to show depth.\n"
-            "   - **Left Wall:** If there is a door arc, cut a hole for the door frame. Do not make it a solid wall.\n"
-            "3. **ASYMMETRY IS KEY:** The left wall and right wall are different. Do not make them symmetrical just because it looks nice. Follow the ink lines of the plan.\n\n"
-
-            "<CRITICAL: MATERIAL MAPPING (TEXTURE ONLY)>\n"
-            "1. **Floor:** Extract the wood flooring texture from the photos and apply it to your new 3D geometry.\n"
-            "2. **Ceiling:** Copy the 'Well Ceiling' (cove lighting) design from the photo. Keep the proportions relative to the room width.\n"
-            "3. **Walls:** Apply the same wallpaper color and baseboard molding from the photos onto the *Plan's* walls.\n"
-            "4. **Accents:** If the photo shows wood paneling, apply it ONLY to the walls that match the plan's solid sections.\n\n"
-
-            "<CRITICAL: EMPTY ROOM & DOORS>\n"
-            "1. **NO FURNITURE:** Remove all sofa, TV, rug, plants. Show only the architectural shell.\n"
-            "2. **MISSING DOORS:** If the plan has a door but the photo doesn't, generate a **Flush Door** in the same color as the wall (minimalist, blending in).\n\n"
-
-            "<CAMERA>\n"
-            "1. **24mm LENS:** Wide enough to show both side walls and the ceiling/floor, but with less distortion than a fisheye.\n"
-            "2. **Straight Verticals:** Keep vertical lines parallel.\n"
-            
-            "OUTPUT RULE: 16:9 Image. Geometry must match the Plan's specific corners and jogs. Materials extracted from photos. Strictly Empty."
-        )
-        
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
-        
-        content_list = [prompt, plan_img] + ref_images
-        
-        response = call_gemini_with_failover(MODEL_NAME, content_list, {'timeout': 90}, safety_settings, system_instruction)
-        
-        if response and hasattr(response, 'candidates') and response.candidates:
-            for part in response.parts:
-                if hasattr(part, 'inline_data'):
-                    timestamp = int(time.time())
-                    out_filename = f"fp_result_{timestamp}_{unique_id}_{index}.png"
-                    out_path = os.path.join("outputs", out_filename)
-                    with open(out_path, 'wb') as f: f.write(part.inline_data.data)
-                    
-                    final_path = standardize_image(out_path)
-                    return f"/outputs/{os.path.basename(final_path)}"
-        return None
-    except Exception as e:
-        print(f"!! Single Room Gen Error {index}: {e}")
-        return None
-
-@app.post("/generate-room-from-plan")
-def generate_room_from_plan(
-    floor_plan: UploadFile = File(...),
-    ref_photos: List[UploadFile] = File(...) 
-):
-    try:
-        unique_id = uuid.uuid4().hex[:8]
-        timestamp = int(time.time())
-        print(f"\n=== [Floor Plan Gen] Starting 5 variations for {unique_id} ===", flush=True)
-
-        plan_path = os.path.join("outputs", f"fp_plan_{timestamp}_{unique_id}.png")
-        with open(plan_path, "wb") as buffer: shutil.copyfileobj(floor_plan.file, buffer)
-        plan_img = Image.open(plan_path)
-
-        ref_images = []
-        for idx, ref_file in enumerate(ref_photos):
-            ref_path = os.path.join("outputs", f"fp_ref_{timestamp}_{unique_id}_{idx}.png")
-            with open(ref_path, "wb") as buffer: shutil.copyfileobj(ref_file.file, buffer)
-            ref_images.append(Image.open(ref_path))
-        
-        print(f">> Loaded {len(ref_images)} reference photos.", flush=True)
-
-        generated_results = []
-        
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(generate_single_room_from_plan, plan_img, ref_images, unique_id, i+1) for i in range(5)]
-            for future in futures:
-                res = future.result()
-                if res: generated_results.append(res)
-        
-        if generated_results:
-            return JSONResponse(content={"urls": generated_results, "message": "Success"})
-        else:
-            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
-            
-    except Exception as e:
-        print(f"🔥🔥🔥 [Floor Plan Gen Error] {e}")
-        traceback.print_exc()
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
 
 # =========================
 # Video MVP (Kling Image-to-Video via Freepik API)
 # =========================
 class VideoClip(BaseModel):
     url: str
-    motion: str = "static"  # 기본값
-    effect: str = "none"    # 기본값
+    motion: str = "static"
+    effect: str = "none"
+    speed: float = 1.0  # [NEW] 기본값(사용자가 수정 가능)
 
 class VideoCreateRequest(BaseModel):
     clips: List[VideoClip]
@@ -1371,13 +1415,13 @@ class VideoCreateRequest(BaseModel):
 # Use Freepik API key for Kling as well (same header: x-freepik-api-key)
 FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY")  # fallback for existing env
 KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-5-pro")  # e.g. kling-v2-1-pro, kling-v2-5-pro
-KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", f"https://api.freepik.com/v1/ai/image-to-video/{KLING_MODEL}")
+KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", f"[https://api.freepik.com/v1/ai/image-to-video/](https://api.freepik.com/v1/ai/image-to-video/){KLING_MODEL}")
 
 # Concurrency controls (avoid 429 bursts)
 VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "5"))
 _video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
 
-VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "24"))
+VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "30"))
 
 # Provider side: Kling always returns 5 second clips.
 VIDEO_PROVIDER_CLIP_SEC = float(os.getenv("VIDEO_PROVIDER_CLIP_SEC", "5.0"))
@@ -1444,8 +1488,8 @@ def _ffmpeg_trim_speed(in_path: Path, out_path: Path, start_sec: float, dur_sec:
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", str(VIDEO_CRF),
-        "-preset", "veryfast",
+        "-crf", "10",          # [수정] 18 -> 10 (초고화질)
+        "-preset", "veryslow", # [수정] veryfast -> veryslow (화질 최우선)
         str(out_path),
     ]
     _run_ffmpeg(cmd)
@@ -1477,12 +1521,12 @@ def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h:
     cmd = [
         "ffmpeg", "-y",
         "-i", str(in_path),
-        "-filter_complex", vf,
+        "-vf", vf,
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", str(VIDEO_CRF),
-        "-preset", "veryfast",
+        "-crf", "10",          # [수정] 18 -> 10 (초고화질)
+        "-preset", "veryslow", # [수정] veryfast -> veryslow (화질 최우선)
         str(out_path),
     ]
     _run_ffmpeg(cmd)
@@ -1548,14 +1592,13 @@ def _find_static_image(prefix: str) -> Optional[Path]:
 
 def _ffmpeg_image_to_video(image_path: Path, out_path: Path, dur_sec: float, target_w: int, target_h: int, fps: int):
     """
-    Turns a still image into a short video segment (used for intro/outro).
+    Turns a still image into a short video segment.
+    [FIX] Removed fade in/out filters to ensure purely static image.
     """
-    fade_d = 0.25
-    fade_out_st = max(0.0, dur_sec - fade_d)
+    # [수정] 페이드 효과 제거, 해상도/비율만 맞춤
     vf = (
         f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-        f"crop={target_w}:{target_h},setsar=1,fps={fps},"
-        f"fade=t=in:st=0:d={fade_d},fade=t=out:st={fade_out_st}:d={fade_d}"
+        f"crop={target_w}:{target_h},setsar=1,fps={fps}"
     )
     cmd = [
         "ffmpeg", "-y",
@@ -1566,8 +1609,8 @@ def _ffmpeg_image_to_video(image_path: Path, out_path: Path, dur_sec: float, tar
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", str(VIDEO_CRF),
-        "-preset", "veryfast",
+        "-crf", "10",          # [수정] 18 -> 10
+        "-preset", "veryslow", # [수정] veryfast -> veryslow
         str(out_path),
     ]
     _run_ffmpeg(cmd)
@@ -1809,243 +1852,240 @@ def _image_url_to_b64(url: str) -> str:
 # -----------------------------------------------------------------------------
 # [NEW] 단일 클립 처리 함수 (병렬 실행용)
 # -----------------------------------------------------------------------------
-def process_single_clip(idx, item, job_id, out_dir, total_steps, completed_counter_lock, completed_counter):
-    """
-    하나의 클립(정지 화상 또는 Kling 영상)을 생성하고 가공하는 단위 작업입니다.
-    """
-    try:
-        kind = item.get("kind")
-        user_preset = item.get("preset", "detail_pan_lr")
-        src_dur = item["dur"]
-        
-        raw_path = out_dir / f"v_raw_{job_id}_{idx}.mp4"
-        final_clip_path = out_dir / f"v_clip_{job_id}_{idx}.mp4"
+# =========================================================
+# [NEW] 2-Step Video Logic (Source Gen -> Final Compile)
+# =========================================================
 
-        # 진행 상황 업데이트 (메시지만)
-        with video_jobs_lock:
-            if job_id in video_jobs:
-                video_jobs[job_id]["message"] = f"Generating clip {idx+1} ({kind})..."
+# --- 1. Request Models (데이터 모델 정의) ---
+class SourceItem(BaseModel):
+    url: str
+    motion: str = "static"
+    effect: str = "none"
 
-        # [Static] 정지 영상 (FFmpeg)
-        if kind == "still" or user_preset == "static":
-            temp_img = out_dir / f"tmp_{job_id}_{idx}.png"
-            try:
-                _download_to_path(item["url"], temp_img)
-                # 정지 영상 생성
-                _ffmpeg_image_to_video(temp_img, raw_path, src_dur, 1080, 1920, VIDEO_TARGET_FPS)
-            except Exception as e:
-                print(f"Static Gen Error (Clip {idx}): {e}")
-                raise e
-            finally:
-                if temp_img.exists(): temp_img.unlink()
+class SourceGenRequest(BaseModel):
+    items: List[SourceItem]
+    cfg_scale: float = 0.5
 
-            # 길이만 맞춤 (속도 변화 없음)
-            _ffmpeg_trim_speed(raw_path, final_clip_path, 0.0, src_dur, 1.0, VIDEO_TARGET_FPS)
+class CompileClip(BaseModel):
+    video_url: str
+    speed: float = 1.0
+    trim_start: float = 0.0
+    trim_end: float = 5.0
 
-        # [Motion] Kling AI (5초 생성 -> 2배속 -> 2.5초 결과물)
-        elif kind == "kling":
-            # [변경] 기존 user_preset 대신 motion, effect 사용
-            user_motion = item.get("motion", "static")
-            user_effect = item.get("effect", "none")
-            
-            # [변경] 새로운 함수 호출
-            prompts = _kling_prompts_dynamic(user_motion, user_effect)
-            
-            img_b64 = _image_url_to_b64(item["url"])
-            
-            task_id = _freepik_kling_create_task(
-                img_b64, prompts["prompt"], prompts["negative_prompt"], 
-                "5", 0.5
-            )
-            # 폴링 (타임아웃 등은 내부 처리)
-            video_url = _freepik_kling_poll(task_id, job_id, idx, total_steps)
-            _download_to_path(video_url, raw_path)
-            
-            # [중요] 5초 영상을 2.5초로 만드니까 정확히 2배속(Speed x2)이 됨
-            _ffmpeg_trim_speed(raw_path, final_clip_path, 0.0, src_dur, VIDEO_SPEED_FACTOR, VIDEO_TARGET_FPS)
-
-        # 작업 완료 후 진행률 업데이트
-        with completed_counter_lock:
-            completed_counter[0] += 1
-            current_count = completed_counter[0]
-        
-        # 전체 진행률(80%까지) 반영
-        progress_percent = int((current_count / total_steps) * 80)
-        with video_jobs_lock:
-            if job_id in video_jobs:
-                video_jobs[job_id]["progress"] = progress_percent
-                video_jobs[job_id]["message"] = f"Finished clip {idx+1}/{total_steps}"
-
-        return (idx, final_clip_path)
-
-    except Exception as e:
-        print(f"!! Clip {idx} Failed: {e}")
-        traceback.print_exc()
-        raise e
-
-# -----------------------------------------------------------------------------
-# [수정] 메인 비디오 잡 실행 함수 (병렬 처리 적용)
-# -----------------------------------------------------------------------------
-def _run_video_job(
-    job_id: str,
-    clips: List[VideoClip],
-    duration: str,
-    cfg_scale: float,
-    mode: Optional[str],
-    target_total_sec: Optional[float],
-    include_intro_outro: Optional[bool],
-    intro_url: Optional[str] = None,
+class CompileRequest(BaseModel):
+    clips: List[CompileClip]
+    include_intro_outro: bool = False
+    intro_url: Optional[str] = None
     outro_url: Optional[str] = None
-):
+
+def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
+    """
+    Step 1: 소스 생성 로직
+    - Static & No Effect: FFmpeg로 즉시 변환 (Fast, Free)
+    - Motion or Effect: Kling AI 호출 (Slow, Cost)
+    """
+    filename = f"source_{job_id}_{idx}.mp4"
+    out_path = out_dir / filename
+    
+    # [최적화] 움직임도 없고, 효과도 없으면 -> 그냥 이미지 5초 영상으로 변환 (Kling X)
+    if item.motion == "static" and item.effect == "none":
+        print(f"🚀 [Clip {idx}] Static detected. Skipping Kling (Fast generation).", flush=True)
+        temp_img = out_dir / f"temp_src_{job_id}_{idx}.png"
+        try:
+            # 1. 이미지 다운로드
+            _download_to_path(item.url, temp_img)
+            
+            # [수정] 1080, 1920 (세로) 파라미터 확인
+            _ffmpeg_image_to_video(
+                temp_img, out_path, 
+                5.0, 
+                1080, 1920, # <--- 여기가 1080, 1920 이어야 함
+                VIDEO_TARGET_FPS
+            )
+            return out_path
+        except Exception as e:
+            print(f"Static Gen Error: {e}")
+            raise e
+        finally:
+            if temp_img.exists(): temp_img.unlink()
+
+    # ---------------------------------------------------------
+    # 그 외 (모션이나 이펙트가 있는 경우) -> Kling 호출
+    # ---------------------------------------------------------
+    print(f"🎥 [Clip {idx}] Kling AI Generating... ({item.motion}/{item.effect})", flush=True)
+    
+    prompts = _kling_prompts_dynamic(item.motion, item.effect)
+    img_b64 = _image_url_to_b64(item.url)
+    
+    # 5초 생성 요청
+    task_id = _freepik_kling_create_task(
+        img_b64, prompts["prompt"], prompts["negative_prompt"], 
+        "5", cfg_scale
+    )
+    
+    # 폴링 대기
+    video_url = _freepik_kling_poll(task_id, job_id, idx, 1)
+    
+    # 다운로드
+    _download_to_path(video_url, out_path)
+    
+    return out_path
+
+def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: float):
     try:
-        # 1. 작업 초기화
         with video_jobs_lock:
-            video_jobs[job_id] = {
-                "status": "RUNNING",
-                "message": "Preparing clips...",
-                "progress": 1,
-                "created_at": time.time()
-            }
+            video_jobs[job_id] = {"status": "RUNNING", "message": "Initializing...", "progress": 0, "results": []}
 
         out_dir = Path("outputs")
         out_dir.mkdir(parents=True, exist_ok=True)
-
-        # -------------------------------------------------------------
-        # 2. 시간 설정 (2.5초 고정)
-        # -------------------------------------------------------------
-        per_clip_sec = 2.5 
         
-        # -------------------------------------------------------------
-        # 3. 실행 계획(Plan) 생성
-        # -------------------------------------------------------------
-        plan = []
+        total_steps = len(items)
+        results_map = [None] * total_steps # 순서 보장용
         
-        # [Intro]
-        if include_intro_outro and intro_url:
-            plan.append({"kind": "still", "type": "intro", "url": intro_url, "dur": 2.0})
+        # 병렬 실행 (최대 5개 동시)
+        with ThreadPoolExecutor(max_workers=VIDEO_MAX_CONCURRENCY) as executor:
+            future_map = {}
+            for i, item in enumerate(items):
+                future = executor.submit(_generate_raw_only, i, item, job_id, out_dir, cfg_scale)
+                future_map[future] = i
 
-        # [Main Clips]
-        for i, clip in enumerate(clips):
-            plan.append({
-                "kind": "kling",
-                "type": "scene",
-                "url": clip.url,
-                # [변경] preset 대신 motion, effect 전달
-                "motion": clip.motion,
-                "effect": clip.effect,
-                "dur": per_clip_sec
-            })
-
-        # [Outro]
-        if include_intro_outro and outro_url:
-            plan.append({"kind": "still", "type": "outro", "url": outro_url, "dur": 2.0})
-
-        total_steps = len(plan)
-        
-        # -------------------------------------------------------------
-        # 4. 병렬 실행 (Parallel Execution) - 핵심 변경 사항
-        # -------------------------------------------------------------
-        print(f"🚀 [VideoJob] Starting parallel generation for {total_steps} clips (Max 5)...", flush=True)
-        
-        completed_counter = [0]
-        completed_counter_lock = threading.Lock()
-        future_map = {}
-        generated_results = [None] * total_steps # 결과 순서 보장용 리스트
-
-        # ThreadPoolExecutor를 사용하여 최대 5개 동시 실행
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            for idx, item in enumerate(plan):
-                # 개별 작업 제출
-                future = executor.submit(
-                    process_single_clip, 
-                    idx, item, job_id, out_dir, total_steps, 
-                    completed_counter_lock, completed_counter
-                )
-                future_map[future] = idx
-            
-            # 완료되는 대로 결과 수집 (에러 체크 포함)
+            completed_count = 0
             for future in as_completed(future_map):
-                idx, path = future.result() # 에러 발생 시 여기서 raise됨
-                generated_results[idx] = path # 원래 순서(index) 자리에 저장
+                idx = future_map[future]
+                try:
+                    path = future.result() 
+                    if path:
+                        # 웹에서 접근 가능한 경로로 저장
+                        results_map[idx] = f"/outputs/{path.name}"
+                except Exception as e:
+                    print(f"Clip {idx} failed: {e}")
+                    results_map[idx] = None # 실패 시 None
+                
+                completed_count += 1
+                # 진행률 업데이트
+                with video_jobs_lock:
+                    video_jobs[job_id]["progress"] = int((completed_count / total_steps) * 100)
+                    video_jobs[job_id]["message"] = f"Generated {completed_count}/{total_steps} clips"
 
-        # None 체크 (혹시 모를 누락 방지)
-        generated_paths = [p for p in generated_results if p is not None]
-
-        # -------------------------------------------------------------
-        # 5. 병합 (Concat)
-        # -------------------------------------------------------------
-        if not generated_paths:
-            raise RuntimeError("No clips generated.")
-
-        with video_jobs_lock:
-             video_jobs[job_id]["message"] = "Stitching video..."
-             video_jobs[job_id]["progress"] = 90
-
-        # 정규화 (해상도 통일 & 레터박스)
-        normalized_paths = []
-        for i, p in enumerate(generated_paths):
-            norm = out_dir / f"v_norm_{job_id}_{i}.mp4"
-            # 1080x1920 세로형 기준
-            _ffmpeg_normalize_to(p, norm, 1080, 1920, VIDEO_TARGET_FPS)
-            normalized_paths.append(norm)
-
-        # 최종 합치기
-        list_file = out_dir / f"list_{job_id}.txt"
-        with open(list_file, "w", encoding="utf-8") as f:
-            for p in normalized_paths:
-                f.write(f"file '{p.resolve().as_posix()}'\n")
-
-        final_path = out_dir / f"final_{job_id}.mp4"
-        cmd = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-            "-i", str(list_file), "-c", "copy", str(final_path)
-        ]
-        _run_ffmpeg(cmd)
-
-        # 완료 처리
-        result_url = f"/outputs/{final_path.name}"
+        # 완료
         with video_jobs_lock:
             video_jobs[job_id]["status"] = "COMPLETED"
-            video_jobs[job_id]["message"] = "Done!"
-            video_jobs[job_id]["progress"] = 100
-            video_jobs[job_id]["result_url"] = result_url
-            
-        print(f"✅ [VideoJob] Finished: {result_url}", flush=True)
+            video_jobs[job_id]["results"] = results_map # 결과 리스트 반환
+            video_jobs[job_id]["message"] = "Source generation complete."
 
     except Exception as e:
-        print(f"🔥 Job {job_id} Critical Error: {e}")
+        print(f"Source Gen Critical Error: {e}")
         traceback.print_exc()
         with video_jobs_lock:
             video_jobs[job_id]["status"] = "FAILED"
             video_jobs[job_id]["error"] = str(e)
-            video_jobs[job_id]["message"] = "Failed during generation."
 
-@app.post("/video-mvp/create")
-async def video_mvp_create(req: VideoCreateRequest):
-    print(f"Video Request: Intro={req.intro_url}, Outro={req.outro_url}", flush=True)
+# --- 3. Step 2: Final Compile (자르기/배속/병합) ---
+def _run_final_compile(job_id: str, req: CompileRequest):
+    try:
+        with video_jobs_lock:
+            video_jobs[job_id] = {"status": "RUNNING", "message": "Compiling...", "progress": 0}
+            
+        out_dir = Path("outputs")
+        processed_paths = []
+        
+        total_clips = len(req.clips)
+        
+        # 1. 각 클립 가공 (Trim -> Speed -> Resize)
+        for i, clip in enumerate(req.clips):
+            if not clip.video_url: continue
+            
+            # 원본 파일 확보 (로컬에 없으면 다운로드)
+            src_name = _safe_filename_from_url(clip.video_url)
+            local_src = out_dir / src_name
+            if not local_src.exists():
+                _download_to_path(clip.video_url, local_src)
+            
+            final_path = out_dir / f"proc_{job_id}_{i}.mp4"
+            
+            # 파라미터 계산
+            t_start = max(0.0, clip.trim_start)
+            t_end = min(5.0, clip.trim_end)
+            if t_end <= t_start: t_end = 5.0
+            
+            dur = t_end - t_start
+            # 속도 안전장치 (0이면 1.0으로)
+            speed = clip.speed if clip.speed > 0.1 else 1.0
+            
+            # FFmpeg 필터 구성:
+            # 1. trim: 구간 자르기
+            # 2. setpts: 속도 조절 ((PTS-STARTPTS)/speed)
+            # 3. scale/crop: 해상도 강제 통일 (1080x1920 등 기존 설정 따름)
+            # 4. setsar=1: 픽셀 비율 초기화 (병합 오류 방지)
+            setpts = f"(PTS-STARTPTS)/{speed}"
+            
+# [수정] 1080x1920 세로형(9:16) 강제 적용
+            vf = (
+                f"trim=start={t_start}:duration={dur},setpts={setpts},"
+                f"scale=1080:1920:force_original_aspect_ratio=increase," # 9:16 비율로 늘리고
+                f"crop=1080:1920,setsar=1,fps={VIDEO_TARGET_FPS}"       # 중앙 크롭
+            )
+            
+            cmd = [
+                "ffmpeg", "-y", "-i", str(local_src),
+                "-vf", vf, "-an", 
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", 
+                "-preset", "veryslow", # [수정] veryfast -> veryslow
+                "-crf", "10",          # [수정] 18 -> 10
+                str(final_path)
+            ]
+            _run_ffmpeg(cmd)
+            processed_paths.append(final_path)
+            
+            # 진행률 (0~80%)
+            with video_jobs_lock:
+                video_jobs[job_id]["progress"] = int(((i + 1) / total_clips) * 80)
+
+        # 2. 병합 (Concat)
+        if not processed_paths: raise RuntimeError("No clips to merge")
+        
+        list_file = out_dir / f"list_{job_id}.txt"
+        with open(list_file, "w", encoding="utf-8") as f:
+            for p in processed_paths:
+                f.write(f"file '{p.resolve().as_posix()}'\n")
+        
+        final_out = out_dir / f"final_{job_id}.mp4"
+        # Concat 실행
+        _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(final_out)])
+        
+        result_url = f"/outputs/{final_out.name}"
+        
+        with video_jobs_lock:
+            video_jobs[job_id]["status"] = "COMPLETED"
+            video_jobs[job_id]["result_url"] = result_url
+            video_jobs[job_id]["progress"] = 100
+            
+    except Exception as e:
+        print(f"Compile Error: {e}")
+        traceback.print_exc()
+        with video_jobs_lock:
+            video_jobs[job_id]["status"] = "FAILED"
+            video_jobs[job_id]["error"] = str(e)
+
+# --- 4. API Endpoints (New) ---
+
+@app.post("/video-mvp/generate-sources")
+async def api_generate_sources(req: SourceGenRequest):
     job_id = uuid.uuid4().hex
     with video_jobs_lock:
-        video_jobs[job_id] = {
-            "status": "QUEUED",
-            "message": "Queued",
-            "progress": 0,
-            "result_url": None,
-            "error": None,
-        }
+        video_jobs[job_id] = {"status": "QUEUED", "progress": 0}
     
-    # [중요] 스레드 실행 시 인자 전달 확인
-    video_executor.submit(
-        _run_video_job, 
-        job_id, 
-        req.clips, 
-        req.duration, 
-        req.cfg_scale, 
-        req.mode, 
-        req.target_total_sec, 
-        req.include_intro_outro,
-        req.intro_url, # 전달
-        req.outro_url  # 전달
-    )
+    # 백그라운드 스레드로 실행
+    threading.Thread(target=_run_source_generation, args=(job_id, req.items, req.cfg_scale)).start()
+    return {"job_id": job_id}
+
+@app.post("/video-mvp/compile")
+async def api_compile_final(req: CompileRequest):
+    job_id = uuid.uuid4().hex
+    with video_jobs_lock:
+        video_jobs[job_id] = {"status": "QUEUED", "progress": 0}
+        
+    threading.Thread(target=_run_final_compile, args=(job_id, req)).start()
     return {"job_id": job_id}
 
 @app.get("/video-mvp/status/{job_id}")
