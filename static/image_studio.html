@@ -419,6 +419,25 @@
             /* Fill the box */
         }
 
+        /* [NEW] Single Mode Preview for Edit Image */
+        .is-file-list.single-mode {
+            grid-template-columns: 1fr;
+            max-height: none;
+        }
+
+        .is-file-list.single-mode .is-file-item {
+            aspect-ratio: auto;
+            background: #000;
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .is-file-list.single-mode .is-file-item img {
+            max-height: 500px;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto;
+        }
+
 
 
         .is-file-item .remove-btn {
@@ -539,6 +558,66 @@
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
             width: 100%;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: var(--primary-color);
+            background-color: #1a1a1a;
+        }
+
+        /* [NEW] Internal Preview Style */
+        .is-internal-preview {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent; /* Seamless with background */
+            z-index: 5;
+            border-radius: 12px; /* Match .is-upload-box */
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .is-internal-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .is-internal-preview .remove-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 34px;
+            height: 34px;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.2s ease;
+        }
+
+        .is-internal-preview .remove-btn:hover {
+            background: rgba(255, 50, 50, 0.8);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: scale(1.1);
+        }
+
+        .is-internal-preview .remove-btn .material-symbols-outlined {
+            font-size: 20px;
+            font-weight: 600;
         }
 
         .result-card {
@@ -699,7 +778,7 @@
 
             <div class="is-card-btn card-sub-1" id="btn-feature-2">
                 <div class="card-content">
-                    <h2>Edit Photo</h2>
+                    <h2>Edit Image</h2>
                     <p>Rearrange furniture & props.</p>
                     <div class="card-action">
                         <span class="material-symbols-outlined">edit</span>
@@ -709,7 +788,7 @@
 
             <div class="is-card-btn card-sub-2" id="btn-feature-3">
                 <div class="card-content">
-                    <h2>Decorate Photo</h2>
+                    <h2>Decorate Image</h2>
                     <p>Add decorations & Lighting.</p>
                     <div class="card-action">
                         <span class="material-symbols-outlined">edit</span>
@@ -756,7 +835,7 @@
                     <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
                     GENERATE REAL PHOTO
                 </button>
-                <div id="statusSource" class="vs-status-text" style="margin-top: 10px;"></div>
+                <div id="statusSource-1" class="vs-status-text" style="margin-top: 10px;"></div>
             </div>
 
             <div class="is-panel-right">
@@ -783,6 +862,178 @@
 
                 <div id="fp-result-container" class="result-container hidden">
                     <div id="fp-gen-grid" class="result-grid"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="workspace-feature-2" class="is-workspace">
+
+        <div class="workspace-breadcrumb">
+            <button id="back-to-menu-2" class="breadcrumb-btn">
+                <span class="material-symbols-outlined">arrow_back</span> Back
+            </button>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Image Studio</span>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Edit Image</span>
+        </div>
+
+        <div class="is-workspace-card">
+
+            <div class="is-panel-left">
+                <h2 class="is-section-title">Edit Image</h2>
+                <p class="is-section-desc">
+                    Rearrange furniture & props in your room image with AI precision.
+                </p>
+
+                <div class="is-upload-box" id="edit-ref-drop-zone">
+                    <div class="is-upload-content">
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <span class="is-upload-label">Upload Image</span>
+                        <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
+                    </div>
+                    <div class="is-internal-preview hidden">
+                        <img src="" alt="Preview">
+                        <button class="remove-btn" title="Remove">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    <input type="file" id="edit-ref-input" accept="image/*" multiple class="hidden">
+                </div>
+
+                <div id="edit-ref-preview-container" class="is-file-list"></div>
+
+                <button id="edit-ref-remove-all" class="clear-all-btn hidden">
+                    Clear All Files
+                </button>
+
+                <!-- [NEW] Instruction Textarea -->
+                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                    <label class="input-label">Edit Instructions</label>
+                    <textarea id="edit-instructions" class="dark-input" rows="4" 
+                        placeholder="eg. TV+TV콘솔과 소파의 위치를 서로 바꿔주고, 스탠드 조명도 그에 맞게 바꿔줘. 그리고 왼쪽하단에 있는 원형모양의 작은 조명을 소파테이블에 올려줘."
+                        style="resize: none;"></textarea>
+                </div>
+
+                <button id="edit-generate-btn" class="is-generate-btn" disabled>
+                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
+                    GENERATE EDIT IMAGE
+                </button>
+                <div id="statusSource-2" class="vs-status-text" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="is-panel-right">
+
+                <div id="edit-placeholder-text" class="is-placeholder-modern">
+                    <div class="placeholder-preview-box">
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                        <span class="preview-arrow">→</span>
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                    </div>
+                    <h3 class="placeholder-title">Ready to Edit Image</h3>
+                    <p class="placeholder-desc">Upload Source Photos to Rearrange Furniture</p>
+                </div>
+
+                <div id="edit-loading" class="loading-container hidden">
+                    <div class="spinner"></div>
+                    <p style="color: #ccc; font-size: 1.1rem;">Rearranging furniture...</p>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                </div>
+
+                <div id="edit-result-container" class="result-container hidden">
+                    <div id="edit-gen-grid" class="result-grid"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="workspace-feature-3" class="is-workspace">
+
+        <div class="workspace-breadcrumb">
+            <button id="back-to-menu-3" class="breadcrumb-btn">
+                <span class="material-symbols-outlined">arrow_back</span> Back
+            </button>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Image Studio</span>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Decorate Image</span>
+        </div>
+
+        <div class="is-workspace-card">
+
+            <div class="is-panel-left">
+                <h2 class="is-section-title">Decorate Image</h2>
+                <p class="is-section-desc">
+                    Add decorations & Lighting to your room image for a perfect atmosphere.
+                </p>
+
+                <div class="is-upload-box" id="decor-ref-drop-zone">
+                    <div class="is-upload-content">
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <span class="is-upload-label">Upload Image</span>
+                        <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
+                    </div>
+                    <div class="is-internal-preview hidden">
+                        <img src="" alt="Preview">
+                        <button class="remove-btn" title="Remove">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    <input type="file" id="decor-ref-input" accept="image/*" multiple class="hidden">
+                </div>
+
+                <div id="decor-ref-preview-container" class="is-file-list"></div>
+
+                <button id="decor-ref-remove-all" class="clear-all-btn hidden">
+                    Clear All Files
+                </button>
+
+                <!-- [NEW] Instruction Textarea -->
+                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                    <label class="input-label">Decorate Instructions</label>
+                    <textarea id="decor-instructions" class="dark-input" rows="4" 
+                        placeholder="eg. 거실에 크리스마스 트리를 배치해주고, 은은한 전구 조명도 달아줘. 그리고 소파 위에는 따뜻한 느낌의 담요와 베이지색 쿠션들을 놓아줘."
+                        style="resize: none;"></textarea>
+                </div>
+
+                <button id="decor-generate-btn" class="is-generate-btn" disabled>
+                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
+                    GENERATE DECORATE IMAGE
+                </button>
+                <div id="statusSource-3" class="vs-status-text" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="is-panel-right">
+
+                <div id="decor-placeholder-text" class="is-placeholder-modern">
+                    <div class="placeholder-preview-box">
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                        <span class="preview-arrow">→</span>
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                    </div>
+                    <h3 class="placeholder-title">Ready to Decorate Image</h3>
+                    <p class="placeholder-desc">Upload Source Photos to Add Decorations</p>
+                </div>
+
+                <div id="decor-loading" class="loading-container hidden">
+                    <div class="spinner"></div>
+                    <p style="color: #ccc; font-size: 1.1rem;">Adding decorations...</p>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                </div>
+
+                <div id="decor-result-container" class="result-container hidden">
+                    <div id="decor-gen-grid" class="result-grid"></div>
                 </div>
 
             </div>
