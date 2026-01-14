@@ -580,6 +580,31 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                 "--------------------------------------------------\n"
             )
 
+        # [NEW] 동적 치수 분석 로직 (하드코딩 방지)
+        calculated_analysis = ""
+        try:
+            # 1. 방 너비 파싱 (3000 x 3500 x 2400 mm 등에서 첫 번째 숫자 추출)
+            room_w = 0
+            room_nums = [int(s) for s in room_dimensions.replace('x', ' ').replace('X', ' ').replace(',', ' ').split() if s.isdigit()]
+            if room_nums: room_w = room_nums[0]
+
+            # 2. 가구 스펙에서 주요 수치 추출 및 비율 계산
+            if room_w > 0 and furniture_specs:
+                import re
+                # 가장 큰 가구(소파 등)의 width 찾기
+                widths = re.findall(r'width\s*:?\s*(\d+)', furniture_specs.lower())
+                if widths:
+                    max_f_w = int(widths[0])
+                    occupancy = round((max_f_w / room_w) * 100, 1)
+                    calculated_analysis = (
+                        f"   - **CALCULATED OCCUPANCY:** The main furniture ({max_f_w}mm) occupies **{occupancy}%** of the room width ({room_w}mm).\n"
+                    )
+                    if occupancy > 90:
+                        calculated_analysis += "   - **ACTION:** This is a near-total fill. The furniture MUST touch or almost touch both side walls.\n"
+                    elif occupancy > 70:
+                        calculated_analysis += "   - **ACTION:** This is a dominant fill. Leave only minimal gaps on the sides.\n"
+        except: pass
+
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
@@ -596,31 +621,19 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "4. **WINDOW TREATMENT (CURTAINS - LOCATION STRICT):** Add floor-to-ceiling **Sheer White Chiffon Curtains**. <CRITICAL>: Place them **ONLY** along the vertical edges of the GLASS WINDOW. **DO NOT** generate curtains on solid walls, corners without windows, or doors. They must **HANG STRAIGHT DOWN NATURALLY** (do not tie) covering only the outer 15% of the glass to frame the view.\n\n"
 
             "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\n"
-            "You are provided with ACTUAL DIMENSIONS for both the Room and the Furniture. Do not guess. CALCULATE.\n"
+            "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
             
-            "1. **ROOM VOLUME ANCHOR:**\n"
-            f"   - **ACTUAL ROOM DIMENSIONS:** {room_dimensions} (Width x Depth x Height)\n"
-            "   - VISUALIZE this specific 3D bounding box first.\n"
-            "   - **CONSTRAINT:** All furniture must physically fit within these specific bounds. If the room is narrow, the furniture must look tight. If spacious, it must look open.\n"
+            "1. **SPECIFIC SCALE ANALYSIS FOR THIS REQUEST:**\n"
+            f"{calculated_analysis if calculated_analysis else '   - (Apply relative scaling based on provided specs)'}\n"
             
-            "2. **FURNITURE-TO-ROOM RATIO (SCALE LOCK):**\n"
-            "   - **Item Width vs Room Width:** Calculate the ratio based on the provided specs.\n"
-            "     * Logic: (Furniture Width / Room Width) = % of Frame Occupancy.\n"
-            "     * Example Rule: If a Sofa is 2800mm and Room is 3500mm, render the sofa occupying roughly **80% of the wall width**.\n"
-            "   - **Item Height vs Ceiling Height:** Calculate vertical ratio.\n"
-            "     * Logic: (Furniture Height / Room Height) = Vertical Position.\n"
-            "     * Example Rule: A low console (700mm) in a 2400mm room is less than **1/3 of the wall height**.\n"
+            "2. **RELATIVE HEIGHT HIERARCHY:**\n"
+            "   - You MUST maintain the visual height hierarchy specified in the specs.\n"
+            "   - Example: If Item A (Height: 950mm) is taller than Item B (Height: 775mm), Item A MUST be rendered taller than Item B in the image.\n"
             
-            "3. **DEPTH & FLOOR OCCUPANCY (DYNAMIC CALCULATION):**\n"
-            "   - **Step A:** Extract the 'Depth' value from the Room Dimensions provided above.\n"
-            "   - **Step B:** Extract the 'Depth' value of the Rug (or Main Furniture) from the specs list.\n"
-            "   - **Step C:** Compare them. If the Rug Depth is > 50% of the Room Depth, it MUST dominate the floor visually.\n"
-            "   - **Action:** Render the floor coverage strictly according to this calculated percentage. Do not default to a small doormat size if the specs say it is huge.\n"
-            
-            "4. **RELATIONAL SIZING (CROSS-CHECK):**\n"
-            "   - Compare Item A vs Item B dimensions provided in the specs.\n"
-            "   - If Item A is stated as W:1500 and Item B is W:2800, Item A MUST be rendered at roughly half the visual width of Item B.\n"
-            "   - **STRICT PROHIBITION:** Do not resize items to match 'aesthetic templates'. Follow the NUMBERS strictly.\n\n"
+            "3. **RATIO LOCK:**\n"
+            "   - Calculate: (Furniture Depth / Room Depth) = Floor Space Coverage.\n"
+            "   - Strictly follow these percentages. Do not shrink deep furniture into 'miniature' versions to create empty space.\n"
+            "   - **STRICT PROHIBITION:** Do not resize items for 'vibe' or 'aesthetic balance'. Follow the NUMBERS strictly.\n\n"
 
             "<CRITICAL: WINDOW LIGHT MUST BE ABUNDANT (PRIORITY #1)>\n"
             "1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
