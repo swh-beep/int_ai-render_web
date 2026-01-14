@@ -627,16 +627,29 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
             "3. **LIGHT DIRECTION:** Clearly visible light direction from the window; cast soft but present shadows across the floor.\n"
             "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-            "5. **WHITE BALANCE:** Neutral/cool daylight white balance (around 5200–5600K). **NO warm/yellow cast.**\n\n"
+            "5. **WHITE BALANCE:** Neutral daylight white balance (around 4000~5000K). **NO warm/yellow cast.**\n\n"
 
-            "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
-            "1. **DAYLIGHT DOMINANT:** Daylight from the window is the KEY light. Simulate how neutral daylight bounces and interacts with furniture.\n"
-            "2. **ARTIFICIAL LIGHTS RULE:** Do NOT add warm/tungsten lighting. If there are existing fixtures, keep them neutral white (5000–5600K) and subtle. If turning lights on would introduce a yellow tint, keep them OFF.\n"
-            "3. **SHADOW PHYSICS:** Generate soft shadows that match the direction and intensity of the sunlight entering the room.\n"
-            "4. **ATMOSPHERE:** Sun-filled, fresh, high-end interior photography 느낌 — but keep colors neutral and clean (no sepia).\n"
-            "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with neutral daylight.\n"
+        "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
+            "1. **MANDATORY LIGHTING STATE: ALL ON (NEUTRAL ONLY):**\n"
+            "   - **ACTION:** TURN ON every lighting fixture in the scene (Pendants, Floor Lamps, Recessed Lights, LED Strips).\n"
+            "   - **VISUALS:** Render a visible 'glow' or subtle 'light bloom' around the fixtures to prove they are active. This adds a luxurious touch.\n"
+            
+            "2. **LIGHTING HIERARCHY (KEY vs. FILL):**\n"
+            "   - **KEY LIGHT (DOMINANT):** Natural Daylight from the window is still the PRIMARY source (approx. 70% intensity). It defines the main shadow direction.\n"
+            "   - **FILL LIGHT (SECONDARY):** The interior lights act as 'Fill Lights' (approx. 30% intensity) to brighten dark corners and highlight furniture textures. They should NOT overpower the sunlight.\n"
+            
+            "3. **STRICT COLOR TEMPERATURE CONTROL (NO YELLOW):**\n"
+            "   - **Target Temperature:** Use **Pure Neutral White (4000K-5000K)** for all artificial lights to match the daylight.\n"
+            "   - **PROHIBITED:** Do NOT use Warm/Tungsten/Orange bulbs (2700K). Even though lights are ON, the room must remain fresh and clean. No vintage/sepia cast.\n"
+            
+            "4. **SHADOW PHYSICS:**\n"
+            "   - Cast soft, directional shadows driven by the window light.\n"
+            "   - Use the interior lights to slightly soften (lift) the deepest shadows, preventing high-contrast black spots.\n"
+            
+            "5. **ATMOSPHERE:**\n"
+            "   - Combine 'Sun-filled Freshness' with 'High-end Illuminated Luxury'. Bright, airy, and fully detailed.\n"
+            "   - **OUTPUT RULE:** Return the image with furniture added, perfectly blended with abundant daylight AND active neutral interior lighting.\n"
         )
-
         # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
