@@ -25,7 +25,7 @@ html {
 }
 
 body {
-    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
     background-color: var(--bg-color);
     color: var(--text-color);
     line-height: 1.6;
@@ -86,6 +86,11 @@ header h1 {
     opacity: 0.6;
 }
 
+.subtitle-sub:last-of-type {
+    margin-bottom: 40px;
+    /* 담당자 외 배포 금지 아래 간격 */
+}
+
 /* --- Buttons --- */
 button,
 .action-btn,
@@ -111,6 +116,7 @@ button,
     min-width: 140px;
     background-color: #4A1215;
     color: white;
+    font-family: inherit;
 }
 
 .action-btn:hover {
@@ -143,6 +149,87 @@ button,
     align-items: center;
     justify-content: center;
     margin-bottom: 20px;
+}
+
+/* --- Fixed Side Navigation --- */
+.side-nav {
+    position: fixed !important;
+    left: 20px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+    padding: 15px 10px;
+    background: rgba(10, 10, 10, 0.7);
+    /* 좀 더 어둡게 */
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 40px;
+    z-index: 99999 !important;
+    /* 압도적 우선순위 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+    width: 64px;
+    /* 기본 너비 */
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.side-nav:hover {
+    width: 190px !important;
+    /* 호버 시 확장 */
+}
+
+.nav-item {
+    width: 100%;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 10px;
+    gap: 12px;
+    color: #888;
+    text-decoration: none;
+    border-radius: 30px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.nav-item.active {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.nav-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.side-nav:hover .nav-label {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.nav-item .material-symbols-outlined {
+    font-size: 24px;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.nav-item.active .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
 
@@ -202,7 +289,7 @@ button,
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
-    text-transform: uppercase;
+    text-transform: uppercase !important;
     letter-spacing: 0.5px;
     min-width: 260px;
     /* 고정 너비 느낌으로 전체 버튼 사이즈 통일 */
@@ -1740,4 +1827,33 @@ button,
     font-size: 80px;
     margin-bottom: 20px;
     opacity: 0.2;
+}
+
+/* --- Inputs for Spatial Constraints --- */
+.dark-input {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 16px;
+    color: #fff;
+    outline: none;
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+}
+
+.dark-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.input-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #888;
+    margin-bottom: 8px;
+    text-align: left;
+    letter-spacing: 0.5px;
 }

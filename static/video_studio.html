@@ -11,6 +11,20 @@
 </head>
 
 <body class="vs-page">
+  <nav class="side-nav">
+    <a href="/" class="nav-item" title="Main">
+      <span class="material-symbols-outlined">home</span>
+      <span class="nav-label">Main</span>
+    </a>
+    <a href="/image-studio" class="nav-item" title="Image Studio">
+      <span class="material-symbols-outlined">photo_library</span>
+      <span class="nav-label">Image Studio</span>
+    </a>
+    <a href="/video-studio" class="nav-item active" title="Video Studio">
+      <span class="material-symbols-outlined">video_library</span>
+      <span class="nav-label">Video Studio</span>
+    </a>
+  </nav>
   <div class="layout">
     <div class="container">
       <div class="vs-shell">
@@ -36,7 +50,8 @@
             <div id="selectedEmpty" class="vs-empty">No images added.</div>
 
             <div class="vs-actions-left">
-              <button id="btnGenerateSource" class="action-btn" style="width:100%;">GENERATE SOURCE CLIPS</button>
+              <button id="btnGenerateSource" class="action-btn glow-btn" style="width:100%;">GENERATE SOURCE
+                CLIPS</button>
               <div id="statusSource" class="vs-status-text"></div>
             </div>
           </div>

@@ -12,6 +12,21 @@
 </head>
 
 <body data-page="home">
+    <nav class="side-nav">
+        <a href="/" class="nav-item active" title="Main">
+            <span class="material-symbols-outlined">home</span>
+            <span class="nav-label">Main</span>
+        </a>
+        <a href="/image-studio" class="nav-item" title="Image Studio">
+            <span class="material-symbols-outlined">photo_library</span>
+            <span class="nav-label">Image Studio</span>
+        </a>
+        <a href="/video-studio" class="nav-item" title="Video Studio">
+            <span class="material-symbols-outlined">video_library</span>
+            <span class="nav-label">Video Studio</span>
+        </a>
+    </nav>
+
     <div class="container">
         <header>
             <img src="/static/logo.png" alt="Company Logo" class="logo">
@@ -20,16 +35,6 @@
             <p class="subtitle-sub">해당 웹 및 앱은 사내용입니다</p>
             <p class="subtitle-sub">담당자 외 배포 금지</p>
 
-            <div class="header-actions"
-                style="margin-top: 30px; margin-bottom: 40px; display: flex; justify-content: center; gap: 15px;">
-                <a href="/image-studio" class="action-btn secondary header-btn" style="text-decoration: none;">IMAGE
-                    STUDIO</a>
-
-                <a id="videoStudioBtn" href="/video-studio" class="action-btn secondary header-btn"
-                    style="text-decoration: none;">VIDEO STUDIO</a>
-
-
-            </div>
 
             <section class="upload-section" id="upload-area">
                 <div class="drop-zone">
@@ -39,6 +44,22 @@
                 <div id="preview-container" class="hidden">
                     <img id="image-preview" src="" alt="Room Preview">
                     <button id="remove-image" class="icon-btn">×</button>
+                </div>
+            </section>
+
+            <section class="spatial-constraints-section" style="margin-top: 2rem; margin-bottom: 3.5rem;">
+                <div class="constraints-grid"
+                    style="display: flex; gap: 20px; justify-content: center; max-width: 700px; margin: 0 auto;">
+                    <div style="flex: 1;">
+                        <label class="input-label">Space Dimensions (W x D x H mm)</label>
+                        <input type="text" id="room-dimensions" class="dark-input"
+                            placeholder="e.g. 3000 x 3500 x 2400 mm">
+                    </div>
+                    <div style="flex: 2;">
+                        <label class="input-label">Placement Instructions</label>
+                        <input type="text" id="placement-instructions" class="dark-input"
+                            placeholder="예: 왼쪽 벽면에 3인용 소파를 배치하고 중앙에 원형 러그를 깔아줘">
+                    </div>
                 </div>
             </section>
 
@@ -86,7 +107,7 @@
             <div class="action-area" style="margin-top: 0; padding-top: 0;">
                 <div style="display: flex; align-items: center; justify-content: center; margin: 2rem 0;">
                     <span style="height: 1px; background: #333; width: 100px;"></span>
-                    <span style="margin: 0 15px; color: #666; font-size: 0.9rem;">OR SKIP RENDER</span>
+                    <span style="margin: 0 15px; color: #666; font-size: 0.9rem;">Or Skip Render</span>
                     <span style="height: 1px; background: #333; width: 100px;"></span>
                 </div>
 

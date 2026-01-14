@@ -859,6 +859,12 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('variant', selectedVariant || "1");
             if (selectedMoodboardFile) formData.append('moodboard', selectedMoodboardFile);
 
+            // [추가] 공간 수치 및 배치 지시사항 수집
+            const dimensions = document.getElementById('room-dimensions')?.value || "";
+            const placement = document.getElementById('placement-instructions')?.value || "";
+            formData.append('dimensions', dimensions);
+            formData.append('placement', placement);
+
             try {
                 const res = await fetch('/render', { method: 'POST', body: formData });
                 if (!res.ok) throw new Error(`서버 에러 (${res.status})`);

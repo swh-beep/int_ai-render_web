@@ -112,7 +112,15 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
         if output_path is None: output_path = image_path
         with Image.open(image_path) as img:
             img = ImageOps.exif_transpose(img)
-            if img.mode != 'RGB': img = img.convert('RGB')
+            
+            # [수정] 투명 배경(RGBA) 처리: 흰색 소품이 흰 배경에 묻히는 것을 방지하기 위해 중립 그레이(#D2D2D2) 배경 사용
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGBA")
+                # 밝은 가구와 어두운 가구 모두 대비가 잘 보이는 중립적인 회색 배경 생성
+                background = Image.new("RGBA", img.size, (210, 210, 210, 255)) 
+                img = Image.alpha_composite(background, img).convert("RGB")
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
 
             width, height = img.size
             
@@ -266,6 +274,7 @@ def detect_furniture_boxes(moodboard_path):
         prompt = (
             "OBJECT DETECTION TASK:\n"
             "Identify ALL discrete furniture items in this image (Sofa, Chair, Table, Lamp, Rug, Ottoman, etc.).\n"
+            "**NOTE:** The background is a neutral grey (#D2D2D2) for contrast. Do not detect the background itself.\n"
             "Return a JSON list where each item has:\n"
             "- 'label': Name of the item.\n"
             "- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 scale.\n"
@@ -312,17 +321,17 @@ def analyze_cropped_item(moodboard_path, item_data):
             cropped_img = img
 
         prompt = (
-            f"Describe the visual traits of this '{label}' for a 3D artist.\n"
-            "Focus ONLY on:\n"
-            "1. Material (e.g., leather, wood, fabric type)\n"
-            "2. Color (exact shade)\n"
-            "3. Shape & Structure (legs, armrests, silhouette)\n\n"
+            "f\"Describe the visual traits of this '{label}' for a 3D artist.\\n\"\n"
+            "\"Focus ON:\\n\"\n"
+            "\"1. Material (e.g., leather, wood, fabric type)\\n\"\n"
+            "\"2. Color (exact shade)\\n\"\n"
+            "\"3. Shape & Structure (legs, armrests, silhouette)\\n\"\n"
+            "\"4. **PHYSICAL DIMENSIONS:** Read and extract any dimensions (e.g., width, depth, height in mm) written near or under the item.\\n\\n\"\n"
             
-            "<CRITICAL: NEGATIVE CONSTRAINTS>\n"
-            "1. **IGNORE BACKGROUND:** Do NOT mention 'white background', 'studio shot', or 'grey backdrop'. Act as if the object is floating.\n"
-            "2. **IGNORE TEXT:** Do NOT read or mention any dimensions (e.g., '2400mm') or watermarks visible in the image.\n"
-            "3. **NO LAYOUT INFO:** Do not describe it as 'collage' or 'grid'.\n"
-            "OUTPUT FORMAT: Concise visual description within 50-80 words."
+            "\"<CRITICAL: NEGATIVE CONSTRAINTS>\\n\"\n"
+            "\"1. **IGNORE BACKGROUND:** The background is a neutral grey (#D2D2D2) added for contrast. Do NOT mention 'grey background'. Treat the object as if it is floating.\\n\"\n"
+            "\"2. **NO LAYOUT INFO:** Do not describe it as 'collage' or 'grid'.\\n\"\n"
+            "\"OUTPUT FORMAT: Include dimensions if found, followed by a concise visual description. 60-100 words.\"\n"
         )
         response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 30}, {})
         
@@ -533,8 +542,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
     print(">> [실패] 빈 방 생성 불가. 원본 사용.", flush=True)
     return image_path
 
-# [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시
-def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furniture_specs=None, start_time=0):
+# [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시 + 공간 제약 사항 추가
+def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furniture_specs=None, room_dimensions=None, placement_instructions=None, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     try:
         room_img = Image.open(room_path)
@@ -557,6 +566,20 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                 "--------------------------------------------------\n"
             )
 
+        # [NEW] 공간 제약 사항 컨텍스트 구성
+        spatial_context = ""
+        if room_dimensions or placement_instructions:
+            spatial_context = "\n<PHYSICAL SPACE CONSTRAINTS (STRICT ADHERENCE)>\n"
+            if room_dimensions:
+                spatial_context += f"- **ACTUAL ROOM DIMENSIONS:** {room_dimensions}\n"
+            if placement_instructions:
+                spatial_context += f"- **PLACEMENT INSTRUCTIONS:** {placement_instructions}\n"
+            spatial_context += (
+                "**SCALING RULE:** You MUST calibrate the scale of all furniture relative to the ACTUAL ROOM DIMENSIONS provided. "
+                "Do NOT shrink furniture to create artificial empty space. If the room is small, it should look appropriately filled.\n"
+                "--------------------------------------------------\n"
+            )
+
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
@@ -572,30 +595,53 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "3. **STYLE:** Match the Reference Moodboard style.\n"
             "4. **WINDOW TREATMENT (CURTAINS - LOCATION STRICT):** Add floor-to-ceiling **Sheer White Chiffon Curtains**. <CRITICAL>: Place them **ONLY** along the vertical edges of the GLASS WINDOW. **DO NOT** generate curtains on solid walls, corners without windows, or doors. They must **HANG STRAIGHT DOWN NATURALLY** (do not tie) covering only the outer 15% of the glass to frame the view.\n\n"
 
-            "<CRITICAL: DIMENSIONAL TEXT ADHERENCE>\n"
-            "1. **OCR & CONSTRAINTS:** Actively SCAN the 'Style Reference' image for any text indicating dimensions (e.g., '2400mm', 'W:200cm', '3-seater', '1800x900').\n"
-            "2. **SCALE ENFORCEMENT:** If dimensions are present, YOU MUST calibrate the size of the generated furniture to match these specific measurements relative to the room's perspective.\n"
-            "3. **LOGIC CHECK:** Do not generate furniture that contradicts the text (e.g., if text says '1-person chair', do not generate a '3-person sofa').\n\n"
+            "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\n"
+            "You are provided with ACTUAL DIMENSIONS for both the Room and the Furniture. Do not guess. CALCULATE.\n"
+            
+            "1. **ROOM VOLUME ANCHOR:**\n"
+            f"   - **ACTUAL ROOM DIMENSIONS:** {room_dimensions} (Width x Depth x Height)\n"
+            "   - VISUALIZE this specific 3D bounding box first.\n"
+            "   - **CONSTRAINT:** All furniture must physically fit within these specific bounds. If the room is narrow, the furniture must look tight. If spacious, it must look open.\n"
+            
+            "2. **FURNITURE-TO-ROOM RATIO (SCALE LOCK):**\n"
+            "   - **Item Width vs Room Width:** Calculate the ratio based on the provided specs.\n"
+            "     * Logic: (Furniture Width / Room Width) = % of Frame Occupancy.\n"
+            "     * Example Rule: If a Sofa is 2800mm and Room is 3500mm, render the sofa occupying roughly **80% of the wall width**.\n"
+            "   - **Item Height vs Ceiling Height:** Calculate vertical ratio.\n"
+            "     * Logic: (Furniture Height / Room Height) = Vertical Position.\n"
+            "     * Example Rule: A low console (700mm) in a 2400mm room is less than **1/3 of the wall height**.\n"
+            
+            "3. **DEPTH & FLOOR OCCUPANCY (DYNAMIC CALCULATION):**\n"
+            "   - **Step A:** Extract the 'Depth' value from the Room Dimensions provided above.\n"
+            "   - **Step B:** Extract the 'Depth' value of the Rug (or Main Furniture) from the specs list.\n"
+            "   - **Step C:** Compare them. If the Rug Depth is > 50% of the Room Depth, it MUST dominate the floor visually.\n"
+            "   - **Action:** Render the floor coverage strictly according to this calculated percentage. Do not default to a small doormat size if the specs say it is huge.\n"
+            
+            "4. **RELATIONAL SIZING (CROSS-CHECK):**\n"
+            "   - Compare Item A vs Item B dimensions provided in the specs.\n"
+            "   - If Item A is stated as W:1500 and Item B is W:2800, Item A MUST be rendered at roughly half the visual width of Item B.\n"
+            "   - **STRICT PROHIBITION:** Do not resize items to match 'aesthetic templates'. Follow the NUMBERS strictly.\n\n"
 
             "<CRITICAL: WINDOW LIGHT MUST BE ABUNDANT (PRIORITY #1)>\n"
-"1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
-"2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
-"3. **LIGHT DIRECTION:** Clearly visible light direction from the window; cast soft but present shadows across the floor.\n"
-"4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-"5. **WHITE BALANCE:** Neutral/cool daylight white balance (around 5200–5600K). **NO warm/yellow cast.**\n\n"
-"<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
-"1. **DAYLIGHT DOMINANT:** Daylight from the window is the KEY light. Simulate how neutral daylight bounces and interacts with furniture.\n"
-"2. **ARTIFICIAL LIGHTS RULE:** Do NOT add warm/tungsten lighting. If there are existing fixtures, keep them neutral white (5000–5600K) and subtle. If turning lights on would introduce a yellow tint, keep them OFF.\n"
-"3. **SHADOW PHYSICS:** Generate soft shadows that match the direction and intensity of the sunlight entering the room.\n"
-"4. **ATMOSPHERE:** Sun-filled, fresh, high-end interior photography 느낌 — but keep colors neutral and clean (no sepia).\n"
-"OUTPUT RULE: Return the original room image with furniture added, perfectly blended with neutral daylight.\n"
+            "1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
+            "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
+            "3. **LIGHT DIRECTION:** Clearly visible light direction from the window; cast soft but present shadows across the floor.\n"
+            "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
+            "5. **WHITE BALANCE:** Neutral/cool daylight white balance (around 5200–5600K). **NO warm/yellow cast.**\n\n"
 
+            "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION>\n"
+            "1. **DAYLIGHT DOMINANT:** Daylight from the window is the KEY light. Simulate how neutral daylight bounces and interacts with furniture.\n"
+            "2. **ARTIFICIAL LIGHTS RULE:** Do NOT add warm/tungsten lighting. If there are existing fixtures, keep them neutral white (5000–5600K) and subtle. If turning lights on would introduce a yellow tint, keep them OFF.\n"
+            "3. **SHADOW PHYSICS:** Generate soft shadows that match the direction and intensity of the sunlight entering the room.\n"
+            "4. **ATMOSPHERE:** Sun-filled, fresh, high-end interior photography 느낌 — but keep colors neutral and clean (no sepia).\n"
+            "OUTPUT RULE: Return the original room image with furniture added, perfectly blended with neutral daylight.\n"
         )
 
         # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
             f"{specs_context}\n" 
+            f"{spatial_context}\n"
             f"{user_original_prompt}\n\n"
             
             f"<CRITICAL: OUTPUT FORMAT ENFORCEMENT -> {ratio_instruction}>\n"
@@ -836,7 +882,9 @@ def render_room(
     room: str = Form(...), 
     style: str = Form(...), 
     variant: str = Form(...),
-    moodboard: UploadFile = File(None) 
+    moodboard: UploadFile = File(None),
+    dimensions: str = Form(""),
+    placement: str = Form("")
 ):
     try:
         unique_id = uuid.uuid4().hex[:8]
@@ -945,7 +993,7 @@ def render_room(
             sub_id = f"{unique_id}_v{index+1}"
             try:
                 current_style_prompt = STYLES.get(style, "Custom Moodboard Style")
-                res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, furniture_specs=furniture_specs_text, start_time=start_time)
+                res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, furniture_specs=furniture_specs_text, room_dimensions=dimensions, placement_instructions=placement, start_time=start_time)
                 if res: return f"/outputs/{os.path.basename(res)}"
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
