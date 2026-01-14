@@ -7,6 +7,8 @@
     <title>AI Interior Rendering Service</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
 </head>
 
 <body data-page="home">
@@ -25,6 +27,8 @@
 
                 <a id="videoStudioBtn" href="/video-studio" class="action-btn secondary header-btn"
                     style="text-decoration: none;">VIDEO STUDIO</a>
+
+
             </div>
 
             <section class="upload-section" id="upload-area">
@@ -38,275 +42,278 @@
                 </div>
             </section>
 
-            <script src="/static/js/script.js"></script>
-</body>
 
-</html>
 
-<section class="style-section" id="room-section">
-    <h2>Step 1: Select Room Type</h2>
-    <div class="style-grid" id="room-grid"></div>
-</section>
+            <section class="style-section" id="room-section">
+                <h2>Step 1: Select Room Type</h2>
+                <div class="style-grid" id="room-grid"></div>
+            </section>
 
-<section class="style-section hidden" id="style-section">
-    <h2>Step 2: Select Style</h2>
-    <div class="style-grid" id="style-grid"></div>
-</section>
+            <section class="style-section hidden" id="style-section">
+                <h2>Step 2: Select Style</h2>
+                <div class="style-grid" id="style-grid"></div>
+            </section>
 
-<section class="style-section hidden" id="variant-section">
-    <h2>Step 3: Select Variant</h2>
-    <div class="style-grid" id="variant-grid"></div>
+            <section class="style-section hidden" id="variant-section">
+                <h2>Step 3: Select Variant</h2>
+                <div class="style-grid" id="variant-grid"></div>
 
-    <div id="moodboard-upload-container" class="hidden">
-        <div class="drop-zone" id="moodboard-drop-zone">
-            <p>Drag & Drop your Moodboard here or <strong>Browse</strong></p>
-            <input type="file" id="moodboard-input" accept="image/*" hidden>
-        </div>
-        <div id="moodboard-preview-container" class="hidden">
-            <img id="moodboard-preview" src="" alt="Moodboard Preview">
-            <button id="remove-moodboard" class="icon-btn">×</button>
-        </div>
+                <div id="moodboard-upload-container" class="hidden">
+                    <div class="drop-zone" id="moodboard-drop-zone">
+                        <p>Drag & Drop your Moodboard here or <strong>Browse</strong></p>
+                        <input type="file" id="moodboard-input" accept="image/*" hidden>
+                    </div>
+                    <div id="moodboard-preview-container" class="hidden">
+                        <img id="moodboard-preview" src="" alt="Moodboard Preview">
+                        <button id="remove-moodboard" class="icon-btn">×</button>
+                    </div>
 
-        <div style="text-align: center; margin-top: 1rem;">
-            <p style="font-size: 0.9rem; color: #a1a1aa; margin-bottom: 0.5rem;">Don't have a moodboard?</p>
-            <button id="open-mb-gen-btn" class="action-btn secondary" style="font-size: 0.9rem; padding: 10px 20px;">
-                Auto-Generate from Reference Photo
-            </button>
-        </div>
-    </div>
-</section>
-
-<div class="action-area">
-    <button id="render-btn" class="action-btn" disabled>Start Rendering</button>
-</div>
-<div class="action-area" style="margin-top: 0; padding-top: 0;">
-    <div style="display: flex; align-items: center; justify-content: center; margin: 2rem 0;">
-        <span style="height: 1px; background: #333; width: 100px;"></span>
-        <span style="margin: 0 15px; color: #666; font-size: 0.9rem;">OR SKIP RENDER</span>
-        <span style="height: 1px; background: #333; width: 100px;"></span>
-    </div>
-
-    <div class="drop-zone" id="direct-upload-zone"
-        style="padding: 2rem; min-height: 150px; border-style: dashed; border-color: #444;">
-        <p style="margin-bottom: 0.5rem; color: #fff;">Already have a Main Cut?</p>
-        <p style="font-size: 0.85rem;">Upload here to generate <strong>Detail Views</strong> directly</p>
-        <input type="file" id="direct-upload-input" accept="image/*" hidden>
-    </div>
-</div>
-<section class="result-section hidden" id="result-section">
-    <h2>Result</h2>
-
-    <div class="comparison-container">
-        <span class="label label-after">After</span>
-        <span class="label label-before">Before</span>
-
-        <div class="image-wrapper after">
-            <img id="result-after" src="" alt="After">
-        </div>
-
-        <div class="image-wrapper before" style="width: 50%;">
-            <img id="result-before" src="" alt="Before">
-        </div>
-
-        <div class="slider-wrapper">
-            <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider">
-            <div class="slider-handle" style="left: 50%;"></div>
-        </div>
-    </div>
-
-    <div id="thumbnailContainer"></div>
-
-    <div class="download-area">
-        <div class="button-group">
-            <button id="upscaleBtn" class="action-btn">Upscale & Download</button>
-            <button id="detailBtn" class="action-btn secondary">Generate Detail View</button>
-            <button id="videoStudioBtn" class="action-btn secondary">VIDEO STUDIO</button>
-        </div>
-        <p id="upscaleStatus" class="hidden">고화질 변환 중입니다... (약 30~60초 소요)</p>
-        <p id="detailStatus" class="hidden">촬영 중입니다... (약 40~60초)</p>
-    </div>
-
-    <div id="detail-section" class="hidden">
-        <h3>Detail Views</h3>
-        <div class="detail-grid-landscape" id="detail-grid-landscape"></div>
-
-        <div style="height: 30px;"></div>
-        <div class="detail-grid-portrait" id="detail-grid-portrait"></div>
-    </div>
-</section>
-</main>
-</div>
-
-<div id="loading-overlay" class="hidden">
-    <div class="spinner"></div>
-    <p class="loading-title">Rendering your dream room...</p>
-    <p id="loading-status">Cleaning the room...</p>
-    <p id="timer">0s</p>
-</div>
-
-<div id="lightbox" class="lightbox hidden">
-    <span class="close-lightbox">&times;</span>
-    <img class="lightbox-content" id="lightbox-img">
-</div>
-
-<div id="global-modal" class="custom-modal hidden">
-    <div class="modal-content">
-        <h3 id="modal-title">Notification</h3>
-        <p id="modal-msg">메시지 내용</p>
-        <div class="modal-buttons">
-            <button id="modal-cancel-btn" class="action-btn secondary hidden">Cancel</button>
-            <button id="modal-ok-btn" class="action-btn">Confirm</button>
-        </div>
-    </div>
-</div>
-
-<div id="moodboard-generator-modal" class="custom-modal hidden">
-    <div class="modal-content"
-        style="max-width: 1600px; width: 95%; height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 0;">
-
-        <div style="padding: 1.5rem; background: #1a1a1a; border-bottom: 1px solid #333;">
-            <h3 style="margin: 0; color: #fff;">Auto-Generate Moodboard</h3>
-            <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #a1a1aa;">Upload a reference room photo to
-                extract furniture items.</p>
-        </div>
-
-        <div style="flex: 1; overflow: hidden; position: relative; padding: 2rem;">
-
-            <div id="mb-gen-step1"
-                style="height: 100%; display: flex; flex-direction: column; justify-content: center; max-width: 600px; margin: 0 auto;">
-                <div class="drop-zone" id="mb-gen-drop-zone" style="padding: 4rem;">
-                    <p>Drag & Drop reference photo or <strong>Browse</strong></p>
-                    <input type="file" id="mb-gen-input" accept="image/*" hidden>
+                    <div style="text-align: center; margin-top: 1rem;">
+                        <p style="font-size: 0.9rem; color: #a1a1aa; margin-bottom: 0.5rem;">Don't have a moodboard?</p>
+                        <button id="open-mb-gen-btn" class="action-btn secondary"
+                            style="font-size: 0.9rem; padding: 10px 20px;">
+                            Auto-Generate from Reference Photo
+                        </button>
+                    </div>
                 </div>
-                <div id="mb-gen-preview-container" class="hidden"
-                    style="margin-bottom: 1rem; position: relative; width: 100%; height: 400px; display: flex; justify-content: center; align-items: center; background: #000; border-radius: 8px; border: 1px solid #333;">
-                    <img id="mb-gen-preview" src="" alt="Ref Preview"
-                        style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;">
-                    <button id="mb-gen-remove" class="icon-btn"
-                        style="top: 10px; right: 10px; position: absolute; z-index: 10;">×</button>
+            </section>
+
+            <div class="action-area">
+                <button id="render-btn" class="glow-btn" disabled>
+                    <span class="material-symbols-outlined">auto_fix_high</span> START RENDERING
+                </button>
+            </div>
+            <div class="action-area" style="margin-top: 0; padding-top: 0;">
+                <div style="display: flex; align-items: center; justify-content: center; margin: 2rem 0;">
+                    <span style="height: 1px; background: #333; width: 100px;"></span>
+                    <span style="margin: 0 15px; color: #666; font-size: 0.9rem;">OR SKIP RENDER</span>
+                    <span style="height: 1px; background: #333; width: 100px;"></span>
                 </div>
-                <button id="mb-gen-action-btn" class="action-btn" disabled
-                    style="width: 100%; margin-top: 1rem;">Generate 5 Options</button>
+
+                <div class="drop-zone" id="direct-upload-zone" style="padding: 2rem; min-height: 150px;">
+                    <p style="margin-bottom: 0.5rem; color: #fff;">Already have a Main Cut?</p>
+                    <p style="font-size: 0.85rem;">Upload here to generate <strong>Detail Views</strong> directly</p>
+                    <input type="file" id="direct-upload-input" accept="image/*" hidden>
+                </div>
+            </div>
+            <section class="result-section hidden" id="result-section">
+                <h2>Result</h2>
+
+                <div class="comparison-container" id="comparison-container">
+                    <button id="close-result-btn" class="icon-btn" title="Close result">&times;</button>
+                    <span class="label label-after">After</span>
+                    <span class="label label-before">Before</span>
+
+                    <div class="image-wrapper after">
+                        <img id="result-after" src="" alt="After">
+                    </div>
+
+                    <div class="image-wrapper before" style="width: 50%;">
+                        <img id="result-before" src="" alt="Before">
+                    </div>
+
+                    <div class="slider-wrapper">
+                        <input type="range" min="0" max="100" value="50" class="slider" id="compare-slider">
+                        <div class="slider-handle" style="left: 50%;"></div>
+                    </div>
+                </div>
+
+                <div id="thumbnailContainer"></div>
+
+                <div class="download-area">
+                    <div class="button-group">
+                        <button id="upscaleBtn" class="glow-btn burgundy">
+                            <span class="material-symbols-outlined">file_download</span> UPSCALE & DOWNLOAD
+                        </button>
+                        <button id="detailBtn" class="glow-btn">
+                            <span class="material-symbols-outlined">auto_fix_high</span> START DETAIL RENDERING
+                        </button>
+                    </div>
+                    <p id="upscaleStatus" class="hidden">고화질 변환 중입니다... (약 30~60초 소요)</p>
+                    <p id="detailStatus" class="hidden">촬영 중입니다... (약 40~60초)</p>
+                </div>
+
+                <div id="detail-section" class="hidden">
+                    <h3>Detail Views</h3>
+                    <div class="detail-grid-landscape" id="detail-grid-landscape"></div>
+
+                    <div style="height: 30px;"></div>
+                    <div class="detail-grid-portrait" id="detail-grid-portrait"></div>
+                </div>
+            </section>
+            </main>
+    </div>
+
+    <div id="loading-overlay" class="hidden">
+        <div class="spinner"></div>
+        <p class="loading-title">Rendering your dream room...</p>
+        <p id="loading-status">Cleaning the room...</p>
+        <p id="timer">0s</p>
+    </div>
+
+    <div id="lightbox" class="lightbox hidden">
+        <span class="close-lightbox">&times;</span>
+        <img class="lightbox-content" id="lightbox-img">
+    </div>
+
+    <div id="global-modal" class="custom-modal hidden">
+        <div class="modal-content">
+            <h3 id="modal-title">Notification</h3>
+            <p id="modal-msg">메시지 내용</p>
+            <div class="modal-buttons">
+                <button id="modal-cancel-btn" class="action-btn secondary hidden">Cancel</button>
+                <button id="modal-ok-btn" class="action-btn">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="moodboard-generator-modal" class="custom-modal hidden">
+        <div class="modal-content"
+            style="max-width: 1600px; width: 95%; height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 0;">
+
+            <div style="padding: 1.5rem; background: #1a1a1a; border-bottom: 1px solid #333;">
+                <h3 style="margin: 0; color: #fff;">Auto-Generate Moodboard</h3>
+                <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #a1a1aa;">Upload a reference room photo to
+                    extract furniture items.</p>
             </div>
 
-            <div id="mb-gen-step2" class="hidden" style="height: 100%; display: flex; gap: 2rem;">
+            <div style="flex: 1; overflow: hidden; position: relative; padding: 2rem;">
 
-                <div
-                    style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid #333; padding-right: 2rem; min-width: 300px;">
-                    <h4
-                        style="margin-bottom: 1rem; color: #fff; text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px;">
-                        Reference Photo</h4>
+                <div id="mb-gen-step1"
+                    style="height: 100%; display: flex; flex-direction: column; justify-content: center; max-width: 600px; margin: 0 auto;">
+                    <div class="drop-zone" id="mb-gen-drop-zone" style="padding: 4rem;">
+                        <p>Drag & Drop reference photo or <strong>Browse</strong></p>
+                        <input type="file" id="mb-gen-input" accept="image/*" hidden>
+                    </div>
+                    <div id="mb-gen-preview-container" class="hidden"
+                        style="margin-bottom: 1rem; position: relative; width: 100%; height: 400px; display: flex; justify-content: center; align-items: center; background: #000; border-radius: 8px; border: 1px solid #333;">
+                        <img id="mb-gen-preview" src="" alt="Ref Preview"
+                            style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;">
+                        <button id="mb-gen-remove" class="icon-btn"
+                            style="top: 10px; right: 10px; position: absolute; z-index: 10;">×</button>
+                    </div>
+                    <button id="mb-gen-action-btn" class="action-btn" disabled
+                        style="width: 100%; margin-top: 1rem;">Generate 5 Options</button>
+                </div>
+
+                <div id="mb-gen-step2" class="hidden" style="height: 100%; display: flex; gap: 2rem;">
+
                     <div
-                        style="flex: 1; background: #000; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 1px solid #333; padding: 10px;">
-                        <img id="mb-step2-ref-img" src="" alt="Original"
-                            style="width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; display: block; cursor: zoom-in;">
+                        style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid #333; padding-right: 2rem; min-width: 300px;">
+                        <h4
+                            style="margin-bottom: 1rem; color: #fff; text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px;">
+                            Reference Photo</h4>
+                        <div
+                            style="flex: 1; background: #000; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 1px solid #333; padding: 10px;">
+                            <img id="mb-step2-ref-img" src="" alt="Original"
+                                style="width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; display: block; cursor: zoom-in;">
+                        </div>
+                    </div>
+
+                    <div style="flex: 2; display: flex; flex-direction: column; overflow: hidden;">
+                        <h4
+                            style="margin-bottom: 1rem; color: #fff; text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px;">
+                            Generated Options (Select Best)</h4>
+
+                        <div id="mb-gen-loading" class="hidden"
+                            style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                            <div class="spinner"></div>
+                            <p>Analyzing furniture & Creating layouts...</p>
+                        </div>
+
+                        <div class="detail-grid" id="mb-gen-grid">
+                        </div>
+
+                        <div style="padding-top: 1rem; text-align: center; border-top: 1px solid #333;">
+                            <button id="mb-gen-retry-btn" class="action-btn secondary"
+                                style="width: 100%; padding: 12px; font-size: 0.9rem;">
+                                &#x21bb; Regenerate Moodboards (Try Again)
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div style="flex: 2; display: flex; flex-direction: column; overflow: hidden;">
-                    <h4
-                        style="margin-bottom: 1rem; color: #fff; text-transform: uppercase; font-size: 0.9rem; letter-spacing: 1px;">
-                        Generated Options (Select Best)</h4>
+            </div>
 
-                    <div id="mb-gen-loading" class="hidden"
+            <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
+                <button id="mb-gen-close-btn" class="action-btn secondary"
+                    style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="floorplan-generator-modal" class="custom-modal hidden">
+        <div class="modal-content" style="max-width: 1400px; width: 95%; height: 90vh; padding: 0;">
+
+            <div style="padding: 1.5rem; background: #1a1a1a; border-bottom: 1px solid #333;">
+                <h3 style="margin: 0; color: #fff; font-size: 1.5rem;">Generate Perfect Frontal View</h3>
+                <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #a1a1aa;">
+                    Upload multiple photos of the room (angled, partial, etc.). AI will synthesize a perfect frontal
+                    view.
+                </p>
+            </div>
+
+            <div class="fp-modal-split">
+                <div class="fp-left-panel">
+                    <div style="flex: 1; display: flex; flex-direction: column;">
+                        <h4 class="fp-section-title">Upload Room Photos (Multiple allowed)</h4>
+
+                        <div class="drop-zone" id="fp-ref-drop-zone" style="border-style: dashed; flex: 1;">
+                            <p><strong>Drag & Drop Photos Here</strong><br>(Angle shots, Corners, Floor, Ceiling)</p>
+                            <input type="file" id="fp-ref-input" accept="image/*" multiple hidden>
+                        </div>
+
+                        <div id="fp-ref-preview-container" class="hidden"
+                            style="position: relative; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; overflow-y: auto; max-height: 200px;">
+                        </div>
+                        <button id="fp-ref-remove-all" class="action-btn secondary hidden"
+                            style="margin-top: 10px; font-size: 0.8rem; padding: 5px 10px; align-self: center;">Clear
+                            All</button>
+                    </div>
+
+                    <div style="margin-top: 2rem; text-align: center;">
+                        <button id="fp-generate-btn" class="action-btn" style="width: 100%;" disabled>
+                            GENERATE FRONTAL VIEW
+                        </button>
+                    </div>
+                </div>
+
+                <div class="fp-right-panel">
+                    <h4 class="fp-section-title" style="width: 100%; text-align: center;">Generated Results (Select
+                        Best)</h4>
+
+                    <div id="fp-placeholder-text"
+                        style="flex: 1; display: flex; align-items: center; justify-content: center; color: #555;">
+                        <p>Results will appear here</p>
+                    </div>
+
+                    <div id="fp-loading" class="hidden"
                         style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                        <div class="spinner"></div>
-                        <p>Analyzing furniture & Creating layouts...</p>
+                        <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                        <p>Synthesizing 3D Space & Correcting Perspective...</p>
                     </div>
 
-                    <div class="detail-grid" id="mb-gen-grid">
+                    <div class="detail-grid" id="fp-gen-grid" style="display: none;">
                     </div>
 
-                    <div style="padding-top: 1rem; text-align: center; border-top: 1px solid #333;">
-                        <button id="mb-gen-retry-btn" class="action-btn secondary"
+                    <div id="fp-result-actions" class="hidden"
+                        style="width: 100%; margin-top: 1.5rem; text-align: center; border-top: 1px solid #333; padding-top: 1rem;">
+                        <button id="fp-retry-btn" class="action-btn secondary"
                             style="width: 100%; padding: 12px; font-size: 0.9rem;">
-                            &#x21bb; Regenerate Moodboards (Try Again)
+                            &#x21bb; REGENERATE (TRY AGAIN)
                         </button>
                     </div>
                 </div>
             </div>
 
-        </div>
-
-        <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
-            <button id="mb-gen-close-btn" class="action-btn secondary"
-                style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
-        </div>
-    </div>
-</div>
-
-<div id="floorplan-generator-modal" class="custom-modal hidden">
-    <div class="modal-content" style="max-width: 1400px; width: 95%; height: 90vh; padding: 0;">
-
-        <div style="padding: 1.5rem; background: #1a1a1a; border-bottom: 1px solid #333;">
-            <h3 style="margin: 0; color: #fff; font-size: 1.5rem;">Generate Perfect Frontal View</h3>
-            <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #a1a1aa;">
-                Upload multiple photos of the room (angled, partial, etc.). AI will synthesize a perfect frontal
-                view.
-            </p>
-        </div>
-
-        <div class="fp-modal-split">
-            <div class="fp-left-panel">
-                <div style="flex: 1; display: flex; flex-direction: column;">
-                    <h4 class="fp-section-title">Upload Room Photos (Multiple allowed)</h4>
-
-                    <div class="drop-zone" id="fp-ref-drop-zone" style="border-style: dashed; flex: 1;">
-                        <p><strong>Drag & Drop Photos Here</strong><br>(Angle shots, Corners, Floor, Ceiling)</p>
-                        <input type="file" id="fp-ref-input" accept="image/*" multiple hidden>
-                    </div>
-
-                    <div id="fp-ref-preview-container" class="hidden"
-                        style="position: relative; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; overflow-y: auto; max-height: 200px;">
-                    </div>
-                    <button id="fp-ref-remove-all" class="action-btn secondary hidden"
-                        style="margin-top: 10px; font-size: 0.8rem; padding: 5px 10px; align-self: center;">Clear
-                        All</button>
-                </div>
-
-                <div style="margin-top: 2rem; text-align: center;">
-                    <button id="fp-generate-btn" class="action-btn" style="width: 100%;" disabled>
-                        GENERATE FRONTAL VIEW
-                    </button>
-                </div>
-            </div>
-
-            <div class="fp-right-panel">
-                <h4 class="fp-section-title" style="width: 100%; text-align: center;">Generated Results (Select
-                    Best)</h4>
-
-                <div id="fp-placeholder-text"
-                    style="flex: 1; display: flex; align-items: center; justify-content: center; color: #555;">
-                    <p>Results will appear here</p>
-                </div>
-
-                <div id="fp-loading" class="hidden"
-                    style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
-                    <p>Synthesizing 3D Space & Correcting Perspective...</p>
-                </div>
-
-                <div class="detail-grid" id="fp-gen-grid" style="display: none;">
-                </div>
-
-                <div id="fp-result-actions" class="hidden"
-                    style="width: 100%; margin-top: 1.5rem; text-align: center; border-top: 1px solid #333; padding-top: 1rem;">
-                    <button id="fp-retry-btn" class="action-btn secondary"
-                        style="width: 100%; padding: 12px; font-size: 0.9rem;">
-                        &#x21bb; REGENERATE (TRY AGAIN)
-                    </button>
-                </div>
+            <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
+                <button id="fp-close-btn" class="action-btn secondary"
+                    style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
             </div>
         </div>
-
-        <div style="padding: 1rem; border-top: 1px solid #333; text-align: right; background: #1a1a1a;">
-            <button id="fp-close-btn" class="action-btn secondary"
-                style="padding: 10px 20px; font-size: 0.9rem;">Close</button>
-        </div>
     </div>
-</div>
 
-<script src="/static/js/script.js"></script>
+    <script src="/static/js/script.js"></script>
 </body>
 
 </html>

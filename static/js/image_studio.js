@@ -8,41 +8,63 @@ document.addEventListener('DOMContentLoaded', () => {
     const menuScreen = document.getElementById('menu-screen');
     const workspace1 = document.getElementById('workspace-feature-1');
 
+    // UI Helper Functions
+    function showMenu() {
+        workspace1.style.display = 'none';
+        menuScreen.style.display = 'flex'; // Ensure Flex layout
+        window.scrollTo(0, 0);
+    }
+
+    function showWorkspace() {
+        menuScreen.style.display = 'none';
+        workspace1.style.display = 'flex';
+        window.scrollTo(0, 0);
+    }
+
+    // Initialize History
+    // Replace current state to ensure we start with a 'menu' state if loaded fresh
+    if (!history.state) {
+        history.replaceState({ view: 'menu' }, '', '');
+    }
+
+    // Handle Browser Back Button
+    window.addEventListener('popstate', (event) => {
+        if (event.state && event.state.view === 'workspace') {
+            showWorkspace();
+        } else {
+            // Default to menu for any other state or null
+            showMenu();
+        }
+    });
+
     // Feature Buttons
     const btnFeature1 = document.getElementById('btn-feature-1'); // Real Photo
-    const btnFeature2 = document.getElementById('btn-feature-2'); // Edit
-    const btnFeature3 = document.getElementById('btn-feature-3'); // Decorate
-
-    // Back Buttons
-    const btnBack1 = document.getElementById('back-to-menu-1');
-
-    // 1. Generate Real Photo 클릭 시 -> 워크스페이스 보이기
     if (btnFeature1) {
         btnFeature1.onclick = () => {
-            menuScreen.style.display = 'none';
-            workspace1.style.display = 'flex';
+            history.pushState({ view: 'workspace' }, '', '');
+            showWorkspace();
         };
     }
 
-    // 2. Edit Photo 클릭 시 (Placeholder)
+    const btnFeature2 = document.getElementById('btn-feature-2'); // Edit
     if (btnFeature2) {
-        btnFeature2.onclick = () => {
-            showAlert("Coming Soon", "Photo Editing feature is under development.");
-        };
+        btnFeature2.onclick = () => showAlert("Coming Soon", "Photo Editing feature is under development.");
     }
 
-    // 3. Decorate Photo 클릭 시 (Placeholder)
+    const btnFeature3 = document.getElementById('btn-feature-3'); // Decorate
     if (btnFeature3) {
-        btnFeature3.onclick = () => {
-            showAlert("Coming Soon", "Decoration & Lighting feature is under development.");
-        };
+        btnFeature3.onclick = () => showAlert("Coming Soon", "Decoration & Lighting feature is under development.");
     }
 
-    // Back to Menu 버튼 로직
+    // Back Buttons (Apps Breadcrumb)
+    const btnBack1 = document.getElementById('back-to-menu-1');
     if (btnBack1) {
         btnBack1.onclick = () => {
-            workspace1.style.display = 'none';
-            menuScreen.style.display = 'grid'; // Grid 복구
+            if (history.state && history.state.view === 'workspace') {
+                history.back(); // Triggers popstate -> showMenu()
+            } else {
+                showMenu(); // Fallback
+            }
         };
     }
 
@@ -58,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const placeholderEl = document.getElementById('fp-placeholder-text');
     const resultContainer = document.getElementById('fp-result-container');
     const gridEl = document.getElementById('fp-gen-grid');
-    const retryBtn = document.getElementById('fp-retry-btn');
+
 
     // 모달 관련
     const globalModal = document.getElementById('global-modal');
@@ -105,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
         previewContainer.innerHTML = '';
 
         if (refFiles.length > 0) {
-            previewContainer.style.display = 'flex';
+            previewContainer.style.display = 'grid'; // Grid Layout Check
             removeAllBtn.classList.remove('hidden');
             generateBtn.disabled = false;
 
@@ -156,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         generateBtn.disabled = true;
         generateBtn.textContent = "GENERATING...";
-        if (retryBtn) retryBtn.disabled = true;
+
 
         const formData = new FormData();
         refFiles.forEach(f => formData.append('input_photos', f));
@@ -178,7 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     img.alt = `Generated Image ${idx + 1}`;
 
                     const downBtn = document.createElement('button');
-                    downBtn.textContent = "DOWNLOAD";
+                    downBtn.className = 'glow-btn burgundy detail-upscale-btn';
+                    downBtn.innerHTML = '<span class="material-symbols-outlined">file_download</span> DOWNLOAD';
 
                     downBtn.onclick = () => {
                         const link = document.createElement('a');
@@ -206,10 +229,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             generateBtn.disabled = false;
             generateBtn.innerHTML = `<span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span> Generate Real Photo`;
-            if (retryBtn) retryBtn.disabled = false;
+
         }
     }
 
     if (generateBtn) generateBtn.onclick = generate;
-    if (retryBtn) retryBtn.onclick = generate;
+
 });

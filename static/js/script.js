@@ -138,6 +138,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const detailGridLandscape = document.getElementById('detail-grid-landscape');
     const detailGridPortrait = document.getElementById('detail-grid-portrait');
 
+    const closeResultBtn = document.getElementById('close-result-btn');
+    if (closeResultBtn) {
+        closeResultBtn.onclick = () => {
+            if (resultSection) resultSection.classList.add('hidden');
+            if (detailSection) detailSection.classList.add('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+    }
+
+
     const lightbox = document.getElementById('lightbox');
     const lightboxImg = document.getElementById('lightbox-img');
     const closeLightbox = document.querySelector('.close-lightbox');
@@ -792,6 +802,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const isPortrait = resultAfter.naturalHeight > resultAfter.naturalWidth;
                     if (comparisonContainer) {
                         comparisonContainer.style.aspectRatio = isPortrait ? "4 / 5" : "16 / 9";
+                        comparisonContainer.classList.add('direct-mode'); // 슬라이더 숨김 모드
                     }
                     initSlider();
                     resultSection.scrollIntoView({ behavior: 'smooth' });
@@ -826,6 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderBtn.disabled = true;
             loadingOverlay.classList.remove('hidden');
             resultSection.classList.add('hidden');
+            if (comparisonContainer) comparisonContainer.classList.remove('direct-mode'); // 일반 렌더링 시 슬라이더 복구
 
             let startTime = Date.now();
             if (timerElement) timerElement.textContent = "0s";
@@ -1114,8 +1126,8 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const upBtn = document.createElement('button');
-        upBtn.className = 'detail-upscale-btn';
-        upBtn.textContent = "UPSCALE & DOWNLOAD";
+        upBtn.className = 'glow-btn burgundy detail-upscale-btn';
+        upBtn.innerHTML = '<span class="material-symbols-outlined">file_download</span> UPSCALE & DOWNLOAD';
 
         upBtn.onclick = async (e) => {
             e.stopPropagation();

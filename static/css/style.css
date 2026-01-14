@@ -135,14 +135,131 @@ button,
     background-color: rgba(255, 255, 255, 0.1);
 }
 
+.button-group {
+    display: flex;
+    flex-direction: column;
+    /* 세로 배치 */
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+
 /* --- Upload Section --- */
 .upload-section {
     margin-bottom: 3rem;
 }
 
+/* Modern Glow Button */
+@keyframes button-glow {
+    0% {
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.1), 0 0 1px rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(255, 255, 255, 0.35), 0 0 5px rgba(255, 255, 255, 0.3);
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+
+    100% {
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.1), 0 0 1px rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+}
+
+@keyframes button-glow-burgundy {
+    0% {
+        box-shadow: 0 0 10px rgba(74, 18, 21, 0.3), 0 0 1px rgba(74, 18, 21, 0.4);
+        border-color: rgba(150, 50, 50, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 25px rgba(139, 0, 0, 0.6), 0 0 8px rgba(139, 0, 0, 0.5);
+        border-color: rgba(255, 100, 100, 0.8);
+    }
+
+    100% {
+        box-shadow: 0 0 10px rgba(74, 18, 21, 0.3), 0 0 1px rgba(74, 18, 21, 0.4);
+        border-color: rgba(150, 50, 50, 0.4);
+    }
+}
+
+.glow-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 24px;
+    /* 기존 14px 30px에서 축소 */
+    background: linear-gradient(135deg, #333 0%, #222 100%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 30px;
+    color: #eee;
+    font-size: 0.85rem;
+    /* 기존 0.95rem에서 축소 */
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    min-width: 260px;
+    /* 고정 너비 느낌으로 전체 버튼 사이즈 통일 */
+}
+
+.glow-btn:not(:disabled) {
+    background: linear-gradient(135deg, #444 0%, #333 100%);
+    color: white;
+    animation: button-glow 2.5s infinite ease-in-out;
+}
+
+.glow-btn.burgundy:not(:disabled) {
+    background: var(--brand-color);
+    background: linear-gradient(135deg, var(--brand-color) 0%, #300a0c 100%);
+    border-color: rgba(255, 255, 255, 0.3);
+    animation: button-glow-burgundy 2.5s infinite ease-in-out;
+}
+
+.glow-btn.burgundy:not(:disabled):hover {
+    background: linear-gradient(135deg, var(--brand-hover) 0%, var(--brand-color) 100%);
+}
+
+.glow-btn:not(:disabled):hover {
+    background: linear-gradient(135deg, #555 0%, #444 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.glow-btn:disabled {
+    background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+    opacity: 0.5;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: not-allowed;
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+    transform: none;
+}
+
+.glow-btn .material-symbols-outlined {
+    font-size: 20px;
+}
+
+.detail-upscale-btn .material-symbols-outlined {
+    font-size: 16px;
+    /* 작은 버튼용 아이콘 크기 축소 */
+}
+
 .drop-zone {
+    width: 100%;
+    max-width: 1000px;
+    /* Step 3 드랍박스 기준 너비 통일 */
+    margin: 0 auto;
+    /* 중앙 정렬 */
     background-color: var(--card-bg);
-    border: 1px solid var(--border-color);
+    border: 1px dashed var(--border-color);
+    /* 점선 테두리 통일 */
     border-radius: var(--radius);
     padding: 4rem;
     text-align: center;
@@ -177,6 +294,10 @@ button,
     border-radius: var(--radius);
     overflow: hidden;
     border: 1px solid var(--border-color);
+    width: 100%;
+    max-width: 1000px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 #image-preview {
@@ -204,9 +325,26 @@ button,
 }
 
 .icon-btn:hover {
-    background: rgba(0, 0, 0, 0.9);
-    border-color: white;
+    background: rgba(255, 0, 0, 0.6);
+    transform: scale(1.1);
 }
+
+#close-result-btn {
+    top: 20px;
+    right: 20px;
+    z-index: 110;
+    width: 44px;
+    height: 44px;
+    font-size: 28px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+#close-result-btn:hover {
+    background: rgba(255, 50, 50, 0.8);
+}
+
+
 
 /* --- Style Selection --- */
 .style-section {
@@ -333,6 +471,9 @@ button,
     overflow: hidden;
     border: 1px solid var(--border-color);
     width: 100%;
+    max-width: 1000px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 #moodboard-preview {
@@ -348,10 +489,7 @@ button,
     margin-top: 2rem;
 }
 
-#render-btn {
-    padding: 1.2rem 4rem;
-    font-size: 1.2rem;
-}
+
 
 /* --- Result Section --- */
 .result-section h2 {
@@ -363,12 +501,29 @@ button,
 .comparison-container {
     position: relative;
     width: 100%;
+    max-width: 1000px;
     aspect-ratio: 16 / 9;
     overflow: hidden;
     border-radius: var(--radius);
-    margin-bottom: 2rem;
+    margin: 0 auto 2rem auto;
     background-color: #222;
     border: 1px solid var(--border-color);
+}
+
+/* Direct Upload Mode (No Slider) */
+.comparison-container.direct-mode .label,
+.comparison-container.direct-mode .slider-wrapper {
+    display: none !important;
+}
+
+.comparison-container.direct-mode .image-wrapper.before {
+    width: 0 !important;
+    border-right: none !important;
+    /* 흰색 선 제거 */
+}
+
+.comparison-container.direct-mode .image-wrapper.after {
+    width: 100% !important;
 }
 
 .image-wrapper {
@@ -573,25 +728,21 @@ button,
 }
 
 .detail-upscale-btn {
-    width: 100%;
-    background-color: #4A1215;
-    color: white;
-    border: none;
-    padding: 8px 0;
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: background 0.3s;
+    width: 180px;
+    /* 고정 너비로 한 줄 유지 */
     position: absolute;
-    bottom: 0;
-    left: 0;
-    z-index: 5;
-    opacity: 0.9;
-}
-
-.detail-card:hover .detail-upscale-btn {
-    opacity: 1;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    /* 정확한 중앙 정렬 */
+    z-index: 10;
+    min-width: unset;
+    padding: 6px 12px;
+    /* 위아래 폭 약 30% 축소 */
+    font-size: 0.7rem;
+    border-radius: 20px;
+    white-space: nowrap;
+    /* 텍스트 줄바꿈 방지 */
 }
 
 /* --- Modals & Loading --- */

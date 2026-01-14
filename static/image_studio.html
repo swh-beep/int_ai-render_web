@@ -22,56 +22,55 @@
             padding: 0;
             font-family: 'Outfit', sans-serif;
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
         }
 
         .hidden {
             display: none !important;
         }
 
-        /* 1. Header Styles */
-        .is-header {
-            width: 100%;
-            padding: 1.5rem;
+        /* Main Layout - Side by Side */
+        .is-main-layout {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 200px;
+            padding: 100px 5% 5rem 5%;
+            min-height: 100vh;
+        }
+
+        /* 1. Left Side - Logo & Title */
+        .is-branding {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 10px;
-            background: #000;
-            z-index: 10;
+            gap: 30px;
+            padding-top: 250px;
+            position: sticky;
+            top: 100px;
         }
 
-        .is-header-logo {
+        .is-branding-logo {
             height: 50px;
             width: auto;
             object-fit: contain;
         }
 
-        .is-header h1 {
-            font-size: 2.25rem;
+        .is-branding h1 {
+            font-size: 3rem;
             font-weight: 600;
             margin: 0;
             letter-spacing: -0.5px;
         }
 
-        /* 2. Menu Grid (Selection Screen) - Centered */
-        .is-menu-container {
-            width: 100%;
-            padding: 2rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-        }
-
+        /* 2. Right Side - Menu Grid */
         .is-menu-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            grid-template-rows: 280px 180px;
-            gap: 20px;
-            max-width: 900px;
-            width: 100%;
+            grid-template-rows: 400px 250px;
+            gap: 30px;
+            min-width: 600px;
+            max-width: 1000px;
+            width: 800px;
         }
 
         .is-card-btn {
@@ -80,8 +79,13 @@
             overflow: hidden;
             cursor: pointer;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background-color: #111;
+            /* Border removed completely */
+            border: none;
+            /* Anti-aliasing Fix: Cover edges with 2px inner black shadow */
+            box-shadow: inset 0 0 0 2px #000;
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            background-color: #000;
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
@@ -92,33 +96,57 @@
 
         .is-card-btn:hover {
             transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            border-color: rgba(255, 255, 255, 0.3);
+            /* Keep inner shadow, no outer shadow */
+            box-shadow: inset 0 0 0 2px #000;
+        }
+
+        /* Card Background with Overlay */
+        .is-card-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 24px;
+            /* Simple Linear Gradient */
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 10%, rgba(0, 0, 0, 0.4) 80%, rgba(0, 0, 0, 0.9) 90%, rgba(0, 0, 0, 1) 100%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .is-card-btn::before {
+            /* Remove old overlay */
+            display: none;
+        }
+
+        .card-content {
+            position: relative;
+            z-index: 2;
         }
 
         /* Hero Card (Real Photo) - Spans 2 columns */
         .card-hero {
             grid-column: 1 / -1;
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 60%, rgba(0, 0, 0, 1) 100%),
-                url('https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?q=80&w=1600&auto=format&fit=crop');
+            background-image: url('/static/card_real.jpg');
             background-size: cover;
             background-position: center;
         }
 
         /* Sub Cards */
         .card-sub-1 {
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 60%, rgba(0, 0, 0, 1) 100%),
-                url('https://images.unsplash.com/photo-1616486338812-3dadae4b4f9d?q=80&w=800&auto=format&fit=crop');
+            background-image: url('/static/card_edit_masked.png');
             background-size: cover;
             background-position: center;
         }
 
         .card-sub-2 {
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 60%, rgba(0, 0, 0, 1) 100%),
-                url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop');
+            background-image: url('/static/card_decorate_final.png');
             background-size: cover;
             background-position: center;
         }
+
+
 
         .card-content h2 {
             font-size: 2rem;
@@ -167,7 +195,8 @@
 
         /* Breadcrumb Navigation */
         .workspace-breadcrumb {
-            padding: 1rem 0;
+            padding: 1rem 0 1rem 15px;
+            /* Added left padding for alignment */
             display: flex;
             align-items: center;
             gap: 10px;
@@ -209,14 +238,61 @@
         }
 
         /* Workspace Card Layout - Side by Side - Fixed Width */
+        /* Workspace Wrapper */
+        .is-workspace {
+            width: 95%;
+            max-width: 2000px;
+            /* Expanded Width to 2000px */
+            margin: 0 auto;
+            padding-top: 50px;
+            padding-bottom: 100px;
+            /* More bottom padding */
+            margin-bottom: 50px;
+            /* Push up from bottom */
+            box-sizing: border-box;
+            display: none;
+            /* Controlled by JS */
+            flex-direction: column;
+        }
+
+        /* Workspace Card Layout - Side by Side */
         .is-workspace-card {
             display: flex;
+            flex-direction: row;
+            /* Fixed sides default */
             gap: 0;
             background: #111;
             border-radius: 16px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.1);
-            min-height: 600px;
+            min-height: 720px;
+            /* Reduced height by 10% */
+            width: 100%;
+        }
+
+        /* Responsive: Stack vertically on smaller screens */
+        @media (max-width: 1100px) {
+            .is-workspace-card {
+                flex-direction: column;
+                height: auto;
+            }
+
+            .is-panel-left {
+                width: 100% !important;
+                max-width: 100% !important;
+                min-width: unset !important;
+                flex: none;
+                border-right: none;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .is-panel-right {
+                width: 100% !important;
+                min-width: unset !important;
+                flex: none;
+                height: 600px;
+                /* Fixed height for preview area on mobile */
+            }
         }
 
         .is-panel-left {
@@ -233,13 +309,25 @@
         .is-panel-right {
             flex: 1 1 auto;
             min-width: 500px;
-            padding: 2rem;
+            padding: 4rem 2rem 2rem 2rem;
+            /* Increased top padding to fix cropping */
             background: #1a1a1a;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
+            /* Fix cropping issue */
             overflow-y: auto;
+            /* Hide Scrollbar */
+            scrollbar-width: none;
+            /* Firefox */
+            -ms-overflow-style: none;
+            /* IE/Edge */
+        }
+
+        .is-panel-right::-webkit-scrollbar {
+            display: none;
+            /* Chrome/Safari */
         }
 
         /* Section Title */
@@ -302,20 +390,22 @@
             color: #666;
         }
 
-        /* File Preview List - Grid of Thumbnails */
+        /* File Preview List - Grid of Thumbnails (3 per row) */
         .is-file-list {
             display: none;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
             gap: 10px;
             margin-bottom: 1rem;
-            max-height: 200px;
+            max-height: 300px;
             overflow-y: auto;
         }
 
         .is-file-item {
             position: relative;
-            width: 80px;
-            height: 80px;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            /* Force 4:3 Ratio */
             border-radius: 8px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -325,7 +415,10 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+            /* Fill the box */
         }
+
+
 
         .is-file-item .remove-btn {
             position: absolute;
@@ -462,21 +555,7 @@
             margin-bottom: 12px;
         }
 
-        .result-card button {
-            width: 100%;
-            padding: 10px;
-            background: #333;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 8px;
-            color: #fff;
-            cursor: pointer;
-            font-family: 'Outfit', sans-serif;
-            transition: background 0.2s;
-        }
 
-        .result-card button:hover {
-            background: #444;
-        }
 
         /* Loading Spinner */
         .loading-container {
@@ -590,12 +669,15 @@
 
 <body data-page="image-studio">
 
-    <header class="is-header">
-        <img src="/static/logo.png" alt="Logo" class="is-header-logo">
-        <h1>Image Studio</h1>
-    </header>
+    <!-- Menu Screen - Side by Side Layout -->
+    <div id="menu-screen" class="is-main-layout">
+        <!-- Left: Branding -->
+        <div class="is-branding">
+            <img src="/static/logo.png" alt="Logo" class="is-branding-logo">
+            <h1>Image Studio</h1>
+        </div>
 
-    <div id="menu-screen" class="is-menu-container">
+        <!-- Right: Menu Cards -->
         <div class="is-menu-grid">
             <div class="is-card-btn card-hero" id="btn-feature-1">
                 <div class="card-content">
@@ -622,7 +704,7 @@
                     <h2>Decorate Photo</h2>
                     <p>Add decorations & Lighting.</p>
                     <div class="card-action">
-                        <span class="material-symbols-outlined">lightbulb</span>
+                        <span class="material-symbols-outlined">edit</span>
                     </div>
                 </div>
             </div>
@@ -692,9 +774,6 @@
 
                 <div id="fp-result-container" class="result-container hidden">
                     <div id="fp-gen-grid" class="result-grid"></div>
-                    <button id="fp-retry-btn" class="retry-btn">
-                        ↻ Regenerate (Try Again)
-                    </button>
                 </div>
 
             </div>
