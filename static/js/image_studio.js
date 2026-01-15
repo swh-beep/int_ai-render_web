@@ -212,14 +212,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+// image_studio.js 파일 내부의 WorkspaceManager 클래스 안의 generate() 메서드를 이것으로 교체하세요.
+
         async generate() {
             if (this.refFiles.length === 0) return;
 
+            // 1. UI 초기화
             this.placeholderEl?.classList.add('hidden');
             this.resultContainer?.classList.add('hidden');
             if (this.gridEl) {
                 this.gridEl.innerHTML = '';
-                // [NEW] If Edit or Decorate, set grid to 1 column for large single result
+                // Edit/Decorate는 1장만 크게 보여주기
                 if (this.id === 'edit-image' || this.id === 'decorate-image') {
                     this.gridEl.style.gridTemplateColumns = '1fr';
                     this.gridEl.style.maxWidth = '1000px';
@@ -234,24 +237,46 @@ document.addEventListener('DOMContentLoaded', () => {
             this.generateBtn.disabled = true;
             this.generateBtn.textContent = "GENERATING...";
 
+            // 2. FormData 생성
             const formData = new FormData();
             this.refFiles.forEach(f => formData.append('input_photos', f));
             
-            // [NEW] Add instructions if applicable
-            if (this.instructionInput) {
-                formData.append('instructions', this.instructionInput.value);
+            // [핵심 수정] 엔드포인트 및 지시사항(Instructions) 처리 통합
+            // 기존에 위쪽에 있던 'if (this.instructionInput)...' 코드를 삭제하고 여기서 한 번에 처리합니다.
+            
+            let endpoint = '/generate-frontal-view'; // 기본값 (Real Photo)
+            
+            // 현재 입력된 텍스트 값을 실시간으로 가져옴 (참조 오류 방지)
+            const currentInstructions = this.instructionInput ? this.instructionInput.value.trim() : "";
+
+            console.log(`[Generate] Mode: ${this.id}, Instructions: "${currentInstructions}"`); // 디버깅용 로그
+
+            if (this.id === 'edit-image') {
+                endpoint = '/generate-image-edit';
+                formData.append('mode', 'edit');
+                // 입력값이 없으면 기본값 사용
+                formData.append('instructions', currentInstructions || "Rearrange furniture for better flow.");
+            } 
+            else if (this.id === 'decorate-image') {
+                endpoint = '/generate-image-edit';
+                formData.append('mode', 'decorate');
+                // 입력값이 없으면 기본값 사용
+                formData.append('instructions', currentInstructions || "Make it cozy and stylish.");
+            }
+            // Real Photo 모드일 때도 instructions가 있다면 보낼 수 있음 (선택 사항)
+            else if (currentInstructions) {
+                formData.append('instructions', currentInstructions);
             }
 
             try {
-                // For now, all features use the same synthesis endpoint
-                const res = await fetch('/generate-frontal-view', { method: 'POST', body: formData });
+                // 3. 서버 요청
+                const res = await fetch(endpoint, { method: 'POST', body: formData });
                 const data = await res.json();
 
                 if (res.ok && data.urls && data.urls.length > 0) {
                     this.loadingEl?.classList.add('hidden');
                     this.resultContainer?.classList.remove('hidden');
 
-                    // [NEW] If Edit or Decorate, only show the FIRST image
                     const urlsToShow = (this.id === 'edit-image' || this.id === 'decorate-image') ? [data.urls[0]] : data.urls;
 
                     urlsToShow.forEach((url, idx) => {
