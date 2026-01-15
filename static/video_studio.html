@@ -1,131 +1,662 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Video Studio</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
-  <link rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Studio - AI Interior</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <style>
+        /* Video Studio Layout - Full Width */
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            margin: 0;
+            padding: 0;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            min-height: 100vh;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Main Layout - Side by Side (REVERSED for Video Studio) */
+        .is-main-layout {
+            display: flex;
+            flex-direction: row-reverse; /* Reversed as requested */
+            justify-content: center;
+            align-items: flex-start;
+            gap: 200px;
+            padding: 100px 5% 5rem 5%;
+            min-height: 100vh;
+        }
+
+        /* 1. Branding (Now on Right due to flex-reverse) */
+        .is-branding {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+            padding-top: 250px;
+            position: sticky;
+            top: 100px;
+        }
+
+        .is-branding-logo {
+            height: 50px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .is-branding h1 {
+            font-size: 3rem;
+            font-weight: 600;
+            margin: 0;
+            letter-spacing: -0.5px;
+        }
+
+        /* 2. Menu Grid (Now on Left due to flex-reverse) */
+        .is-menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 400px 250px;
+            gap: 30px;
+            min-width: 600px;
+            max-width: 1000px;
+            width: 800px;
+        }
+
+        .is-card-btn {
+            position: relative;
+            border-radius: 24px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: none;
+            box-shadow: inset 0 0 0 2px #000;
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            padding: 2rem;
+            text-decoration: none;
+            color: white;
+        }
+
+        .is-card-btn:hover {
+            transform: translateY(-5px);
+            box-shadow: inset 0 0 0 2px #000;
+        }
+
+        .is-card-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 24px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 10%, rgba(0, 0, 0, 0.4) 80%, rgba(0, 0, 0, 0.9) 90%, rgba(0, 0, 0, 1) 100%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .card-content {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Video Feature Cards */
+        .card-hero {
+            grid-column: 1 / -1;
+            background-image: url('/static/video_card_1.jpg'); /* Placeholder or existing assets */
+            background-size: cover;
+            background-position: center;
+        }
+
+        .card-sub-1 {
+            background-image: url('/static/video_card_2.jpg');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .card-sub-2 {
+            background-image: url('/static/video_card_3.jpg');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .card-content h2 {
+            font-size: 2rem;
+            margin: 0 0 0.5rem 0;
+            font-weight: 500;
+        }
+
+        .card-content p {
+            font-size: 1rem;
+            opacity: 0.8;
+            margin: 0 0 1.5rem 0;
+            max-width: 80%;
+        }
+
+        .card-action {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Workspace Styles */
+        .is-workspace {
+            display: none;
+            width: 95%;
+            max-width: 2000px;
+            margin: 0 auto;
+            padding-top: 50px;
+            padding-bottom: 100px;
+            margin-bottom: 50px;
+            box-sizing: border-box;
+            flex-direction: column;
+            animation: fadeIn 0.4s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .workspace-breadcrumb {
+            padding: 1rem 0 1rem 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .breadcrumb-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+
+        .breadcrumb-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .breadcrumb-divider { color: #555; }
+        .breadcrumb-current { color: #888; font-size: 0.9rem; }
+
+        .is-workspace-card {
+            display: flex;
+            flex-direction: row;
+            gap: 0;
+            background: #111;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-height: 720px;
+            width: 100%;
+        }
+
+        .is-panel-left {
+            flex: 0 0 450px;
+            width: 450px;
+            padding: 2rem;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .is-panel-right {
+            flex: 1;
+            padding: 4rem 2rem 2rem 2rem;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+
+        .is-panel-right::-webkit-scrollbar { display: none; }
+
+        .is-section-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin: 0 0 0.75rem 0;
+            color: #fff;
+        }
+
+        .is-section-desc {
+            color: #888;
+            font-size: 0.95rem;
+            margin: 0 0 2rem 0;
+            line-height: 1.5;
+        }
+
+        /* Controls & Elements */
+        .is-upload-box {
+            position: relative;
+            border: 1px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.02);
+            margin-bottom: 1rem;
+            transition: all 0.3s;
+        }
+
+        .is-upload-box:hover { border-color: rgba(255, 255, 255, 0.5); background: rgba(255, 255, 255, 0.05); }
+
+        .is-internal-preview {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: transparent; z-index: 5; border-radius: 12px;
+            overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .is-internal-preview img, .is-internal-preview video {
+            max-width: 100%; max-height: 100%; object-fit: contain;
+        }
+
+        .is-internal-preview .remove-btn {
+            position: absolute; top: 12px; right: 12px;
+            width: 34px; height: 34px; background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%; color: #fff; display: flex;
+            align-items: center; justify-content: center; cursor: pointer;
+            z-index: 10; transition: all 0.2s;
+        }
+
+        .is-internal-preview .remove-btn:hover { background: rgba(255, 50, 50, 0.8); transform: scale(1.1); }
+
+        .is-file-list {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1rem;
+            max-height: 300px; overflow-y: auto;
+        }
+
+        .is-file-item {
+            position: relative; width: 100%; aspect-ratio: 4/3;
+            border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .is-file-item img { width: 100%; height: 100%; object-fit: cover; }
+
+        .is-generate-btn {
+            width: 100%; padding: 14px 24px; border-radius: 30px;
+            background: linear-gradient(135deg, #333 0%, #222 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2); color: #888;
+            font-size: 0.9rem; font-weight: 500; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: all 0.3s; margin-top: auto; text-transform: uppercase;
+        }
+
+        .is-generate-btn:not(:disabled) { background: linear-gradient(135deg, #444 0%, #333 100%); color: #fff; }
+
+        .spinner {
+            width: 50px; height: 50px; border: 3px solid #333; border-top: 3px solid #fff;
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Result Cards & Buttons */
+        .result-container { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; width: 100%; }
+
+        .result-card {
+            position: relative; background: #111; border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1); overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        .result-card:hover { border-color: rgba(255, 255, 255, 0.3); transform: translateY(-5px); }
+        .result-card video { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #000; }
+
+        .detail-upscale-btn {
+            position: absolute; bottom: 15px; left: 15px; right: 15px;
+            padding: 10px; border-radius: 8px; font-size: 0.8rem;
+            opacity: 0; transform: translateY(10px); transition: all 0.3s ease;
+            z-index: 10;
+        }
+        .result-card:hover .detail-upscale-btn { opacity: 1; transform: translateY(0); }
+
+        .glow-btn.burgundy {
+            background: linear-gradient(135deg, #4a0e0e 0%, #2a0505 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2); color: #fff;
+        }
+        .glow-btn.burgundy:hover { background: linear-gradient(135deg, #6a1414 0%, #3a0808 100%); }
+
+        /* Timeline Specific Styles (Workspace 2) */
+        .vs-timeline-area {
+            width: 100%;
+            background: #111;
+            border-radius: 12px;
+            margin-top: 2rem;
+            padding: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .timeline-container {
+            position: relative;
+            height: 120px;
+            background: #000;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+
+        .timeline-track-area {
+            position: relative;
+            display: flex;
+            height: 80px;
+            margin-top: 25px;
+        }
+
+        /* Existing Timeline Styles inherited from Video Studio MVP */
+        .timeline-block {
+            position: relative;
+            flex-shrink: 0;
+            border-right: 1px solid #333;
+            background: #222;
+            cursor: move;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+        .timeline-block.selected { border: 2px solid #fff; box-shadow: 0 0 10px rgba(255,255,255,0.2); z-index: 5; }
+        .timeline-block-thumbs { display: flex; height: 100%; }
+        .timeline-block-thumbs img { height: 100%; width: auto; object-fit: cover; }
+        .timeline-block-info {
+            position: absolute; bottom: 0; width: 100%;
+            background: rgba(0,0,0,0.6); font-size: 10px; color: #ccc;
+            padding: 1px 4px; text-align: center;
+        }
+
+        .timeline-ruler {
+            position: absolute; top: 0; left: 0; height: 100%; width: 5000px;
+            pointer-events: none; z-index: 2;
+        }
+        .timeline-playhead {
+            position: absolute; top: 0; left: 0; width: 2px; height: 100%;
+            background: #fff; z-index: 10; pointer-events: none;
+            box-shadow: 0 0 5px rgba(255,255,255,0.8);
+        }
+
+        .timeline-properties {
+            background: #1a1a1a; padding: 15px; border-radius: 8px;
+            margin-top: 15px; border: 1px solid #333;
+        }
+        .prop-row { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; color: #ccc; font-size: 0.9rem; }
+        .vs-select-small, .vs-input-small {
+            background: #000; border: 1px solid #444; color: #fff; padding: 4px 8px; border-radius: 4px;
+        }
+        
+        .custom-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8); display: flex; align-items: center;
+            justify-content: center; z-index: 1000;
+        }
+        .modal-content { background: #1a1a1a; padding: 2rem; border-radius: 16px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.1); }
+        .modal-buttons button { padding: 10px 30px; background: #333; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: #fff; cursor: pointer; }
+    </style>
 </head>
 
-<body class="vs-page">
-  <nav class="side-nav">
-    <a href="/" class="nav-item" title="Main">
-      <span class="material-symbols-outlined">home</span>
-      <span class="nav-label">Main</span>
-    </a>
-    <a href="/image-studio" class="nav-item" title="Image Studio">
-      <span class="material-symbols-outlined">photo_library</span>
-      <span class="nav-label">Image Studio</span>
-    </a>
-    <a href="/video-studio" class="nav-item active" title="Video Studio">
-      <span class="material-symbols-outlined">video_library</span>
-      <span class="nav-label">Video Studio</span>
-    </a>
-  </nav>
-  <div class="layout">
-    <div class="container">
-      <div class="vs-shell">
-        <header class="vs-header">
-          <h1>Video Studio</h1>
-        </header>
+<body data-page="video-studio">
 
-        <div class="vs-editor-grid">
-
-          <div class="area-source-manager vs-card">
-            <div class="vs-card-head">
-              <h2>Source Clips</h2>
-              <p class="muted">Upload images and set motion. Then generate clips.</p>
-            </div>
-
-            <div id="uploadZone" class="vs-dropzone-compact">
-              <span class="material-symbols-outlined">cloud_upload</span>
-              <p>Drag images or <strong id="browseBtn">Browse</strong></p>
-              <input id="uploadInput" type="file" accept="image/*" multiple class="hidden" />
-            </div>
-
-            <div id="selectedList" class="vs-clip-list"></div>
-            <div id="selectedEmpty" class="vs-empty">No images added.</div>
-
-            <div class="vs-actions-left">
-              <button id="btnGenerateSource" class="action-btn glow-btn" style="width:100%;">GENERATE SOURCE
-                CLIPS</button>
-              <div id="statusSource" class="vs-status-text"></div>
-            </div>
-          </div>
-
-          <div class="area-right-group">
-
-            <div class="area-preview">
-              <div class="panel-label">Preview</div>
-              <div class="preview-stage">
-                <img id="previewImage" src="" class="hidden" />
-                <video id="previewVideo" controls class="hidden"></video>
-                <div id="previewPlaceholder" class="muted">Select a clip to preview</div>
-
-                <div id="resultOverlay" class="hidden">
-                  <video id="resultVideo" controls style="width:100%; height:100%; object-fit:contain;"></video>
-                  <a id="downloadLink" class="vs-btn-download" href="#" download>DOWNLOAD FINAL VIDEO</a>
-                  <button id="closeResultBtn" class="vs-btn-close">×</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="area-timeline">
-              <div class="timeline-toolbar">
-                <div class="timeline-title">Timeline</div>
-
-                <div class="timeline-controls-center">
-                  <button id="btnPlayTimeline" class="icon-btn-play">
-                    <span class="material-symbols-outlined">play_arrow</span>
-                  </button>
-                </div>
-
-                <div class="timeline-tools">
-                  <button id="btnZoomOut" class="icon-btn">-</button>
-                  <button id="btnZoomIn" class="icon-btn">+</button>
-                </div>
-              </div>
-
-              <div class="timeline-container">
-                <div id="timelineRuler" class="timeline-ruler"></div>
-                <div id="timelineTrack" class="timeline-track-area">
-                  <div class="vs-empty-timeline">Generate source clips first.</div>
-                </div>
-                <div id="playhead" class="timeline-playhead"></div>
-              </div>
-
-              <div id="timelineProperties" class="timeline-properties hidden">
-                <div class="prop-row">
-                  <label>Speed:</label>
-                  <select id="tlSpeed" class="vs-select-small">
-                    <option value="0.5">0.5x</option>
-                    <option value="1.0" selected>1.0x</option>
-                    <option value="2.0">2.0x</option>
-                  </select>
-                </div>
-                <div class="prop-row">
-                  <label>Trim:</label>
-                  <input type="number" id="tlTrimStart" class="vs-input-small" step="0.1" min="0" value="0.0">
-                  <span>~</span>
-                  <input type="number" id="tlTrimEnd" class="vs-input-small" step="0.1" max="5.0" value="5.0">
-                </div>
-              </div>
-
-              <div class="vs-actions-right">
-                <button id="btnExportFinal" class="action-btn" disabled>EXPORT FINAL VIDEO</button>
-                <div id="statusFinal" class="vs-status-text"></div>
-              </div>
-            </div>
-          </div>
-
+    <!-- Menu Screen - Side by Side Layout (REVERSED) -->
+    <div id="menu-screen" class="is-main-layout">
+        <!-- Right: Branding (Reversed) -->
+        <div class="is-branding">
+            <img src="/static/logo.png" alt="Logo" class="is-branding-logo">
+            <h1>Video Studio</h1>
         </div>
-      </div>
+
+        <!-- Left: Menu Cards (Reversed) -->
+        <div class="is-menu-grid">
+            <div class="is-card-btn card-hero" id="btn-feature-1">
+                <div class="card-content">
+                    <h2>Create Video Clips</h2>
+                    <p>Transform images into AI motion clips.</p>
+                    <div class="card-action">
+                        <span class="material-symbols-outlined">movie</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="is-card-btn card-sub-1" id="btn-feature-2">
+                <div class="card-content">
+                    <h2>Assemble Full Video</h2>
+                    <p>Combine clips into a seamless video.</p>
+                    <div class="card-action">
+                        <span class="material-symbols-outlined">view_timeline</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="is-card-btn card-sub-2" id="btn-feature-3">
+                <div class="card-content">
+                    <h2>Post-Production</h2>
+                    <p>Add AI voiceover, music, and subtitles.</p>
+                    <div class="card-action">
+                        <span class="material-symbols-outlined">graphic_eq</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-  <script src="/static/js/video_studio.js"></script>
+
+    <!-- Workspace 1: Create Video Clips -->
+    <div id="workspace-feature-1" class="is-workspace">
+        <div class="workspace-breadcrumb">
+            <button id="back-to-menu-1" class="breadcrumb-btn">
+                <span class="material-symbols-outlined">arrow_back</span> Back
+            </button>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Video Studio</span>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Create Clips</span>
+        </div>
+
+        <div class="is-workspace-card">
+            <div class="is-panel-left">
+                <h2 class="is-section-title">Step 1. Create Clips</h2>
+                <p class="is-section-desc">Upload room images and set motion effects to generate video clips.</p>
+
+                <div class="is-upload-box" id="clip-ref-drop-zone">
+                    <div class="is-upload-content">
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <span class="is-upload-label">Upload Image</span>
+                        <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
+                    </div>
+                    <div class="is-internal-preview hidden">
+                        <img src="" alt="Preview">
+                        <button class="remove-btn" title="Remove"><span class="material-symbols-outlined">close</span></button>
+                    </div>
+                    <input type="file" id="clip-ref-input" accept="image/*" multiple class="hidden">
+                </div>
+
+                <div id="clip-ref-preview-container" class="is-file-list"></div>
+
+                <button id="clip-ref-remove-all" class="clear-all-btn hidden">Clear All Files</button>
+                
+                <div class="vs-source-item" style="gap:10px; margin-bottom: 20px;">
+                    <select id="clip-motion" class="vs-select-mini" style="flex:1; height:40px; font-size:14px; background:#1a1a1a; border-radius:8px;">
+                        <option value="static">기본 (움직임 없음)</option>
+                        <option value="orbit_r_slow">회전 (우측 천천히)</option>
+                        <option value="orbit_l_slow">회전 (좌측 천천히)</option>
+                        <option value="zoom_in_slow">줌인 (천천히)</option>
+                        <option value="zoom_out_slow">줌아웃 (천천히)</option>
+                    </select>
+                </div>
+
+                <button id="clip-generate-btn" class="is-generate-btn" disabled>
+                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
+                    GENERATE CLIPS
+                </button>
+                <div id="statusSource-1" class="vs-status-text" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="is-panel-right">
+                <div id="clip-placeholder-text" class="is-placeholder-modern">
+                    <h3 class="placeholder-title">Ready to Create Clips</h3>
+                    <p class="placeholder-desc">Upload room images to start AI video generation.</p>
+                </div>
+                <div id="clip-loading" class="loading-container hidden">
+                    <div class="spinner"></div>
+                    <p style="color: #ccc;">Generating AI Video clips...</p>
+                </div>
+                <div id="clip-result-container" class="result-container hidden">
+                    <div id="clip-gen-grid" class="result-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workspace 2: Assemble Full Video -->
+    <div id="workspace-feature-2" class="is-workspace">
+        <div class="workspace-breadcrumb">
+            <button id="back-to-menu-2" class="breadcrumb-btn">
+                <span class="material-symbols-outlined">arrow_back</span> Back
+            </button>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Video Studio</span>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Assemble Video</span>
+        </div>
+
+        <div class="is-workspace-card">
+            <div class="is-panel-left">
+                <h2 class="is-section-title">Step 2. Assemble</h2>
+                <p class="is-section-desc">Arrange your clips on the timeline and export the final video.</p>
+                
+                <div id="full-ref-preview-container" class="is-file-list" style="grid-template-columns: 1fr;">
+                    <!-- List of available clips to add to timeline -->
+                </div>
+
+                <button id="full-generate-btn" class="is-generate-btn">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">movie_creation</span>
+                    EXPORT FINAL VIDEO
+                </button>
+                <div id="statusSource-2" class="vs-status-text" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="is-panel-right" style="padding: 2rem;">
+                <div id="full-preview-stage" class="is-upload-box" style="width:100%; height:400px; padding:0; background:#000;">
+                    <video id="previewVideo" controls style="width:100%; height:100%; object-fit:contain;" class="hidden"></video>
+                    <div id="previewPlaceholder" class="placeholder-desc" style="line-height:400px;">Timeline Preview</div>
+                </div>
+
+                <div class="vs-timeline-area">
+                    <div class="timeline-container">
+                        <div id="timelineRuler" class="timeline-ruler"></div>
+                        <div id="timelineTrack" class="timeline-track-area"></div>
+                        <div id="playhead" class="timeline-playhead"></div>
+                    </div>
+                </div>
+
+                <div id="timelineProperties" class="timeline-properties hidden">
+                    <div class="prop-row">
+                        <label>Speed:</label>
+                        <select id="tlSpeed" class="vs-select-small">
+                            <option value="0.5">0.5x</option>
+                            <option value="1.0" selected>1.0x</option>
+                            <option value="2.0">2.0x</option>
+                        </select>
+                        <label style="margin-left: 20px;">Trim:</label>
+                        <input type="number" id="tlTrimStart" class="vs-input-small" step="0.1" value="0.0">
+                        <span>~</span>
+                        <input type="number" id="tlTrimEnd" class="vs-input-small" step="0.1" value="5.0">
+                    </div>
+                </div>
+                
+                <div id="full-loading" class="loading-container hidden" style="margin-top: 20px;">
+                    <div class="spinner"></div>
+                    <p>Compiling final video...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workspace 3: Post-Production (Placeholder) -->
+    <div id="workspace-feature-3" class="is-workspace">
+        <div class="workspace-breadcrumb">
+            <button id="back-to-menu-3" class="breadcrumb-btn">
+                <span class="material-symbols-outlined">arrow_back</span> Back
+            </button>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Video Studio</span>
+            <span class="breadcrumb-divider">/</span>
+            <span class="breadcrumb-current">Post-Production</span>
+        </div>
+
+        <div class="is-workspace-card">
+            <div class="is-panel-left">
+                <h2 class="is-section-title">Step 3. Post-Production</h2>
+                <p class="is-section-desc">Add AI voiceovers, background music, and subtitles.</p>
+                <div class="placeholder-desc" style="margin-top: 50px; text-align: center;">Coming Soon</div>
+            </div>
+            <div class="is-panel-right">
+                <div class="is-placeholder-modern">
+                    <span class="material-symbols-outlined" style="font-size: 5rem; color: #333;">construction</span>
+                    <h3 class="placeholder-title">Under Construction</h3>
+                    <p class="placeholder-desc">This feature will be available soon.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="global-modal" class="custom-modal hidden">
+        <div class="modal-content">
+            <h3 id="modal-title">Notification</h3>
+            <p id="modal-msg">Message</p>
+            <div class="modal-buttons">
+                <button id="modal-ok-btn">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="side-nav">
+        <a href="/" class="nav-item" title="Main">
+            <span class="material-symbols-outlined">home</span>
+            <span class="nav-label">Main</span>
+        </a>
+        <a href="/image-studio" class="nav-item" title="Image Studio">
+            <span class="material-symbols-outlined">photo_library</span>
+            <span class="nav-label">Image Studio</span>
+        </a>
+        <a href="/video-studio" class="nav-item active" title="Video Studio">
+            <span class="material-symbols-outlined">video_library</span>
+            <span class="nav-label">Video Studio</span>
+        </a>
+    </nav>
+
+    <script src="/static/js/video_studio.js"></script>
 </body>
 
 </html>

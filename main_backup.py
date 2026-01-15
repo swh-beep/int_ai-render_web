@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
-from PIL import Image, ImageOps, ImageDraw
+from PIL import Image, ImageOps
 import re
 import traceback
 import random
@@ -267,534 +267,6 @@ def standardize_image_to_reference_canvas(
 # [CORE] Analysis Logic (Global Definition)
 # -----------------------------------------------------------------------------
 
-# =============================================================================
-# [SCALE FIX PACK vB] Robust dimension parsing + furniture spec JSON + auto-pick
-# - Keeps existing rendering behavior; only strengthens SCALE guidance & selection.
-# - Primary anchor furniture = largest-volume movable furniture EXCLUDING rugs/carpets.
-# =============================================================================
-
-_RUG_KEYWORDS = [
-    "fabric rug", "large rug", "rug", "carpet", "mat",
-    "러그", "카페트", "카펫",
-]
-
-def _is_rug_like(label: str) -> bool:
-    try:
-        s = (label or "").strip().lower()
-        if not s:
-            return False
-        for kw in _RUG_KEYWORDS:
-            if kw in s:
-                if kw == "mat":
-                    if re.search(r"\bmat\b", s):
-                        return True
-                    continue
-                return True
-        return False
-    except Exception:
-        return False
-
-def _to_mm(value: float, unit: Optional[str]) -> int:
-    """Convert value to mm. If unit missing, heuristic: >=50 -> mm else meters."""
-    u = (unit or "").strip().lower()
-    try:
-        if u in ("mm",):
-            return int(round(value))
-        if u in ("cm",):
-            return int(round(value * 10.0))
-        if u in ("m", "meter", "metre"):
-            return int(round(value * 1000.0))
-        if value <= 20.0:
-            return int(round(value * 1000.0))
-        return int(round(value))
-    except Exception:
-        return 0
-
-_DIM_KEY_PATTERNS = {
-    "width_mm":  r"(?:\bW\b|width|가로|폭|너비)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
-    "depth_mm":  r"(?:\bD\b|depth|세로|깊이)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
-    "height_mm": r"(?:\bH\b|height|높이)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
-}
-
-_TRIPLE_PATTERNS = [
-    r"([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*[x×X]\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*[x×X]\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
-    r"\bW\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*\bD\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*\bH\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
-]
-
-def parse_object_dimensions_mm(text: str) -> dict:
-    t = (text or "")
-    t_norm = t.replace("，", ",").replace("×", "x")
-    out = {"width_mm": None, "depth_mm": None, "height_mm": None, "raw": {}}
-
-    for pat in _TRIPLE_PATTERNS:
-        m = re.search(pat, t_norm, flags=re.IGNORECASE)
-        if not m:
-            continue
-        n1, u1, n2, u2, n3, u3 = m.groups()
-        def _num(s): return float(str(s).replace(",", ""))
-        w = _to_mm(_num(n1), u1)
-        d = _to_mm(_num(n2), u2 or u1)
-        h = _to_mm(_num(n3), u3 or u2 or u1)
-        if w: out["width_mm"] = w
-        if d: out["depth_mm"] = d
-        if h: out["height_mm"] = h
-        out["raw"]["triple"] = m.group(0)
-        return out
-
-    for k, pat in _DIM_KEY_PATTERNS.items():
-        m = re.search(pat, t_norm, flags=re.IGNORECASE)
-        if not m:
-            continue
-        num_str, unit = m.group(1), m.group(2)
-        try:
-            v = float(num_str.replace(",", ""))
-        except Exception:
-            continue
-        mm = _to_mm(v, unit)
-        if mm:
-            out[k] = mm
-            out["raw"][k] = m.group(0)
-
-    return out
-
-def parse_room_dimensions_mm(text: str) -> dict:
-    t = (text or "").strip()
-    if not t:
-        return {"width_mm": 0, "depth_mm": 0, "height_mm": 0}
-    t_norm = t.replace("，", ",").replace("×", "x").replace("X", "x")
-
-    m = re.search(_TRIPLE_PATTERNS[0], t_norm, flags=re.IGNORECASE)
-    if m:
-        n1,u1,n2,u2,n3,u3 = m.groups()
-        def _num(s): return float(str(s).replace(",", ""))
-        w = _to_mm(_num(n1), u1)
-        d = _to_mm(_num(n2), u2 or u1)
-        h = _to_mm(_num(n3), u3 or u2 or u1)
-        return {"width_mm": w or 0, "depth_mm": d or 0, "height_mm": h or 0}
-
-    parts = re.findall(r"([0-9][0-9,\.]*)\s*(mm|cm|m)?", t_norm, flags=re.IGNORECASE)
-    nums = []
-    for num_str, unit in parts:
-        try:
-            v = float(num_str.replace(",", ""))
-        except Exception:
-            continue
-        nums.append(_to_mm(v, unit))
-    nums = [n for n in nums if n > 0]
-    if not nums:
-        return {"width_mm": 0, "depth_mm": 0, "height_mm": 0}
-    if len(nums) == 1:
-        return {"width_mm": nums[0], "depth_mm": 0, "height_mm": 0}
-    if len(nums) == 2:
-        return {"width_mm": nums[0], "depth_mm": nums[1], "height_mm": 0}
-    return {"width_mm": nums[0], "depth_mm": nums[1], "height_mm": nums[2]}
-
-def _volume_proxy(dims: dict) -> int:
-    try:
-        w = int(dims.get("width_mm") or 0)
-        d = int(dims.get("depth_mm") or 0)
-        h = int(dims.get("height_mm") or 0)
-        if w and d and h: return w*d*h
-        if w and d: return w*d
-        if w: return w
-    except Exception:
-        pass
-    return 0
-
-def build_furniture_specs_json(analyzed_items: list) -> dict:
-    items = []
-    for i, it in enumerate(analyzed_items or []):
-        label = it.get("label", "") or ""
-        desc  = it.get("description", "") or ""
-        box   = it.get("box_2d")
-
-        # Prefer structured dimensions_mm from analyze_cropped_item() if present.
-        dims = {"width_mm": None, "depth_mm": None, "height_mm": None, "raw": {}}
-        try:
-            spec = it.get("spec") or {}
-            sd = spec.get("dimensions_mm") if isinstance(spec, dict) else None
-            if isinstance(sd, dict) and any(sd.get(k) for k in ("width", "depth", "height")):
-                dims["width_mm"] = sd.get("width")
-                dims["depth_mm"] = sd.get("depth")
-                dims["height_mm"] = sd.get("height")
-                dims["raw"]["spec_dimensions_mm"] = True
-            else:
-                dims = parse_object_dimensions_mm(desc)
-        except Exception:
-            dims = parse_object_dimensions_mm(desc)
-        is_rug = _is_rug_like(label)
-        vp = 0 if is_rug else _volume_proxy(dims)
-        items.append({
-            "index": i,
-            "label": label,
-            "is_rug": is_rug,
-            "dims_mm": {
-                "width_mm": dims.get("width_mm"),
-                "depth_mm": dims.get("depth_mm"),
-                "height_mm": dims.get("height_mm"),
-            },
-            "volume_proxy": vp,
-            "box_2d": box,
-            "description": desc,
-        })
-
-    primary = None
-    candidates = [x for x in items if not x["is_rug"]]
-    if candidates:
-        candidates_sorted = sorted(candidates, key=lambda x: (x["volume_proxy"], -x["index"]), reverse=True)
-        primary = candidates_sorted[0] if candidates_sorted else candidates[0]
-
-    max_width_mm = 0
-    for x in candidates:
-        w = x.get("dims_mm", {}).get("width_mm") or 0
-        try:
-            max_width_mm = max(max_width_mm, int(w))
-        except Exception:
-            pass
-
-    # If primary width missing but max width exists, use it as fallback for scale locking.
-    try:
-        if primary and max_width_mm and not (primary.get("dims_mm", {}) or {}).get("width_mm"):
-            primary.setdefault("dims_mm", {})["width_mm"] = int(max_width_mm)
-    except Exception:
-        pass
-
-    hierarchy = [x.get("label","") for x in (analyzed_items or []) if not _is_rug_like(x.get("label",""))]
-    return {"items": items, "primary": primary, "max_width_mm": max_width_mm, "size_hierarchy": hierarchy}
-
-
-
-def _enhance_for_text_read(img: Image.Image) -> Image.Image:
-    """Lightweight enhancement to improve small-text OCR/reading."""
-    try:
-        g = img.convert("L")
-        g = ImageOps.autocontrast(g)
-        # upscale for better legibility
-        g = g.resize((g.size[0] * 2, g.size[1] * 2), Image.Resampling.LANCZOS)
-        return g.convert("RGB")
-    except Exception:
-        return img.convert("RGB") if img else img
-
-def ensure_primary_dims_and_guide(
-    furniture_specs_json: dict,
-    ref_path: str,
-    room_dims_parsed: dict,
-    wall_span_norm: tuple,
-    step1_img: Optional[str],
-    unique_id: str,
-) -> dict:
-    """
-    Ensure furniture_specs_json['primary'].dims_mm is populated.
-    1) If primary has printed dimensions in the moodboard crop -> extract EXACT values (no guessing).
-    2) If still missing -> estimate typical dimensions (last resort).
-    Also creates a scale guide image when possible and stores it under key '_scale_guide_path'.
-    """
-    try:
-        if not isinstance(furniture_specs_json, dict):
-            return furniture_specs_json
-        primary = furniture_specs_json.get("primary") or {}
-        if not isinstance(primary, dict):
-            return furniture_specs_json
-
-        dims_mm = (primary.get("dims_mm") or {}) if isinstance(primary.get("dims_mm"), dict) else {}
-        p_w = dims_mm.get("width_mm")
-        p_d = dims_mm.get("depth_mm")
-        p_h = dims_mm.get("height_mm")
-
-        # If already good -> just build guide
-        need = not (isinstance(p_w, (int, float)) and p_w)
-        if need and ref_path and os.path.exists(ref_path):
-            # Crop primary item from moodboard using its bbox
-            crop = None
-            try:
-                mb_img = Image.open(ref_path)
-                box = primary.get("box_2d")
-                if box:
-                    ymin, xmin, ymax, xmax = box
-                    W, Hh = mb_img.size
-
-                    # base bbox
-                    left = int(xmin / 1000 * W)
-                    top = int(ymin / 1000 * Hh)
-                    right = int(xmax / 1000 * W)
-                    bottom = int(ymax / 1000 * Hh)
-
-                    # expand crop to also include the caption/spec text BELOW the item
-                    box_w = max(1, right - left)
-                    box_h = max(1, bottom - top)
-
-                    pad_x = int(box_w * 0.06)
-                    pad_top = int(box_h * 0.06)
-                    pad_bottom = int(box_h * 0.85)  # captions are usually below in moodboards
-
-                    left = max(0, left - pad_x)
-                    right = min(W, right + pad_x)
-                    top = max(0, top - pad_top)
-                    bottom = min(Hh, bottom + pad_bottom)
-
-                    crop_all = mb_img.crop((left, top, right, bottom))
-
-                    # focus on the lower part where text is likely present
-                    y_text = int(crop_all.size[1] * 0.55)
-                    text_strip = crop_all.crop((0, y_text, crop_all.size[0], crop_all.size[1]))
-
-                    # enhance for text reading
-                    crop = _enhance_for_text_read(text_strip)
-                else:
-                    crop = _enhance_for_text_read(mb_img)
-            except Exception:
-                crop = None
-
-            # Step 1) STRICT text extraction (no guessing)
-            try:
-                if crop is not None:
-                    enhanced = _enhance_for_text_read(crop)
-                    read_prompt = (
-                        "Read ONLY the printed dimensions from this furniture cutout image.\n"
-                        "Return STRICT JSON ONLY: {\"width\": int|null, \"depth\": int|null, \"height\": int|null}.\n"
-                        "Rules:\n"
-                        "- If the image contains numeric dimensions, extract them EXACTLY.\n"
-                        "- Convert cm or m to mm.\n"
-                        "- If dimensions are NOT printed/legible, return nulls.\n"
-                        "- DO NOT guess or estimate in this step."
-                    )
-                    res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [read_prompt, enhanced, crop], {"timeout": 25}, {})
-                    obj = _safe_extract_json(res.text if res else "")
-                    if isinstance(obj, dict):
-                        rw, rd, rh = obj.get("width"), obj.get("depth"), obj.get("height")
-                        # sanitize
-                        def _as_int(x):
-                            try:
-                                if x is None: return None
-                                return int(float(x))
-                            except Exception:
-                                return None
-                        rw, rd, rh = _as_int(rw), _as_int(rd), _as_int(rh)
-                        if rw and not p_w: p_w = rw
-                        if rd and not p_d: p_d = rd
-                        if rh and not p_h: p_h = rh
-            except Exception:
-                pass
-
-            # Step 2) Last resort estimation (allowed to guess)
-            try:
-                if crop is not None and not (isinstance(p_w, (int, float)) and p_w):
-                    est_prompt = (
-                        "Estimate typical real-world dimensions in mm for this furniture item.\n"
-                        "Return STRICT JSON ONLY: {\"width\": int, \"depth\": int, \"height\": int}.\n"
-                        "No other text."
-                    )
-                    est_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [est_prompt, crop], {"timeout": 20}, {})
-                    est = _safe_extract_json(est_res.text if est_res else "")
-                    if isinstance(est, dict):
-                        def _to_i(x):
-                            try:
-                                return int(float(x)) if x is not None else None
-                            except Exception:
-                                return None
-                        p_w = p_w or _to_i(est.get("width"))
-                        p_d = p_d or _to_i(est.get("depth"))
-                        p_h = p_h or _to_i(est.get("height"))
-            except Exception:
-                pass
-
-            # Write back
-            primary.setdefault("dims_mm", {})
-            primary["dims_mm"]["width_mm"] = int(p_w) if p_w else None
-            primary["dims_mm"]["depth_mm"] = int(p_d) if p_d else None
-            primary["dims_mm"]["height_mm"] = int(p_h) if p_h else None
-            furniture_specs_json["primary"] = primary
-
-            try:
-                lbl = primary.get("label", "Primary Furniture")
-                if p_w:
-                    print(f">> [ScaleFix] primary dims used: {lbl} -> W={int(p_w)} D={int(p_d or 0)} H={int(p_h or 0)}", flush=True)
-                else:
-                    print(f">> [ScaleFix] primary dims missing after read/est: {lbl}", flush=True)
-            except Exception:
-                pass
-
-        # (Re)build scale guide if possible
-        try:
-            room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
-            p_w2 = int(((primary.get("dims_mm") or {}).get("width_mm") or 0))
-            if room_w > 0 and p_w2 > 0 and step1_img:
-                xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-                span = max(1e-6, (xr - xl))
-                ratio = (p_w2 / room_w) / span
-                guide_out = os.path.join("outputs", f"scale_guide_{unique_id}.png")
-                guide_path = create_scale_guide_image(step1_img, wall_span_norm, ratio, guide_out)
-
-                if guide_path:
-                    furniture_specs_json["_scale_guide_path"] = guide_path
-        except Exception:
-            pass
-
-    except Exception:
-        pass
-
-    return furniture_specs_json
-def _safe_json_from_model_text(txt: str):
-    if not txt: return None
-    t = txt.strip()
-    try:
-        if "```json" in t:
-            t = t.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif "```" in t:
-            t = t.split("```", 1)[1].split("```", 1)[0].strip()
-    except Exception:
-        pass
-    try:
-        return json.loads(t)
-    except Exception:
-        pass
-    try:
-        a = t.find("{"); b = t.rfind("}")
-        if a != -1 and b != -1 and b > a:
-            return json.loads(t[a:b+1])
-    except Exception:
-        pass
-    return None
-
-def detect_back_wall_span_norm(empty_room_path: str) -> tuple:
-    try:
-        img = Image.open(empty_room_path)
-        prompt = (
-            "TASK: ROOM GEOMETRY MEASUREMENT.\\n"
-            "In this empty room photo, find the BACK WALL usable span where main furniture would sit.\\n"
-            "Return STRICT JSON ONLY: {\\\"x_left\\\":0.0, \\\"x_right\\\":1.0} using normalized [0..1].\\n"
-            "Use the floor-wall boundary; ignore doors/windows if they reduce usable span. Approximate if unsure."
-        )
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
-        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-        if isinstance(obj, dict):
-            xl = float(obj.get("x_left", 0.0)); xr = float(obj.get("x_right", 1.0))
-            xl = max(0.0, min(1.0, xl)); xr = max(0.0, min(1.0, xr))
-            if xr - xl >= 0.2:
-                return (xl, xr)
-    except Exception:
-        pass
-    return (0.0, 1.0)
-
-def _crop_ref_item_image(ref_path: str, box_2d: list, out_path: str):
-    try:
-        if not box_2d:
-            return None
-        img = Image.open(ref_path)
-        w, h = img.size
-        ymin, xmin, ymax, xmax = box_2d
-        left = int(xmin / 1000 * w); top = int(ymin / 1000 * h)
-        right = int(xmax / 1000 * w); bottom = int(ymax / 1000 * h)
-        left = max(0, min(w-1, left)); right = max(left+1, min(w, right))
-        top = max(0, min(h-1, top)); bottom = max(top+1, min(h, bottom))
-        crop = img.crop((left, top, right, bottom))
-        crop.save(out_path, "PNG")
-        return out_path
-    except Exception:
-        return None
-
-def create_scale_guide_image(empty_room_path: str, wall_span_norm: tuple, target_ratio: float, out_path: str):
-    try:
-        base = Image.open(empty_room_path).convert("RGBA")
-        W, H = base.size
-        xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-        span_px = max(1, int((xr - xl) * W))
-        target_px = int(max(1, min(span_px, span_px * float(target_ratio))))
-        x_center = int((xl + xr) * 0.5 * W)
-        x1 = int(max(0, min(W-1, x_center - target_px//2)))
-        x2 = int(max(0, min(W-1, x_center + target_px//2)))
-
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        line = (255, 0, 0, 110)
-        thick = 4
-        for dx in range(-thick//2, thick//2 + 1):
-            draw.line([(x1+dx, 0), (x1+dx, H)], fill=line, width=1)
-            draw.line([(x2+dx, 0), (x2+dx, H)], fill=line, width=1)
-
-        wall_line = (0, 255, 255, 80)
-        draw.line([(int(xl*W), H-5), (int(xr*W), H-5)], fill=wall_line, width=3)
-
-        composed = Image.alpha_composite(base, overlay).convert("RGB")
-        composed.save(out_path, "PNG")
-        return out_path
-    except Exception:
-        return None
-
-def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], primary_label: Optional[str]):
-    try:
-        img = Image.open(staged_path)
-        prompt = (
-            "OBJECT LOCALIZATION TASK.\\n"
-            "Find the PRIMARY ANCHOR furniture in the staged room image.\\n"
-            "Return STRICT JSON ONLY: {\\\"xmin\\\":0.0,\\\"ymin\\\":0.0,\\\"xmax\\\":1.0,\\\"ymax\\\":1.0}.\\n"
-            "bbox must tightly cover only that furniture. If reference crop is provided, match that object."
-        )
-        content = [prompt, "Staged room image:", img]
-        if primary_label:
-            content.insert(1, f"Primary label hint: {primary_label}")
-        if ref_item_crop_path and os.path.exists(ref_item_crop_path):
-            content += ["Reference item crop:", Image.open(ref_item_crop_path)]
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 20}, {})
-        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-        if isinstance(obj, dict):
-            xmin = float(obj.get("xmin", 0.0)); xmax = float(obj.get("xmax", 1.0))
-            ymin = float(obj.get("ymin", 0.0)); ymax = float(obj.get("ymax", 1.0))
-            xmin = max(0.0, min(1.0, xmin)); xmax = max(0.0, min(1.0, xmax))
-            ymin = max(0.0, min(1.0, ymin)); ymax = max(0.0, min(1.0, ymax))
-            if xmax - xmin > 0.05 and ymax - ymin > 0.05:
-                return (xmin, ymin, xmax, ymax)
-    except Exception:
-        pass
-    return None
-
-def _score_scale(bbox_norm: tuple, wall_span_norm: tuple, target_ratio: float) -> float:
-    try:
-        xmin, ymin, xmax, ymax = bbox_norm
-        xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-        span = max(1e-6, (xr - xl))
-        w = max(1e-6, (xmax - xmin))
-        actual = w / span
-        target = max(1e-6, float(target_ratio))
-        err = abs(actual - target)
-        tol = max(0.08, target * 0.20)
-        score = 1.0 - min(1.0, err / tol)
-        return float(max(0.0, min(1.0, score)))
-    except Exception:
-        return 0.0
-
-def reorder_by_scale_best_pick(result_urls: list, ref_path: str, primary: dict, room_dims: dict, wall_span_norm: tuple) -> list:
-    try:
-        room_w = int(room_dims.get("width_mm") or 0)
-        p_w = int((primary.get("dims_mm") or {}).get("width_mm") or 0)
-        if room_w <= 0 or p_w <= 0:
-            return result_urls
-        xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-        span = max(1e-6, (xr - xl))
-        target_ratio = (p_w / room_w) / span
-
-        ref_crop = None
-        try:
-            out_crop = os.path.join("outputs", f"ref_primary_{uuid.uuid4().hex[:8]}.png")
-            ref_crop = _crop_ref_item_image(ref_path, primary.get("box_2d"), out_crop) if primary.get("box_2d") else None
-        except Exception:
-            ref_crop = None
-
-        scored = []
-        for idx, url in enumerate(result_urls or []):
-            local = os.path.join("outputs", os.path.basename(url))
-            bbox = detect_primary_bbox_norm(local, ref_crop, primary.get("label"))
-            if bbox is None:
-                scored.append((0.0, idx, url))
-                continue
-            s = _score_scale(bbox, wall_span_norm, target_ratio)
-            scored.append((s, idx, url))
-
-        scored.sort(key=lambda x: (x[0], -x[1]), reverse=True)
-        return [u for _, _, u in scored]
-    except Exception:
-        return result_urls
-
 def detect_furniture_boxes(moodboard_path):
     print(f">> [Detection] Scanning furniture in {moodboard_path}...", flush=True)
     try:
@@ -831,17 +303,13 @@ def detect_furniture_boxes(moodboard_path):
     return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
 
 def analyze_cropped_item(moodboard_path, item_data):
-    """
-    Crop each detected item and extract structured specs as strict JSON.
-    Also returns a human-readable description, but the critical part is dimensions_mm.
-    """
     try:
         box = item_data.get('box_2d')
         label = item_data.get('label', 'Furniture')
-
+        
         img = Image.open(moodboard_path)
         width, height = img.size
-
+        
         if box:
             ymin, xmin, ymax, xmax = box
             left = int(xmin / 1000 * width)
@@ -852,81 +320,28 @@ def analyze_cropped_item(moodboard_path, item_data):
         else:
             cropped_img = img
 
-        prompt = f"""
-You are extracting product specs from a furniture cutout image.
-
-Return ONLY valid JSON (no markdown, no code fences) with this schema:
-{{
-  "label": "{label}",
-  "materials": "short",
-  "colors": "short",
-  "shape": "short",
-  "dimensions_mm": {{
-    "width": <int or null>,
-    "depth": <int or null>,
-    "height": <int or null>
-  }},
-  "notes": "1~2 sentences about visual traits"
-}}
-
-Rules:
-- If dimensions are printed in the image, extract them exactly and convert to mm.
-- If units are cm or m, convert to mm.
-- If dimensions are NOT printed, set them to null. Do NOT invent numbers in this step.
-- Ignore the neutral grey background.
-"""
-
-        response = call_gemini_with_failover(
-            ANALYSIS_MODEL_NAME,
-            [prompt, cropped_img],
-            {'timeout': 30},
-            {}
+        prompt = (
+            "f\"Describe the visual traits of this '{label}' for a 3D artist.\\n\"\n"
+            "\"Focus ON:\\n\"\n"
+            "\"1. Material (e.g., leather, wood, fabric type)\\n\"\n"
+            "\"2. Color (exact shade)\\n\"\n"
+            "\"3. Shape & Structure (legs, armrests, silhouette)\\n\"\n"
+            "\"4. **PHYSICAL DIMENSIONS:** Read and extract any dimensions (e.g., width, depth, height in mm) written near or under the item.\\n\\n\"\n"
+            
+            "\"<CRITICAL: NEGATIVE CONSTRAINTS>\\n\"\n"
+            "\"1. **IGNORE BACKGROUND:** The background is a neutral grey (#D2D2D2) added for contrast. Do NOT mention 'grey background'. Treat the object as if it is floating.\\n\"\n"
+            "\"2. **NO LAYOUT INFO:** Do not describe it as 'collage' or 'grid'.\\n\"\n"
+            "\"OUTPUT FORMAT: Include dimensions if found, followed by a concise visual description. 60-100 words.\"\n"
         )
-
-        raw = (response.text or "").strip() if response else ""
-        data = _safe_extract_json(raw)
-
-        # Ensure structure
-        dims = data.get("dimensions_mm") if isinstance(data, dict) else None
-        if not isinstance(dims, dict):
-            dims = {"width": None, "depth": None, "height": None}
-
-        # ✅ 핵심: 문자열/콤마/단위 포함해도 int(mm)로 정규화
-        dims = {
-            "width": _to_int_mm(dims.get("width")),
-            "depth": _to_int_mm(dims.get("depth")),
-            "height": _to_int_mm(dims.get("height")),
-        }
-
-        spec = {
-            "label": label,
-            "dimensions_mm": {
-                "width": dims.get("width"),
-                "depth": dims.get("depth"),
-                "height": dims.get("height"),
-            },
-            "materials": data.get("materials") if isinstance(data, dict) else None,
-            "colors": data.get("colors") if isinstance(data, dict) else None,
-            "shape": data.get("shape") if isinstance(data, dict) else None,
-            "notes": data.get("notes") if isinstance(data, dict) else None,
-            "box_2d": box,
-        }
-
-        desc = (spec.get("notes") or "").strip()
-        if not desc:
-            desc = f"A high quality {label}."
-
-        return {"label": label, "description": desc, "spec": spec, "box_2d": box}
-
+        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 30}, {})
+        
+        if response and response.text:
+            return {"label": label, "description": response.text.strip()}
+            
     except Exception as e:
-        print(f"!! Crop Analysis Failed for {item_data.get('label','Furniture')}: {e}", flush=True)
-        return {
-            "label": item_data.get('label', 'Furniture'),
-            "description": f"A high quality {item_data.get('label','Furniture')}.",
-            "spec": {"dimensions_mm": {"width": None, "depth": None, "height": None}},
-            "box_2d": item_data.get("box_2d")
-        }
-
+        print(f"!! Crop Analysis Failed for {label}: {e}", flush=True)
+    
+    return {"label": label, "description": f"A high quality {label}."}
 
 # [최종 복구 및 업그레이드] 분석(Flash) -> 생성(Pro-Image) 2단계 파이프라인
 # 구글 AI 스튜디오의 "Generative Reconstruction" 로직 이식
@@ -1128,22 +543,7 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
     return image_path
 
 # [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시 + 공간 제약 사항 추가
-def generate_furnished_room(
-    room_path,
-    style_prompt,
-    ref_path,
-    unique_id,
-    furniture_specs=None,
-    furniture_specs_json=None,
-    room_dimensions=None,
-    placement_instructions=None,
-    scale_guide_path=None,
-    primary_item=None,
-    room_dims_parsed=None,
-    wall_span_norm=None,
-    size_hierarchy=None,
-    start_time=0,
-):
+def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furniture_specs=None, room_dimensions=None, placement_instructions=None, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     try:
         room_img = Image.open(room_path)
@@ -1159,10 +559,9 @@ def generate_furnished_room(
         specs_context = ""
         if furniture_specs:
             specs_context = (
-                "\n<REFERENCE FURNITURE IDENTITY (STRICT)>\n"
-                "The reference moodboard defines the EXACT furniture identities.\n"
-                "Do NOT substitute with different designs. Match silhouettes/forms as closely as possible.\n"
-                "If an item cannot be matched, omit it rather than inventing a new one.\n"
+                "\n<REFERENCE MATERIAL PALETTE (READ ONLY)>\n"
+                "The following list describes the MATERIALS and COLORS.\n"
+                "**WARNING:** Do NOT copy the text/dimensions/layout from the reference. Use ONLY materials.\n"
                 f"{furniture_specs}\n"
                 "--------------------------------------------------\n"
             )
@@ -1173,11 +572,6 @@ def generate_furnished_room(
             spatial_context = "\n<PHYSICAL SPACE CONSTRAINTS (STRICT ADHERENCE)>\n"
             if room_dimensions:
                 spatial_context += f"- **ACTUAL ROOM DIMENSIONS:** {room_dimensions}\n"
-            try:
-                _rd = room_dims_parsed or parse_room_dimensions_mm(room_dimensions or "")
-                spatial_context += f"- **NORMALIZED_DIMENSIONS_MM:** width={int(_rd.get('width_mm') or 0)}mm, depth={int(_rd.get('depth_mm') or 0)}mm, height={int(_rd.get('height_mm') or 0)}mm\n"
-            except Exception:
-                pass
             if placement_instructions:
                 spatial_context += f"- **PLACEMENT INSTRUCTIONS:** {placement_instructions}\n"
             spatial_context += (
@@ -1186,62 +580,30 @@ def generate_furnished_room(
                 "--------------------------------------------------\n"
             )
 
-        # [FIX] Robust dimension parsing + primary anchor analysis (rug excluded)
+        # [NEW] 동적 치수 분석 로직 (하드코딩 방지)
         calculated_analysis = ""
         try:
-            _room_dims = room_dims_parsed or parse_room_dimensions_mm(room_dimensions or "")
-            room_w = int(_room_dims.get("width_mm") or 0)
-            room_d = int(_room_dims.get("depth_mm") or 0)
+            # 1. 방 너비 파싱 (3000 x 3500 x 2400 mm 등에서 첫 번째 숫자 추출)
+            room_w = 0
+            room_nums = [int(s) for s in room_dimensions.replace('x', ' ').replace('X', ' ').replace(',', ' ').split() if s.isdigit()]
+            if room_nums: room_w = room_nums[0]
 
-
-            try:
-                print(f">> [ScaleFix] (generate_furnished_room) parsed room mm: W={room_w} D={room_d} H={int(_room_dims.get('height_mm') or 0)}", flush=True)
-            except Exception:
-                pass
-            _primary = primary_item or (furniture_specs_json or {}).get("primary") or {}
-            _p_dims = _primary.get("dims_mm") or {}
-            p_w = int(_p_dims.get("width_mm") or 0)
-            if not p_w and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                try:
-                    p_w = int(furniture_specs_json.get("max_width_mm") or 0)
-                except Exception:
-                    pass
-            p_d = int(_p_dims.get("depth_mm") or 0)
-
-            if room_w > 0 and p_w > 0:
-                occ = round((p_w / room_w) * 100, 1)
-                calculated_analysis += f"   - **PRIMARY ANCHOR:** {_primary.get('label','Primary Furniture')} (Width {p_w}mm)\\n"
-                calculated_analysis += f"   - **ROOM WIDTH:** {room_w}mm\\n"
-                calculated_analysis += f"   - **TARGET WIDTH OCCUPANCY:** {occ}% (primary_width / room_width)\\n"
-                if room_d > 0 and p_d > 0:
-                    occ_d = round((p_d / room_d) * 100, 1)
-                    calculated_analysis += f"   - **TARGET DEPTH OCCUPANCY:** {occ_d}% (primary_depth / room_depth)\\n"
-                if wall_span_norm and isinstance(wall_span_norm, (list, tuple)) and len(wall_span_norm) == 2:
-                    xl, xr = float(wall_span_norm[0]), float(wall_span_norm[1])
-                    calculated_analysis += f"   - **BACK WALL SPAN (NORM):** x_left={xl:.3f}, x_right={xr:.3f}\\n"
-
-                if occ > 90:
-                    calculated_analysis += "   - **ACTION:** Near-total fill. Primary MUST almost touch both side walls (total side gap ~50-150mm).\\n"
-                elif occ > 70:
-                    calculated_analysis += "   - **ACTION:** Dominant fill. Leave only minimal gaps on both sides (about 100-250mm each).\\n"
-                else:
-                    calculated_analysis += "   - **ACTION:** Moderate fill. Keep realistic gaps; DO NOT miniaturize.\\n"
-            else:
-                calculated_analysis += "   - (No reliable mm dimensions found; apply relative scaling from reference hierarchy)\\n"
-        except Exception:
-            pass
-        # [NEW] hierarchy hint string (exclude rugs/carpets)
-        size_hierarchy_hint = ""
-        try:
-            if size_hierarchy and isinstance(size_hierarchy, list):
-                size_hierarchy_hint = " > ".join([str(x) for x in size_hierarchy if x])
-            elif furniture_specs_json and isinstance(furniture_specs_json, dict):
-                h = furniture_specs_json.get("size_hierarchy") or []
-                if isinstance(h, list):
-                    size_hierarchy_hint = " > ".join([str(x) for x in h if x])
-        except Exception:
-            size_hierarchy_hint = ""
-
+            # 2. 가구 스펙에서 주요 수치 추출 및 비율 계산
+            if room_w > 0 and furniture_specs:
+                import re
+                # 가장 큰 가구(소파 등)의 width 찾기
+                widths = re.findall(r'width\s*:?\s*(\d+)', furniture_specs.lower())
+                if widths:
+                    max_f_w = int(widths[0])
+                    occupancy = round((max_f_w / room_w) * 100, 1)
+                    calculated_analysis = (
+                        f"   - **CALCULATED OCCUPANCY:** The main furniture ({max_f_w}mm) occupies **{occupancy}%** of the room width ({room_w}mm).\n"
+                    )
+                    if occupancy > 90:
+                        calculated_analysis += "   - **ACTION:** This is a near-total fill. The furniture MUST touch or almost touch both side walls.\n"
+                    elif occupancy > 70:
+                        calculated_analysis += "   - **ACTION:** This is a dominant fill. Leave only minimal gaps on the sides.\n"
+        except: pass
 
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
@@ -1258,7 +620,7 @@ def generate_furnished_room(
             "3. **STYLE:** Match the Reference Moodboard style.\n"
             "4. **WINDOW TREATMENT (CURTAINS - LOCATION STRICT):** Add floor-to-ceiling **Sheer White Chiffon Curtains**. <CRITICAL>: Place them **ONLY** along the vertical edges of the GLASS WINDOW. **DO NOT** generate curtains on solid walls, corners without windows, or doors. They must **HANG STRAIGHT DOWN NATURALLY** (do not tie) covering only the outer 15% of the glass to frame the view.\n\n"
 
-            "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and (optionally) a SCALE GUIDE IMAGE. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
+            "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
             
             "1. **SPECIFIC SCALE ANALYSIS FOR THIS REQUEST:**\n"
@@ -1316,23 +678,12 @@ def generate_furnished_room(
             "5. **NO MULTI-PANEL OUTPUT:** Output must be ONE single staged room photograph only. Do NOT append catalog sheets, white inventory panels, split layouts, or include the reference image anywhere."
         )
         
-        prompt = prompt.replace("{size_hierarchy_hint}", size_hierarchy_hint or "")
-
         content = [prompt, "Empty Room (Target Canvas - KEEP THIS):", room_img]
-
-        # [NEW] Optional scale guide image (measurement only; DO NOT render any guide artifacts)
-        try:
-            if scale_guide_path and os.path.exists(scale_guide_path):
-                guide_img = Image.open(scale_guide_path)
-                content += ["SCALE GUIDE IMAGE (do NOT render the guide; use only for measurement):", guide_img]
-        except Exception:
-            pass
         if ref_path:
             try:
                 ref = Image.open(ref_path)
                 ref.thumbnail((2048, 2048))
-                content.extend(["Style Reference (Furniture Identity - Match Designs):", ref])
-
+                content.extend(["Style Reference (Furniture Palette ONLY):", ref])
             except: pass
         
         remaining = max(30, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
@@ -1573,17 +924,6 @@ def render_room(
         
         std_path = standardize_image(raw_path)
         step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
-
-        # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
-        room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
-        print(f">> [ScaleFix] dimensions(raw)='{dimensions}'", flush=True)
-        print(f">> [ScaleFix] room_dims_parsed(mm)={room_dims_parsed}", flush=True)
-        wall_span_norm = detect_back_wall_span_norm(step1_img) if step1_img else (0.0, 1.0)
-
-        furniture_specs_json = None
-        primary_item = None
-        scale_guide_path = None
-        size_hierarchy = None
         
         ref_path = None
         mb_url = None
@@ -1656,43 +996,16 @@ def render_room(
             print(f">> [Global Analysis] Analyzing furniture in {ref_path}...", flush=True)
             try:
                 detected = detect_furniture_boxes(ref_path)
+                
                 print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
-                # IMPORTANT: preserve the detection order (Gemini already sorted by physical size).
-                # Do NOT rely on futures completion order.
-                full_analyzed_data = [None] * len(detected)
                 with ThreadPoolExecutor(max_workers=30) as executor:
-                    future_map = {idx: executor.submit(analyze_cropped_item, ref_path, item) for idx, item in enumerate(detected)}
-                    for idx, fut in future_map.items():
-                        full_analyzed_data[idx] = fut.result()
+                    futures = [executor.submit(analyze_cropped_item, ref_path, item) for item in detected]
+                    full_analyzed_data = [f.result() for f in futures]
+                
                 specs_list = []
                 for idx, item in enumerate(full_analyzed_data):
                     specs_list.append(f"{idx+1}. {item['label']}: {item['description']}")
                 furniture_specs_text = "\n".join(specs_list)
-
-                # [SCALE FIX vB] Build furniture JSON + select PRIMARY (largest volume, exclude rugs/carpets)
-                try:
-                    furniture_specs_json = build_furniture_specs_json(full_analyzed_data)
-                    primary_item = (furniture_specs_json or {}).get("primary")
-                    size_hierarchy = (furniture_specs_json or {}).get("size_hierarchy")
-
-                    # Optional: scale guide image (only if both room width and primary width are available)
-                    try:
-                        room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
-                        p_w = int(((primary_item or {}).get("dims_mm") or {}).get("width_mm") or 0)
-                        if room_w > 0 and p_w > 0 and step1_img:
-                            xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-                            span = max(1e-6, (xr - xl))
-                            ratio = (p_w / room_w) / span
-                            guide_out = os.path.join("outputs", f"scale_guide_{unique_id}.png")
-                            scale_guide_path = create_scale_guide_image(step1_img, wall_span_norm, ratio, guide_out)
-
-                    except Exception:
-                        pass
-                except Exception:
-                    furniture_specs_json = None
-                    primary_item = None
-                    scale_guide_path = None
-                    size_hierarchy = None
                 
                 print(f">> [Global Analysis] Complete. Specs injected.", flush=True)
                 
@@ -1700,31 +1013,13 @@ def render_room(
                 print(f"!! [Global Analysis Failed] {e}", flush=True)
 
         generated_results = []
-
-        # [ScaleFix vB] Make sure PRIMARY dims are actually available inside furniture_specs_json (not just printed in logs).
-        # This is critical for consistent scaling + scale guide generation.
-        try:
-            if ref_path and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                furniture_specs_json = ensure_primary_dims_and_guide(
-                    furniture_specs_json=furniture_specs_json,
-                    ref_path=ref_path,
-                    room_dims_parsed=room_dims_parsed,
-                    wall_span_norm=wall_span_norm,
-                    step1_img=step1_img,
-                    unique_id=unique_id,
-                )
-                primary_item = (furniture_specs_json or {}).get("primary")
-                size_hierarchy = (furniture_specs_json or {}).get("size_hierarchy")
-                scale_guide_path = (furniture_specs_json or {}).get("_scale_guide_path") or scale_guide_path
-        except Exception as e:
-            print(f"!! [ScaleFix] ensure_primary_dims_and_guide failed: {e}", flush=True)
-
         print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Specs Injection)!", flush=True)
+
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
             try:
                 current_style_prompt = STYLES.get(style, "Custom Moodboard Style")
-                res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, furniture_specs=furniture_specs_text, furniture_specs_json=furniture_specs_json, room_dimensions=dimensions, placement_instructions=placement, scale_guide_path=scale_guide_path, primary_item=primary_item, room_dims_parsed=room_dims_parsed, wall_span_norm=wall_span_norm, size_hierarchy=size_hierarchy, start_time=start_time)
+                res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, furniture_specs=furniture_specs_text, room_dimensions=dimensions, placement_instructions=placement, start_time=start_time)
                 if res: return f"/outputs/{os.path.basename(res)}"
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
@@ -1738,13 +1033,6 @@ def render_room(
 
         final_before_url = f"/outputs/{os.path.basename(step1_img)}"
         if not generated_results: generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
-
-        # [SCALE FIX vB] Auto-pick best scale among results (no numeric score exposed)
-        try:
-            if generated_results and primary_item and room_dims_parsed and wall_span_norm and ref_path:
-                generated_results = reorder_by_scale_best_pick(generated_results, ref_path, primary_item, room_dims_parsed, wall_span_norm)
-        except Exception:
-            pass
 
         return JSONResponse(content={
             "original_url": f"/outputs/{os.path.basename(std_path)}", 
@@ -2320,74 +1608,28 @@ import io
 import math
 
 def _safe_extract_json(text: str) -> Dict[str, Any]:
-    """
-    Extract a JSON object from Gemini text safely.
-    - Accepts: pure JSON, fenced ```json, or text containing a JSON object.
-    - Returns dict only; otherwise {}.
-    """
+    """Extract a JSON object from Gemini text safely."""
     if not text:
         return {}
-
     t = text.strip()
-
-    # Strip code fences
     if "```json" in t:
         t = t.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in t:
-        parts = t.split("```")
-        if len(parts) >= 3:
-            t = parts[1].strip()
-        else:
-            t = parts[0].strip()
-
-    # Try direct parse
+        t = t.split("```", 1)[1].split("```", 1)[0].strip() if t.count("```") >= 2 else t.split("```", 1)[0].strip()
     try:
         obj = json.loads(t)
         return obj if isinstance(obj, dict) else {}
     except Exception:
         pass
-
-    # Try to locate the first {...} block
     try:
         a = t.find("{")
         b = t.rfind("}")
         if a != -1 and b != -1 and b > a:
-            obj = json.loads(t[a:b + 1])
+            obj = json.loads(t[a:b+1])
             return obj if isinstance(obj, dict) else {}
     except Exception:
         pass
-
     return {}
-
-def _to_int_mm(v):
-    """
-    Normalize dimension value to int(mm).
-    Accepts: 2800, 2800.0, "2800mm", "2,800", "280 cm", "2.8m"
-    Returns: int(mm) or None
-    """
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        try:
-            return int(round(v))
-        except Exception:
-            return None
-
-    s = str(v).strip().lower().replace(",", " ")
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(mm|cm|m)?", s)
-    if not m:
-        return None
-    try:
-        num = float(m.group(1))
-    except Exception:
-        return None
-    unit = (m.group(2) or "mm").lower()
-
-    if unit == "m":
-        num *= 1000.0
-    elif unit == "cm":
-        num *= 10.0
-    return int(round(num))
 
 def _clip_url_to_image_bytes(url: str) -> bytes:
     """Supports data URI, local path (/...), and remote URL."""
