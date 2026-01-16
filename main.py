@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import time
 import threading
@@ -59,6 +60,35 @@ os.makedirs("outputs", exist_ok=True)
 os.makedirs("assets", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
+# Periodic cleanup for outputs to avoid disk growth.
+OUTPUT_CLEANUP_TTL_SEC = 12 * 60 * 60
+OUTPUT_CLEANUP_INTERVAL_SEC = 60 * 60
+
+def _cleanup_outputs_once():
+    now = time.time()
+    try:
+        for name in os.listdir("outputs"):
+            path = os.path.join("outputs", name)
+            try:
+                if not os.path.isfile(path):
+                    continue
+                if now - os.path.getmtime(path) > OUTPUT_CLEANUP_TTL_SEC:
+                    os.remove(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def _start_outputs_cleanup_worker():
+    def _worker():
+        while True:
+            _cleanup_outputs_once()
+            time.sleep(OUTPUT_CLEANUP_INTERVAL_SEC)
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+_start_outputs_cleanup_worker()
+
 app = FastAPI()
 @app.middleware("http")
 async def log_requests(request, call_next):
@@ -91,7 +121,8 @@ QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
-    max_retries = len(API_KEY_POOL) + 5
+    max_retries = len(API_KEY_POOL) + 2
+    timeout_retry_used = False
 
     # 간단하게 payload 타입만 로깅 (이미지는 너무 크니 길이만)
     try:
@@ -128,6 +159,16 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
 
         except Exception as e:
             error_msg = str(e)
+            error_lower = error_msg.lower()
+            is_timeout = any(x in error_lower for x in ["504", "deadline", "timeout", "timed out"])
+            if is_timeout:
+                if timeout_retry_used:
+                    logger.error(f"[Gemini] timeout retry exhausted key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:200]}")
+                    break
+                timeout_retry_used = True
+                logger.warning(f"[Gemini] timeout key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:200]}")
+                time.sleep(1)
+                continue
             if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
                 logger.warning(f"[Gemini] 📉 quota key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:180]}")
                 QUOTA_EXCEEDED_KEYS.add(current_key)
@@ -560,20 +601,20 @@ def _safe_json_from_model_text(txt: str):
 
 def detect_back_wall_span_norm(empty_room_path: str) -> tuple:
     try:
-        img = Image.open(empty_room_path)
-        prompt = (
-            "TASK: ROOM GEOMETRY MEASUREMENT.\\n"
-            "In this empty room photo, find the BACK WALL usable span where main furniture would sit.\\n"
-            "Return STRICT JSON ONLY: {\\\"x_left\\\":0.0, \\\"x_right\\\":1.0} using normalized [0..1].\\n"
-            "Use the floor-wall boundary; ignore doors/windows if they reduce usable span. Approximate if unsure."
-        )
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
-        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-        if isinstance(obj, dict):
-            xl = float(obj.get("x_left", 0.0)); xr = float(obj.get("x_right", 1.0))
-            xl = max(0.0, min(1.0, xl)); xr = max(0.0, min(1.0, xr))
-            if xr - xl >= 0.2:
-                return (xl, xr)
+        with Image.open(empty_room_path) as img:
+            prompt = (
+                "TASK: ROOM GEOMETRY MEASUREMENT.\\n"
+                "In this empty room photo, find the BACK WALL usable span where main furniture would sit.\\n"
+                "Return STRICT JSON ONLY: {\\\"x_left\\\":0.0, \\\"x_right\\\":1.0} using normalized [0..1].\\n"
+                "Use the floor-wall boundary; ignore doors/windows if they reduce usable span. Approximate if unsure."
+            )
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
+            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+            if isinstance(obj, dict):
+                xl = float(obj.get("x_left", 0.0)); xr = float(obj.get("x_right", 1.0))
+                xl = max(0.0, min(1.0, xl)); xr = max(0.0, min(1.0, xr))
+                if xr - xl >= 0.2:
+                    return (xl, xr)
     except Exception:
         pass
     return (0.0, 1.0)
@@ -582,70 +623,77 @@ def _crop_ref_item_image(ref_path: str, box_2d: list, out_path: str):
     try:
         if not box_2d:
             return None
-        img = Image.open(ref_path)
-        w, h = img.size
-        ymin, xmin, ymax, xmax = box_2d
-        left = int(xmin / 1000 * w); top = int(ymin / 1000 * h)
-        right = int(xmax / 1000 * w); bottom = int(ymax / 1000 * h)
-        left = max(0, min(w-1, left)); right = max(left+1, min(w, right))
-        top = max(0, min(h-1, top)); bottom = max(top+1, min(h, bottom))
-        crop = img.crop((left, top, right, bottom))
-        crop.save(out_path, "PNG")
-        return out_path
+        with Image.open(ref_path) as img:
+            w, h = img.size
+            ymin, xmin, ymax, xmax = box_2d
+            left = int(xmin / 1000 * w); top = int(ymin / 1000 * h)
+            right = int(xmax / 1000 * w); bottom = int(ymax / 1000 * h)
+            left = max(0, min(w-1, left)); right = max(left+1, min(w, right))
+            top = max(0, min(h-1, top)); bottom = max(top+1, min(h, bottom))
+            crop = img.crop((left, top, right, bottom))
+            crop.save(out_path, "PNG")
+            return out_path
     except Exception:
         return None
 
 def create_scale_guide_image(empty_room_path: str, wall_span_norm: tuple, target_ratio: float, out_path: str):
     try:
-        base = Image.open(empty_room_path).convert("RGBA")
-        W, H = base.size
-        xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
-        span_px = max(1, int((xr - xl) * W))
-        target_px = int(max(1, min(span_px, span_px * float(target_ratio))))
-        x_center = int((xl + xr) * 0.5 * W)
-        x1 = int(max(0, min(W-1, x_center - target_px//2)))
-        x2 = int(max(0, min(W-1, x_center + target_px//2)))
+        with Image.open(empty_room_path) as base_img:
+            base = base_img.convert("RGBA")
+            W, H = base.size
+            xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
+            span_px = max(1, int((xr - xl) * W))
+            target_px = int(max(1, min(span_px, span_px * float(target_ratio))))
+            x_center = int((xl + xr) * 0.5 * W)
+            x1 = int(max(0, min(W-1, x_center - target_px//2)))
+            x2 = int(max(0, min(W-1, x_center + target_px//2)))
 
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        line = (255, 0, 0, 110)
-        thick = 4
-        for dx in range(-thick//2, thick//2 + 1):
-            draw.line([(x1+dx, 0), (x1+dx, H)], fill=line, width=1)
-            draw.line([(x2+dx, 0), (x2+dx, H)], fill=line, width=1)
+            overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            line = (255, 0, 0, 110)
+            thick = 4
+            for dx in range(-thick//2, thick//2 + 1):
+                draw.line([(x1+dx, 0), (x1+dx, H)], fill=line, width=1)
+                draw.line([(x2+dx, 0), (x2+dx, H)], fill=line, width=1)
 
-        wall_line = (0, 255, 255, 80)
-        draw.line([(int(xl*W), H-5), (int(xr*W), H-5)], fill=wall_line, width=3)
+            wall_line = (0, 255, 255, 80)
+            draw.line([(int(xl*W), H-5), (int(xr*W), H-5)], fill=wall_line, width=3)
 
-        composed = Image.alpha_composite(base, overlay).convert("RGB")
-        composed.save(out_path, "PNG")
-        return out_path
+            composed = Image.alpha_composite(base, overlay).convert("RGB")
+            composed.save(out_path, "PNG")
+            return out_path
     except Exception:
         return None
 
 def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], primary_label: Optional[str]):
     try:
-        img = Image.open(staged_path)
-        prompt = (
-            "OBJECT LOCALIZATION TASK.\\n"
-            "Find the PRIMARY ANCHOR furniture in the staged room image.\\n"
-            "Return STRICT JSON ONLY: {\\\"xmin\\\":0.0,\\\"ymin\\\":0.0,\\\"xmax\\\":1.0,\\\"ymax\\\":1.0}.\\n"
-            "bbox must tightly cover only that furniture. If reference crop is provided, match that object."
-        )
-        content = [prompt, "Staged room image:", img]
-        if primary_label:
-            content.insert(1, f"Primary label hint: {primary_label}")
-        if ref_item_crop_path and os.path.exists(ref_item_crop_path):
-            content += ["Reference item crop:", Image.open(ref_item_crop_path)]
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 20}, {})
-        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-        if isinstance(obj, dict):
-            xmin = float(obj.get("xmin", 0.0)); xmax = float(obj.get("xmax", 1.0))
-            ymin = float(obj.get("ymin", 0.0)); ymax = float(obj.get("ymax", 1.0))
-            xmin = max(0.0, min(1.0, xmin)); xmax = max(0.0, min(1.0, xmax))
-            ymin = max(0.0, min(1.0, ymin)); ymax = max(0.0, min(1.0, ymax))
-            if xmax - xmin > 0.05 and ymax - ymin > 0.05:
-                return (xmin, ymin, xmax, ymax)
+        with Image.open(staged_path) as img:
+            prompt = (
+                "OBJECT LOCALIZATION TASK.\\n"
+                "Find the PRIMARY ANCHOR furniture in the staged room image.\\n"
+                "Return STRICT JSON ONLY: {\\\"xmin\\\":0.0,\\\"ymin\\\":0.0,\\\"xmax\\\":1.0,\\\"ymax\\\":1.0}.\\n"
+                "bbox must tightly cover only that furniture. If reference crop is provided, match that object."
+            )
+            content = [prompt, "Staged room image:", img]
+            if primary_label:
+                content.insert(1, f"Primary label hint: {primary_label}")
+            ref_img = None
+            try:
+                if ref_item_crop_path and os.path.exists(ref_item_crop_path):
+                    ref_img = Image.open(ref_item_crop_path)
+                    content += ["Reference item crop:", ref_img]
+                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 20}, {})
+            finally:
+                if ref_img:
+                    ref_img.close()
+            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+            if isinstance(obj, dict):
+                xmin = float(obj.get("xmin", 0.0)); xmax = float(obj.get("xmax", 1.0))
+                ymin = float(obj.get("ymin", 0.0)); ymax = float(obj.get("ymax", 1.0))
+                xmin = max(0.0, min(1.0, xmin)); xmax = max(0.0, min(1.0, xmax))
+                ymin = max(0.0, min(1.0, ymin)); ymax = max(0.0, min(1.0, ymax))
+                if xmax - xmin > 0.05 and ymax - ymin > 0.05:
+                    return (xmin, ymin, xmax, ymax)
     except Exception:
         pass
     return None
@@ -698,33 +746,33 @@ def reorder_by_scale_best_pick(result_urls: list, ref_path: str, primary: dict, 
 def detect_furniture_boxes(moodboard_path):
     print(f">> [Detection] Scanning furniture in {moodboard_path}...", flush=True)
     try:
-        img = Image.open(moodboard_path)
-        prompt = (
-            "OBJECT DETECTION TASK:\n"
-            "Identify ALL discrete furniture items in this image (Sofa, Chair, Table, Lamp, Rug, Ottoman, etc.).\n"
-            "**NOTE:** The background is a neutral grey (#D2D2D2) for contrast. Do not detect the background itself.\n"
-            "Return a JSON list where each item has:\n"
-            "- 'label': Name of the item.\n"
-            "- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 scale.\n"
-            "\n"
-            "<CRITICAL: SORTING ORDER>\n"
-            "**YOU MUST SORT THE LIST BY PHYSICAL SIZE (VOLUME) FROM LARGEST TO SMALLEST.**\n"
-            "1. Largest items first (e.g., Sofa, Bed, Large Rug, Wardrobe).\n"
-            "2. Medium items second (e.g., Armchair, Coffee Table, Console).\n"
-            "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
-            "Ignore walls, windows, and floors. Focus on movable objects."
-        )
-        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {'timeout': 60}, {})
-        if response and response.text:
-            text = response.text.strip()
-            if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
-            elif "```" in text: text = text.split("```")[0].strip()
-            
-            items = json.loads(text)
-            if isinstance(items, list) and len(items) > 0:
+        with Image.open(moodboard_path) as img:
+            prompt = (
+                "OBJECT DETECTION TASK:\n"
+                "Identify ALL discrete furniture items in this image (Sofa, Chair, Table, Lamp, Rug, Ottoman, etc.).\n"
+                "**NOTE:** The background is a neutral grey (#D2D2D2) for contrast. Do not detect the background itself.\n"
+                "Return a JSON list where each item has:\n"
+                "- 'label': Name of the item.\n"
+                "- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 scale.\n"
+                "\n"
+                "<CRITICAL: SORTING ORDER>\n"
+                "**YOU MUST SORT THE LIST BY PHYSICAL SIZE (VOLUME) FROM LARGEST TO SMALLEST.**\n"
+                "1. Largest items first (e.g., Sofa, Bed, Large Rug, Wardrobe).\n"
+                "2. Medium items second (e.g., Armchair, Coffee Table, Console).\n"
+                "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
+                "Ignore walls, windows, and floors. Focus on movable objects."
+            )
+            response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {'timeout': 60}, {})
+            if response and response.text:
+                text = response.text.strip()
+                if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
+                elif "```" in text: text = text.split("```")[0].strip()
+                
+                items = json.loads(text)
+                if isinstance(items, list) and len(items) > 0:
 
-                print(f">> [Detection] Found {len(items)} items (Sorted): {[i.get('label') for i in items]}", flush=True)
-                return items
+                    print(f">> [Detection] Found {len(items)} items (Sorted): {[i.get('label') for i in items]}", flush=True)
+                    return items
     except Exception as e:
         print(f"!! Detection Failed: {e}", flush=True)
     
@@ -737,6 +785,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
     try:
         box = item_data.get('box_2d')
         label = item_data.get('label', 'Furniture')
+        cropped_img = None
         
         img = Image.open(moodboard_path)
         W, H = img.size
@@ -767,7 +816,9 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             # 크롭 실행
             cropped_img = img.crop((left, top, right, bottom))
         else:
-            cropped_img = img
+            cropped_img = img.copy()
+
+        img.close()
 
         # [A-Variant] Optionally save the cropped item image for cutout injection
         crop_path = None
@@ -815,6 +866,11 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
                     # 로깅
                     print(f"   -> [Text Read] {label}: {dims_str} (Source: {data.get('raw_text_found')})", flush=True)
                 
+        if cropped_img:
+            try:
+                cropped_img.close()
+            except Exception:
+                pass
         return {
             "label": label,
             "description": desc + dims_str, # 치수 정보를 설명에 병합
@@ -824,6 +880,11 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             
     except Exception as e:
         print(f"!! Crop Analysis Failed for {item_data.get('label','Furniture')}: {e}", flush=True)
+        if cropped_img:
+            try:
+                cropped_img.close()
+            except Exception:
+                pass
     
     return {
         "label": item_data.get('label', 'Furniture'),
@@ -835,16 +896,16 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
 # [최종 복구 및 업그레이드] 분석(Flash) -> 생성(Pro-Image) 2단계 파이프라인
 # 구글 AI 스튜디오의 "Generative Reconstruction" 로직 이식
 def generate_frontal_room_from_photos(photo_paths, unique_id, index):
+    input_images = []
     try:
         print(f"   [Frontal Gen] Step 1: Analyzing {len(photo_paths)} photos with Flash (Spatial Mapping)...", flush=True)
         
         # 1. 이미지 로드
-        input_images = []
         for path in photo_paths:
             try:
-                img = Image.open(path)
-                img.thumbnail((1536, 1536))
-                input_images.append(img)
+                with Image.open(path) as img:
+                    img.thumbnail((1536, 1536))
+                    input_images.append(img.copy())
             except: pass
 
         if not input_images:
@@ -936,6 +997,12 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
     except Exception as e:
         print(f"!! Frontal Gen Error: {e}", flush=True)
         return None
+    finally:
+        for im in input_images:
+            try:
+                im.close()
+            except Exception:
+                pass
 
 # [수정] 이미지 편집/데코레이션 처리 로직 (Inpainting & Resizing 강화 버전)
 def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
@@ -944,10 +1011,12 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         
         if not photo_paths: return None
         target_path = photo_paths[0] 
+        img = None
         
         try:
-            img = Image.open(target_path)
-            img.thumbnail((2048, 2048)) 
+            with Image.open(target_path) as base_img:
+                base_img.thumbnail((2048, 2048))
+                img = base_img.copy()
         except: return None
 
         # 모드별 시스템 프롬프트 분기
@@ -1006,11 +1075,26 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                     
                     # 해상도/비율 복구
                     final_path = standardize_image_to_reference_canvas(out_path, target_path)
+                    try:
+                        if img:
+                            img.close()
+                    except Exception:
+                        pass
                     return f"/outputs/{os.path.basename(final_path)}"
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
 
     except Exception as e:
         print(f"!! {mode} Gen Error: {e}", flush=True)
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
 
 # [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
@@ -1037,8 +1121,8 @@ def generate_frontal_view_endpoint(
         generated_results = []
         
         # 2. 병렬 생성 (5장 시도)
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(generate_frontal_room_from_photos, saved_photo_paths, unique_id, i+1) for i in range(5)]
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(generate_frontal_room_from_photos, saved_photo_paths, unique_id, i+1) for i in range(3)]
             for future in futures:
                 res = future.result()
                 if res: generated_results.append(res)
@@ -1139,12 +1223,20 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                         path = os.path.join("outputs", filename)
                         with open(path, 'wb') as f: f.write(part.inline_data.data)
                         # [FIX] Stage 1 결과도 입력 캔버스(원본 방 사진) 비율/해상도로 강제 통일
+                        try:
+                            img.close()
+                        except Exception:
+                            pass
                         return standardize_image_to_reference_canvas(path, image_path)
             else:
                 print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
         print(f"⚠️ [Retry] 시도 {try_count+1} 실패. 재시도...", flush=True)
 
     print(">> [실패] 빈 방 생성 불가. 원본 사용.", flush=True)
+    try:
+        img.close()
+    except Exception:
+        pass
     return image_path
 
 # [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시 + 공간 제약 사항 추가
@@ -1165,6 +1257,8 @@ def generate_furnished_room(
     start_time=0,
 ):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
+    room_img = None
+    extra_imgs = []
     try:
         room_img = Image.open(room_path)
         
@@ -1398,13 +1492,16 @@ def generate_furnished_room(
                     if cp and os.path.exists(cp):
                         cutouts.append((lbl, cp))
                 for lbl, cp in cutouts[:10]:
-                    content += [f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN). Label: {lbl}", Image.open(cp)]
+                    cutout_img = Image.open(cp)
+                    extra_imgs.append(cutout_img)
+                    content += [f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN). Label: {lbl}", cutout_img]
         except Exception:
             pass
 
         try:
             if scale_guide_path and os.path.exists(scale_guide_path):
                 guide_img = Image.open(scale_guide_path)
+                extra_imgs.append(guide_img)
                 content += ["SCALE GUIDE IMAGE (do NOT render the guide; use only for measurement):", guide_img]
         except Exception:
             pass
@@ -1412,6 +1509,7 @@ def generate_furnished_room(
             try:
                 ref = Image.open(ref_path)
                 ref.thumbnail((2048, 2048))
+                extra_imgs.append(ref)
                 content.extend(["Style Reference (Furniture Palette ONLY):", ref])
             except: pass
         
@@ -1438,6 +1536,17 @@ def generate_furnished_room(
     except Exception as e:
         print(f"!! Stage 2 에러: {e}", flush=True)
         return None
+    finally:
+        for im in extra_imgs:
+            try:
+                im.close()
+            except Exception:
+                pass
+        try:
+            if room_img:
+                room_img.close()
+        except Exception:
+            pass
 
 def call_magnific_api(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: 
@@ -1806,7 +1915,7 @@ def render_room(
                 print(f"!! [Global Analysis Failed] {e}", flush=True)
 
         generated_results = []
-        print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Specs Injection)!", flush=True)
+        print(f"\n🚀 [Stage 2] 3장 동시 생성 시작 (Specs Injection)!", flush=True)
 
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
@@ -1817,8 +1926,8 @@ def render_room(
             except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(process_one_variant, i) for i in range(5)]
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(process_one_variant, i) for i in range(3)]
             for future in futures:
                 res = future.result()
                 if res: generated_results.append(res)
@@ -1987,6 +2096,7 @@ def construct_dynamic_styles(analyzed_items):
     return styles
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
+    img = None
     try:
         img = Image.open(original_image_path)
         target_ratio = style_config.get('ratio', '16:9')
@@ -2018,10 +2128,25 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
                     filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
+                    try:
+                        if img:
+                            img.close()
+                    except Exception:
+                        pass
                     return f"/outputs/{filename}"
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
     except Exception as e:
         print(f"!! Detail Generation Error: {e}")
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
 
 class DetailRequest(BaseModel):
@@ -2195,6 +2320,7 @@ Height: Estimated Value mm
 """
 
 def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None):
+    img = None
     try:
         img = Image.open(image_path)
         
@@ -2218,10 +2344,25 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
                     filename = f"gen_mb_{timestamp}_{unique_id}_{index}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
+                    try:
+                        if img:
+                            img.close()
+                    except Exception:
+                        pass
                     return f"/outputs/{filename}"
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
     except Exception as e:
         print(f"!! Moodboard Gen Error: {e}")
+        try:
+            if img:
+                img.close()
+        except Exception:
+            pass
         return None
 
 @app.post("/generate-moodboard-options")
@@ -2234,7 +2375,7 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
         
-        print(f"\n=== [Moodboard Gen] Starting 5 variations for {unique_id} ===", flush=True)
+        print(f"\n=== [Moodboard Gen] Starting 3 variations for {unique_id} ===", flush=True)
 
         furniture_specs_text = None
         try:
@@ -2247,8 +2388,8 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         
         generated_results = []
         
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(5)]
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(3)]
             for future in futures:
                 res = future.result()
                 if res: generated_results.append(res)

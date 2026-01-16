@@ -1,4 +1,5 @@
-# 3단계 구조: 공간 -> 스타일 -> 번호 (1-10)
+﻿# -*- coding: utf-8 -*-
+# 3?④퀎 援ъ“: 怨듦컙 -> ?ㅽ???-> 踰덊샇 (1-10)
 ROOM_STYLES = {
     "Living room": [
         "French-modern",
@@ -32,7 +33,7 @@ ROOM_STYLES = {
     ]
 }
 
-# 하위 호환성을 위한 기존 STYLES (더 이상 사용하지 않지만 유지)
+# ?섏쐞 ?명솚?깆쓣 ?꾪븳 湲곗〈 STYLES (???댁긽 ?ъ슜?섏? ?딆?留??좎?)
 STYLES = {
     "French-modern": {
         "prompt": "",
@@ -67,3 +68,4 @@ STYLES = {
         "furniture_specs": {}
     }
 }
+

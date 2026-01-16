@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 import os
 import time
 import threading
@@ -27,12 +28,11 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import Optional, List, Dict, Any
 
 # ---------------------------------------------------------
-# 1. 환경 설정 및 초기화
-# ---------------------------------------------------------
+# 1. ?섍꼍 ?ㅼ젙 諛?珥덇린??# ---------------------------------------------------------
 load_dotenv()
 
-MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-flash-preview'  # 절대 변경 금지
+MODEL_NAME = 'gemini-3-pro-image-preview'       # ?덈? 蹂寃?湲덉?
+ANALYSIS_MODEL_NAME = 'gemini-3-flash-preview'  # ?덈? 蹂寃?湲덉?
 API_KEY_POOL = []
 i = 1
 while True:
@@ -47,7 +47,7 @@ if not API_KEY_POOL:
     single_key = os.getenv("NANOBANANA_API_KEY")
     if single_key: API_KEY_POOL.append(single_key)
 
-print(f"✅ 로드된 나노바나나 API 키 개수: {len(API_KEY_POOL)}개", flush=True)
+print(f"??濡쒕뱶???섎끂諛붾굹??API ??媛쒖닔: {len(API_KEY_POOL)}媛?, flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
@@ -79,7 +79,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
     for attempt in range(max_retries):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         if not available_keys:
-            print("🔄 [System] 모든 키가 락 상태. 5초 쿨다운 후 초기화.", flush=True)
+            print("?봽 [System] 紐⑤뱺 ?ㅺ? ???곹깭. 5珥?荑⑤떎????珥덇린??", flush=True)
             time.sleep(5) 
             QUOTA_EXCEEDED_KEYS.clear()
             available_keys = list(API_KEY_POOL)
@@ -97,14 +97,14 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
         except Exception as e:
             error_msg = str(e)
             if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
-                print(f"📉 [Lock] Key(...{masked_key}) 할당량 초과. (잠시 휴식)", flush=True)
+                print(f"?뱣 [Lock] Key(...{masked_key}) ?좊떦??珥덇낵. (?좎떆 ?댁떇)", flush=True)
                 QUOTA_EXCEEDED_KEYS.add(current_key)
                 time.sleep(2 + attempt) 
             else:
-                print(f"⚠️ [Error] Key(...{masked_key}) 에러: {error_msg}", flush=True)
+                print(f"?좑툘 [Error] Key(...{masked_key}) ?먮윭: {error_msg}", flush=True)
                 time.sleep(1)
 
-    print("❌ [Fatal] 모든 키 시도 실패.", flush=True)
+    print("??[Fatal] 紐⑤뱺 ???쒕룄 ?ㅽ뙣.", flush=True)
     return None
 
 def standardize_image(image_path, output_path=None, keep_ratio=False, force_landscape=False):
@@ -113,10 +113,10 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
         with Image.open(image_path) as img:
             img = ImageOps.exif_transpose(img)
             
-            # [수정] 투명 배경(RGBA) 처리: 흰색 소품이 흰 배경에 묻히는 것을 방지하기 위해 중립 그레이(#D2D2D2) 배경 사용
+            # [?섏젙] ?щ챸 諛곌꼍(RGBA) 泥섎━: ?곗깋 ?뚰뭹????諛곌꼍??臾삵엳??寃껋쓣 諛⑹??섍린 ?꾪빐 以묐┰ 洹몃젅??#D2D2D2) 諛곌꼍 ?ъ슜
             if img.mode in ("RGBA", "P"):
                 img = img.convert("RGBA")
-                # 밝은 가구와 어두운 가구 모두 대비가 잘 보이는 중립적인 회색 배경 생성
+                # 諛앹? 媛援ъ? ?대몢??媛援?紐⑤몢 ?鍮꾧? ??蹂댁씠??以묐┰?곸씤 ?뚯깋 諛곌꼍 ?앹꽦
                 background = Image.new("RGBA", img.size, (210, 210, 210, 255)) 
                 img = Image.alpha_composite(background, img).convert("RGB")
             elif img.mode != 'RGB':
@@ -124,11 +124,11 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
 
             width, height = img.size
             
-            # [FIX] force_landscape가 True면 -> 무조건 16:9 (1920x1080) 설정
+            # [FIX] force_landscape媛 True硫?-> 臾댁“嫄?16:9 (1920x1080) ?ㅼ젙
             if force_landscape:
                 target_size = (1920, 1080)
                 target_ratio = 16 / 9
-            # 기존 로직 (자동 감지)
+            # 湲곗〈 濡쒖쭅 (?먮룞 媛먯?)
             elif width >= height:
                 target_size = (1920, 1080)
                 target_ratio = 16 / 9
@@ -140,17 +140,17 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
                 current_ratio = width / height
 
                 if current_ratio > target_ratio:
-                    # 이미지가 더 납작한 경우 (양옆 자름)
+                    # ?대?吏媛 ???⑹옉??寃쎌슦 (?묒쁿 ?먮쫫)
                     new_width = int(height * target_ratio)
                     offset = (width - new_width) // 2
                     img = img.crop((offset, 0, offset + new_width, height))
                 else:
-                    # 이미지가 더 홀쭉한 경우 (위아래 자름)
+                    # ?대?吏媛 ???彛됲븳 寃쎌슦 (?꾩븘???먮쫫)
                     new_height = int(width / target_ratio)
                     offset = (height - new_height) // 2
                     img = img.crop((0, offset, width, offset + new_height))
 
-                # 최종 리사이즈 (LANCZOS 필터 사용)
+                # 理쒖쥌 由ъ궗?댁쫰 (LANCZOS ?꾪꽣 ?ъ슜)
                 img = img.resize(target_size, Image.Resampling.LANCZOS)
 
             base, _ = os.path.splitext(output_path)
@@ -158,20 +158,18 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
             img.save(new_output_path, "PNG")
             return new_output_path
     except Exception as e:
-        print(f"!! 표준화 실패: {e}", flush=True)
+        print(f"!! ?쒖????ㅽ뙣: {e}", flush=True)
         return image_path
 # ---------------------------------------------------------
 # [NEW] Output Aspect Ratio Enforcement
-# - Gemini가 무드보드 비율/레이아웃을 따라가거나,
-#   하단에 흰 배경(카탈로그/텍스트) 영역을 붙여서 내보내는 케이스를
-#   "방 사진 캔버스" 기준으로 강제 보정합니다.
+# - Gemini媛 臾대뱶蹂대뱶 鍮꾩쑉/?덉씠?꾩썐???곕씪媛嫄곕굹,
+#   ?섎떒????諛곌꼍(移댄깉濡쒓렇/?띿뒪?? ?곸뿭??遺숈뿬???대낫?대뒗 耳?댁뒪瑜?#   "諛??ъ쭊 罹붾쾭?? 湲곗??쇰줈 媛뺤젣 蹂댁젙?⑸땲??
 # ---------------------------------------------------------
 
 def _is_bottom_strip_mostly_white(img: Image.Image, strip_ratio: float = 0.22, white_thresh: int = 245) -> bool:
-    """하단 strip이 '거의 흰색'인지 휴리스틱으로 판단합니다.
+    """?섎떒 strip??'嫄곗쓽 ?곗깋'?몄? ?대━?ㅽ떛?쇰줈 ?먮떒?⑸땲??
 
-    - 무드보드/인벤토리 시트가 하단에 붙는 경우 흰 배경이 대량 포함되는 패턴이 많아서
-      landscape 강제 크롭 시 '위쪽 고정(top anchor)' 여부를 결정하는 데 사용합니다.
+    - 臾대뱶蹂대뱶/?몃깽?좊━ ?쒗듃媛 ?섎떒??遺숇뒗 寃쎌슦 ??諛곌꼍??????ы븿?섎뒗 ?⑦꽩??留롮븘??      landscape 媛뺤젣 ?щ∼ ??'?꾩そ 怨좎젙(top anchor)' ?щ?瑜?寃곗젙?섎뒗 ???ъ슜?⑸땲??
     """
     try:
         w, h = img.size
@@ -182,7 +180,7 @@ def _is_bottom_strip_mostly_white(img: Image.Image, strip_ratio: float = 0.22, w
         y0 = max(0, h - strip_h)
         strip = img.crop((0, y0, w, h))
 
-        # 계산 비용을 낮추기 위해 축소 후 판단
+        # 怨꾩궛 鍮꾩슜????텛湲??꾪빐 異뺤냼 ???먮떒
         strip = strip.resize((256, max(1, int(256 * strip_ratio))), Image.Resampling.BILINEAR)
         gray = strip.convert('L')
         pixels = list(gray.getdata())
@@ -192,8 +190,7 @@ def _is_bottom_strip_mostly_white(img: Image.Image, strip_ratio: float = 0.22, w
         white_count = sum(1 for p in pixels if p >= white_thresh)
         white_ratio = white_count / len(pixels)
 
-        # 35% 이상이 순백(근처)이면 "하단이 흰 시트"일 확률이 높다고 가정
-        return white_ratio >= 0.35
+        # 35% ?댁긽???쒕갚(洹쇱쿂)?대㈃ "?섎떒?????쒗듃"???뺣쪧???믩떎怨?媛??        return white_ratio >= 0.35
     except Exception:
         return False
 
@@ -203,11 +200,10 @@ def standardize_image_to_reference_canvas(
     reference_path: str,
     output_path: Optional[str] = None,
 ) -> str:
-    """생성 결과물을 'reference 이미지(=빈 방 캔버스)'의 비율/해상도로 강제 통일합니다.
+    """?앹꽦 寃곌낵臾쇱쓣 'reference ?대?吏(=鍮?諛?罹붾쾭??'??鍮꾩쑉/?댁긽?꾨줈 媛뺤젣 ?듭씪?⑸땲??
 
-    - 핵심: 무드보드가 세로여도 최종 결과는 방 사진 캔버스(16:9 또는 4:5)로 강제.
-    - 추가: 결과 이미지가 세로로 튀면서 하단에 흰 인벤토리 영역이 붙는 케이스를
-            top-anchor 크롭으로 잘라내는 휴리스틱을 적용.
+    - ?듭떖: 臾대뱶蹂대뱶媛 ?몃줈?щ룄 理쒖쥌 寃곌낵??諛??ъ쭊 罹붾쾭??16:9 ?먮뒗 4:5)濡?媛뺤젣.
+    - 異붽?: 寃곌낵 ?대?吏媛 ?몃줈濡??硫댁꽌 ?섎떒?????몃깽?좊━ ?곸뿭??遺숇뒗 耳?댁뒪瑜?            top-anchor ?щ∼?쇰줈 ?섎씪?대뒗 ?대━?ㅽ떛???곸슜.
     """
     try:
         with Image.open(reference_path) as ref_img:
@@ -228,7 +224,7 @@ def standardize_image_to_reference_canvas(
             target_ratio = ref_w / ref_h
             current_ratio = w / h
 
-            # 이미 목표 캔버스와 동일하면 그대로 PNG로만 저장 (안전)
+            # ?대? 紐⑺몴 罹붾쾭?ㅼ? ?숈씪?섎㈃ 洹몃?濡?PNG濡쒕쭔 ???(?덉쟾)
             if abs(current_ratio - target_ratio) < 1e-3 and (w, h) == (ref_w, ref_h):
                 base, _ = os.path.splitext(output_path or image_path)
                 out_path = f"{base}.png"
@@ -236,16 +232,16 @@ def standardize_image_to_reference_canvas(
                 return out_path
 
             if current_ratio > target_ratio:
-                # 너무 넓음: 좌우 크롭
+                # ?덈Т ?볦쓬: 醫뚯슦 ?щ∼
                 new_w = int(h * target_ratio)
                 x0 = max(0, (w - new_w) // 2)
                 img = img.crop((x0, 0, x0 + new_w, h))
             else:
-                # 너무 높음: 상하 크롭
+                # ?덈Т ?믪쓬: ?곹븯 ?щ∼
                 new_h = int(w / target_ratio)
                 new_h = min(new_h, h)
 
-                # 하단에 흰 시트가 붙는 패턴이면 위쪽 기준으로 크롭 (하단 제거)
+                # ?섎떒?????쒗듃媛 遺숇뒗 ?⑦꽩?대㈃ ?꾩そ 湲곗??쇰줈 ?щ∼ (?섎떒 ?쒓굅)
                 if ref_w >= ref_h and _is_bottom_strip_mostly_white(img):
                     y0 = 0
                 else:
@@ -343,13 +339,12 @@ def analyze_cropped_item(moodboard_path, item_data):
     
     return {"label": label, "description": f"A high quality {label}."}
 
-# [최종 복구 및 업그레이드] 분석(Flash) -> 생성(Pro-Image) 2단계 파이프라인
-# 구글 AI 스튜디오의 "Generative Reconstruction" 로직 이식
+# [理쒖쥌 蹂듦뎄 諛??낃렇?덉씠?? 遺꾩꽍(Flash) -> ?앹꽦(Pro-Image) 2?④퀎 ?뚯씠?꾨씪??# 援ш? AI ?ㅽ뒠?붿삤??"Generative Reconstruction" 濡쒖쭅 ?댁떇
 def generate_frontal_room_from_photos(photo_paths, unique_id, index):
     try:
         print(f"   [Frontal Gen] Step 1: Analyzing {len(photo_paths)} photos with Flash (Spatial Mapping)...", flush=True)
         
-        # 1. 이미지 로드
+        # 1. ?대?吏 濡쒕뱶
         input_images = []
         for path in photo_paths:
             try:
@@ -362,8 +357,8 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
             return None
 
         # ---------------------------------------------------------
-        # [Step 1] Flash 모델로 "공간 구조 및 3D 매핑" 분석
-        # AI 스튜디오의 "Comprehending Spatial Data" 단계를 수행
+        # [Step 1] Flash 紐⑤뜽濡?"怨듦컙 援ъ“ 諛?3D 留ㅽ븨" 遺꾩꽍
+        # AI ?ㅽ뒠?붿삤??"Comprehending Spatial Data" ?④퀎瑜??섑뻾
         # ---------------------------------------------------------
         analysis_prompt = (
             "You are a Spatial Architect AI. Analyze these multiple photos of the SAME room taken from different angles.\n"
@@ -375,15 +370,15 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
             "Output ONLY the spatial blueprint description."
         )
         
-        # 분석 모델 호출
+        # 遺꾩꽍 紐⑤뜽 ?몄텧
         analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 45}, {})
         spatial_blueprint = analysis_res.text if (analysis_res and analysis_res.text) else "A modern living room with large windows and tiled floor."
         
         print(f"   [Frontal Gen] Step 2: Synthesizing Frontal View based on Spatial Blueprint...", flush=True)
 
         # ---------------------------------------------------------
-        # [Step 2] Pro Image 모델로 "생성형 재구성(Generative Reconstruction)"
-        # AI 스튜디오의 "Defining the Frontal View" & "Spatial Fidelity" 로직 이식
+        # [Step 2] Pro Image 紐⑤뜽濡?"?앹꽦???ш뎄??Generative Reconstruction)"
+        # AI ?ㅽ뒠?붿삤??"Defining the Frontal View" & "Spatial Fidelity" 濡쒖쭅 ?댁떇
         # ---------------------------------------------------------
         generation_prompt = (
             f"TASK: Generative Space Reconstruction (Multi-View to Single Frontal View).\n"
@@ -418,9 +413,8 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
             "- Distorted pillars, curved horizon, fisheye curvature."
         )
 
-        # 이미지 생성 모델 호출
-        # input_images를 함께 넣어주어 시각적 텍스처(Texture)를 참조하게 함
-        content_list = [generation_prompt] + input_images
+        # ?대?吏 ?앹꽦 紐⑤뜽 ?몄텧
+        # input_images瑜??④퍡 ?ｌ뼱二쇱뼱 ?쒓컖???띿뒪泥?Texture)瑜?李몄“?섍쾶 ??        content_list = [generation_prompt] + input_images
         
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -439,7 +433,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
                     out_path = os.path.join("outputs", out_filename)
                     with open(out_path, 'wb') as f: f.write(part.inline_data.data)
                     
-                    # [유지] 표준화 함수 (에러 없이 호출)
+                    # [?좎?] ?쒖????⑥닔 (?먮윭 ?놁씠 ?몄텧)
                     final_path = standardize_image(out_path)
                     return f"/outputs/{os.path.basename(final_path)}"
         return None
@@ -448,8 +442,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
         print(f"!! Frontal Gen Error: {e}", flush=True)
         return None
 
-# [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
-@app.post("/generate-frontal-view")
+# [NEW] ?붾뱶?ъ씤?? ?꾨㈃ ?낅줈?????-> 洹몃깷 ?ъ쭊?ㅻ쭔 ?낅줈??@app.post("/generate-frontal-view")
 def generate_frontal_view_endpoint(
     input_photos: List[UploadFile] = File(...) 
 ):
@@ -458,10 +451,9 @@ def generate_frontal_view_endpoint(
         timestamp = int(time.time())
         print(f"\n=== [Frontal View Gen] Processing {len(input_photos)} photos ===", flush=True)
 
-        # 1. 업로드된 사진들 저장
-        saved_photo_paths = []
+        # 1. ?낅줈?쒕맂 ?ъ쭊?????        saved_photo_paths = []
         for idx, photo in enumerate(input_photos):
-            # 파일명 안전하게 처리
+            # ?뚯씪紐??덉쟾?섍쾶 泥섎━
             safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
             path = os.path.join("outputs", f"src_{timestamp}_{unique_id}_{idx}_{safe_name}")
             
@@ -471,7 +463,7 @@ def generate_frontal_view_endpoint(
         
         generated_results = []
         
-        # 2. 병렬 생성 (5장 시도)
+        # 2. 蹂묐젹 ?앹꽦 (5???쒕룄)
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(generate_frontal_room_from_photos, saved_photo_paths, unique_id, i+1) for i in range(5)]
             for future in futures:
@@ -484,7 +476,7 @@ def generate_frontal_view_endpoint(
             return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
             
     except Exception as e:
-        print(f"🔥🔥🔥 [Error] {e}")
+        print(f"?뵦?뵦?뵦 [Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 # -----------------------------------------------------------------------------
@@ -493,7 +485,7 @@ def generate_frontal_view_endpoint(
 
 def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1"):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
-    print(f"\n--- [{stage_name}] 빈 방 생성 시작 ({MODEL_NAME}) ---", flush=True)
+    print(f"\n--- [{stage_name}] 鍮?諛??앹꽦 ?쒖옉 ({MODEL_NAME}) ---", flush=True)
     
     img = Image.open(image_path)
     system_instruction = "You are an expert architectural AI."
@@ -528,34 +520,34 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
             if hasattr(response, 'parts') and response.parts:
                 for part in response.parts:
                     if hasattr(part, 'inline_data'):
-                        print(f">> [성공] 빈 방 이미지 생성됨! ({try_count+1}회차)", flush=True)
+                        print(f">> [?깃났] 鍮?諛??대?吏 ?앹꽦?? ({try_count+1}?뚯감)", flush=True)
                         timestamp = int(time.time())
                         filename = f"empty_{timestamp}_{unique_id}.png"
                         path = os.path.join("outputs", filename)
                         with open(path, 'wb') as f: f.write(part.inline_data.data)
-                        # [FIX] Stage 1 결과도 입력 캔버스(원본 방 사진) 비율/해상도로 강제 통일
+                        # [FIX] Stage 1 寃곌낵???낅젰 罹붾쾭???먮낯 諛??ъ쭊) 鍮꾩쑉/?댁긽?꾨줈 媛뺤젣 ?듭씪
                         return standardize_image_to_reference_canvas(path, image_path)
             else:
-                print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
-        print(f"⚠️ [Retry] 시도 {try_count+1} 실패. 재시도...", flush=True)
+                print(f"?좑툘 [Blocked] ?덉쟾 ?꾪꽣 李⑤떒", flush=True)
+        print(f"?좑툘 [Retry] ?쒕룄 {try_count+1} ?ㅽ뙣. ?ъ떆??..", flush=True)
 
-    print(">> [실패] 빈 방 생성 불가. 원본 사용.", flush=True)
+    print(">> [?ㅽ뙣] 鍮?諛??앹꽦 遺덇?. ?먮낯 ?ъ슜.", flush=True)
     return image_path
 
-# [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시 + 공간 제약 사항 추가
+# [?섏젙] ?먮낯 ?꾨＼?꾪듃 ?좎? + 鍮꾩쑉 ?먮룞 媛먯? + ?띿뒪???щ갚 湲덉? + 臾대뱶蹂대뱶 鍮꾩쑉 臾댁떆 + 怨듦컙 ?쒖빟 ?ы빆 異붽?
 def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furniture_specs=None, room_dimensions=None, placement_instructions=None, start_time=0):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     try:
         room_img = Image.open(room_path)
         
-        # [NEW] 이미지 비율 계산 (가로형/세로형 판단)
+        # [NEW] ?대?吏 鍮꾩쑉 怨꾩궛 (媛濡쒗삎/?몃줈???먮떒)
         width, height = room_img.size
         is_portrait = height > width
         ratio_instruction = "PORTRAIT (4:5 Ratio)" if is_portrait else "LANDSCAPE (16:9 Ratio)"
         
         system_instruction = "You are an expert interior designer AI."
         
-        # [수정] 스펙 데이터 (레이아웃 무시 경고 포함)
+        # [?섏젙] ?ㅽ럺 ?곗씠??(?덉씠?꾩썐 臾댁떆 寃쎄퀬 ?ы븿)
         specs_context = ""
         if furniture_specs:
             specs_context = (
@@ -566,7 +558,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                 "--------------------------------------------------\n"
             )
 
-        # [NEW] 공간 제약 사항 컨텍스트 구성
+        # [NEW] 怨듦컙 ?쒖빟 ?ы빆 而⑦뀓?ㅽ듃 援ъ꽦
         spatial_context = ""
         if room_dimensions or placement_instructions:
             spatial_context = "\n<PHYSICAL SPACE CONSTRAINTS (STRICT ADHERENCE)>\n"
@@ -580,18 +572,18 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                 "--------------------------------------------------\n"
             )
 
-        # [NEW] 동적 치수 분석 로직 (하드코딩 방지)
+        # [NEW] ?숈쟻 移섏닔 遺꾩꽍 濡쒖쭅 (?섎뱶肄붾뵫 諛⑹?)
         calculated_analysis = ""
         try:
-            # 1. 방 너비 파싱 (3000 x 3500 x 2400 mm 등에서 첫 번째 숫자 추출)
+            # 1. 諛??덈퉬 ?뚯떛 (3000 x 3500 x 2400 mm ?깆뿉??泥?踰덉㎏ ?レ옄 異붿텧)
             room_w = 0
             room_nums = [int(s) for s in room_dimensions.replace('x', ' ').replace('X', ' ').replace(',', ' ').split() if s.isdigit()]
             if room_nums: room_w = room_nums[0]
 
-            # 2. 가구 스펙에서 주요 수치 추출 및 비율 계산
+            # 2. 媛援??ㅽ럺?먯꽌 二쇱슂 ?섏튂 異붿텧 諛?鍮꾩쑉 怨꾩궛
             if room_w > 0 and furniture_specs:
                 import re
-                # 가장 큰 가구(소파 등)의 width 찾기
+                # 媛????媛援??뚰뙆 ????width 李얘린
                 widths = re.findall(r'width\s*:?\s*(\d+)', furniture_specs.lower())
                 if widths:
                     max_f_w = int(widths[0])
@@ -663,7 +655,7 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
             "   - Combine 'Sun-filled Freshness' with 'High-end Illuminated Luxury'. Bright, airy, and fully detailed.\n"
             "   - **OUTPUT RULE:** Return the image with furniture added, perfectly blended with abundant daylight AND active neutral interior lighting.\n"
         )
-        # [조립] 비율 고정 및 '무드보드 비율 무시' 명령 추가 (세로 무드보드 문제 해결)
+        # [議곕┰] 鍮꾩쑉 怨좎젙 諛?'臾대뱶蹂대뱶 鍮꾩쑉 臾댁떆' 紐낅졊 異붽? (?몃줈 臾대뱶蹂대뱶 臾몄젣 ?닿껐)
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
             f"{specs_context}\n" 
@@ -704,21 +696,21 @@ def generate_furnished_room(room_path, style_prompt, ref_path, unique_id, furnit
                     filename = f"result_{timestamp}_{unique_id}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
-                    # [FIX] 무드보드 비율/레이아웃 영향을 받더라도 최종 결과를 "방 캔버스"로 강제 통일
+                    # [FIX] 臾대뱶蹂대뱶 鍮꾩쑉/?덉씠?꾩썐 ?곹뼢??諛쏅뜑?쇰룄 理쒖쥌 寃곌낵瑜?"諛?罹붾쾭??濡?媛뺤젣 ?듭씪
                     return standardize_image_to_reference_canvas(path, room_path)
         return None
     except Exception as e:
-        print(f"!! Stage 2 에러: {e}", flush=True)
+        print(f"!! Stage 2 ?먮윭: {e}", flush=True)
         return None
 
 def call_magnific_api(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: 
         return image_path
     
-    print(f"\n--- [Stage 4] 업스케일링 시도 (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
+    print(f"\n--- [Stage 4] ?낆뒪耳?쇰쭅 ?쒕룄 (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
     
     if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
-         print(">> [SKIP] API 키가 없습니다. 원본 반환.", flush=True)
+         print(">> [SKIP] API ?ㅺ? ?놁뒿?덈떎. ?먮낯 諛섑솚.", flush=True)
          return image_path
          
     try:
@@ -751,7 +743,7 @@ def call_magnific_api(image_path, unique_id, start_time):
         res = requests.post(MAGNIFIC_ENDPOINT, json=payload, headers=headers)
         
         if res.status_code != 200:
-            print(f"!! [API 오류] Status: {res.status_code}, Msg: {res.text}", flush=True)
+            print(f"!! [API ?ㅻ쪟] Status: {res.status_code}, Msg: {res.text}", flush=True)
             return image_path
 
         data = res.json()
@@ -761,7 +753,7 @@ def call_magnific_api(image_path, unique_id, start_time):
 
         if "task_id" in data["data"]:
             task_id = data["data"]["task_id"]
-            print(f">> 작업 예약됨 (ID: {task_id})...", end="", flush=True)
+            print(f">> ?묒뾽 ?덉빟??(ID: {task_id})...", end="", flush=True)
             
             while time.time() - start_time < TOTAL_TIMEOUT_LIMIT:
                 time.sleep(2)
@@ -773,12 +765,12 @@ def call_magnific_api(image_path, unique_id, start_time):
                     status = status_data.get("status")
                     
                     if status == "COMPLETED":
-                        print(" 완료!", flush=True)
+                        print(" ?꾨즺!", flush=True)
                         gen_list = status_data.get("generated", [])
                         if gen_list and len(gen_list) > 0:
                             return download_image(gen_list[0], unique_id) or image_path
                     elif status == "FAILED": 
-                        print(f" 실패.", flush=True)
+                        print(f" ?ㅽ뙣.", flush=True)
                         return image_path
             return image_path
 
@@ -879,8 +871,7 @@ def get_available_thumbnails(room_name: str, style_name: str):
     base_dir = "static/thumbnails"
     if not os.path.exists(base_dir): return []
 
-    valid_items = [] # [변경] 단순 숫자 리스트가 아니라 객체 리스트로 변경
-    valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+    valid_items = [] # [蹂寃? ?⑥닚 ?レ옄 由ъ뒪?멸? ?꾨땲??媛앹껜 由ъ뒪?몃줈 蹂寃?    valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
 
     try:
         for f in os.listdir(base_dir):
@@ -890,18 +881,17 @@ def get_available_thumbnails(room_name: str, style_name: str):
                     name_part = f_lower.replace(prefix, "")
                     num_part = os.path.splitext(name_part)[0]
                     if num_part.isdigit():
-                        # [변경] 번호와 '실제 파일명'을 함께 저장
-                        valid_items.append({"index": int(num_part), "file": f})
+                        # [蹂寃? 踰덊샇? '?ㅼ젣 ?뚯씪紐????④퍡 ???                        valid_items.append({"index": int(num_part), "file": f})
                 except: continue
         
-        # 번호 순서대로 정렬
+        # 踰덊샇 ?쒖꽌?濡??뺣젹
         valid_items.sort(key=lambda x: x["index"])
         return valid_items
     except Exception as e:
         print(f"Thumbnail Scan Error: {e}")
         return []
 
-# --- 메인 렌더링 엔드포인트 ---
+# --- 硫붿씤 ?뚮뜑留??붾뱶?ъ씤??---
 @app.post("/render")
 def render_room(
     file: UploadFile = File(...), 
@@ -914,7 +904,7 @@ def render_room(
 ):
     try:
         unique_id = uuid.uuid4().hex[:8]
-        print(f"\n=== 요청 시작 [{unique_id}] (Integrated Analysis Mode) ===", flush=True)
+        print(f"\n=== ?붿껌 ?쒖옉 [{unique_id}] (Integrated Analysis Mode) ===", flush=True)
         start_time = time.time()
         
         timestamp = int(time.time())
@@ -932,49 +922,46 @@ def render_room(
             safe_room = room.lower().replace(" ", "") 
             safe_style = style.lower().replace(" ", "-").replace("_", "-")
             
-            # [수정] 폴더 대소문자 무시하고 찾기 로직
+            # [?섏젙] ?대뜑 ??뚮Ц??臾댁떆?섍퀬 李얘린 濡쒖쭅
             target_path = os.path.join("assets", safe_room, safe_style)
             assets_dir = None
 
-            # 1. 정확한 경로가 있으면 사용
+            # 1. ?뺥솗??寃쎈줈媛 ?덉쑝硫??ъ슜
             if os.path.exists(target_path):
                 assets_dir = target_path
             else:
-                # 2. 없으면 대소문자 무시하고 탐색 (assets 폴더 안을 뒤짐)
-                # 예: 코드는 'livingroom'을 찾지만 폴더는 'LivingRoom'이어도 찾게 함
-                root_assets = "assets"
+                # 2. ?놁쑝硫???뚮Ц??臾댁떆?섍퀬 ?먯깋 (assets ?대뜑 ?덉쓣 ?ㅼ쭚)
+                # ?? 肄붾뱶??'livingroom'??李얠?留??대뜑??'LivingRoom'?댁뼱??李얘쾶 ??                root_assets = "assets"
                 if os.path.exists(root_assets):
-                    # Room 찾기
+                    # Room 李얘린
                     found_room = next((d for d in os.listdir(root_assets) if d.lower() == safe_room), None)
                     if found_room:
                         room_path = os.path.join(root_assets, found_room)
-                        # Style 찾기
+                        # Style 李얘린
                         found_style = next((d for d in os.listdir(room_path) if d.lower() == safe_style), None)
                         if found_style:
                             assets_dir = os.path.join(room_path, found_style)
 
-            # 폴더를 찾았으면 파일 검색 시작
+            # ?대뜑瑜?李얠븯?쇰㈃ ?뚯씪 寃???쒖옉
             if assets_dir and os.path.exists(assets_dir):
                 files = sorted(os.listdir(assets_dir))
                 found = False
                 import re 
                 
-                # 파일명 검색 (대소문자 무시 플래그 re.IGNORECASE 추가)
+                # ?뚯씪紐?寃??(??뚮Ц??臾댁떆 ?뚮옒洹?re.IGNORECASE 異붽?)
                 pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
                 
-                # 지원할 확장자
-                valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+                # 吏?먰븷 ?뺤옣??                valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
 
                 for f in files:
-                    # 확장자 체크 & 번호 매칭 (대소문자 무시)
+                    # ?뺤옣??泥댄겕 & 踰덊샇 留ㅼ묶 (??뚮Ц??臾댁떆)
                     if f.lower().endswith(valid_exts) and re.search(pattern, f, re.IGNORECASE):
                         ref_path = os.path.join(assets_dir, f)
-                        # URL 경로 생성 시 역슬래시(\)를 슬래시(/)로 바꿔야 웹에서 안깨짐
-                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
+                        # URL 寃쎈줈 ?앹꽦 ????뒳?섏떆(\)瑜??щ옒??/)濡?諛붽퓭???뱀뿉???덇묠吏?                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
                         found = True
                         break
                 
-                # 못 찾았는데 파일이 있다면 첫번째 파일 사용 (확장자 맞는 것 중)
+                # 紐?李얠븯?붾뜲 ?뚯씪???덈떎硫?泥ル쾲吏??뚯씪 ?ъ슜 (?뺤옣??留욌뒗 寃?以?
                 if not found:
                     valid_files = [f for f in files if f.lower().endswith(valid_exts)]
                     if valid_files:
@@ -1013,7 +1000,7 @@ def render_room(
                 print(f"!! [Global Analysis Failed] {e}", flush=True)
 
         generated_results = []
-        print(f"\n🚀 [Stage 2] 5장 동시 생성 시작 (Specs Injection)!", flush=True)
+        print(f"\n?? [Stage 2] 5???숈떆 ?앹꽦 ?쒖옉 (Specs Injection)!", flush=True)
 
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
@@ -1021,7 +1008,7 @@ def render_room(
                 current_style_prompt = STYLES.get(style, "Custom Moodboard Style")
                 res = generate_furnished_room(step1_img, current_style_prompt, ref_path, sub_id, furniture_specs=furniture_specs_text, room_dimensions=dimensions, placement_instructions=placement, start_time=start_time)
                 if res: return f"/outputs/{os.path.basename(res)}"
-            except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
+            except Exception as e: print(f"   ??[Variation {index+1}] ?먮윭: {e}", flush=True)
             return None
 
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -1044,7 +1031,7 @@ def render_room(
             "message": "Complete"
         })
     except Exception as e:
-        print(f"\n🔥🔥🔥 [SERVER CRASH] {e}", flush=True)
+        print(f"\n?뵦?뵦?뵦 [SERVER CRASH] {e}", flush=True)
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -1065,14 +1052,14 @@ def finalize_download(req: FinalizeRequest):
         if not os.path.exists(local_path): 
             return JSONResponse(content={"error": "Original file not found"}, status_code=404)
 
-        # [업그레이드]
-        # 1) 가구방 업스케일을 먼저 시작해두고(백그라운드 스레드),
-        # 2) 그 동안 빈방 생성 -> 빈방 업스케일 시작
-        # => 체감 대기시간을 줄입니다.
+        # [?낃렇?덉씠??
+        # 1) 媛援щ갑 ?낆뒪耳?쇱쓣 癒쇱? ?쒖옉?대몢怨?諛깃렇?쇱슫???ㅻ젅??,
+        # 2) 洹??숈븞 鍮덈갑 ?앹꽦 -> 鍮덈갑 ?낆뒪耳???쒖옉
+        # => 泥닿컧 ?湲곗떆媛꾩쓣 以꾩엯?덈떎.
         final_empty_path = ""
         final_furnished_path = ""
 
-        # 업스케일링도 5-worker로 병렬 처리 (동시 요청 처리 여유)
+        # ?낆뒪耳?쇰쭅??5-worker濡?蹂묐젹 泥섎━ (?숈떆 ?붿껌 泥섎━ ?ъ쑀)
         with ThreadPoolExecutor(max_workers=5) as executor:
             print(">> [Step 1] Upscaling Furnished in parallel...", flush=True)
             future_furnished = executor.submit(call_magnific_api, local_path, unique_id + "_upscale_furnished", start_time)
@@ -1083,8 +1070,7 @@ def finalize_download(req: FinalizeRequest):
             print(">> [Step 3] Upscaling Empty Room...", flush=True)
             future_empty = executor.submit(call_magnific_api, empty_room_path, unique_id + "_upscale_empty", start_time)
 
-            # 결과 대기
-            final_furnished_path = future_furnished.result()
+            # 寃곌낵 ?湲?            final_furnished_path = future_furnished.result()
             final_empty_path = future_empty.result()
 
         return JSONResponse(content={
@@ -1094,7 +1080,7 @@ def finalize_download(req: FinalizeRequest):
         })
 
     except Exception as e:
-        print(f"🔥🔥🔥 [Finalize Error] {e}")
+        print(f"?뵦?뵦?뵦 [Finalize Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -1118,7 +1104,7 @@ def construct_dynamic_styles(analyzed_items):
         ), 
         "ratio": "16:9"
     })
-    # [수정 1] 좌측 공간 강조 (카메라 이동 X, 프레임 집중 O)
+    # [?섏젙 1] 醫뚯륫 怨듦컙 媛뺤“ (移대찓???대룞 X, ?꾨젅??吏묒쨷 O)
     styles.append({
         "name": "Side Composition (Focus Left)", 
         "prompt": (
@@ -1130,7 +1116,7 @@ def construct_dynamic_styles(analyzed_items):
         "ratio": "16:9"
     })
 
-    # [수정 2] 우측 공간 강조
+    # [?섏젙 2] ?곗륫 怨듦컙 媛뺤“
     styles.append({
         "name": "Side Composition (Focus Right)", 
         "prompt": (
@@ -1265,34 +1251,34 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# [수정] main.py 내부의 generate_details_endpoint 함수 교체
+# [?섏젙] main.py ?대???generate_details_endpoint ?⑥닔 援먯껜
 
 @app.post("/generate-details")
 def generate_details_endpoint(req: DetailRequest):
     try:
-        # 1. 대상 이미지 경로 확보
+        # 1. ????대?吏 寃쎈줈 ?뺣낫
         filename = os.path.basename(req.image_url)
         local_path = os.path.join("outputs", filename)
         if not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original image not found"}, status_code=404)
 
         unique_id = uuid.uuid4().hex[:6]
-        print(f"\n=== [Detail View] 요청 시작 ({unique_id}) - Smart Analysis Mode ===", flush=True)
+        print(f"\n=== [Detail View] ?붿껌 ?쒖옉 ({unique_id}) - Smart Analysis Mode ===", flush=True)
 
         analyzed_items = []
         
-        # 2. 가구 데이터 확인 (캐시 or 신규 분석)
+        # 2. 媛援??곗씠???뺤씤 (罹먯떆 or ?좉퇋 遺꾩꽍)
         if req.furniture_data and len(req.furniture_data) > 0:
             print(">> [Smart Cache] Using pre-analyzed furniture data!", flush=True)
             analyzed_items = req.furniture_data
         else:
             print(">> [Smart Cache] No cached data found. Starting Analysis...", flush=True)
             
-            # [NEW] 분석할 대상 이미지 결정 로직 (무드보드 우선 -> 없으면 메인 이미지 사용)
+            # [NEW] 遺꾩꽍??????대?吏 寃곗젙 濡쒖쭅 (臾대뱶蹂대뱶 ?곗꽑 -> ?놁쑝硫?硫붿씤 ?대?吏 ?ъ슜)
             target_analysis_path = None
             
             if req.moodboard_url:
-                # A. 무드보드 URL이 있는 경우 (경로 파싱)
+                # A. 臾대뱶蹂대뱶 URL???덈뒗 寃쎌슦 (寃쎈줈 ?뚯떛)
                 if req.moodboard_url.startswith("/assets/"):
                     rel_path = req.moodboard_url.lstrip("/")
                     target_analysis_path = os.path.join(*rel_path.split("/"))
@@ -1300,17 +1286,17 @@ def generate_details_endpoint(req: DetailRequest):
                     mb_filename = os.path.basename(req.moodboard_url)
                     target_analysis_path = os.path.join("outputs", mb_filename)
             else:
-                # B. [핵심 수정] 무드보드가 없으면? -> 메인 이미지 분석 대상을 설정!
+                # B. [?듭떖 ?섏젙] 臾대뱶蹂대뱶媛 ?놁쑝硫? -> 硫붿씤 ?대?吏 遺꾩꽍 ??곸쓣 ?ㅼ젙!
                 print(">> [Info] No Moodboard provided. Analyzing the Main Image itself.", flush=True)
                 target_analysis_path = local_path
 
-            # 3. 실제 분석 실행
+            # 3. ?ㅼ젣 遺꾩꽍 ?ㅽ뻾
             if target_analysis_path and os.path.exists(target_analysis_path):
                 try:
                     detected_items = detect_furniture_boxes(target_analysis_path)
                     print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
                     
-                    with ThreadPoolExecutor(max_workers=10) as executor: # Worker 수 약간 증량
+                    with ThreadPoolExecutor(max_workers=10) as executor: # Worker ???쎄컙 利앸웾
                         futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
                         analyzed_items = [f.result() for f in futures]
                         
@@ -1321,16 +1307,16 @@ def generate_details_endpoint(req: DetailRequest):
             else:
                  print(f"!! Target path not found: {target_analysis_path}", flush=True)
 
-            # 4. 분석 실패 시 최후의 보루 (기본값)
+            # 4. 遺꾩꽍 ?ㅽ뙣 ??理쒗썑??蹂대（ (湲곕낯媛?
             if not analyzed_items:
                  print("!! Fallback to default list.", flush=True)
                  analyzed_items = [{"label": "Sofa"}, {"label": "Chair"}, {"label": "Table"}]
         
-        # 5. 동적 스타일 구성 및 생성 요청
+        # 5. ?숈쟻 ?ㅽ???援ъ꽦 諛??앹꽦 ?붿껌
         dynamic_styles = construct_dynamic_styles(analyzed_items)
         
         generated_results = []
-        print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
+        print(f"?? Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
         
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
@@ -1342,7 +1328,7 @@ def generate_details_endpoint(req: DetailRequest):
                 if res: 
                     generated_results.append({"index": i, "url": res})
                 
-        print(f"=== [Detail View] 완료: {len(generated_results)}장 생성됨 ===", flush=True)
+        print(f"=== [Detail View] ?꾨즺: {len(generated_results)}???앹꽦??===", flush=True)
         
         if not generated_results:
             return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
@@ -1353,7 +1339,7 @@ def generate_details_endpoint(req: DetailRequest):
         })
 
     except Exception as e:
-        print(f"🔥🔥🔥 [Detail Error] {e}")
+        print(f"?뵦?뵦?뵦 [Detail Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -1460,7 +1446,7 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         })
         
     except Exception as e:
-        print(f"🔥🔥🔥 [Moodboard Gen Error] {e}")
+        print(f"?뵦?뵦?뵦 [Moodboard Gen Error] {e}")
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -1472,7 +1458,7 @@ class VideoClip(BaseModel):
     url: str
     motion: str = "static"
     effect: str = "none"
-    speed: float = 1.0  # [NEW] 기본값(사용자가 수정 가능)
+    speed: float = 1.0  # [NEW] 湲곕낯媛??ъ슜?먭? ?섏젙 媛??
 
 class VideoCreateRequest(BaseModel):
     clips: List[VideoClip]
@@ -1481,7 +1467,7 @@ class VideoCreateRequest(BaseModel):
     mode: Optional[str] = None
     target_total_sec: Optional[float] = None
     include_intro_outro: Optional[bool] = None
-    # [필수 확인]
+    # [?꾩닔 ?뺤씤]
     intro_url: Optional[str] = None
     outro_url: Optional[str] = None
 
@@ -1524,23 +1510,23 @@ def _safe_filename_from_url(url: str) -> str:
 
 def _download_to_path(url: str, out_path: Path):
     """
-    URL이 http로 시작하면 다운로드하고,
-    / 로 시작하면 로컬 파일을 복사합니다.
+    URL??http濡??쒖옉?섎㈃ ?ㅼ슫濡쒕뱶?섍퀬,
+    / 濡??쒖옉?섎㈃ 濡쒖뺄 ?뚯씪??蹂듭궗?⑸땲??
     """
-    # [수정] 로컬 파일 경로인 경우 (/outputs/... 등)
+    # [?섏젙] 濡쒖뺄 ?뚯씪 寃쎈줈??寃쎌슦 (/outputs/... ??
     if url.startswith("/"):
-        # 맨 앞의 슬래시 제거 (절대경로 -> 상대경로 변환, 예: /outputs/a.png -> outputs/a.png)
+        # 留??욎쓽 ?щ옒???쒓굅 (?덈?寃쎈줈 -> ?곷?寃쎈줈 蹂?? ?? /outputs/a.png -> outputs/a.png)
         local_path = url.lstrip("/")
         
         if not os.path.exists(local_path):
             raise FileNotFoundError(f"Local file not found on server: {local_path}")
             
-        # 단순히 파일 복사
+        # ?⑥닚???뚯씪 蹂듭궗
         with open(local_path, "rb") as src, open(out_path, "wb") as dst:
             shutil.copyfileobj(src, dst)
         return
 
-    # [기존] 원격 URL인 경우 (http://...)
+    # [湲곗〈] ?먭꺽 URL??寃쎌슦 (http://...)
     r = requests.get(url, timeout=120)
     r.raise_for_status()
     with open(out_path, "wb") as f:
@@ -1562,8 +1548,8 @@ def _ffmpeg_trim_speed(in_path: Path, out_path: Path, start_sec: float, dur_sec:
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", "10",          # [수정] 18 -> 10 (초고화질)
-        "-preset", "veryslow", # [수정] veryfast -> veryslow (화질 최우선)
+        "-crf", "10",          # [?섏젙] 18 -> 10 (珥덇퀬?붿쭏)
+        "-preset", "veryslow", # [?섏젙] veryfast -> veryslow (?붿쭏 理쒖슦??
         str(out_path),
     ]
     _run_ffmpeg(cmd)
@@ -1584,13 +1570,12 @@ def _ffprobe_wh(path: Path):
     return int(st.get("width") or 0), int(st.get("height") or 0)
 
 def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h: int, fps: int):
-    # [FIX] 16:9 가로 -> 4:5 세로 강제 중앙 크롭 (Shorts/Reels 스타일)
-    # 복잡한 패딩/블러 로직을 제거하고, 화면을 꽉 채운 뒤 중앙을 자르는 방식 적용
+    # [FIX] 16:9 媛濡?-> 4:5 ?몃줈 媛뺤젣 以묒븰 ?щ∼ (Shorts/Reels ?ㅽ???
+    # 蹂듭옟???⑤뵫/釉붾윭 濡쒖쭅???쒓굅?섍퀬, ?붾㈃??苑?梨꾩슫 ??以묒븰???먮Ⅴ??諛⑹떇 ?곸슜
     vf = (
-        f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase," # 1. 빈공간 없이 꽉 채우도록 확대 (비율 유지)
-        f"crop={target_w}:{target_h}," # 2. 목표 해상도만큼 중앙을 잘라냄
-        f"setsar=1," # 3. 픽셀 비율 1:1 강제 (병합 오류 방지)
-        f"fps={fps}" # 4. 프레임레이트 통일
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase," # 1. 鍮덇났媛??놁씠 苑?梨꾩슦?꾨줉 ?뺣? (鍮꾩쑉 ?좎?)
+        f"crop={target_w}:{target_h}," # 2. 紐⑺몴 ?댁긽?꾨쭔??以묒븰???섎씪??        f"setsar=1," # 3. ?쎌? 鍮꾩쑉 1:1 媛뺤젣 (蹂묓빀 ?ㅻ쪟 諛⑹?)
+        f"fps={fps}" # 4. ?꾨젅?꾨젅?댄듃 ?듭씪
     )
     cmd = [
         "ffmpeg", "-y",
@@ -1599,8 +1584,8 @@ def _ffmpeg_normalize_to(in_path: Path, out_path: Path, target_w: int, target_h:
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", "10",          # [수정] 18 -> 10 (초고화질)
-        "-preset", "veryslow", # [수정] veryfast -> veryslow (화질 최우선)
+        "-crf", "10",          # [?섏젙] 18 -> 10 (珥덇퀬?붿쭏)
+        "-preset", "veryslow", # [?섏젙] veryfast -> veryslow (?붿쭏 理쒖슦??
         str(out_path),
     ]
     _run_ffmpeg(cmd)
@@ -1669,7 +1654,7 @@ def _ffmpeg_image_to_video(image_path: Path, out_path: Path, dur_sec: float, tar
     Turns a still image into a short video segment.
     [FIX] Removed fade in/out filters to ensure purely static image.
     """
-    # [수정] 페이드 효과 제거, 해상도/비율만 맞춤
+    # [?섏젙] ?섏씠???④낵 ?쒓굅, ?댁긽??鍮꾩쑉留?留욎땄
     vf = (
         f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
         f"crop={target_w}:{target_h},setsar=1,fps={fps}"
@@ -1683,22 +1668,22 @@ def _ffmpeg_image_to_video(image_path: Path, out_path: Path, dur_sec: float, tar
         "-an",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-crf", "10",          # [수정] 18 -> 10
-        "-preset", "veryslow", # [수정] veryfast -> veryslow
+        "-crf", "10",          # [?섏젙] 18 -> 10
+        "-preset", "veryslow", # [?섏젙] veryfast -> veryslow
         str(out_path),
     ]
     _run_ffmpeg(cmd)
 
-# [NEW] 모션과 이펙트를 조합하여 프롬프트 생성
+# [NEW] 紐⑥뀡怨??댄럺?몃? 議고빀?섏뿬 ?꾨＼?꾪듃 ?앹꽦
 def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
-    # 1. 기본 품질 및 유지 프롬프트
+    # 1. 湲곕낯 ?덉쭏 諛??좎? ?꾨＼?꾪듃
     base_keep = (
         "High quality interior video, photorealistic, 8k. "
         "Keep ALL furniture and layout exactly the same as the input image. "
         "No warping, no distortion. "
     )
     
-    # 2. 모션 프롬프트 매핑
+    # 2. 紐⑥뀡 ?꾨＼?꾪듃 留ㅽ븨
     motion_map = {
         "static": "Static camera shot, extremely subtle movement.",
         "orbit_r_slow": "Slow orbit rotation to the right, keeping the subject centered, smooth movement.",
@@ -1711,7 +1696,7 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "zoom_out_fast": "Fast camera dolly-out at eye-level. Rapid straight movement away from the subject.",
     }
     
-    # 3. 이펙트 프롬프트 매핑
+    # 3. ?댄럺???꾨＼?꾪듃 留ㅽ븨
     effect_map = {
         "none": "Natural lighting, static environment.",
         "sunlight": "Sunlight beams moving across the room, time-lapse shadow movement on the floor and furniture.",
@@ -1721,13 +1706,13 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "door_open": "A door, cabinet door, or glass door in the scene slowly opens.",
     }
 
-    # 프롬프트 조합
+    # ?꾨＼?꾪듃 議고빀
     p_motion = motion_map.get(motion, motion_map["static"])
     p_effect = effect_map.get(effect, effect_map["none"])
     
     final_prompt = f"{base_keep} {p_motion} {p_effect}"
 
-    # 네거티브 프롬프트
+    # ?ㅺ굅?곕툕 ?꾨＼?꾪듃
     neg = (
         "human, person, walking, shaking camera, shaky footage, "
         "changing furniture, melting objects, distorted geometry, "
@@ -1756,10 +1741,10 @@ def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str
     
     data = r.json()
     
-    # ✅ 디버깅: 실제 응답 구조 출력
-    print(f"🔍 [DEBUG] Kling API Response: {json.dumps(data, indent=2)}", flush=True)
+    # ???붾쾭源? ?ㅼ젣 ?묐떟 援ъ“ 異쒕젰
+    print(f"?뵇 [DEBUG] Kling API Response: {json.dumps(data, indent=2)}", flush=True)
     
-    # 여러 가능한 필드 시도
+    # ?щ윭 媛?ν븳 ?꾨뱶 ?쒕룄
     task_id = (
         data.get("task_id") or 
         data.get("id") or 
@@ -1770,21 +1755,21 @@ def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str
     )
     
     if not task_id:
-        print(f"❌ [ERROR] Could not find task_id. Full response keys: {list(data.keys())}", flush=True)
+        print(f"??[ERROR] Could not find task_id. Full response keys: {list(data.keys())}", flush=True)
         raise RuntimeError(f"No task_id returned from Kling create. Response: {json.dumps(data)[:300]}")
     
-    print(f"✅ [SUCCESS] Task created: {task_id}", flush=True)
+    print(f"??[SUCCESS] Task created: {task_id}", flush=True)
     return task_id
 
-import math # 함수 상단이나 파일 최상단에 import math 필요
+import math # ?⑥닔 ?곷떒?대굹 ?뚯씪 理쒖긽?⑥뿉 import math ?꾩슂
 
 def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips: int, timeout_sec: int = 600) -> str:
     headers = {"x-freepik-api-key": FREEPIK_API_KEY}
     start = time.time()
     poll_count = 0
     
-    # [UX] 각 클립당 할당할 최대 진행률 (전체의 90%를 클립 생성에 분배)
-    # 예: 클립이 1개면 90%까지, 2개면 개당 45%까지 할당
+    # [UX] 媛??대┰???좊떦??理쒕? 吏꾪뻾瑜?(?꾩껜??90%瑜??대┰ ?앹꽦??遺꾨같)
+    # ?? ?대┰??1媛쒕㈃ 90%源뚯?, 2媛쒕㈃ 媛쒕떦 45%源뚯? ?좊떦
     clip_share_percent = 90 / max(1, total_clips)
     clip_start_percent = clip_index * clip_share_percent
 
@@ -1794,15 +1779,14 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
         
         poll_count += 1
         
-        # 1. API 호출 (네트워크 에러 방어)
+        # 1. API ?몄텧 (?ㅽ듃?뚰겕 ?먮윭 諛⑹뼱)
         try:
             with _video_sem:
                 r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
             
             if not r.ok:
-                # 500 에러 등은 잠시 대기 후 재시도
-                if r.status_code >= 500:
-                    print(f"⚠️ [Server Warning] {r.status_code}. Retrying...", flush=True)
+                # 500 ?먮윭 ?깆? ?좎떆 ?湲????ъ떆??                if r.status_code >= 500:
+                    print(f"?좑툘 [Server Warning] {r.status_code}. Retrying...", flush=True)
                     time.sleep(3)
                     continue
                 raise RuntimeError(f"Kling status failed ({r.status_code}): {r.text[:300]}")
@@ -1810,52 +1794,51 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
             st = r.json()
             
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ [Network Warning] Polling failed temporarily: {e}. Retrying...", flush=True)
+            print(f"?좑툘 [Network Warning] Polling failed temporarily: {e}. Retrying...", flush=True)
             time.sleep(3)
             continue
 
-        # 2. [FIX] 데이터 구조 방어 로직 (AttributeError 'str' object 방지)
+        # 2. [FIX] ?곗씠??援ъ“ 諛⑹뼱 濡쒖쭅 (AttributeError 'str' object 諛⑹?)
         data = st.get("data", {})
         status = "UNKNOWN"
 
         if isinstance(data, dict):
             status = data.get("status", "").upper()
         elif isinstance(st, dict):
-             # data가 없거나 문자열이면 top-level에서 status 확인
+             # data媛 ?녾굅??臾몄옄?댁씠硫?top-level?먯꽌 status ?뺤씤
             status = st.get("status", "").upper()
         
-        # 3. [FIX] 진행률 로직 개선 (15% 멈춤 해결)
-        # 로그 함수를 사용하여 시간이 지날수록 천천히 오르지만 100%는 넘지 않게 설정
-        # poll_count가 늘어날수록 clip_share_percent의 95% 수준까지 점진적으로 접근
+        # 3. [FIX] 吏꾪뻾瑜?濡쒖쭅 媛쒖꽑 (15% 硫덉땄 ?닿껐)
+        # 濡쒓렇 ?⑥닔瑜??ъ슜?섏뿬 ?쒓컙??吏?좎닔濡?泥쒖쿇???ㅻⅤ吏留?100%???섏? ?딄쾶 ?ㅼ젙
+        # poll_count媛 ?섏뼱?좎닔濡?clip_share_percent??95% ?섏?源뚯? ?먯쭊?곸쑝濡??묎렐
         simulated_progress = clip_share_percent * 0.95 * (1 - math.exp(-0.05 * poll_count))
         
         current_total_progress = int(clip_start_percent + simulated_progress)
         
-        # 로그 출력 (사용자 안심용)
+        # 濡쒓렇 異쒕젰 (?ъ슜???덉떖??
         if poll_count <= 3 or poll_count % 5 == 0:
-            print(f"🔍 [Poll #{poll_count}] Clip {clip_index+1}/{total_clips} Status: {status} (Progress: {current_total_progress}%)", flush=True)
+            print(f"?뵇 [Poll #{poll_count}] Clip {clip_index+1}/{total_clips} Status: {status} (Progress: {current_total_progress}%)", flush=True)
 
         with video_jobs_lock:
             if job_id in video_jobs:
                 video_jobs[job_id]["progress"] = current_total_progress
-                # 메시지에 실제 서버 상태 포함
+                # 硫붿떆吏???ㅼ젣 ?쒕쾭 ?곹깭 ?ы븿
                 video_jobs[job_id]["message"] = f"Generating clip {clip_index+1}/{total_clips}: {status}..."
         
-        # 4. 완료 처리
+        # 4. ?꾨즺 泥섎━
         if status in ("COMPLETED", "SUCCEEDED", "SUCCESS", "DONE"):
-            print(f"✅ [COMPLETED] Clip {clip_index+1}/{total_clips}. Fetching URL...", flush=True)
+            print(f"??[COMPLETED] Clip {clip_index+1}/{total_clips}. Fetching URL...", flush=True)
             
-            # generated 필드 안전 추출
+            # generated ?꾨뱶 ?덉쟾 異붿텧
             generated = []
             if isinstance(data, dict):
                 generated = data.get("generated", [])
             elif isinstance(st, dict):
                 generated = st.get("generated", [])
 
-            # 완료되었는데 URL이 바로 안 뜨는 경우 대기
-            retry_count = 0
+            # ?꾨즺?섏뿀?붾뜲 URL??諛붾줈 ???⑤뒗 寃쎌슦 ?湲?            retry_count = 0
             while not generated and retry_count < 5:
-                print(f"⏳ [WAIT] Generated array empty, retrying... ({retry_count+1}/5)", flush=True)
+                print(f"??[WAIT] Generated array empty, retrying... ({retry_count+1}/5)", flush=True)
                 time.sleep(2)
                 retry_count += 1
                 
@@ -1869,7 +1852,7 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                     else:
                         generated = st.get("generated", [])
 
-            # URL 찾기
+            # URL 李얘린
             url = None
             if generated and len(generated) > 0:
                 first = generated[0]
@@ -1885,10 +1868,10 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                 url = st.get("result_url") or st.get("video_url")
 
             if url:
-                print(f"✅ [SUCCESS] Found URL: {url[:60]}...", flush=True)
+                print(f"??[SUCCESS] Found URL: {url[:60]}...", flush=True)
                 return url
             
-            print(f"❌ [ERROR] Completed but no URL. Response dump:", flush=True)
+            print(f"??[ERROR] Completed but no URL. Response dump:", flush=True)
             print(json.dumps(st, indent=2), flush=True)
             raise RuntimeError("Kling completed but no result URL found.")
         
@@ -1907,9 +1890,9 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
 
 def _image_url_to_b64(url: str) -> str:
     """
-    이미지 URL(혹은 로컬 경로)을 받아 Base64 문자열로 변환합니다.
+    ?대?吏 URL(?뱀? 濡쒖뺄 寃쎈줈)??諛쏆븘 Base64 臾몄옄?대줈 蹂?섑빀?덈떎.
     """
-    # [수정] 로컬 파일 경로인 경우
+    # [?섏젙] 濡쒖뺄 ?뚯씪 寃쎈줈??寃쎌슦
     if url.startswith("/"):
         local_path = url.lstrip("/")
         if not os.path.exists(local_path):
@@ -1918,19 +1901,19 @@ def _image_url_to_b64(url: str) -> str:
         with open(local_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    # [기존] 원격 URL인 경우
+    # [湲곗〈] ?먭꺽 URL??寃쎌슦
     r = requests.get(url, timeout=120)
     r.raise_for_status()
     return base64.b64encode(r.content).decode("utf-8")
 
 # -----------------------------------------------------------------------------
-# [NEW] 단일 클립 처리 함수 (병렬 실행용)
+# [NEW] ?⑥씪 ?대┰ 泥섎━ ?⑥닔 (蹂묐젹 ?ㅽ뻾??
 # -----------------------------------------------------------------------------
 # =========================================================
 # [NEW] 2-Step Video Logic (Source Gen -> Final Compile)
 # =========================================================
 
-# --- 1. Request Models (데이터 모델 정의) ---
+# --- 1. Request Models (?곗씠??紐⑤뜽 ?뺤쓽) ---
 class SourceItem(BaseModel):
     url: str
     motion: str = "static"
@@ -1954,27 +1937,26 @@ class CompileRequest(BaseModel):
 
 def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
     """
-    Step 1: 소스 생성 로직
-    - Static & No Effect: FFmpeg로 즉시 변환 (Fast, Free)
-    - Motion or Effect: Kling AI 호출 (Slow, Cost)
+    Step 1: ?뚯뒪 ?앹꽦 濡쒖쭅
+    - Static & No Effect: FFmpeg濡?利됱떆 蹂??(Fast, Free)
+    - Motion or Effect: Kling AI ?몄텧 (Slow, Cost)
     """
     filename = f"source_{job_id}_{idx}.mp4"
     out_path = out_dir / filename
     
-    # [최적화] 움직임도 없고, 효과도 없으면 -> 그냥 이미지 5초 영상으로 변환 (Kling X)
+    # [理쒖쟻?? ?吏곸엫???녾퀬, ?④낵???놁쑝硫?-> 洹몃깷 ?대?吏 5珥??곸긽?쇰줈 蹂??(Kling X)
     if item.motion == "static" and item.effect == "none":
-        print(f"🚀 [Clip {idx}] Static detected. Skipping Kling (Fast generation).", flush=True)
+        print(f"?? [Clip {idx}] Static detected. Skipping Kling (Fast generation).", flush=True)
         temp_img = out_dir / f"temp_src_{job_id}_{idx}.png"
         try:
-            # 1. 이미지 다운로드
+            # 1. ?대?吏 ?ㅼ슫濡쒕뱶
             _download_to_path(item.url, temp_img)
             
-            # [수정] 1080, 1920 (세로) 파라미터 확인
+            # [?섏젙] 1080, 1920 (?몃줈) ?뚮씪誘명꽣 ?뺤씤
             _ffmpeg_image_to_video(
                 temp_img, out_path, 
                 5.0, 
-                1080, 1920, # <--- 여기가 1080, 1920 이어야 함
-                VIDEO_TARGET_FPS
+                1080, 1920, # <--- ?ш린媛 1080, 1920 ?댁뼱????                VIDEO_TARGET_FPS
             )
             return out_path
         except Exception as e:
@@ -1984,23 +1966,22 @@ def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
             if temp_img.exists(): temp_img.unlink()
 
     # ---------------------------------------------------------
-    # 그 외 (모션이나 이펙트가 있는 경우) -> Kling 호출
+    # 洹???(紐⑥뀡?대굹 ?댄럺?멸? ?덈뒗 寃쎌슦) -> Kling ?몄텧
     # ---------------------------------------------------------
-    print(f"🎥 [Clip {idx}] Kling AI Generating... ({item.motion}/{item.effect})", flush=True)
+    print(f"?렏 [Clip {idx}] Kling AI Generating... ({item.motion}/{item.effect})", flush=True)
     
     prompts = _kling_prompts_dynamic(item.motion, item.effect)
     img_b64 = _image_url_to_b64(item.url)
     
-    # 5초 생성 요청
+    # 5珥??앹꽦 ?붿껌
     task_id = _freepik_kling_create_task(
         img_b64, prompts["prompt"], prompts["negative_prompt"], 
         "5", cfg_scale
     )
     
-    # 폴링 대기
-    video_url = _freepik_kling_poll(task_id, job_id, idx, 1)
+    # ?대쭅 ?湲?    video_url = _freepik_kling_poll(task_id, job_id, idx, 1)
     
-    # 다운로드
+    # ?ㅼ슫濡쒕뱶
     _download_to_path(video_url, out_path)
     
     return out_path
@@ -2014,9 +1995,8 @@ def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: floa
         out_dir.mkdir(parents=True, exist_ok=True)
         
         total_steps = len(items)
-        results_map = [None] * total_steps # 순서 보장용
-        
-        # 병렬 실행 (최대 5개 동시)
+        results_map = [None] * total_steps # ?쒖꽌 蹂댁옣??        
+        # 蹂묐젹 ?ㅽ뻾 (理쒕? 5媛??숈떆)
         with ThreadPoolExecutor(max_workers=VIDEO_MAX_CONCURRENCY) as executor:
             future_map = {}
             for i, item in enumerate(items):
@@ -2029,22 +2009,21 @@ def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: floa
                 try:
                     path = future.result() 
                     if path:
-                        # 웹에서 접근 가능한 경로로 저장
-                        results_map[idx] = f"/outputs/{path.name}"
+                        # ?뱀뿉???묎렐 媛?ν븳 寃쎈줈濡????                        results_map[idx] = f"/outputs/{path.name}"
                 except Exception as e:
                     print(f"Clip {idx} failed: {e}")
-                    results_map[idx] = None # 실패 시 None
+                    results_map[idx] = None # ?ㅽ뙣 ??None
                 
                 completed_count += 1
-                # 진행률 업데이트
+                # 吏꾪뻾瑜??낅뜲?댄듃
                 with video_jobs_lock:
                     video_jobs[job_id]["progress"] = int((completed_count / total_steps) * 100)
                     video_jobs[job_id]["message"] = f"Generated {completed_count}/{total_steps} clips"
 
-        # 완료
+        # ?꾨즺
         with video_jobs_lock:
             video_jobs[job_id]["status"] = "COMPLETED"
-            video_jobs[job_id]["results"] = results_map # 결과 리스트 반환
+            video_jobs[job_id]["results"] = results_map # 寃곌낵 由ъ뒪??諛섑솚
             video_jobs[job_id]["message"] = "Source generation complete."
 
     except Exception as e:
@@ -2054,7 +2033,7 @@ def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: floa
             video_jobs[job_id]["status"] = "FAILED"
             video_jobs[job_id]["error"] = str(e)
 
-# --- 3. Step 2: Final Compile (자르기/배속/병합) ---
+# --- 3. Step 2: Final Compile (?먮Ⅴ湲?諛곗냽/蹂묓빀) ---
 def _run_final_compile(job_id: str, req: CompileRequest):
     try:
         with video_jobs_lock:
@@ -2065,11 +2044,11 @@ def _run_final_compile(job_id: str, req: CompileRequest):
         
         total_clips = len(req.clips)
         
-        # 1. 각 클립 가공 (Trim -> Speed -> Resize)
+        # 1. 媛??대┰ 媛怨?(Trim -> Speed -> Resize)
         for i, clip in enumerate(req.clips):
             if not clip.video_url: continue
             
-            # 원본 파일 확보 (로컬에 없으면 다운로드)
+            # ?먮낯 ?뚯씪 ?뺣낫 (濡쒖뺄???놁쑝硫??ㅼ슫濡쒕뱶)
             src_name = _safe_filename_from_url(clip.video_url)
             local_src = out_dir / src_name
             if not local_src.exists():
@@ -2077,45 +2056,43 @@ def _run_final_compile(job_id: str, req: CompileRequest):
             
             final_path = out_dir / f"proc_{job_id}_{i}.mp4"
             
-            # 파라미터 계산
+            # ?뚮씪誘명꽣 怨꾩궛
             t_start = max(0.0, clip.trim_start)
             t_end = min(5.0, clip.trim_end)
             if t_end <= t_start: t_end = 5.0
             
             dur = t_end - t_start
-            # 속도 안전장치 (0이면 1.0으로)
+            # ?띾룄 ?덉쟾?μ튂 (0?대㈃ 1.0?쇰줈)
             speed = clip.speed if clip.speed > 0.1 else 1.0
             
-            # FFmpeg 필터 구성:
-            # 1. trim: 구간 자르기
-            # 2. setpts: 속도 조절 ((PTS-STARTPTS)/speed)
-            # 3. scale/crop: 해상도 강제 통일 (1080x1920 등 기존 설정 따름)
-            # 4. setsar=1: 픽셀 비율 초기화 (병합 오류 방지)
+            # FFmpeg ?꾪꽣 援ъ꽦:
+            # 1. trim: 援ш컙 ?먮Ⅴ湲?            # 2. setpts: ?띾룄 議곗젅 ((PTS-STARTPTS)/speed)
+            # 3. scale/crop: ?댁긽??媛뺤젣 ?듭씪 (1080x1920 ??湲곗〈 ?ㅼ젙 ?곕쫫)
+            # 4. setsar=1: ?쎌? 鍮꾩쑉 珥덇린??(蹂묓빀 ?ㅻ쪟 諛⑹?)
             setpts = f"(PTS-STARTPTS)/{speed}"
             
-# [수정] 1080x1920 세로형(9:16) 강제 적용
+# [?섏젙] 1080x1920 ?몃줈??9:16) 媛뺤젣 ?곸슜
             vf = (
                 f"trim=start={t_start}:duration={dur},setpts={setpts},"
-                f"scale=1080:1920:force_original_aspect_ratio=increase," # 9:16 비율로 늘리고
-                f"crop=1080:1920,setsar=1,fps={VIDEO_TARGET_FPS}"       # 중앙 크롭
+                f"scale=1080:1920:force_original_aspect_ratio=increase," # 9:16 鍮꾩쑉濡??섎━怨?                f"crop=1080:1920,setsar=1,fps={VIDEO_TARGET_FPS}"       # 以묒븰 ?щ∼
             )
             
             cmd = [
                 "ffmpeg", "-y", "-i", str(local_src),
                 "-vf", vf, "-an", 
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", 
-                "-preset", "veryslow", # [수정] veryfast -> veryslow
-                "-crf", "10",          # [수정] 18 -> 10
+                "-preset", "veryslow", # [?섏젙] veryfast -> veryslow
+                "-crf", "10",          # [?섏젙] 18 -> 10
                 str(final_path)
             ]
             _run_ffmpeg(cmd)
             processed_paths.append(final_path)
             
-            # 진행률 (0~80%)
+            # 吏꾪뻾瑜?(0~80%)
             with video_jobs_lock:
                 video_jobs[job_id]["progress"] = int(((i + 1) / total_clips) * 80)
 
-        # 2. 병합 (Concat)
+        # 2. 蹂묓빀 (Concat)
         if not processed_paths: raise RuntimeError("No clips to merge")
         
         list_file = out_dir / f"list_{job_id}.txt"
@@ -2124,7 +2101,7 @@ def _run_final_compile(job_id: str, req: CompileRequest):
                 f.write(f"file '{p.resolve().as_posix()}'\n")
         
         final_out = out_dir / f"final_{job_id}.mp4"
-        # Concat 실행
+        # Concat ?ㅽ뻾
         _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(final_out)])
         
         result_url = f"/outputs/{final_out.name}"
@@ -2149,7 +2126,7 @@ async def api_generate_sources(req: SourceGenRequest):
     with video_jobs_lock:
         video_jobs[job_id] = {"status": "QUEUED", "progress": 0}
     
-    # 백그라운드 스레드로 실행
+    # 諛깃렇?쇱슫???ㅻ젅?쒕줈 ?ㅽ뻾
     threading.Thread(target=_run_source_generation, args=(job_id, req.items, req.cfg_scale)).start()
     return {"job_id": job_id}
 
@@ -2180,7 +2157,7 @@ def auto_cleanup_task():
         try:
             now = time.time()
             
-            # 1. 파일 정리 (기존 로직 유지)
+            # 1. ?뚯씪 ?뺣━ (湲곗〈 濡쒖쭅 ?좎?)
             deleted_count = 0
             folder = "outputs"
             if os.path.exists(folder):
@@ -2194,22 +2171,21 @@ def auto_cleanup_task():
                                 deleted_count += 1
                             except Exception: pass
             
-            # 2. [FIX] 메모리 정리: 완료되었거나 오래된 Job ID 삭제 (메모리 누수 방지)
-            # Job 생성 후 24시간(86400초) 지난 기록은 삭제
+            # 2. [FIX] 硫붾え由??뺣━: ?꾨즺?섏뿀嫄곕굹 ?ㅻ옒??Job ID ??젣 (硫붾え由??꾩닔 諛⑹?)
+            # Job ?앹꽦 ??24?쒓컙(86400珥? 吏??湲곕줉? ??젣
             JOB_RETENTION = 86400 
             with video_jobs_lock:
-                # 딕셔너리를 순회하며 삭제해야 하므로 키 리스트 복사 사용
+                # ?뺤뀛?덈━瑜??쒗쉶?섎ŉ ??젣?댁빞 ?섎?濡???由ъ뒪??蹂듭궗 ?ъ슜
                 for jid in list(video_jobs.keys()):
-                    # progress가 100이거나 failed인 상태에서 오래된 것, 혹은 그냥 너무 오래된 것 삭제
-                    # 여기서는 단순하게 생성 시간을 별도 추적 안하므로, 일단 100% 완료된 건 바로 지우지 않고(다운로드 위해),
-                    # 리스트 관리 정책이 필요함.
-                    # 간단하게: video_jobs에 timestamp 필드를 추가하는 것이 정석이나,
-                    # 현재 구조상 '너무 많아지면 강제 정리' 방식으로 구현.
-                    if len(video_jobs) > 1000: # 혹시 1000개가 넘어가면
-                        video_jobs.pop(jid, None) # 앞에서부터 하나 지움 (Python 3.7+ 딕셔너리는 삽입 순서 유지되므로 가장 오래된 것 삭제됨)
+                    # progress媛 100?닿굅??failed???곹깭?먯꽌 ?ㅻ옒??寃? ?뱀? 洹몃깷 ?덈Т ?ㅻ옒??寃???젣
+                    # ?ш린?쒕뒗 ?⑥닚?섍쾶 ?앹꽦 ?쒓컙??蹂꾨룄 異붿쟻 ?덊븯誘濡? ?쇰떒 100% ?꾨즺??嫄?諛붾줈 吏?곗? ?딄퀬(?ㅼ슫濡쒕뱶 ?꾪빐),
+                    # 由ъ뒪??愿由??뺤콉???꾩슂??
+                    # 媛꾨떒?섍쾶: video_jobs??timestamp ?꾨뱶瑜?異붽??섎뒗 寃껋씠 ?뺤꽍?대굹,
+                    # ?꾩옱 援ъ“??'?덈Т 留롮븘吏硫?媛뺤젣 ?뺣━' 諛⑹떇?쇰줈 援ы쁽.
+                    if len(video_jobs) > 1000: # ?뱀떆 1000媛쒓? ?섏뼱媛硫?                        video_jobs.pop(jid, None) # ?욎뿉?쒕????섎굹 吏? (Python 3.7+ ?뺤뀛?덈━???쎌엯 ?쒖꽌 ?좎??섎?濡?媛???ㅻ옒??寃???젣??
             
             if deleted_count > 0:
-                print(f"✨ [System] Cleaned up {deleted_count} old files.", flush=True)
+                print(f"??[System] Cleaned up {deleted_count} old files.", flush=True)
                 
         except Exception as e:
             print(f"!! [Cleanup Error] {e}", flush=True)

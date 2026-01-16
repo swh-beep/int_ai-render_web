@@ -1,3 +1,4 @@
+﻿# -*- coding: utf-8 -*-
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
@@ -17,3 +18,4 @@ else:
             print("-" * 20)
     except Exception as e:
         print(f"Error listing models: {e}")
+

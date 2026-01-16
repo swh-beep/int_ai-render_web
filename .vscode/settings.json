@@ -1,4 +1,7 @@
 {
     "editor.fontSize": 12,
-    "workbench.colorTheme": "Default Dark Modern"
+    "workbench.colorTheme": "Default Dark Modern",
+    "chatgpt.openOnStartup": true,
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": false
 }
