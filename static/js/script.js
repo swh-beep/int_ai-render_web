@@ -172,6 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(res => res.json())
         .then(rooms => {
             roomGrid.innerHTML = '';
+            if (!rooms.includes('Customize')) rooms.push('Customize');
             rooms.forEach(room => {
                 const btn = document.createElement('button');
                 btn.className = 'style-btn';
@@ -196,11 +197,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateActiveButton(roomGrid, btn);
 
+        if (room === 'Customize') {
+            selectedStyle = 'Customize';
+            if (styleSection) styleSection.classList.add('hidden');
+            if (variantSection) variantSection.classList.remove('hidden');
+            if (variantGrid) variantGrid.classList.add('hidden');
+            if (moodboardUploadContainer) moodboardUploadContainer.classList.remove('hidden');
+            if (styleGrid) styleGrid.innerHTML = '';
+            checkReady();
+            return;
+        }
+
         fetch(`/styles/${room}`)
             .then(res => res.json())
             .then(styles => {
                 styleGrid.innerHTML = '';
                 styles.forEach(style => {
+                    if (style === 'Customize') return;
                     const styleBtn = document.createElement('button');
                     styleBtn.className = 'style-btn';
                     styleBtn.textContent = style;
@@ -509,8 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const img = document.createElement('img');
                     img.src = url;
                     img.style.aspectRatio = "16 / 9";
-                    img.style.objectFit = "contain";
-                    img.style.backgroundColor = "#000";
+                    img.style.objectFit = "cover";
+                    img.style.backgroundColor = "transparent";
                     img.style.cursor = "zoom-in";
                     img.onclick = (e) => {
                         e.stopPropagation();
@@ -739,9 +752,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function checkReady() {
         if (!renderBtn) return;
         let ready = false;
-        if (selectedFile && selectedRoom && selectedStyle) {
-            if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
-            else ready = !!selectedVariant;
+        if (selectedFile && selectedRoom) {
+            if (selectedRoom === 'Customize') {
+                ready = !!selectedMoodboardFile;
+            } else if (selectedStyle) {
+                if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
+                else ready = !!selectedVariant;
+            }
         }
         renderBtn.disabled = !ready;
     }
@@ -838,9 +855,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (renderBtn) {
         renderBtn.addEventListener('click', async () => {
             let ready = false;
-            if (selectedFile && selectedRoom && selectedStyle) {
-                if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
-                else ready = !!selectedVariant;
+            if (selectedFile && selectedRoom) {
+                if (selectedRoom === 'Customize') {
+                    ready = !!selectedMoodboardFile;
+                } else if (selectedStyle) {
+                    if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
+                    else ready = !!selectedVariant;
+                }
             }
             if (!ready) return;
 
@@ -911,24 +932,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 thumbnailContainer.innerHTML = "";
                 results.forEach((url, idx) => {
+                    const card = document.createElement("div");
+                    card.className = "thumb-card";
+
                     const img = document.createElement("img");
                     img.src = url;
-                    img.style.width = "19%";
-                    img.style.height = "auto";
-                    img.style.aspectRatio = "16/9";
-                    img.style.objectFit = "contain";
-                    img.style.backgroundColor = "#000";
-                    img.style.cursor = "pointer";
-                    img.style.borderRadius = "8px";
-                    img.style.border = idx === 0 ? `3px solid ${THEME_COLOR}` : "3px solid transparent";
 
-                    img.onclick = () => {
+                    const check = document.createElement("span");
+                    check.className = "thumb-check material-symbols-outlined";
+                    check.textContent = "check";
+
+                    if (idx === 0) card.classList.add("is-selected");
+
+                    card.onclick = () => {
                         resultAfter.src = url;
-                        Array.from(thumbnailContainer.children).forEach(c => c.style.border = "3px solid transparent");
-                        img.style.border = `3px solid ${THEME_COLOR}`;
+                        Array.from(thumbnailContainer.children).forEach(c => c.classList.remove("is-selected"));
+                        card.classList.add("is-selected");
                     };
 
-                    thumbnailContainer.appendChild(img);
+                    card.appendChild(img);
+                    card.appendChild(check);
+                    thumbnailContainer.appendChild(card);
                 });
 
                 initSlider();

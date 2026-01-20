@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" />
     <link rel="icon" href="/static/favicon-light.png">
     
     <style>
@@ -21,7 +22,7 @@
             color: var(--text-color);
             margin: 0;
             padding: 0;
-            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
             min-height: 100vh;
         }
 
@@ -44,10 +45,12 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             gap: 30px;
-            padding-top: 250px;
+            padding-top: 0;
             position: sticky;
-            top: 100px;
+            top: 0;
+            min-height: 80vh;
         }
 
         .is-branding-logo {
@@ -206,14 +209,15 @@
             /* Added left padding for alignment */
             display: flex;
             align-items: center;
+            justify-content: flex-start;
             gap: 10px;
             background: transparent;
         }
 
         .breadcrumb-btn {
-            background: #e2e8f0;
-            border: 1px solid #e2e8f0;
-            color: #0f172a;
+            background: #e5e5e5;
+            border: 1px solid #b6b6b6;
+            color: #363636;
             padding: 8px 16px;
             border-radius: 20px;
             cursor: pointer;
@@ -226,8 +230,8 @@
         }
 
         .breadcrumb-btn:hover {
-            background: #e9edf3;
-            border-color: #cbd5e1;
+            background: #f0f0f0;
+            border-color: #b6b6b6;
         }
 
         .breadcrumb-btn .material-symbols-outlined {
@@ -235,12 +239,12 @@
         }
 
         .breadcrumb-divider {
-            color: #94a3b8;
+            color: #8a8a8a;
             font-size: 1rem;
         }
 
         .breadcrumb-current {
-            color: #64748b;
+            color: #5f5f5f;
             font-size: 0.9rem;
         }
 
@@ -269,9 +273,9 @@
             /* Fixed sides default */
             gap: 0;
             background: #ffffff;
-            border-radius: 16px;
+            border-radius: 24px;
             overflow: hidden;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #b6b6b6;
             min-height: 720px;
             /* Reduced height by 10% */
             width: 100%;
@@ -322,7 +326,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-start;
+            justify-content: center;
             /* Fix cropping issue */
             overflow-y: auto;
             /* Hide Scrollbar */
@@ -376,26 +380,26 @@
             background: #e2e8f0;
         }
         .is-instruction-upload {
-            height: 120px;
+            height: 30px;
             min-height: 0;
-            padding: 8px 12px;
+            padding: 2px 8px;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-direction: column;
-            gap: 6px;
+            gap: 1px;
             box-sizing: border-box;
         }
         .dark-input {
             line-height: 1.4;
         }
         .is-instruction-upload .is-upload-icon {
-            font-size: 2.1rem;
+            font-size: 1.2rem;
             color: #6b7280;
         }
         .is-instruction-upload .upload-title {
             color: #64748b;
-            font-size: 0.9rem;
+            font-size: 0.65rem;
             font-weight: 600;
             letter-spacing: 0.2px;
         }
@@ -468,7 +472,7 @@
 
         .is-file-list.single-mode .is-file-item img {
             max-height: 500px;
-            object-fit: contain;
+            object-fit: cover;
             display: block;
             margin: 0 auto;
         }
@@ -502,12 +506,12 @@
         .is-generate-btn {
             width: 100%;
             padding: 14px 24px;
-            background: linear-gradient(135deg, #333 0%, #222 100%);
+            background: #383633;
             border: 1px solid #e2e8f0;
-            border-radius: 30px;
-            color: #64748b;
+            border-radius: 10px;
+            color: #ffffff;
             font-size: 0.9rem;
-            font-weight: 500;
+            font-weight: 400;
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -519,13 +523,22 @@
             text-transform: uppercase !important;
         }
 
+        .is-generate-btn .material-symbols-outlined {
+            font-variation-settings: "FILL" 0, "wght" 300, "GRAD" -25, "opsz" 20;
+            color: #ffffff;
+        }
+
+        .is-generate-btn:not(:disabled) .material-symbols-outlined {
+            color: #ffffff;
+        }
+
         .is-generate-btn:not(:disabled) {
-            background: linear-gradient(135deg, #444 0%, #333 100%);
-            color: #0f172a;
+            background: #383633;
+            color: #ffffff;
         }
 
         .is-generate-btn:not(:disabled):hover {
-            background: linear-gradient(135deg, #555 0%, #444 100%);
+            background: #383633;
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
         }
@@ -619,9 +632,10 @@
         }
 
         .is-internal-preview img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
         }
 
         .is-internal-preview .remove-btn {
@@ -752,12 +766,12 @@
         }
 
         .modal-content {
-            background: #f8fafc;
+            background: #ffffff;
             padding: 2rem;
             border-radius: 16px;
             max-width: 400px;
             text-align: center;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #c0b9ac;
         }
         .modal-content.preview-wide {
             max-width: 1000px;
@@ -956,12 +970,19 @@
                         style="resize: none;"></textarea>
                 </div>
                 <div class="is-instruction-box" style="margin-bottom: 11px;">
-                    <div class="is-upload-box is-instruction-upload is-reference-upload">
-                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" hidden>
+                    <div class="is-upload-box is-instruction-upload is-reference-upload"
+                        data-ref-for="edit-image"
+                        data-preview-target="edit-reference-preview-container"
+                        data-remove-target="edit-reference-remove-all">
+                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" multiple hidden>
                         <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
                         <div class="upload-title">Upload Reference Image</div>
                         <small>png, jpg, jpeg &amp; webp (up to 30mb)</small>
                     </div>
+                    <div id="edit-reference-preview-container" class="is-file-list" style="display: none;"></div>
+                    <button id="edit-reference-remove-all" class="clear-all-btn hidden">
+                        Clear Reference
+                    </button>
                 </div>
 
                 <button id="edit-generate-btn" class="is-generate-btn" disabled>
@@ -1050,12 +1071,19 @@
                         style="resize: none;"></textarea>
                 </div>
                 <div class="is-instruction-box" style="margin-bottom: 11px;">
-                    <div class="is-upload-box is-instruction-upload is-reference-upload">
-                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" hidden>
+                    <div class="is-upload-box is-instruction-upload is-reference-upload"
+                        data-ref-for="decorate-image"
+                        data-preview-target="decor-reference-preview-container"
+                        data-remove-target="decor-reference-remove-all">
+                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" multiple hidden>
                         <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
                         <div class="upload-title">Upload Reference Image</div>
                         <small>png, jpg, jpeg &amp; webp (up to 30mb)</small>
                     </div>
+                    <div id="decor-reference-preview-container" class="is-file-list" style="display: none;"></div>
+                    <button id="decor-reference-remove-all" class="clear-all-btn hidden">
+                        Clear Reference
+                    </button>
                 </div>
 
                 <button id="decor-generate-btn" class="is-generate-btn" disabled>
@@ -1100,7 +1128,7 @@
             <h3 id="modal-title">Notification</h3>
             <p id="modal-msg">Message</p>
             <div class="modal-buttons">
-                <button id="modal-ok-btn">Confirm</button>
+                <button id="modal-ok-btn">ESC</button>
             </div>
         </div>
     </div>

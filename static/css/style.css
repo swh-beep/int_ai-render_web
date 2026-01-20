@@ -25,7 +25,7 @@ html {
 }
 
 body {
-    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
     background-color: var(--bg-color);
     color: var(--text-color);
     line-height: 1.6;
@@ -38,13 +38,13 @@ body {
 }
 
 body[data-page="home"] .drop-zone {
-    border: 1px solid var(--border-color);
+    border: 1px solid #b6b6b6;
     border-radius: 12px;
     padding: 2rem;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
-    background: var(--card-bg);
+    background: #ffffff;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -53,35 +53,68 @@ body[data-page="home"] .drop-zone {
 }
 
 body[data-page="home"] .drop-zone:hover {
-    border-color: #cbd5e1;
-    background: #e9edf3;
+    border-color: #363636;
+    background: #ffffff;
+}
+
+body[data-page="home"] .dark-input {
+    background: #ffffff;
+    border-color: #b6b6b6;
+    color: #363636;
+}
+
+body[data-page="home"] .dark-input:focus {
+    background: #ffffff;
+    border-color: #b6b6b6;
+    box-shadow: inset 0 0 0 0.25px rgba(15, 23, 42, 0.12);
+}
+
+body[data-page="home"] .dark-input:hover {
+    border-color: #363636;
+    background: #ffffff;
+}
+
+body[data-page="home"] .dark-input::placeholder {
+    color: #363636;
+    opacity: 0.6;
+}
+
+body[data-page="home"] .input-label {
+    color: #363636;
+    font-weight: 500;
+    font-size: 0.9rem;
+    text-transform: none;
 }
 
 body[data-page="home"] .drop-zone p {
-    color: var(--text-muted);
+    color: #363636;
     margin: 0;
+    font-size: 0.8rem;
+    font-weight: 400;
 }
 
 body[data-page="home"] .drop-zone .home-upload-title {
-    color: var(--text-color);
-      font-weight: 300;
-    font-size: 0.95rem;
+    color: #363636;
+    font-weight: 700;
+    font-size: 1rem;
+    text-transform: uppercase;
 }
 
 body[data-page="home"] .drop-zone .home-upload-sub {
-    color: var(--text-muted);
-    font-size: 0.85rem;
+    color: #363636;
+    font-size: 0.8rem;
     font-weight: 400;
 }
 
 body[data-page="home"] .drop-zone .home-upload-browse {
-    color: var(--text-color);
+    color: #363636;
     text-decoration: none;
-    font-weight: 400;
+    font-weight: 700;
 }
 
 body[data-page="home"] .drop-zone .is-upload-icon {
-    color: #9aa3b2;
+    color: #363636;
+    font-size: 2rem;
 }
 
 /* [기본 레이아웃] 메인 페이지 등 일반 페이지용 (최대폭 제한) */
@@ -205,7 +238,7 @@ button,
 .action-btn:disabled {
     background-color: #333333 !important;
     color: #777777 !important;
-    cursor: not-allowed;
+    cursor: default;
     transform: none !important;
 }
 
@@ -214,6 +247,12 @@ button,
     border: 1px solid #ffffff;
     color: #ffffff;
     font-weight: 400;
+}
+
+body[data-page="home"] .action-btn.secondary,
+#moodboard-upload-container .action-btn.secondary {
+    border-color: #111111;
+    color: #111111;
 }
 
 #open-mb-gen-btn {
@@ -257,7 +296,7 @@ button,
     /* 좀 더 어둡게 */
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid #e2e8f0;
+    border: 1px solid #595959;
     border-radius: 33px;
     z-index: 99999 !important;
     /* 압도적 우선순위 */
@@ -282,7 +321,7 @@ button,
     align-items: center;
     justify-content: flex-start;
     padding: 0;
-    color: #0f172a;
+    color: #858593;
     text-decoration: none;
     border-radius: 30px;
     transition: all 0.2s ease;
@@ -290,12 +329,16 @@ button,
 }
 
 .nav-item:hover {
-    color: #000000;
+    color: #18181b;
     font-weight: 600;
 }
 
+.nav-item:hover .material-symbols-outlined {
+    color: #18181b;
+}
+
 .nav-item.active {
-    color: #000000;
+    color: #18181b;
     font-weight: 700;
 }
 
@@ -313,12 +356,12 @@ button,
     flex-shrink: 0;
     font-size: 24px;
     font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
-    color: #0f172a;
+    color: #858593;
 }
 
 .nav-item.active .material-symbols-outlined {
     font-variation-settings: 'FILL' 1, 'wght' 600, 'GRAD' 0, 'opsz' 24;
-    color: #000000;
+    color: #18181b;
 }
 
 .nav-label {
@@ -379,59 +422,61 @@ button,
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 11px 24px;
-    /* 기존 14px 30px에서 축소 */
-    background: linear-gradient(135deg, #333 0%, #222 100%);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 30px;
-    color: #eee;
-    font-size: 0.85rem;
-    /* 기존 0.95rem에서 축소 */
-    font-weight: 600;
-    cursor: pointer;
+    padding: 14px 24px;
+    background: #383633;
+    border: 1px solid #b6b6b6;
+    border-radius: 10px;
+    color: #ffffff;
+    font-size: 0.9rem;
+    font-weight: 400;
+    cursor: not-allowed;
     transition: all 0.3s ease;
     text-transform: uppercase !important;
     letter-spacing: 0.5px;
     min-width: 260px;
-    /* 고정 너비 느낌으로 전체 버튼 사이즈 통일 */
+    /* ?????? ????? ?????????? ????? ?????? ????????????? */
 }
+
 
 .glow-btn:not(:disabled) {
-    background: linear-gradient(135deg, #444 0%, #333 100%);
-    color: white;
-    animation: button-glow 2.5s infinite ease-in-out;
+    color: #ffffff;
+    cursor: pointer;
 }
 
+
 .glow-btn.burgundy:not(:disabled) {
-    background: var(--brand-color);
-    background: linear-gradient(135deg, var(--brand-color) 0%, #300a0c 100%);
-    border-color: rgba(255, 255, 255, 0.3);
-    animation: button-glow-burgundy 2.5s infinite ease-in-out;
+    background: #39131A;
+    border-color: #e2e8f0;
 }
 
 .glow-btn.burgundy:not(:disabled):hover {
-    background: linear-gradient(135deg, var(--brand-hover) 0%, var(--brand-color) 100%);
+    background: #39131A;
+    border-color: #e2e8f0;
 }
 
 .glow-btn:not(:disabled):hover {
-    background: linear-gradient(135deg, #555 0%, #444 100%);
+    background: #383633;
     transform: translateY(-2px);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-    border-color: rgba(255, 255, 255, 0.4);
+    border-color: #e2e8f0;
 }
 
+
 .glow-btn:disabled {
-    background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
-    opacity: 0.5;
-    color: rgba(255, 255, 255, 0.3);
-    cursor: not-allowed;
-    border-color: rgba(255, 255, 255, 0.1);
+    background: #383633;
+    opacity: 1;
+    color: #ffffff;
+    cursor: default;
+    border-color: #e2e8f0;
     box-shadow: none;
     transform: none;
 }
 
+
 .glow-btn .material-symbols-outlined {
     font-size: 20px;
+    font-variation-settings: "FILL" 0, "wght" 300, "GRAD" -25, "opsz" 20;
+    color: #ffffff;
 }
 
 .detail-upscale-btn .material-symbols-outlined {
@@ -545,7 +590,7 @@ button,
     margin-bottom: 1.5rem;
     font-size: 1.5rem;
     font-weight: 600;
-    color: var(--text-color);
+    color: #18181b;
     text-align: center;
 }
 
@@ -567,29 +612,30 @@ button,
     min-width: 0;
     max-width: 260px;
     flex: 0 0 auto;
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
+    background-color: #ffffff;
+    border: 1px solid #b6b6b6;
+    color: #363636;
     padding: 0.85rem 1.6rem;
     height: auto;
     border-radius: 12px;
     cursor: pointer;
     font-size: 1rem;
     font-weight: 400;
+    font-family: inherit;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .style-btn:hover {
-    border-color: var(--primary-color);
-    color: var(--text-color);
+    border-color: #363636;
+    color: #363636;
     font-weight: 400;
 }
 
 .style-btn.active {
-    background-color: transparent;
-    border: 1px solid var(--primary-color);
-    color: var(--primary-color);
+    background-color: #ffffff;
+    border: 1px solid #363636;
+    color: #363636;
     font-weight: 400;
 }
 
@@ -830,10 +876,53 @@ button,
     flex-wrap: wrap;
 }
 
-#thumbnailContainer img {
+#thumbnailContainer .thumb-card {
+    position: relative;
+    width: 19%;
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    background: transparent;
+}
+
+#thumbnailContainer .thumb-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
     image-rendering: auto;
     transform: translateZ(0);
     backface-visibility: hidden;
+}
+
+#thumbnailContainer .thumb-card .thumb-check {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.9);
+    color: #222;
+    font-size: 16px;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: none;
+}
+
+#thumbnailContainer .thumb-card.is-selected img {
+    filter: grayscale(1);
+    opacity: 0.6;
+}
+
+#thumbnailContainer .thumb-card.is-selected .thumb-check {
+    opacity: 1;
+    transform: scale(1);
 }
 
 .download-area {
@@ -930,16 +1019,13 @@ button,
 
 .detail-upscale-btn {
     width: 180px;
-    /* 고정 너비로 한 줄 유지 */
     position: absolute;
     bottom: 10px;
     left: 50%;
     transform: translateX(-50%);
     /* 정확한 중앙 정렬 */
     z-index: 10;
-    min-width: unset;
     padding: 6px 12px;
-    /* 위아래 폭 약 30% 축소 */
     font-size: 0.7rem;
     border-radius: 20px;
     white-space: nowrap;
@@ -949,6 +1035,28 @@ button,
 .detail-upscale-btn:hover {
     transform: translateX(-50%) translateY(-2px) !important;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+#detail-section .detail-upscale-btn {
+    width: 234px;
+    min-width: 234px;
+    padding: 14px 24px;
+    font-size: 0.9rem;
+    border-radius: 10px;
+    font-weight: 400;
+    border: none;
+    transform: translateX(-50%) scale(0.7);
+    outline: none;
+    box-shadow: none;
+}
+
+#detail-section .detail-upscale-btn:hover {
+    transform: translateX(-50%) translateY(-2px) scale(0.7) !important;
+    box-shadow: 0 0 0 2px rgba(39, 13, 18, 0.7) !important;
+}
+
+#detail-section .detail-upscale-btn .material-symbols-outlined {
+    font-size: 20px;
 }
 
 /* --- Modals & Loading --- */
@@ -1468,8 +1576,8 @@ button,
 .vs-btn-download {
     position: absolute;
     bottom: 20px;
-    background: #00E5FF;
-    color: #000;
+    background: #39131A;
+    color: #ffffff;
     padding: 10px 20px;
     border-radius: 20px;
     text-decoration: none;
@@ -1789,13 +1897,178 @@ body[data-page="image-studio"] .is-panel-left {
 }
 
 body[data-page="image-studio"] .is-panel-right {
-    background: #f8fafc !important;
-    color: #0f172a !important;
+    background: #f5f5f5 !important;
+    color: #363636 !important;
+}
+
+body[data-page="image-studio"] .is-panel-right .placeholder-preview-box,
+body[data-page="image-studio"] .is-panel-right .preview-image-slot,
+body[data-page="image-studio"] .is-panel-right .preview-arrow,
+body[data-page="image-studio"] .is-panel-right .placeholder-title,
+body[data-page="image-studio"] .is-panel-right .placeholder-desc,
+body[data-page="image-studio"] .is-panel-right .material-symbols-outlined {
+    color: #363636 !important;
+    filter: grayscale(1) !important;
+}
+
+body[data-page="image-studio"] .is-panel-right .preview-image-slot {
+    background: #eeeeee !important;
+    border-color: #d6d6d6 !important;
 }
 
 body[data-page="image-studio"] .is-upload-box {
-    background: #f2f4f8 !important;
-    border-color: #cbd5e1 !important;
+    background: #ffffff !important;
+    border-color: #b6b6b6 !important;
+    border-style: solid !important;
+    border-radius: 12px !important;
+    padding: 2rem !important;
+    gap: 6px !important;
+    min-height: 200px !important;
+}
+
+body[data-page="image-studio"] .is-upload-box:hover {
+    border-color: #363636 !important;
+    background: #ffffff !important;
+}
+
+body[data-page="image-studio"] .is-upload-box.dragover {
+    border-color: #363636 !important;
+    background: #ffffff !important;
+}
+
+body[data-page="image-studio"] .is-upload-box.has-preview {
+    padding: 0 !important;
+}
+
+body[data-page="image-studio"] .is-upload-box.has-preview .is-internal-preview {
+    border: none !important;
+}
+
+body[data-page="image-studio"] .is-upload-icon {
+    color: #363636 !important;
+    font-size: 2rem !important;
+    margin-bottom: 0 !important;
+}
+
+body[data-page="image-studio"] .is-upload-label {
+    color: #363636 !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+}
+
+body[data-page="image-studio"] .is-upload-sub {
+    color: #363636 !important;
+    font-size: 0.8rem !important;
+    font-weight: 400 !important;
+}
+
+body[data-page="image-studio"] .is-instruction-upload .is-upload-icon {
+    color: #363636 !important;
+    font-size: 2rem !important;
+    margin-bottom: 0 !important;
+}
+
+body[data-page="image-studio"] .is-instruction-upload .upload-title {
+    color: #363636 !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+}
+
+body[data-page="image-studio"] .is-instruction-upload small {
+    color: #363636 !important;
+    font-size: 0.8rem !important;
+    font-weight: 400 !important;
+}
+
+body[data-page="image-studio"] .is-instruction-upload {
+    height: 90px !important;
+    min-height: 90px !important;
+    padding: 8px 12px !important;
+    gap: 4px !important;
+}
+
+body[data-page="image-studio"] .dark-input {
+    background: #ffffff !important;
+    border-color: #b6b6b6 !important;
+    color: #363636 !important;
+}
+
+body[data-page="image-studio"] .dark-input:hover {
+    border-color: #363636 !important;
+    background: #ffffff !important;
+}
+
+body[data-page="image-studio"] .dark-input:focus {
+    background: #ffffff !important;
+    border-color: #b6b6b6 !important;
+    box-shadow: inset 0 0 0 0.25px rgba(15, 23, 42, 0.12) !important;
+}
+
+body[data-page="image-studio"] .dark-input::placeholder {
+    color: #363636 !important;
+    opacity: 0.6;
+}
+
+body[data-page="image-studio"] .input-label {
+    color: #363636 !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    text-transform: none !important;
+}
+
+body[data-page="image-studio"] .is-file-item {
+    background: #ffffff;
+}
+
+body[data-page="video-studio"] .vs-dropzone-compact {
+    border-color: #b6b6b6;
+    border-style: solid;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+body[data-page="video-studio"] .vs-dropzone-compact:hover {
+    border-color: #363636;
+    background: #ffffff;
+}
+
+body[data-page="video-studio"] .vs-dropzone-compact p {
+    color: #363636;
+    font-size: 0.8rem;
+    font-weight: 400;
+    margin: 0;
+}
+
+body[data-page="video-studio"] .vs-dropzone-compact .material-symbols-outlined {
+    color: #363636;
+    font-size: 2rem;
+}
+body[data-page="image-studio"] .detail-upscale-btn {
+    width: 234px;
+    min-width: 234px;
+    padding: 14px 24px;
+    font-size: 0.9rem;
+    border-radius: 10px;
+    font-weight: 400;
+    border: none;
+    transform: translateX(-50%) scale(0.7);
+    color: #ffffff;
+}
+
+body[data-page="image-studio"] .detail-upscale-btn .material-symbols-outlined {
+    font-size: 20px;
+    color: #ffffff !important;
+    opacity: 1 !important;
+}
+
+body[data-page="image-studio"] .detail-upscale-btn:hover {
+    transform: translateX(-50%) translateY(-2px) scale(0.7) !important;
 }
 
 /* [왼쪽] 입력 패널 */
@@ -1899,7 +2172,7 @@ body[data-page="image-studio"] .is-upload-box {
     background-color: #222;
     color: #555;
     border: none;
-    border-radius: 50px;
+    border-radius: 10px;
     /* 둥근 버튼 */
     font-size: 1rem;
     font-weight: 600;
@@ -1909,17 +2182,22 @@ body[data-page="image-studio"] .is-upload-box {
 }
 
 .is-generate-btn:not(:disabled) {
-    background-color: #000000;
-    /* 활성 시 흰색 배경 */
-    color: #000;
-    /* 검은 글씨 */
+    background-color: #383633;
+    /* ????? ??????? ?????? */
+    color: #ffffff;
+    /* ????? ?????*/
     cursor: pointer;
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
 }
 
 .is-generate-btn:not(:disabled):hover {
+    background-color: #44423f;
     transform: translateY(-2px);
     box-shadow: 0 5px 25px rgba(255, 255, 255, 0.3);
+}
+
+.is-generate-btn .material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 300, "GRAD" -25, "opsz" 20;
 }
 
 /* 파일 리스트 (업로드 박스 아래에 작게 표시) */

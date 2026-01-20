@@ -462,10 +462,14 @@ _DIM_KEY_PATTERNS = {
     "depth_mm":  r"(?:\bD\b|depth|세로|깊이)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
     "height_mm": r"(?:\bH\b|height|높이)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
 }
+_LENGTH_PAT = r"(?:\bL\b|length|len)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?"
 
 _TRIPLE_PATTERNS = [
     r"([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*[x×X]\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*[x×X]\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
     r"\bW\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*\bD\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*\bH\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
+]
+_DOUBLE_PATTERNS = [
+    r"([0-9][0-9,\.]*)\s*(mm|cm|m)?\s*[x×X]\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?",
 ]
 
 def parse_object_dimensions_mm(text: str) -> dict:
@@ -501,6 +505,52 @@ def parse_object_dimensions_mm(text: str) -> dict:
         if mm:
             out[k] = mm
             out["raw"][k] = m.group(0)
+
+    if not out["width_mm"]:
+        m = re.search(_LENGTH_PAT, t_norm, flags=re.IGNORECASE)
+        if m:
+            num_str, unit = m.group(1), m.group(2)
+            try:
+                v = float(num_str.replace(",", ""))
+            except Exception:
+                v = None
+            if v is not None:
+                mm = _to_mm(v, unit)
+                if mm:
+                    out["width_mm"] = mm
+                    out["raw"]["length"] = m.group(0)
+
+    if not out["height_mm"]:
+        m = re.search(r"(?:\bSH\b|SH)\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?", t_norm, flags=re.IGNORECASE)
+        if m:
+            num_str, unit = m.group(1), m.group(2)
+            try:
+                v = float(num_str.replace(",", ""))
+            except Exception:
+                v = None
+            if v is not None:
+                mm = _to_mm(v, unit)
+                if mm:
+                    out["height_mm"] = mm
+                    out["raw"]["seat_height"] = m.group(0)
+
+    if not any([out["width_mm"], out["depth_mm"], out["height_mm"]]):
+        for pat in _DOUBLE_PATTERNS:
+            m = re.search(pat, t_norm, flags=re.IGNORECASE)
+            if not m:
+                continue
+            n1, u1, n2, u2 = m.groups()
+            def _num(s): return float(str(s).replace(",", ""))
+            v1 = _to_mm(_num(n1), u1)
+            v2 = _to_mm(_num(n2), u2 or u1)
+            if re.search(r"\b(poster|frame|wall|art|painting)\b", t_norm, flags=re.IGNORECASE):
+                if v1: out["width_mm"] = v1
+                if v2: out["height_mm"] = v2
+            else:
+                if v1: out["width_mm"] = v1
+                if v2: out["depth_mm"] = v2
+            out["raw"]["double"] = m.group(0)
+            break
 
     return out
 
@@ -1154,20 +1204,20 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             box_h_px = max(1, base_bottom - base_top)
 
             # Expand aggressively to capture nearby spec text.
-            pad_bottom_px = max(int(box_h_px * 1.4), int(H * 0.12))
-            pad_top_px = max(int(box_h_px * 0.8), int(H * 0.08))
-            pad_left_px = max(int(box_w_px * 0.9), int(W * 0.12))
-            pad_right_px = max(int(box_w_px * 1.6), int(W * 0.18))
+            pad_bottom_px = max(int(box_h_px * 2.0), int(H * 0.18))
+            pad_top_px = max(int(box_h_px * 1.2), int(H * 0.12))
+            pad_left_px = max(int(box_w_px * 1.2), int(W * 0.16))
+            pad_right_px = max(int(box_w_px * 2.0), int(W * 0.24))
 
             # Bias expansion toward the side with more whitespace.
             space_left = base_left
             space_right = W - base_right
             if space_right > space_left * 1.2:
-                pad_right_px = max(pad_right_px, int(W * 0.26))
-                pad_left_px = max(pad_left_px, int(W * 0.10))
+                pad_right_px = max(pad_right_px, int(W * 0.34))
+                pad_left_px = max(pad_left_px, int(W * 0.12))
             elif space_left > space_right * 1.2:
-                pad_left_px = max(pad_left_px, int(W * 0.26))
-                pad_right_px = max(pad_right_px, int(W * 0.10))
+                pad_left_px = max(pad_left_px, int(W * 0.34))
+                pad_right_px = max(pad_right_px, int(W * 0.12))
 
             top = max(0, base_top - pad_top_px)
             bottom = min(H, base_bottom + pad_bottom_px)
@@ -1175,8 +1225,8 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             right = min(W, base_right + pad_right_px)
 
             # Ensure a minimum crop window for small items.
-            min_w = int(W * 0.18)
-            min_h = int(H * 0.18)
+            min_w = int(W * 0.26)
+            min_h = int(H * 0.26)
             if right - left < min_w:
                 pad = int(min_w / 2)
                 left = max(0, base_left - pad)
@@ -1426,14 +1476,25 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         print(f"   [{mode.upper()}] Processing step with instructions: {instructions}", flush=True)
         
         if not photo_paths: return None
-        target_path = photo_paths[0] 
+        target_path = photo_paths[0]
+        ref_paths = photo_paths[1:7]
         img = None
+        ref_imgs = []
         
         try:
             with Image.open(target_path) as base_img:
                 base_img.thumbnail((2048, 2048))
                 img = base_img.copy()
         except: return None
+        try:
+            for rp in ref_paths:
+                if not rp or not os.path.exists(rp):
+                    continue
+                with Image.open(rp) as _ref:
+                    _ref.thumbnail((2048, 2048))
+                    ref_imgs.append(_ref.copy())
+        except Exception:
+            ref_imgs = []
 
         # 모드별 시스템 프롬프트 분기
         if mode == 'edit':
@@ -1467,7 +1528,10 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         prompt = (
             f"ACT AS: {role}\n"
             f"TASK: {task}\n\n"
-            
+            f"<REFERENCE IMAGES>\n"
+            "If provided, treat them as exact visual references for objects or styles mentioned by the user.\n"
+            "Do NOT invent a different design when a matching reference is available.\n"
+            "--------------------------------------------------\n\n"
             f"<USER INSTRUCTIONS (EXECUTE AGGRESSIVELY)>\n"
             f"\"{instructions}\"\n"
             f"--------------------------------------------------\n\n"
@@ -1475,11 +1539,17 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
             f"<CRITICAL RULES>\n"
             f"{critical_rule}\n"
             "4. **OUTPUT:** Return a single, high-quality photorealistic image.\n"
-            "5. **NO TEXT:** Do not add watermarks or text."
+            "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.\n"
+            "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.\n"
+            "7. **NO TEXT:** Do not add watermarks or text.\n"
+            "8. **NO NOISE:** Do NOT add film grain or artificial noise; keep the image clean."
         )
 
         # 모델 호출 (온도를 살짝 높여서 변화를 유도)
-        response = call_gemini_with_failover(MODEL_NAME, [prompt, img], {'timeout': 90}, {})
+        content = [prompt, "Target image:", img]
+        for i, ref in enumerate(ref_imgs):
+            content.extend([f"Reference image {i+1}:", ref])
+        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {})
 
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
@@ -1502,6 +1572,11 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                 img.close()
         except Exception:
             pass
+        for rimg in ref_imgs:
+            try:
+                rimg.close()
+            except Exception:
+                pass
         return None
 
     except Exception as e:
@@ -1511,6 +1586,11 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                 img.close()
         except Exception:
             pass
+        for rimg in ref_imgs:
+            try:
+                rimg.close()
+            except Exception:
+                pass
         return None
 
 # [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
@@ -2040,25 +2120,25 @@ def generate_furnished_room(
             "5. **WHITE BALANCE:** Neutral daylight white balance (around 4000~5000K). **NO warm/yellow cast.**\n\n"
 
         "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
-            "1. **MANDATORY LIGHTING STATE: ALL ON (NEUTRAL ONLY):**\n"
-            "   - **ACTION:** TURN ON every lighting fixture in the scene (Pendants, Floor Lamps, Recessed Lights, LED Strips).\n"
-            "   - **VISUALS:** Render a visible 'glow' or subtle 'light bloom' around the fixtures to prove they are active. This adds a luxurious touch.\n"
+            "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
+            "   - **ACTION:** Keep interior fixtures ON only if they appear in the reference; no extra fixtures.\n"
+            "   - **VISUALS:** Avoid visible glow/bloom halos. Lights should look realistic and restrained.\n"
             
             "2. **LIGHTING HIERARCHY (KEY vs. FILL):**\n"
-            "   - **KEY LIGHT (DOMINANT):** Natural Daylight from the window is still the PRIMARY source (approx. 70% intensity). It defines the main shadow direction.\n"
-            "   - **FILL LIGHT (SECONDARY):** The interior lights act as 'Fill Lights' (approx. 30% intensity) to brighten dark corners and highlight furniture textures. They should NOT overpower the sunlight.\n"
+            "   - **KEY LIGHT (DOMINANT):** Natural daylight from the window is the PRIMARY source (approx. 80% intensity).\n"
+            "   - **FILL LIGHT (SECONDARY):** Interior lights act as gentle fill (approx. 20%). They must NOT overpower the daylight.\n"
             
             "3. **STRICT COLOR TEMPERATURE CONTROL (NO YELLOW):**\n"
-            "   - **Target Temperature:** Use **Pure Neutral White (4000K-5000K)** for all artificial lights to match the daylight.\n"
-            "   - **PROHIBITED:** Do NOT use Warm/Tungsten/Orange bulbs (2700K). Even though lights are ON, the room must remain fresh and clean. No vintage/sepia cast.\n"
+            "   - **Target Temperature:** Use **Neutral White (4000K-5000K)** for any artificial lights to match daylight.\n"
+            "   - **PROHIBITED:** No warm/tungsten/orange bulbs (2700K). No vintage/sepia cast.\n"
             
             "4. **SHADOW PHYSICS:**\n"
-            "   - Cast soft, directional shadows driven by the window light.\n"
-            "   - Use the interior lights to slightly soften (lift) the deepest shadows, preventing high-contrast black spots.\n"
+            "   - Cast soft, directional shadows driven by window light.\n"
+            "   - Use interior lights only to lift the darkest corners slightly.\n"
             
             "5. **ATMOSPHERE:**\n"
-            "   - Combine 'Sun-filled Freshness' with 'High-end Illuminated Luxury'. Bright, airy, and fully detailed.\n"
-            "   - **OUTPUT RULE:** Return the image with furniture added, perfectly blended with abundant daylight AND active neutral interior lighting.\n"
+            "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
+            "   - **OUTPUT RULE:** Return the image with furniture added, blended with abundant daylight and subtle interior lighting.\n"
         )
         
         prompt = (
@@ -2207,16 +2287,15 @@ def call_magnific_api(image_path, unique_id, start_time):
             "scale_factor": "2x", 
             "optimized_for": "films_n_photography", 
             "engine": "automatic",
-            "creativity": 1,
+            "creativity": 0,
             "hdr": 0,
-            "resemblance": 10,
-            "fractality": 1,
+            "resemblance": 12,
+            "fractality": 0,
             "prompt": (
                 "Professional interior photography, architectural digest style, "
                 "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
-                "natural white daylight coming from window, sharp shadows, "
-                "hyper-realistic material textures, raw photo, 8k resolution, "
-                "imperfect details. "
+                "natural white daylight coming from window, soft shadows, "
+                "clean textures, true-to-source details, raw photo, 8k resolution. "
                 "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
             )
         }
@@ -2336,7 +2415,7 @@ async def api_outputs_upload(file: UploadFile = File(...)):
 
 
 @app.get("/favicon.ico", include_in_schema=False)
-async def favicon(): return FileResponse("static/logo2.png")
+async def favicon(): return FileResponse("static/favicon-light.png")
 
 @app.get("/room-types")
 async def get_room_types(): return JSONResponse(content=list(ROOM_STYLES.keys()))

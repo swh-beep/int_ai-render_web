@@ -158,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         img.src = e.target.result;
                         this.internalPreview.classList.remove('hidden');
                         if (this.uploadContent) this.uploadContent.classList.add('hidden');
+                        this.dropZone?.classList.add('has-preview');
                     };
                     reader.readAsDataURL(this.refFiles[this.refFiles.length - 1]); // Show the latest one
                     this.generateBtn.disabled = false;
@@ -166,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.internalPreview.classList.add('hidden');
                     if (this.uploadContent) this.uploadContent.classList.remove('hidden');
                     this.generateBtn.disabled = true;
+                    this.dropZone?.classList.remove('has-preview');
                 }
                 // Hide external preview container if it exists
                 if (this.previewContainer) this.previewContainer.style.display = 'none';
@@ -241,6 +243,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2. FormData 생성
             const formData = new FormData();
             this.refFiles.forEach(f => formData.append('input_photos', f));
+            if (this.id === 'edit-image' || this.id === 'decorate-image') {
+                const refBox = document.querySelector(`.is-reference-upload[data-ref-for="${this.id}"]`);
+                const refInput = refBox ? refBox.querySelector('.reference-input') : null;
+                const refFiles = (refInput && Array.isArray(refInput._refFiles)) ? refInput._refFiles : [];
+                refFiles.forEach(f => formData.append('input_photos', f));
+            }
             
             // [핵심 수정] 엔드포인트 및 지시사항(Instructions) 처리 통합
             // 기존에 위쪽에 있던 'if (this.instructionInput)...' 코드를 삭제하고 여기서 한 번에 처리합니다.
@@ -367,6 +375,63 @@ document.addEventListener('DOMContentLoaded', () => {
     refUploadBoxes.forEach((box) => {
         const input = box.querySelector('.reference-input');
         if (!input) return;
+        const previewId = box.dataset.previewTarget;
+        const removeId = box.dataset.removeTarget;
+        const previewContainer = previewId ? document.getElementById(previewId) : null;
+        const clearBtn = removeId ? document.getElementById(removeId) : null;
+
+        const renderPreview = (files) => {
+            if (!previewContainer) return;
+            previewContainer.innerHTML = '';
+            if (!files || files.length === 0) {
+                previewContainer.style.display = 'none';
+                if (clearBtn) clearBtn.classList.add('hidden');
+                return;
+            }
+            files.forEach((file, index) => {
+                const reader = new FileReader();
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'is-file-item';
+                reader.onload = (e) => {
+                    itemDiv.innerHTML = `
+                        <img src="${e.target.result}" alt="${file.name}">
+                        <button class="remove-btn" title="Remove">×</button>
+                    `;
+                    const delBtn = itemDiv.querySelector('.remove-btn');
+                    delBtn.onclick = (ev) => {
+                        ev.stopPropagation();
+                        input._refFiles.splice(index, 1);
+                        renderPreview(input._refFiles);
+                    };
+                    previewContainer.appendChild(itemDiv);
+                };
+                reader.readAsDataURL(file);
+            });
+            previewContainer.style.display = 'grid';
+            if (clearBtn) clearBtn.classList.remove('hidden');
+        };
+
         box.addEventListener('click', () => input.click());
+        input._refFiles = [];
+        input.addEventListener('change', (e) => {
+            const selected = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+            if (selected.length === 0) {
+                input.value = '';
+                renderPreview(input._refFiles);
+                return;
+            }
+            const combined = input._refFiles.concat(selected).slice(0, 6);
+            input._refFiles = combined;
+            input.value = '';
+            renderPreview(input._refFiles);
+        });
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                input.value = '';
+                input._refFiles = [];
+                renderPreview(input._refFiles);
+            });
+        }
     });
 });
