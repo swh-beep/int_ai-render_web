@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const $ = (id) => document.getElementById(id);
 
+
     // --- Global State ---
     let sourceClips = []; // Generated video clips available for timeline
     let timelineClips = []; // Clips actually in the timeline
@@ -25,6 +26,25 @@ document.addEventListener('DOMContentLoaded', () => {
         menuScreen.classList.remove('hidden');
         window.scrollTo(0, 0);
     }
+
+    function showPreview(title, html) {
+        const globalModal = $('global-modal');
+        const modalMsg = $('modal-msg');
+        const modalContent = globalModal?.querySelector('.modal-content');
+        if (!globalModal || !modalMsg) return;
+        modalContent?.classList.add('preview-wide');
+        $('modal-title').textContent = title;
+        modalMsg.innerHTML = html;
+        $('modal-ok-btn').onclick = () => globalModal.classList.add('hidden');
+        globalModal.classList.remove('hidden');
+    }
+
+    document.addEventListener('keydown', (e) => {
+        const globalModal = $('global-modal');
+        if (e.key === 'Escape' && globalModal && !globalModal.classList.contains('hidden')) {
+            globalModal.classList.add('hidden');
+        }
+    });
 
     // Menu Bindings
     $('btn-feature-1').onclick = () => showWorkspace('create-clips');
@@ -216,6 +236,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="material-symbols-outlined">add_circle</span> ADD TO TIMELINE
                             </button>
                         `;
+                        card.addEventListener('click', (e) => {
+                            if (e.target.closest('.detail-upscale-btn')) return;
+                            showPreview("Result Preview", `<video src="${vidUrl}" controls style="width:100%; max-height:80vh; border-radius:12px; display:block; margin:0 auto;"></video>`);
+                        });
+
                         this.gridEl.appendChild(card);
                     });
                     
@@ -387,9 +412,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Show result modal
             const globalModal = $('global-modal');
+            const modalContent = globalModal?.querySelector('.modal-content');
             const modalMsg = $('modal-msg');
+            modalContent?.classList.remove('preview-wide');
             modalMsg.innerHTML = `<video src="${finalUrl}" controls style="width:100%; border-radius:8px;"></video>
-                                 <a href="${finalUrl}" download class="glow-btn burgundy" style="display:block; margin-top:15px; text-decoration:none;">DOWNLOAD FINAL VIDEO</a>`;
+                                  <a href="${finalUrl}" download class="glow-btn burgundy" style="display:block; margin-top:15px; text-decoration:none;">DOWNLOAD FINAL VIDEO</a>`;
             $('modal-title').textContent = "Video Exported Successfully";
             $('modal-ok-btn').onclick = () => globalModal.classList.add('hidden');
             globalModal.classList.remove('hidden');
@@ -405,7 +432,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initialization ---
     new VideoWorkspaceManager('create-clips', { prefix: 'clip-' });
-    // Note: Workspace 2 and 3 are handled via specialized logic above
+    new VideoWorkspaceManager('assemble-video', { prefix: 'full-' });
+    new VideoWorkspaceManager('post-production', { prefix: 'post-' });
+    // Note: Specialized logic for timeline in workspace 2
     
     // Scrubber
     const container = document.querySelector('.timeline-container');

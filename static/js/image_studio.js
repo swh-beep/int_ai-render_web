@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("✅ Image Studio Script Loaded (Multi-Feature Support)");
 
+
     // --- Screen Navigation Logic ---
     const menuScreen = document.getElementById('menu-screen');
     const workspaces = {
@@ -291,13 +292,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         downBtn.className = 'glow-btn burgundy detail-upscale-btn';
                         downBtn.innerHTML = '<span class="material-symbols-outlined">file_download</span> DOWNLOAD';
 
-                        downBtn.onclick = () => {
+                        downBtn.onclick = (e) => {
+                            e.stopPropagation();
                             const link = document.createElement('a');
                             link.href = url;
                             link.download = `Result_${this.id}_${Date.now()}_${idx}.png`;
                             document.body.appendChild(link);
                             link.click();
                             document.body.removeChild(link);
+                        };
+
+                        card.onclick = (e) => {
+                            if (e.target.closest('.detail-upscale-btn')) return;
+                            showPreview("Result Preview", `<img src="${url}" alt="Result preview" style="width:100%; max-height:80vh; object-fit:contain; display:block; margin:0 auto; border-radius:12px;">`);
                         };
 
                         card.appendChild(img);
@@ -325,17 +332,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalTitle = document.getElementById('modal-title');
     const modalMsg = document.getElementById('modal-msg');
     const modalOkBtn = document.getElementById('modal-ok-btn');
+    const modalContent = globalModal?.querySelector('.modal-content');
 
     function showAlert(title, msg) {
         if (!globalModal) { alert(msg); return; }
+        modalContent?.classList.remove('preview-wide');
         modalTitle.textContent = title;
         modalMsg.innerHTML = msg.replace(/\n/g, '<br>');
         modalOkBtn.onclick = () => globalModal.classList.add('hidden');
         globalModal.classList.remove('hidden');
     }
 
+    function showPreview(title, html) {
+        if (!globalModal) return;
+        modalContent?.classList.add('preview-wide');
+        modalTitle.textContent = title;
+        modalMsg.innerHTML = html;
+        modalOkBtn.onclick = () => globalModal.classList.add('hidden');
+        globalModal.classList.remove('hidden');
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && globalModal && !globalModal.classList.contains('hidden')) {
+            globalModal.classList.add('hidden');
+        }
+    });
+
     // Initialize Managers
     new WorkspaceManager('real-photo', { prefix: 'fp-' });
     new WorkspaceManager('edit-image', { prefix: 'edit-' });
     new WorkspaceManager('decorate-image', { prefix: 'decor-' });
+
+    const refUploadBoxes = document.querySelectorAll('.is-reference-upload');
+    refUploadBoxes.forEach((box) => {
+        const input = box.querySelector('.reference-input');
+        if (!input) return;
+        box.addEventListener('click', () => input.click());
+    });
 });

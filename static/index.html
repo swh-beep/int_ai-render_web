@@ -9,27 +9,29 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="icon" href="/static/favicon-light.png">
+    
 </head>
 
 <body data-page="home">
     <nav class="side-nav">
-        <a href="/" class="nav-item active" title="Main">
+        <a href="/" class="nav-item active" title="MAIN">
             <span class="material-symbols-outlined">home</span>
-            <span class="nav-label">Main</span>
+            <span class="nav-label">MAIN</span>
         </a>
-        <a href="/image-studio" class="nav-item" title="Image Studio">
+        <a href="/image-studio" class="nav-item" title="IMAGE STUDIO">
             <span class="material-symbols-outlined">photo_library</span>
-            <span class="nav-label">Image Studio</span>
+            <span class="nav-label">IMAGE STUDIO</span>
         </a>
-        <a href="/video-studio" class="nav-item" title="Video Studio">
+        <a href="/video-studio" class="nav-item" title="VIDEO STUDIO">
             <span class="material-symbols-outlined">video_library</span>
-            <span class="nav-label">Video Studio</span>
+            <span class="nav-label">VIDEO STUDIO</span>
         </a>
     </nav>
-
     <div class="container">
         <header>
             <img src="/static/logo.png" alt="Company Logo" class="logo">
+            <img src="/static/TIOR STUDIO.png" alt="TIOR STUDIO" class="logo-wordmark">
             <h1>AI Styling Design</h1>
             <p class="subtitle-sub">Based Google Nanobanana with Gemini</p>
             <p class="subtitle-sub">해당 웹 및 앱은 사내용입니다</p>
@@ -38,7 +40,10 @@
 
             <section class="upload-section" id="upload-area">
                 <div class="drop-zone">
-                    <p>Drag & Drop your room photo here or <strong>Browse</strong></p>
+                    <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                    <div class="home-upload-title">Upload Image</div>
+                    <div class="home-upload-sub">Drag &amp; Drop your room photo here or <span class="home-upload-browse">Browse</span></div>
+                    <small class="home-upload-sub">png, jpg, jpeg &amp; webp (up to 30mb)</small>
                     <input type="file" id="file-input" accept="image/*" hidden>
                 </div>
                 <div id="preview-container" class="hidden">
@@ -81,7 +86,10 @@
 
                 <div id="moodboard-upload-container" class="hidden">
                     <div class="drop-zone" id="moodboard-drop-zone">
-                        <p>Drag & Drop your Moodboard here or <strong>Browse</strong></p>
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <div class="home-upload-title">Upload Moodboard</div>
+                        <div class="home-upload-sub">Drag &amp; Drop your moodboard here or <span class="home-upload-browse">Browse</span></div>
+                        <small class="home-upload-sub">png, jpg, jpeg &amp; webp (up to 30mb)</small>
                         <input type="file" id="moodboard-input" accept="image/*" hidden>
                     </div>
                     <div id="moodboard-preview-container" class="hidden">
@@ -112,8 +120,10 @@
                 </div>
 
                 <div class="drop-zone" id="direct-upload-zone" style="padding: 2rem; min-height: 150px;">
-                    <p style="margin-bottom: 0.5rem; color: #fff;">Already have a Main Cut?</p>
-                    <p style="font-size: 0.85rem;">Upload here to generate <strong>Detail Views</strong> directly</p>
+                    <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                    <div class="home-upload-title">Upload Main Cut</div>
+                    <div class="home-upload-sub">Upload here to generate <span class="home-upload-browse">Detail Views</span> directly</div>
+                    <small class="home-upload-sub">png, jpg, jpeg &amp; webp (up to 30mb)</small>
                     <input type="file" id="direct-upload-input" accept="image/*" hidden>
                 </div>
             </div>

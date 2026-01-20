@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="icon" href="/static/favicon-light.png">
+    
     <style>
         /* Image Studio Layout - Full Width */
         * {
@@ -15,8 +17,8 @@
         }
 
         body {
-            background-color: #000;
-            color: #fff;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             margin: 0;
             padding: 0;
             font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
@@ -49,9 +51,16 @@
         }
 
         .is-branding-logo {
-            height: 50px;
+            height: 40px;
             width: auto;
             object-fit: contain;
+            filter: invert(1);
+        }
+        .is-branding-wordmark {
+            height: 26.25px;
+            width: auto;
+            object-fit: contain;
+            filter: invert(1);
         }
 
         .is-branding h1 {
@@ -78,13 +87,11 @@
             overflow: hidden;
             cursor: pointer;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
-            /* Border removed completely */
             border: none;
-            /* Anti-aliasing Fix: Cover edges with 2px inner black shadow */
-            box-shadow: inset 0 0 0 2px #000;
+            box-shadow: none;
             -webkit-transform: translateZ(0);
             transform: translateZ(0);
-            background-color: #000;
+            background-color: #0f172a;
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
@@ -94,9 +101,9 @@
         }
 
         .is-card-btn:hover {
-            transform: translateY(-5px);
+            transform: translateY(-10px);
             /* Keep inner shadow, no outer shadow */
-            box-shadow: inset 0 0 0 2px #000;
+            box-shadow: none;
         }
 
         /* Card Background with Overlay */
@@ -169,6 +176,7 @@
             align-items: center;
             justify-content: center;
             background: rgba(255, 255, 255, 0.1);
+            color: #fff;
             backdrop-filter: blur(5px);
         }
 
@@ -203,9 +211,9 @@
         }
 
         .breadcrumb-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #fff;
+            background: #e2e8f0;
+            border: 1px solid #e2e8f0;
+            color: #0f172a;
             padding: 8px 16px;
             border-radius: 20px;
             cursor: pointer;
@@ -218,8 +226,8 @@
         }
 
         .breadcrumb-btn:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.3);
+            background: #e9edf3;
+            border-color: #cbd5e1;
         }
 
         .breadcrumb-btn .material-symbols-outlined {
@@ -227,12 +235,12 @@
         }
 
         .breadcrumb-divider {
-            color: #555;
+            color: #94a3b8;
             font-size: 1rem;
         }
 
         .breadcrumb-current {
-            color: #888;
+            color: #64748b;
             font-size: 0.9rem;
         }
 
@@ -260,10 +268,10 @@
             flex-direction: row;
             /* Fixed sides default */
             gap: 0;
-            background: #111;
+            background: #ffffff;
             border-radius: 16px;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid #e2e8f0;
             min-height: 720px;
             /* Reduced height by 10% */
             width: 100%;
@@ -299,8 +307,8 @@
             width: 450px;
             min-width: 450px;
             max-width: 450px;
-            padding: 2rem;
-            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1.5rem 2rem;
+            border-right: 1px solid #e2e8f0;
             display: flex;
             flex-direction: column;
         }
@@ -310,7 +318,7 @@
             min-width: 500px;
             padding: 4rem 2rem 2rem 2rem;
             /* Increased top padding to fix cropping */
-            background: #1a1a1a;
+            background: #f8fafc;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -335,43 +343,70 @@
             font-weight: 600;
             margin: 0 0 0.75rem 0;
             letter-spacing: 0.5px;
-            color: #fff;
+            color: #0f172a;
             text-transform: none !important;
         }
 
         .is-section-desc {
-            color: #888;
+            color: #64748b;
             font-size: 0.95rem;
-            margin: 0 0 2rem 0;
+            margin: 0 0 1.3rem 0;
             line-height: 1.5;
         }
 
         /* Upload Box */
         .is-upload-box {
-            border: 1px dashed rgba(255, 255, 255, 0.3);
+            border: 1px dashed #cbd5e1;
             border-radius: 12px;
             padding: 2rem;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.02);
-            margin-bottom: 1rem;
+            background: #f2f4f8;
+            margin-bottom: 0.6rem;
         }
 
         .is-upload-box:hover {
             border-color: rgba(255, 255, 255, 0.5);
-            background: rgba(255, 255, 255, 0.05);
+            background: #e9edf3;
         }
 
         .is-upload-box.dragover {
-            border-color: #fff;
-            background: rgba(255, 255, 255, 0.1);
+            border-color: #0f172a;
+            background: #e2e8f0;
+        }
+        .is-instruction-upload {
+            height: 120px;
+            min-height: 0;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 6px;
+            box-sizing: border-box;
+        }
+        .dark-input {
+            line-height: 1.4;
+        }
+        .is-instruction-upload .is-upload-icon {
+            font-size: 2.1rem;
+            color: #6b7280;
+        }
+        .is-instruction-upload .upload-title {
+            color: #64748b;
+            font-size: 0.9rem;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }
+        .is-instruction-upload small {
+            color: #64748b;
         }
 
         .is-upload-icon {
             display: block;
             font-size: 2.5rem;
-            color: #666;
+            color: #6b7280;
             margin-bottom: 0.75rem;
         }
 
@@ -379,7 +414,7 @@
             display: block;
             font-size: 0.85rem;
             font-weight: 600;
-            color: #fff;
+            color: #0f172a;
             letter-spacing: 0.5px;
             margin-bottom: 0.5rem;
             text-transform: none !important;
@@ -388,7 +423,7 @@
         .is-upload-sub {
             display: block;
             font-size: 0.75rem;
-            color: #666;
+            color: #6b7280;
         }
 
         /* File Preview List - Grid of Thumbnails (3 per row) */
@@ -409,7 +444,7 @@
             /* Force 4:3 Ratio */
             border-radius: 8px;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid #e2e8f0;
         }
 
         .is-file-item img {
@@ -427,8 +462,8 @@
 
         .is-file-list.single-mode .is-file-item {
             aspect-ratio: auto;
-            background: #000;
-            border-color: rgba(255, 255, 255, 0.1);
+            background: #ffffff;
+            border-color: #e2e8f0;
         }
 
         .is-file-list.single-mode .is-file-item img {
@@ -446,10 +481,10 @@
             right: 2px;
             width: 20px;
             height: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            border: none;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #e2e8f0;
             border-radius: 50%;
-            color: #fff;
+            color: #0f172a;
             font-size: 14px;
             cursor: pointer;
             display: flex;
@@ -468,9 +503,9 @@
             width: 100%;
             padding: 14px 24px;
             background: linear-gradient(135deg, #333 0%, #222 100%);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid #e2e8f0;
             border-radius: 30px;
-            color: #888;
+            color: #64748b;
             font-size: 0.9rem;
             font-weight: 500;
             cursor: pointer;
@@ -486,7 +521,7 @@
 
         .is-generate-btn:not(:disabled) {
             background: linear-gradient(135deg, #444 0%, #333 100%);
-            color: #fff;
+            color: #0f172a;
         }
 
         .is-generate-btn:not(:disabled):hover {
@@ -513,8 +548,8 @@
         .preview-image-slot {
             width: 120px;
             height: 90px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #e9edf3;
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
             display: flex;
             align-items: center;
@@ -528,18 +563,18 @@
 
         .preview-arrow {
             font-size: 1.5rem;
-            color: #555;
+            color: #94a3b8;
         }
 
         .placeholder-title {
-            color: #fff;
+            color: #0f172a;
             font-size: 1.2rem;
             font-weight: 500;
             margin: 0 0 0.5rem 0;
         }
 
         .placeholder-desc {
-            color: #666;
+            color: #6b7280;
             font-size: 0.9rem;
             margin: 0;
         }
@@ -563,7 +598,7 @@
         .drop-zone:hover,
         .drop-zone.dragover {
             border-color: var(--primary-color);
-            background-color: #1a1a1a;
+            background-color: #e9edf3;
         }
 
         /* [NEW] Internal Preview Style */
@@ -580,7 +615,7 @@
             z-index: 5;
             border-radius: 12px; /* Match .is-upload-box */
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid #e2e8f0;
         }
 
         .is-internal-preview img {
@@ -595,12 +630,12 @@
             right: 12px;
             width: 34px;
             height: 34px;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border: 1px solid #e2e8f0;
             border-radius: 50%;
-            color: #fff;
+            color: #0f172a;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -622,22 +657,18 @@
 
         .result-card {
             position: relative;
-            background: #111;
+            background: #ffffff;
             border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid #e2e8f0;
             overflow: hidden;
             transition: border-color 0.3s ease;
-        }
-
-        .result-card:hover {
-            border-color: rgba(255, 255, 255, 0.3);
         }
 
         .result-card img {
             width: 100%;
             aspect-ratio: 16/9;
             object-fit: contain;
-            background: #000;
+            background: #ffffff;
             display: block;
         }
 
@@ -652,8 +683,8 @@
         .spinner {
             width: 50px;
             height: 50px;
-            border: 3px solid #333;
-            border-top: 3px solid #fff;
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #0f172a;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 1.5rem;
@@ -676,7 +707,7 @@
             background: transparent;
             border: 1px solid rgba(255, 255, 255, 0.3);
             border-radius: 8px;
-            color: #888;
+            color: #64748b;
             cursor: pointer;
             font-family: inherit;
             font-size: 0.85rem;
@@ -686,24 +717,24 @@
         }
 
         .clear-all-btn:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
+            background: #e9edf3;
+            color: #0f172a;
         }
 
         /* Retry Button */
         .retry-btn {
             padding: 12px 30px;
-            background: #333;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
-            color: #fff;
+            color: #0f172a;
             cursor: pointer;
             font-family: 'Outfit', sans-serif;
             transition: background 0.2s;
         }
 
         .retry-btn:hover {
-            background: #444;
+            background: #f1f5f9;
         }
 
         /* Modal */
@@ -713,7 +744,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(255, 255, 255, 0.7);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -721,12 +752,19 @@
         }
 
         .modal-content {
-            background: #1a1a1a;
+            background: #f8fafc;
             padding: 2rem;
             border-radius: 16px;
             max-width: 400px;
             text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid #e2e8f0;
+        }
+        .modal-content.preview-wide {
+            max-width: 1000px;
+            width: min(95vw, 1000px);
+        }
+        .modal-content.preview-wide #modal-msg {
+            margin: 0 0 1.25rem 0;
         }
 
         .modal-content h3 {
@@ -734,22 +772,22 @@
         }
 
         .modal-content p {
-            color: #888;
+            color: #64748b;
             margin: 0 0 1.5rem 0;
         }
 
         .modal-content button {
-            padding: 10px 30px;
-            background: #333;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 6px 30px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
-            color: #fff;
+            color: #0f172a;
             cursor: pointer;
             font-family: 'Outfit', sans-serif;
         }
 
         .modal-content button:hover {
-            background: #444;
+            background: #f1f5f9;
         }
     </style>
 </head>
@@ -761,6 +799,7 @@
         <!-- Left: Branding -->
         <div class="is-branding">
             <img src="/static/logo.png" alt="Logo" class="is-branding-logo">
+            <img src="/static/TIOR STUDIO.png" alt="TIOR STUDIO" class="is-branding-wordmark">
             <h1>Image Studio</h1>
         </div>
 
@@ -835,7 +874,7 @@
                     <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
                     GENERATE REAL PHOTO
                 </button>
-                <div id="statusSource-1" class="vs-status-text" style="margin-top: 10px;"></div>
+                <div id="statusSource-1" class="vs-status-text" style="margin-top: 6px;"></div>
             </div>
 
             <div class="is-panel-right">
@@ -857,7 +896,7 @@
                 <div id="fp-loading" class="loading-container hidden">
                     <div class="spinner"></div>
                     <p style="color: #ccc; font-size: 1.1rem;">Synthesizing 3D Space...</p>
-                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                    <p style="color: #6b7280; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
                 </div>
 
                 <div id="fp-result-container" class="result-container hidden">
@@ -910,18 +949,26 @@
                 </button>
 
                 <!-- [NEW] Instruction Textarea -->
-                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                <div class="is-instruction-box" style="margin-bottom: 9px;">
                     <label class="input-label">Edit Instructions</label>
                     <textarea id="edit-instructions" class="dark-input" rows="4" 
                         placeholder="eg. TV+TV콘솔과 소파의 위치를 서로 바꿔주고, 스탠드 조명도 그에 맞게 바꿔줘. 그리고 왼쪽하단에 있는 원형모양의 작은 조명을 소파테이블에 올려줘."
                         style="resize: none;"></textarea>
+                </div>
+                <div class="is-instruction-box" style="margin-bottom: 11px;">
+                    <div class="is-upload-box is-instruction-upload is-reference-upload">
+                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" hidden>
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <div class="upload-title">Upload Reference Image</div>
+                        <small>png, jpg, jpeg &amp; webp (up to 30mb)</small>
+                    </div>
                 </div>
 
                 <button id="edit-generate-btn" class="is-generate-btn" disabled>
                     <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
                     GENERATE EDIT IMAGE
                 </button>
-                <div id="statusSource-2" class="vs-status-text" style="margin-top: 10px;"></div>
+                <div id="statusSource-2" class="vs-status-text" style="margin-top: 6px;"></div>
             </div>
 
             <div class="is-panel-right">
@@ -943,7 +990,7 @@
                 <div id="edit-loading" class="loading-container hidden">
                     <div class="spinner"></div>
                     <p style="color: #ccc; font-size: 1.1rem;">Rearranging furniture...</p>
-                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                    <p style="color: #6b7280; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
                 </div>
 
                 <div id="edit-result-container" class="result-container hidden">
@@ -996,18 +1043,26 @@
                 </button>
 
                 <!-- [NEW] Instruction Textarea -->
-                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                <div class="is-instruction-box" style="margin-bottom: 9px;">
                     <label class="input-label">Decorate Instructions</label>
                     <textarea id="decor-instructions" class="dark-input" rows="4" 
                         placeholder="eg. 거실에 크리스마스 트리를 배치해주고, 은은한 전구 조명도 달아줘. 그리고 소파 위에는 따뜻한 느낌의 담요와 베이지색 쿠션들을 놓아줘."
                         style="resize: none;"></textarea>
+                </div>
+                <div class="is-instruction-box" style="margin-bottom: 11px;">
+                    <div class="is-upload-box is-instruction-upload is-reference-upload">
+                        <input type="file" class="reference-input" accept="image/png,image/jpeg,image/webp" hidden>
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <div class="upload-title">Upload Reference Image</div>
+                        <small>png, jpg, jpeg &amp; webp (up to 30mb)</small>
+                    </div>
                 </div>
 
                 <button id="decor-generate-btn" class="is-generate-btn" disabled>
                     <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
                     GENERATE DECORATE IMAGE
                 </button>
-                <div id="statusSource-3" class="vs-status-text" style="margin-top: 10px;"></div>
+                <div id="statusSource-3" class="vs-status-text" style="margin-top: 6px;"></div>
             </div>
 
             <div class="is-panel-right">
@@ -1029,7 +1084,7 @@
                 <div id="decor-loading" class="loading-container hidden">
                     <div class="spinner"></div>
                     <p style="color: #ccc; font-size: 1.1rem;">Adding decorations...</p>
-                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                    <p style="color: #6b7280; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
                 </div>
 
                 <div id="decor-result-container" class="result-container hidden">
@@ -1051,20 +1106,19 @@
     </div>
 
     <nav class="side-nav">
-        <a href="/" class="nav-item" title="Main">
+        <a href="/" class="nav-item" title="MAIN">
             <span class="material-symbols-outlined">home</span>
-            <span class="nav-label">Main</span>
+            <span class="nav-label">MAIN</span>
         </a>
-        <a href="/image-studio" class="nav-item active" title="Image Studio">
+        <a href="/image-studio" class="nav-item active" title="IMAGE STUDIO">
             <span class="material-symbols-outlined">photo_library</span>
-            <span class="nav-label">Image Studio</span>
+            <span class="nav-label">IMAGE STUDIO</span>
         </a>
-        <a href="/video-studio" class="nav-item" title="Video Studio">
+        <a href="/video-studio" class="nav-item" title="VIDEO STUDIO">
             <span class="material-symbols-outlined">video_library</span>
-            <span class="nav-label">Video Studio</span>
+            <span class="nav-label">VIDEO STUDIO</span>
         </a>
     </nav>
-
     <script src="/static/js/image_studio.js"></script>
 </body>
 

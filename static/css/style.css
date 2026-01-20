@@ -1,13 +1,13 @@
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
 
 :root {
-    --primary-color: #ffffff;
-    --primary-hover: #e2e8f0;
-    --bg-color: #000000;
-    --card-bg: #111111;
-    --text-color: #ffffff;
-    --text-muted: #a1a1aa;
-    --border-color: #333333;
+    --primary-color: #0f172a;
+    --primary-hover: #1f2937;
+    --bg-color: #ffffff;
+    --card-bg: #f2f4f8;
+    --text-color: #0f172a;
+    --text-muted: #6b7280;
+    --border-color: #e2e8f0;
     --radius: 10px;
     --transition: 0.3s ease;
     --brand-color: #4A1215;
@@ -35,6 +35,53 @@ body {
     align-items: center;
     padding: 2rem;
     padding-bottom: 30rem;
+}
+
+body[data-page="home"] .drop-zone {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: var(--card-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+body[data-page="home"] .drop-zone:hover {
+    border-color: #cbd5e1;
+    background: #e9edf3;
+}
+
+body[data-page="home"] .drop-zone p {
+    color: var(--text-muted);
+    margin: 0;
+}
+
+body[data-page="home"] .drop-zone .home-upload-title {
+    color: var(--text-color);
+      font-weight: 300;
+    font-size: 0.95rem;
+}
+
+body[data-page="home"] .drop-zone .home-upload-sub {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+
+body[data-page="home"] .drop-zone .home-upload-browse {
+    color: var(--text-color);
+    text-decoration: none;
+    font-weight: 400;
+}
+
+body[data-page="home"] .drop-zone .is-upload-icon {
+    color: #9aa3b2;
 }
 
 /* [기본 레이아웃] 메인 페이지 등 일반 페이지용 (최대폭 제한) */
@@ -72,6 +119,36 @@ header {
     display: block;
     margin: 0 auto -2rem;
 }
+.logo-wordmark {
+    width: 220px;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    margin: -4rem auto 6rem;
+}
+
+body[data-page="home"] .logo,
+body[data-page="home"] .logo-wordmark {
+    filter: invert(1);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 header h1 {
     font-size: 3rem;
@@ -84,6 +161,7 @@ header h1 {
 .subtitle-sub {
     font-size: 0.7rem;
     opacity: 0.6;
+    font-weight: 400;
 }
 
 .subtitle-sub:last-of-type {
@@ -133,8 +211,21 @@ button,
 
 .action-btn.secondary {
     background-color: transparent;
-    border: 2px solid #ffffff;
+    border: 1px solid #ffffff;
     color: #ffffff;
+    font-weight: 400;
+}
+
+#open-mb-gen-btn {
+    border-width: 1px;
+    font-weight: 400;
+    text-transform: none;
+}
+
+#open-mb-gen-btn:hover {
+    background-color: transparent;
+    color: inherit;
+    transform: none;
 }
 
 .action-btn.secondary:hover {
@@ -162,15 +253,15 @@ button,
     gap: 10px;
     padding: 15px 0;
     /* 좌우 패딩 제거하여 수치 계산 단순화 */
-    background: rgba(10, 10, 10, 0.7);
+    background: #ffffff;
     /* 좀 더 어둡게 */
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 40px;
+    border: 1px solid #e2e8f0;
+    border-radius: 33px;
     z-index: 99999 !important;
     /* 압도적 우선순위 */
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15);
     width: 64px;
     /* 기본 너비 */
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -191,7 +282,7 @@ button,
     align-items: center;
     justify-content: flex-start;
     padding: 0;
-    color: #888;
+    color: #0f172a;
     text-decoration: none;
     border-radius: 30px;
     transition: all 0.2s ease;
@@ -199,11 +290,12 @@ button,
 }
 
 .nav-item:hover {
-    color: #fff;
+    color: #000000;
+    font-weight: 600;
 }
 
 .nav-item.active {
-    color: #fff;
+    color: #000000;
     font-weight: 700;
 }
 
@@ -220,23 +312,25 @@ button,
     justify-content: center;
     flex-shrink: 0;
     font-size: 24px;
-    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+    color: #0f172a;
 }
 
 .nav-item.active .material-symbols-outlined {
     font-variation-settings: 'FILL' 1, 'wght' 600, 'GRAD' 0, 'opsz' 24;
+    color: #000000;
 }
 
 .nav-label {
     font-size: 0.95rem;
-    font-weight: 400;
+    font-weight: 700;
     opacity: 0;
     transition: opacity 0.2s ease;
     pointer-events: none;
 }
 
 .nav-item.active .nav-label {
-    font-weight: 600;
+    font-weight: 700;
 }
 
 
@@ -348,6 +442,8 @@ button,
 .drop-zone {
     width: 100%;
     max-width: 1000px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
     /* Step 3 드랍박스 기준 너비 통일 */
     margin: 0 auto;
     /* 중앙 정렬 */
@@ -378,8 +474,8 @@ button,
 }
 
 .drop-zone strong {
-    color: #fff;
-    text-decoration: underline;
+    color: #000000;
+    text-decoration: none;
 }
 
 #preview-container {
@@ -476,10 +572,10 @@ button,
     color: var(--text-muted);
     padding: 0.85rem 1.6rem;
     height: auto;
-    border-radius: 100px;
+    border-radius: 12px;
     cursor: pointer;
     font-size: 1rem;
-    font-weight: 500;
+    font-weight: 400;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -487,13 +583,14 @@ button,
 .style-btn:hover {
     border-color: var(--primary-color);
     color: var(--text-color);
+    font-weight: 400;
 }
 
 .style-btn.active {
     background-color: transparent;
-    border: 2px solid #ffffff;
-    color: #ffffff;
-    font-weight: 700;
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+    font-weight: 400;
 }
 
 /* --- Variant Grid --- */
@@ -524,31 +621,35 @@ button,
     width: 100%;
     aspect-ratio: 16 / 9;
     object-fit: cover;
+    object-position: center;
     border-radius: 12px;
-    border: 3px solid transparent;
+    border: 1px solid var(--text-muted);
     background-color: #222;
+    image-rendering: auto;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .variant-label {
     width: 100%;
     padding: 0.5rem 0;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--text-muted);
     color: var(--text-muted);
-    border-radius: 50px;
+    border-radius: 12px;
     text-align: center;
     font-size: 0.9rem;
 }
 
 .variant-img-btn.active img {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--primary-color);
+    box-shadow: none;
 }
 
 .variant-img-btn.active .variant-label {
     background-color: transparent;
-    border: 2px solid #ffffff;
-    color: #ffffff;
-    font-weight: 700;
+    border: 1px solid var(--primary-color);
+    color: var(--primary-color);
+    font-weight: 400;
 }
 
 /* --- Moodboard Preview --- */
@@ -631,7 +732,7 @@ button,
 
 .image-wrapper.before {
     z-index: 2;
-    border-right: 2px solid white;
+    border-right: 2px solid #ffffff;
     width: 50%;
 }
 
@@ -708,7 +809,7 @@ button,
     left: 50%;
     width: 20px;
     height: 20px;
-    background-color: white;
+    background-color: #ffffff;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
@@ -727,6 +828,12 @@ button,
     gap: 10px;
     margin-top: 20px;
     flex-wrap: wrap;
+}
+
+#thumbnailContainer img {
+    image-rendering: auto;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .download-area {
@@ -778,7 +885,7 @@ button,
     overflow: hidden;
     border: 1px solid var(--border-color);
     transition: border-color 0.3s;
-    background-color: #000;
+    background-color: transparent;
 }
 
 .detail-card:hover {
@@ -817,7 +924,7 @@ button,
 }
 
 .detail-retry-btn:hover {
-    background-color: #fff;
+    background-color: #000000;
     color: #000;
 }
 
@@ -851,7 +958,7 @@ button,
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.95);
+    background: rgba(255, 255, 255, 0.9);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -914,8 +1021,10 @@ button,
 }
 
 .lightbox-content {
-    max-width: 90%;
-    max-height: 90%;
+    width: 63vw;
+    height: 63vh;
+    max-width: 63vw;
+    max-height: 63vh;
     object-fit: contain;
 }
 
@@ -1013,7 +1122,7 @@ button,
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    background-color: #111;
+    background-color: #ffffff;
     overflow-y: auto;
 }
 
@@ -1039,7 +1148,7 @@ button,
     object-fit: contain;
     border-radius: 8px;
     border: 1px solid #444;
-    background-color: #000;
+    background-color: #ffffff;
     display: block;
     margin: 0 auto;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
@@ -1128,7 +1237,7 @@ button,
     width: 30px;
     height: 30px;
     border: 3px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #fff;
+    border-top-color: #000000;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
@@ -1207,7 +1316,7 @@ button,
 /* Left Panel */
 .area-source-manager {
     background: #1e1e1e;
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -1227,7 +1336,7 @@ button,
 }
 
 .vs-dropzone-compact:hover {
-    border-color: #888;
+    border-color: #0f172a;
     background: rgba(255, 255, 255, 0.05);
 }
 
@@ -1258,7 +1367,7 @@ button,
     background: #252525;
     padding: 10px;
     border-radius: 6px;
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
     align-items: center;
 }
 
@@ -1297,7 +1406,7 @@ button,
 .area-preview {
     flex: 1.5;
     background: #000;
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -1375,7 +1484,7 @@ button,
     right: 10px;
     background: transparent;
     border: none;
-    color: #fff;
+    color: #000000;
     font-size: 24px;
     cursor: pointer;
     pointer-events: auto;
@@ -1385,7 +1494,7 @@ button,
 .area-timeline {
     flex: 1;
     background: #181818;
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -1404,7 +1513,7 @@ button,
 
 .timeline-title {
     font-size: 11px;
-    color: #888;
+    color: #0f172a;
     font-weight: 600;
     text-transform: uppercase;
 }
@@ -1420,7 +1529,7 @@ button,
 .icon-btn-play {
     background: transparent;
     border: none;
-    color: #fff;
+    color: #000000;
     cursor: pointer;
     font-size: 24px;
     display: flex;
@@ -1466,7 +1575,7 @@ button,
     left: 0;
     width: 1px;
     height: 100%;
-    background-color: #fff;
+    background-color: #000000;
     z-index: 100;
     pointer-events: none;
     box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
@@ -1526,7 +1635,7 @@ button,
     bottom: 2px;
     left: 4px;
     font-size: 10px;
-    color: #fff;
+    color: #000000;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
     background: rgba(0, 0, 0, 0.3);
     padding: 1px 3px;
@@ -1557,14 +1666,14 @@ button,
     width: 50px;
     background: #111;
     border: 1px solid #444;
-    color: #fff;
+    color: #000000;
     padding: 2px 5px;
 }
 
 .vs-select-small {
     background: #111;
     border: 1px solid #444;
-    color: #fff;
+    color: #000000;
     padding: 2px 5px;
 }
 
@@ -1627,7 +1736,7 @@ button,
     /* 기본 숨김 */
     flex-direction: column;
     height: 100vh;
-    background-color: #000;
+    background-color: #ffffff;
 }
 
 /* 상단 네비게이션 (Back 버튼 등) */
@@ -1641,7 +1750,7 @@ button,
 .btn-back-menu {
     background: transparent;
     border: none;
-    color: #888;
+    color: #0f172a;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1652,7 +1761,7 @@ button,
 }
 
 .btn-back-menu:hover {
-    color: #fff;
+    color: #000000;
 }
 
 /* 메인 스플릿 레이아웃 (카드 형태의 컨테이너 안에서 좌우 분할) */
@@ -1660,15 +1769,33 @@ button,
     flex: 1;
     margin: 0 40px 40px 40px;
     /* 화면 가장자리 여백 */
-    background-color: #111;
+    background-color: #ffffff;
     /* 카드 배경색 */
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
     border-radius: 24px;
     display: flex;
     /* 좌우 분할 */
     overflow: hidden;
     /* 내부 스크롤 제어 */
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+/* Image Studio hard light overrides */
+body[data-page="image-studio"] .is-workspace,
+body[data-page="image-studio"] .is-workspace-card,
+body[data-page="image-studio"] .is-panel-left {
+    background: #ffffff !important;
+    color: #0f172a !important;
+}
+
+body[data-page="image-studio"] .is-panel-right {
+    background: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+body[data-page="image-studio"] .is-upload-box {
+    background: #f2f4f8 !important;
+    border-color: #cbd5e1 !important;
 }
 
 /* [왼쪽] 입력 패널 */
@@ -1704,13 +1831,13 @@ button,
     font-size: 1.8rem;
     font-weight: 700;
     margin-bottom: 0.5rem;
-    color: #fff;
+    color: #000000;
     text-transform: uppercase;
     letter-spacing: -0.5px;
 }
 
 .is-section-desc {
-    color: #888;
+    color: #0f172a;
     font-size: 0.95rem;
     margin-bottom: 2.5rem;
     line-height: 1.5;
@@ -1739,13 +1866,13 @@ button,
 }
 
 .is-upload-box.dragover {
-    border-color: #fff;
+    border-color: #000000;
     background-color: rgba(255, 255, 255, 0.05);
 }
 
 .is-upload-icon {
     font-size: 3rem;
-    color: #fff;
+    color: #000000;
     margin-bottom: 1rem;
     opacity: 0.8;
 }
@@ -1753,7 +1880,7 @@ button,
 .is-upload-label {
     font-size: 1rem;
     font-weight: 700;
-    color: #fff;
+    color: #000000;
     margin-bottom: 0.5rem;
     text-transform: uppercase;
 }
@@ -1782,7 +1909,7 @@ button,
 }
 
 .is-generate-btn:not(:disabled) {
-    background-color: #fff;
+    background-color: #000000;
     /* 활성 시 흰색 배경 */
     color: #000;
     /* 검은 글씨 */
@@ -1810,7 +1937,7 @@ button,
     background: #222;
     border-radius: 8px;
     margin-bottom: 8px;
-    border: 1px solid #333;
+    border: 1px solid #e2e8f0;
 }
 
 .is-file-name {
@@ -1826,7 +1953,7 @@ button,
 }
 
 .is-file-remove:hover {
-    color: #fff;
+    color: #000000;
 }
 
 /* 오른쪽 결과 플레이스홀더 */
@@ -1844,27 +1971,34 @@ button,
 /* --- Inputs for Spatial Constraints --- */
 .dark-input {
     width: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 12px 16px;
-    color: #fff;
+    color: var(--text-color);
     outline: none;
     font-family: inherit;
     font-size: 0.9rem;
     transition: all 0.2s ease;
+    box-shadow: inset 0 0 0 0.25px rgba(15, 23, 42, 0.08);
 }
 
 .dark-input:focus {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.3);
+    background: var(--card-bg);
+    border-color: #cbd5e1;
+    box-shadow: inset 0 0 0 0.25px rgba(15, 23, 42, 0.12);
 }
+
+
+
+
+
 
 .input-label {
     display: block;
     font-size: 0.8rem;
     font-weight: 500;
-    color: #888;
+    color: #0f172a;
     margin-bottom: 8px;
     text-align: left;
     letter-spacing: 0.5px;

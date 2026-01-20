@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="icon" href="/static/favicon-light.png">
+    
     <style>
         /* Video Studio Layout - Full Width */
         * {
@@ -15,7 +17,7 @@
         }
 
         body {
-            background-color: #000;
+            background-color: var(--bg-color);
             color: #fff;
             margin: 0;
             padding: 0;
@@ -50,7 +52,13 @@
         }
 
         .is-branding-logo {
-            height: 50px;
+            height: 40px;
+            width: auto;
+            object-fit: contain;
+            filter: invert(1);
+        }
+        .is-branding-wordmark {
+            height: 26.25px;
             width: auto;
             object-fit: contain;
         }
@@ -60,6 +68,7 @@
             font-weight: 600;
             margin: 0;
             letter-spacing: -0.5px;
+            color: #111;
         }
 
         /* 2. Menu Grid (Now on Left due to flex-reverse) */
@@ -80,7 +89,7 @@
             cursor: pointer;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
             border: none;
-            box-shadow: inset 0 0 0 2px #000;
+            box-shadow: none;
             -webkit-transform: translateZ(0);
             transform: translateZ(0);
             background-color: #111;
@@ -93,8 +102,8 @@
         }
 
         .is-card-btn:hover {
-            transform: translateY(-5px);
-            box-shadow: inset 0 0 0 2px #000;
+            transform: translateY(-10px);
+            box-shadow: none;
         }
 
         .is-card-btn::after {
@@ -333,16 +342,14 @@
             border: 1px solid rgba(255, 255, 255, 0.1); overflow: hidden;
             transition: all 0.3s ease;
         }
-        .result-card:hover { border-color: rgba(255, 255, 255, 0.3); transform: translateY(-5px); }
         .result-card video { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #000; }
 
         .detail-upscale-btn {
             position: absolute; bottom: 15px; left: 15px; right: 15px;
             padding: 10px; border-radius: 8px; font-size: 0.8rem;
-            opacity: 0; transform: translateY(10px); transition: all 0.3s ease;
+            opacity: 1; transform: translateY(0); transition: all 0.3s ease;
             z-index: 10;
         }
-        .result-card:hover .detail-upscale-btn { opacity: 1; transform: translateY(0); }
 
         .glow-btn.burgundy {
             background: linear-gradient(135deg, #4a0e0e 0%, #2a0505 100%);
@@ -423,7 +430,9 @@
             justify-content: center; z-index: 1000;
         }
         .modal-content { background: #1a1a1a; padding: 2rem; border-radius: 16px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.1); }
-        .modal-buttons button { padding: 10px 30px; background: #333; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: #fff; cursor: pointer; }
+        .modal-content.preview-wide { max-width: 1000px; width: min(95vw, 1000px); }
+        .modal-content.preview-wide #modal-msg { margin: 0 0 1.25rem 0; }
+        .modal-buttons button { padding: 6px 30px; background: #333; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: #fff; cursor: pointer; }
     </style>
 </head>
 
@@ -434,6 +443,7 @@
         <!-- Right: Branding (Reversed) -->
         <div class="is-branding">
             <img src="/static/logo.png" alt="Logo" class="is-branding-logo">
+            <img src="/static/TIOR STUDIO(Black).png" alt="TIOR STUDIO" class="is-branding-wordmark">
             <h1>Video Studio</h1>
         </div>
 
@@ -472,7 +482,7 @@
     </div>
 
     <!-- Workspace 1: Create Video Clips -->
-    <div id="workspace-feature-1" class="is-workspace">
+    <div id="workspace-feature-1" class="is-workspace hidden">
         <div class="workspace-breadcrumb">
             <button id="back-to-menu-1" class="breadcrumb-btn">
                 <span class="material-symbols-outlined">arrow_back</span> Back
@@ -484,36 +494,25 @@
         </div>
 
         <div class="is-workspace-card">
+
             <div class="is-panel-left">
-                <h2 class="is-section-title">Step 1. Create Clips</h2>
-                <p class="is-section-desc">Upload room images and set motion effects to generate video clips.</p>
+                <h2 class="is-section-title">Create Video Clips</h2>
+                <p class="is-section-desc">
+                    Create a perfect video clips from room images with AI precision and accuracy.
+                </p>
 
                 <div class="is-upload-box" id="clip-ref-drop-zone">
-                    <div class="is-upload-content">
-                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
-                        <span class="is-upload-label">Upload Image</span>
-                        <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
-                    </div>
-                    <div class="is-internal-preview hidden">
-                        <img src="" alt="Preview">
-                        <button class="remove-btn" title="Remove"><span class="material-symbols-outlined">close</span></button>
-                    </div>
+                    <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                    <span class="is-upload-label">Upload Source Photos *</span>
+                    <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
                     <input type="file" id="clip-ref-input" accept="image/*" multiple class="hidden">
                 </div>
 
                 <div id="clip-ref-preview-container" class="is-file-list"></div>
 
-                <button id="clip-ref-remove-all" class="clear-all-btn hidden">Clear All Files</button>
-                
-                <div class="vs-source-item" style="gap:10px; margin-bottom: 20px;">
-                    <select id="clip-motion" class="vs-select-mini" style="flex:1; height:40px; font-size:14px; background:#1a1a1a; border-radius:8px;">
-                        <option value="static">기본 (움직임 없음)</option>
-                        <option value="orbit_r_slow">회전 (우측 천천히)</option>
-                        <option value="orbit_l_slow">회전 (좌측 천천히)</option>
-                        <option value="zoom_in_slow">줌인 (천천히)</option>
-                        <option value="zoom_out_slow">줌아웃 (천천히)</option>
-                    </select>
-                </div>
+                <button id="clip-ref-remove-all" class="clear-all-btn hidden">
+                    Clear All Files
+                </button>
 
                 <button id="clip-generate-btn" class="is-generate-btn" disabled>
                     <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
@@ -523,23 +522,37 @@
             </div>
 
             <div class="is-panel-right">
+
                 <div id="clip-placeholder-text" class="is-placeholder-modern">
+                    <div class="placeholder-preview-box">
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                        <span class="preview-arrow">→</span>
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>
+                    </div>
                     <h3 class="placeholder-title">Ready to Create Clips</h3>
-                    <p class="placeholder-desc">Upload room images to start AI video generation.</p>
+                    <p class="placeholder-desc">Upload Source Photos to Create Video Clips</p>
                 </div>
+
                 <div id="clip-loading" class="loading-container hidden">
                     <div class="spinner"></div>
-                    <p style="color: #ccc;">Generating AI Video clips...</p>
+                    <p style="color: #ccc; font-size: 1.1rem;">Generating video clips...</p>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
                 </div>
+
                 <div id="clip-result-container" class="result-container hidden">
                     <div id="clip-gen-grid" class="result-grid"></div>
                 </div>
+
             </div>
         </div>
     </div>
 
     <!-- Workspace 2: Assemble Full Video -->
-    <div id="workspace-feature-2" class="is-workspace">
+    <div id="workspace-feature-2" class="is-workspace hidden">
         <div class="workspace-breadcrumb">
             <button id="back-to-menu-2" class="breadcrumb-btn">
                 <span class="material-symbols-outlined">arrow_back</span> Back
@@ -551,60 +564,81 @@
         </div>
 
         <div class="is-workspace-card">
+
             <div class="is-panel-left">
-                <h2 class="is-section-title">Step 2. Assemble</h2>
-                <p class="is-section-desc">Arrange your clips on the timeline and export the final video.</p>
-                
-                <div id="full-ref-preview-container" class="is-file-list" style="grid-template-columns: 1fr;">
-                    <!-- List of available clips to add to timeline -->
+                <h2 class="is-section-title">Assemble Video</h2>
+                <p class="is-section-desc">
+                    Arrange your clips on the timeline and export the final video.
+                </p>
+
+                <div class="is-upload-box" id="full-ref-drop-zone">
+                    <div class="is-upload-content">
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <span class="is-upload-label">Upload Clips</span>
+                        <span class="is-upload-sub">mp4, mov & webm (up to 100mb)</span>
+                    </div>
+                    <div class="is-internal-preview hidden">
+                        <img src="" alt="Preview">
+                        <button class="remove-btn" title="Remove">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    <input type="file" id="full-ref-input" accept="video/*" multiple class="hidden">
                 </div>
 
-                <button id="full-generate-btn" class="is-generate-btn">
-                    <span class="material-symbols-outlined" style="font-size: 18px;">movie_creation</span>
-                    EXPORT FINAL VIDEO
+                <div id="full-ref-preview-container" class="is-file-list"></div>
+
+                <button id="full-ref-remove-all" class="clear-all-btn hidden">
+                    Clear All Files
+                </button>
+
+                <!-- [NEW] Instruction Textarea -->
+                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                    <label class="input-label">Assembly Instructions</label>
+                    <textarea id="full-instructions" class="dark-input" rows="4" 
+                        placeholder="eg. 클립들을 순서대로 배치하고, 전환 효과를 추가해줘. 배경 음악도 넣어줘."
+                        style="resize: none;"></textarea>
+                </div>
+
+                <button id="full-generate-btn" class="is-generate-btn" disabled>
+                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
+                    GENERATE ASSEMBLE VIDEO
                 </button>
                 <div id="statusSource-2" class="vs-status-text" style="margin-top: 10px;"></div>
             </div>
 
-            <div class="is-panel-right" style="padding: 2rem;">
-                <div id="full-preview-stage" class="is-upload-box" style="width:100%; height:400px; padding:0; background:#000;">
-                    <video id="previewVideo" controls style="width:100%; height:100%; object-fit:contain;" class="hidden"></video>
-                    <div id="previewPlaceholder" class="placeholder-desc" style="line-height:400px;">Timeline Preview</div>
+            <div class="is-panel-right">
+
+                <div id="full-placeholder-text" class="is-placeholder-modern">
+                    <div class="placeholder-preview-box">
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">video_library</span>
+                        </div>
+                        <span class="preview-arrow">→</span>
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">movie</span>
+                        </div>
+                    </div>
+                    <h3 class="placeholder-title">Ready to Assemble Video</h3>
+                    <p class="placeholder-desc">Upload Video Clips to Assemble Final Video</p>
                 </div>
 
-                <div class="vs-timeline-area">
-                    <div class="timeline-container">
-                        <div id="timelineRuler" class="timeline-ruler"></div>
-                        <div id="timelineTrack" class="timeline-track-area"></div>
-                        <div id="playhead" class="timeline-playhead"></div>
-                    </div>
-                </div>
-
-                <div id="timelineProperties" class="timeline-properties hidden">
-                    <div class="prop-row">
-                        <label>Speed:</label>
-                        <select id="tlSpeed" class="vs-select-small">
-                            <option value="0.5">0.5x</option>
-                            <option value="1.0" selected>1.0x</option>
-                            <option value="2.0">2.0x</option>
-                        </select>
-                        <label style="margin-left: 20px;">Trim:</label>
-                        <input type="number" id="tlTrimStart" class="vs-input-small" step="0.1" value="0.0">
-                        <span>~</span>
-                        <input type="number" id="tlTrimEnd" class="vs-input-small" step="0.1" value="5.0">
-                    </div>
-                </div>
-                
-                <div id="full-loading" class="loading-container hidden" style="margin-top: 20px;">
+                <div id="full-loading" class="loading-container hidden">
                     <div class="spinner"></div>
-                    <p>Compiling final video...</p>
+                    <p style="color: #ccc; font-size: 1.1rem;">Assembling video...</p>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
                 </div>
+
+                <div id="full-result-container" class="result-container hidden">
+                    <div id="full-gen-grid" class="result-grid"></div>
+                </div>
+
             </div>
         </div>
     </div>
 
     <!-- Workspace 3: Post-Production (Placeholder) -->
-    <div id="workspace-feature-3" class="is-workspace">
+    <div id="workspace-feature-3" class="is-workspace hidden">
         <div class="workspace-breadcrumb">
             <button id="back-to-menu-3" class="breadcrumb-btn">
                 <span class="material-symbols-outlined">arrow_back</span> Back
@@ -616,17 +650,75 @@
         </div>
 
         <div class="is-workspace-card">
+
             <div class="is-panel-left">
-                <h2 class="is-section-title">Step 3. Post-Production</h2>
-                <p class="is-section-desc">Add AI voiceovers, background music, and subtitles.</p>
-                <div class="placeholder-desc" style="margin-top: 50px; text-align: center;">Coming Soon</div>
-            </div>
-            <div class="is-panel-right">
-                <div class="is-placeholder-modern">
-                    <span class="material-symbols-outlined" style="font-size: 5rem; color: #333;">construction</span>
-                    <h3 class="placeholder-title">Under Construction</h3>
-                    <p class="placeholder-desc">This feature will be available soon.</p>
+                <h2 class="is-section-title">Post-Production</h2>
+                <p class="is-section-desc">
+                    Add voiceovers, background music, and subtitles to your video.
+                </p>
+
+                <div class="is-upload-box" id="post-ref-drop-zone">
+                    <div class="is-upload-content">
+                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
+                        <span class="is-upload-label">Upload Video</span>
+                        <span class="is-upload-sub">mp4, mov & webm (up to 100mb)</span>
+                    </div>
+                    <div class="is-internal-preview hidden">
+                        <img src="" alt="Preview">
+                        <button class="remove-btn" title="Remove">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    <input type="file" id="post-ref-input" accept="video/*" multiple class="hidden">
                 </div>
+
+                <div id="post-ref-preview-container" class="is-file-list"></div>
+
+                <button id="post-ref-remove-all" class="clear-all-btn hidden">
+                    Clear All Files
+                </button>
+
+                <!-- [NEW] Instruction Textarea -->
+                <div class="is-instruction-box" style="margin-bottom: 20px;">
+                    <label class="input-label">Post-Production Instructions</label>
+                    <textarea id="post-instructions" class="dark-input" rows="4" 
+                        placeholder="eg. 배경 음악을 추가하고, 자막을 넣어줘. 목소리 내레이션도 추가해줘."
+                        style="resize: none;"></textarea>
+                </div>
+
+                <button id="post-generate-btn" class="is-generate-btn" disabled>
+                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
+                    GENERATE POST-PRODUCTION VIDEO
+                </button>
+                <div id="statusSource-3" class="vs-status-text" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="is-panel-right">
+
+                <div id="post-placeholder-text" class="is-placeholder-modern">
+                    <div class="placeholder-preview-box">
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">movie</span>
+                        </div>
+                        <span class="preview-arrow">→</span>
+                        <div class="preview-image-slot">
+                            <span class="material-symbols-outlined">movie</span>
+                        </div>
+                    </div>
+                    <h3 class="placeholder-title">Ready for Post-Production</h3>
+                    <p class="placeholder-desc">Upload Video to Add Effects and Audio</p>
+                </div>
+
+                <div id="post-loading" class="loading-container hidden">
+                    <div class="spinner"></div>
+                    <p style="color: #ccc; font-size: 1.1rem;">Adding post-production effects...</p>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                </div>
+
+                <div id="post-result-container" class="result-container hidden">
+                    <div id="post-gen-grid" class="result-grid"></div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -642,20 +734,19 @@
     </div>
 
     <nav class="side-nav">
-        <a href="/" class="nav-item" title="Main">
+        <a href="/" class="nav-item" title="MAIN">
             <span class="material-symbols-outlined">home</span>
-            <span class="nav-label">Main</span>
+            <span class="nav-label">MAIN</span>
         </a>
-        <a href="/image-studio" class="nav-item" title="Image Studio">
+        <a href="/image-studio" class="nav-item" title="IMAGE STUDIO">
             <span class="material-symbols-outlined">photo_library</span>
-            <span class="nav-label">Image Studio</span>
+            <span class="nav-label">IMAGE STUDIO</span>
         </a>
-        <a href="/video-studio" class="nav-item active" title="Video Studio">
+        <a href="/video-studio" class="nav-item active" title="VIDEO STUDIO">
             <span class="material-symbols-outlined">video_library</span>
-            <span class="nav-label">Video Studio</span>
+            <span class="nav-label">VIDEO STUDIO</span>
         </a>
     </nav>
-
     <script src="/static/js/video_studio.js"></script>
 </body>
 

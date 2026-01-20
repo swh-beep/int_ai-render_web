@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentFurnitureData = null;
 
+
     // --- [1] 통합 모달 시스템 설정 ---
     const globalModal = document.getElementById('global-modal');
     const modalTitle = document.getElementById('modal-title');
@@ -235,8 +236,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // [변경] 서버에서 {index, file} 형태의 리스트를 받음
                 const validItems = await res.json();
+                const thumbUrls = validItems.map(item => `/static/thumbnails/${item.file}`);
 
-                validItems.forEach(item => {
+                validItems.forEach((item, idx) => {
                     // [변경] item.index와 item.file을 사용
                     const i = item.index;
                     const fileName = item.file;
@@ -256,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     variantBtn.appendChild(img);
                     variantBtn.appendChild(label);
 
-                    variantBtn.onclick = () => {
+                    const selectVariant = () => {
                         selectedVariant = i.toString();
                         document.querySelectorAll('.variant-img-btn').forEach(b => {
                             b.classList.remove('active');
@@ -265,6 +267,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         variantBtn.classList.add('active');
                         variantBtn.style.borderColor = THEME_COLOR;
                         checkReady();
+                    };
+                    variantBtn.onclick = selectVariant;
+                    img.onclick = (e) => {
+                        e.stopPropagation();
+                        selectVariant();
+                        if (typeof openLightbox === 'function') {
+                            openLightbox(thumbUrls[idx], thumbUrls, idx);
+                        }
                     };
                     variantGrid.appendChild(variantBtn);
                 });
@@ -918,10 +928,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         img.style.border = `3px solid ${THEME_COLOR}`;
                     };
 
-                    img.ondblclick = () => {
-                        openLightbox(url, results, idx);
-                    };
-
                     thumbnailContainer.appendChild(img);
                 });
 
@@ -1126,9 +1132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         retryBtn.onclick = (e) => {
             e.stopPropagation();
-            showCustomConfirm("Retry", "이 컷만 다시 생성하시겠습니까?\n기존 이미지는 삭제됩니다.", async () => {
-                await retrySingleDetail(card, styleIndex);
-            });
+            retrySingleDetail(card, styleIndex);
         };
 
         const upBtn = document.createElement('button');
