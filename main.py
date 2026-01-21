@@ -2325,7 +2325,81 @@ def generate_furnished_room(
             pass
 
 def call_magnific_api(image_path, unique_id, start_time):
-    if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: 
+    if time.time() - start_time > TOTAL_TIMEOUT_LIMIT:
+        return image_path
+
+    print(f"\n--- [Stage 4] Magnific Upscaling (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
+
+    if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
+        print(">> [SKIP] API key missing. Return original.", flush=True)
+        return image_path
+
+    try:
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        payload = {
+            "image": b64,
+            "scale_factor": "2x",
+            "optimized_for": "films_n_photography",
+            "engine": "automatic",
+            "creativity": 0,
+            "hdr": 0,
+            "resemblance": 12,
+            "fractality": 0,
+            "prompt": (
+                "Professional interior photography, architectural digest style, "
+                "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
+                "natural white daylight coming from window, soft shadows, "
+                "clean textures, true-to-source details, raw photo, 8k resolution. "
+                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
+            ),
+        }
+        headers = {
+            "x-freepik-api-key": MAGNIFIC_API_KEY,
+            "Content-Type": "application/json",
+        }
+
+        res = requests.post(MAGNIFIC_ENDPOINT, json=payload, headers=headers)
+        if res.status_code != 200:
+            print(f"!! [API Error] Status: {res.status_code}, Msg: {res.text}", flush=True)
+            return image_path
+
+        data = res.json()
+        if "data" not in data:
+            return image_path
+
+        if "task_id" in data["data"]:
+            task_id = data["data"]["task_id"]
+            print(f">> Task queued (ID: {task_id})...", end="", flush=True)
+
+            while time.time() - start_time < TOTAL_TIMEOUT_LIMIT:
+                time.sleep(2)
+                print(".", end="", flush=True)
+
+                check = requests.get(f"{MAGNIFIC_ENDPOINT}/{task_id}", headers=headers)
+                if check.status_code == 200:
+                    status_data = check.json().get("data", {})
+                    status = status_data.get("status")
+
+                    if status == "COMPLETED":
+                        print(" done!", flush=True)
+                        gen_list = status_data.get("generated", [])
+                        if gen_list:
+                            return download_image(gen_list[0], unique_id) or image_path
+                    elif status == "FAILED":
+                        print(" failed.", flush=True)
+                        return image_path
+            return image_path
+
+        elif "generated" in data.get("data", {}):
+            gen_list = data["data"]["generated"]
+            if gen_list:
+                return download_image(gen_list[0], unique_id) or image_path
+
+        return image_path
+
+    except Exception:
         return image_path
 
 
@@ -2357,81 +2431,6 @@ def pad_image_to_target_canvas(
         return canvas
     except Exception:
         return img
-    print(f"\n--- [Stage 4] 업스케일링 시도 (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
-    
-    if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
-         print(">> [SKIP] API 키가 없습니다. 원본 반환.", flush=True)
-         return image_path
-         
-    try:
-        with open(image_path, "rb") as f: 
-            b64 = base64.b64encode(f.read()).decode('utf-8')
-            
-        payload = {
-            "image": b64, 
-            "scale_factor": "2x", 
-            "optimized_for": "films_n_photography", 
-            "engine": "automatic",
-            "creativity": 0,
-            "hdr": 0,
-            "resemblance": 12,
-            "fractality": 0,
-            "prompt": (
-                "Professional interior photography, architectural digest style, "
-                "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
-                "natural white daylight coming from window, soft shadows, "
-                "clean textures, true-to-source details, raw photo, 8k resolution. "
-                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
-            )
-        }
-        headers = {
-            "x-freepik-api-key": MAGNIFIC_API_KEY, 
-            "Content-Type": "application/json"
-        }
-        
-        res = requests.post(MAGNIFIC_ENDPOINT, json=payload, headers=headers)
-        
-        if res.status_code != 200:
-            print(f"!! [API 오류] Status: {res.status_code}, Msg: {res.text}", flush=True)
-            return image_path
-
-        data = res.json()
-        
-        if "data" not in data:
-            return image_path
-
-        if "task_id" in data["data"]:
-            task_id = data["data"]["task_id"]
-            print(f">> 작업 예약됨 (ID: {task_id})...", end="", flush=True)
-            
-            while time.time() - start_time < TOTAL_TIMEOUT_LIMIT:
-                time.sleep(2)
-                print(".", end="", flush=True)
-                
-                check = requests.get(f"{MAGNIFIC_ENDPOINT}/{task_id}", headers=headers)
-                if check.status_code == 200:
-                    status_data = check.json().get("data", {})
-                    status = status_data.get("status")
-                    
-                    if status == "COMPLETED":
-                        print(" 완료!", flush=True)
-                        gen_list = status_data.get("generated", [])
-                        if gen_list and len(gen_list) > 0:
-                            return download_image(gen_list[0], unique_id) or image_path
-                    elif status == "FAILED": 
-                        print(f" 실패.", flush=True)
-                        return image_path
-            return image_path
-
-        elif "generated" in data.get("data", {}):
-             gen_list = data["data"]["generated"]
-             if gen_list and len(gen_list) > 0:
-                 return download_image(gen_list[0], unique_id) or image_path
-                 
-        return image_path
-        
-    except Exception as e:
-        return image_path
 
 def download_image(url, unique_id):
     try:
