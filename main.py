@@ -410,6 +410,54 @@ def standardize_image_to_reference_canvas(
         print(f"!! [Canvas Fit Failed] {e}", flush=True)
         return image_path
 
+
+def standardize_image_to_target_canvas(
+    image_path: str,
+    target_path: str,
+    output_path: Optional[str] = None,
+) -> str:
+    """Force output to match the original target image size, ignoring references."""
+    try:
+        with Image.open(target_path) as tgt_img:
+            tgt_img = ImageOps.exif_transpose(tgt_img)
+            tgt_w, tgt_h = tgt_img.size
+            if tgt_w <= 0 or tgt_h <= 0:
+                return image_path
+
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            w, h = img.size
+            if w <= 0 or h <= 0:
+                return image_path
+
+            target_ratio = tgt_w / tgt_h
+            current_ratio = w / h
+
+            # If aspect already matches, just resize to exact target size.
+            if abs(current_ratio - target_ratio) < 1e-3:
+                resized = img.resize((tgt_w, tgt_h), Image.Resampling.LANCZOS)
+            else:
+                # Center-crop to target ratio, then resize to exact target size.
+                if current_ratio > target_ratio:
+                    new_w = int(h * target_ratio)
+                    x0 = max(0, (w - new_w) // 2)
+                    img = img.crop((x0, 0, x0 + new_w, h))
+                else:
+                    new_h = int(w / target_ratio)
+                    y0 = max(0, (h - new_h) // 2)
+                    img = img.crop((0, y0, w, y0 + new_h))
+                resized = img.resize((tgt_w, tgt_h), Image.Resampling.LANCZOS)
+
+            base, _ = os.path.splitext(output_path or image_path)
+            out_path = f"{base}_target.png"
+            resized.save(out_path, "PNG")
+            return out_path
+    except Exception as e:
+        print(f"!! [Target Canvas Fit Failed] {e}", flush=True)
+        return image_path
 # -----------------------------------------------------------------------------
 # [CORE] Analysis Logic (Global Definition)
 # -----------------------------------------------------------------------------
@@ -1560,7 +1608,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                     with open(out_path, 'wb') as f: f.write(part.inline_data.data)
                     
                     # 해상도/비율 복구
-                    final_path = standardize_image_to_reference_canvas(out_path, target_path)
+                    final_path = standardize_image_to_target_canvas(out_path, target_path)
                     try:
                         if img:
                             img.close()
