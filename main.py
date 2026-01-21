@@ -1540,7 +1540,10 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                     continue
                 with Image.open(rp) as _ref:
                     _ref.thumbnail((2048, 2048))
-                    ref_imgs.append(_ref.copy())
+                    ref_img = _ref.copy()
+                    if img:
+                        ref_img = pad_image_to_target_canvas(ref_img, img.size[0], img.size[1])
+                    ref_imgs.append(ref_img)
         except Exception:
             ref_imgs = []
 
@@ -1589,6 +1592,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
             "4. **FRAMING LOCK (ABSOLUTE):** The output MUST match the target image's framing, composition, and camera viewpoint exactly.\n"
             "5. **ASPECT/SIZE LOCK (ABSOLUTE):** The output MUST be the SAME aspect ratio and resolution as the target image. No cropping, no letterboxing.\n"
             "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.\n"
+            "7. **INTEGRATION:** Insert reference-based objects into the scene with correct perspective, floor contact, occlusion, and shadows matching the target lighting.\n"
             "4. **OUTPUT:** Return a single, high-quality photorealistic image.\n"
             "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.\n"
             "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.\n"
@@ -2322,7 +2326,36 @@ def generate_furnished_room(
 def call_magnific_api(image_path, unique_id, start_time):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: 
         return image_path
-    
+
+
+def pad_image_to_target_canvas(
+    img: Image.Image,
+    target_w: int,
+    target_h: int,
+    pad_color: tuple = (255, 255, 255),
+) -> Image.Image:
+    """Pad (and only downscale if needed) to match the target canvas size."""
+    try:
+        if target_w <= 0 or target_h <= 0:
+            return img
+        w, h = img.size
+        if w <= 0 or h <= 0:
+            return img
+
+        scale = min(1.0, target_w / w, target_h / h)
+        if scale < 1.0:
+            new_w = max(1, int(round(w * scale)))
+            new_h = max(1, int(round(h * scale)))
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            w, h = img.size
+
+        canvas = Image.new('RGB', (target_w, target_h), pad_color)
+        x0 = max(0, (target_w - w) // 2)
+        y0 = max(0, (target_h - h) // 2)
+        canvas.paste(img, (x0, y0))
+        return canvas
+    except Exception:
+        return img
     print(f"\n--- [Stage 4] 업스케일링 시도 (Key: {MAGNIFIC_API_KEY[:5]}...) ---", flush=True)
     
     if not MAGNIFIC_API_KEY or "your_" in MAGNIFIC_API_KEY:
