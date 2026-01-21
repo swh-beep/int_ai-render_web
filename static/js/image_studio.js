@@ -310,11 +310,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             document.body.removeChild(link);
                         };
 
-                        card.onclick = (e) => {
-                            if (e.target.closest('.detail-upscale-btn')) return;
-                            showPreview("Result Preview", `<img src="${url}" alt="Result preview" style="width:100%; max-height:80vh; object-fit:contain; display:block; margin:0 auto; border-radius:12px;">`);
-                        };
-
                         card.appendChild(img);
                         card.appendChild(downBtn);
                         this.gridEl?.appendChild(card);

@@ -548,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             handleFile(file); // 메인 화면으로 파일 전달
                             fpGenModal.classList.add('hidden');
-                            showCustomAlert("Success", "Frontal view set as main input!");
+                            // Silent success: no modal for setting frontal view.
 
                         } catch (err) {
                             showCustomAlert("Error", "Failed to load selected image.");
@@ -724,7 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             handleMoodboardFile(file);
                             mbGenModal.classList.add('hidden');
-                            showCustomAlert("Success", "Moodboard Applied!");
+                            // Silent success: no modal for moodboard apply.
                         } catch (err) {
                             showCustomAlert("Error", "Failed to load selected moodboard.");
                             selectBtn.textContent = "SELECT THIS";
@@ -1036,7 +1036,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         downloadFile(data.upscaled_empty, "Result_Before_Empty_HighRes");
                     }, 1000);
 
-                    showCustomAlert("Success", "Download Complete! (Before & After)");
+                    // Silent success: no modal for download completion.
                 } else {
                     throw new Error(data.error || "Processing failed");
                 }
@@ -1183,7 +1183,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const success = await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
 
                 if (success) {
-                    showCustomAlert("Success", "다운로드가 완료되었습니다.");
+                    // Silent success: no modal for download completion.
                 } else {
                     showCustomAlert("Error", "업스케일링에 실패했습니다.\n(잠시 후 다시 시도하거나 서버 로그를 확인하세요)");
                 }
