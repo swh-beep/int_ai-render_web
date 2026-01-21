@@ -2345,7 +2345,7 @@ def call_magnific_api(image_path, unique_id, start_time):
             "engine": "automatic",
             "creativity": 0,
             "hdr": 0,
-            "resemblance": 12,
+            "resemblance": 10,
             "fractality": 0,
             "prompt": (
                 "Professional interior photography, architectural digest style, "
