@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from dotenv import load_dotenv
 from styles_config import STYLES, ROOM_STYLES
-from PIL import Image, ImageOps, ImageDraw
+from PIL import Image, ImageOps, ImageDraw, ImageFilter
 import re
 import traceback
 import random
@@ -235,6 +235,33 @@ class _LocalUpload:
         except Exception:
             pass
 
+
+
+def _materialize_input(path_or_url: str, prefix: str = "input") -> str | None:
+    if not path_or_url:
+        return None
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://") or path_or_url.startswith("/outputs/"):
+        base = os.path.basename(path_or_url.split("?")[0])
+        if not base:
+            base = f"{prefix}_{uuid.uuid4().hex}.bin"
+        local_path = os.path.join("outputs", f"{prefix}_{uuid.uuid4().hex[:8]}_{base}")
+        try:
+            _download_to_path(path_or_url, Path(local_path))
+        except Exception:
+            return None
+        return local_path
+    if os.path.exists(path_or_url):
+        return path_or_url
+    if path_or_url.startswith("/"):
+        base = os.path.basename(path_or_url)
+        local_path = os.path.join("outputs", f"{prefix}_{uuid.uuid4().hex[:8]}_{base}")
+        try:
+            _download_to_path(path_or_url, Path(local_path))
+        except Exception:
+            return None
+        return local_path
+    return path_or_url
+
 def _json_from_response(resp):
     if isinstance(resp, JSONResponse):
         try:
@@ -246,7 +273,7 @@ def _json_from_response(resp):
     return {"result": resp}
 
 def job_render(payload: dict) -> dict:
-    file_path = payload.get("file_path")
+    file_path = _materialize_input(payload.get("file_path"), "input")
     moodboard_path = payload.get("moodboard_path")
     room = payload.get("room", "")
     style = payload.get("style", "")
@@ -258,7 +285,8 @@ def job_render(payload: dict) -> dict:
         return {"error": "Input file not found"}
 
     file_obj = _LocalUpload(file_path)
-    mood_obj = _LocalUpload(moodboard_path) if moodboard_path and os.path.exists(moodboard_path) else None
+    mood_local = _materialize_input(moodboard_path, "mood") if moodboard_path else None
+    mood_obj = _LocalUpload(mood_local) if mood_local and os.path.exists(mood_local) else None
     try:
         resp = render_room.__wrapped__(
             file=file_obj,
@@ -283,7 +311,15 @@ def job_image_edit(payload: dict) -> dict:
     mask_path = payload.get("mask_path")
     if not photo_paths:
         return {"error": "No input photos"}
-    res = process_image_edit_logic(photo_paths, instructions, mode, unique_id, 1, mask_path)
+    local_photos = []
+    for idx, p in enumerate(photo_paths):
+        lp = _materialize_input(p, f"edit_{idx}")
+        if lp:
+            local_photos.append(lp)
+    if not local_photos:
+        return {"error": "Input file not found"}
+    local_mask = _materialize_input(mask_path, "mask") if mask_path else None
+    res = process_image_edit_logic(local_photos, instructions, mode, unique_id, 1, local_mask)
     if res:
         return {"urls": [res], "message": "Success"}
     return {"error": "Failed to generate image"}
@@ -303,7 +339,14 @@ def job_frontal_view(payload: dict) -> dict:
     unique_id = payload.get("unique_id") or uuid.uuid4().hex[:8]
     if not photo_paths:
         return {"error": "No input photos"}
-    res = generate_frontal_room_from_photos(photo_paths, unique_id, 1)
+    local_photos = []
+    for idx, p in enumerate(photo_paths):
+        lp = _materialize_input(p, f"frontal_{idx}")
+        if lp:
+            local_photos.append(lp)
+    if not local_photos:
+        return {"error": "Input file not found"}
+    res = generate_frontal_room_from_photos(local_photos, unique_id, 1)
     if res:
         return {"urls": [res], "message": "Success"}
     return {"error": "Failed to generate images"}
@@ -1829,6 +1872,23 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
                     
                     # 해상도/비율 복구
                     final_path = standardize_image_to_target_canvas(out_path, target_path)
+                    if mask_img:
+                        try:
+                            with Image.open(final_path) as _gen, Image.open(target_path) as _base:
+                                gen_img = _gen.convert("RGB")
+                                base_img = _base.convert("RGB")
+                                if gen_img.size != base_img.size:
+                                    base_img = base_img.resize(gen_img.size, Image.Resampling.LANCZOS)
+                                mask = mask_img.convert("L")
+                                if mask.size != gen_img.size:
+                                    mask = mask.resize(gen_img.size, Image.Resampling.NEAREST)
+                                blur_radius = max(2, int(min(gen_img.size) * 0.003))
+                                if blur_radius > 0:
+                                    mask = mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+                                composited = Image.composite(gen_img, base_img, mask)
+                                composited.save(final_path)
+                        except Exception as e:
+                            print(f"!! Mask composite failed: {e}", flush=True)
                     try:
                         if img:
                             img.close()
@@ -1977,9 +2037,9 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         "1. **DO NOT CHANGE ARCHITECTURE:** Preserve room layout, walls, ceiling, floor, built-ins, and openings exactly as-is.\n"
         "2. **DO NOT MOVE THE CAMERA:** Keep viewpoint, perspective, lens, and framing identical to the input image.\n"
         "3. **DO NOT ALTER MATERIALS:** Keep wall finishes, flooring, baseboards, trims, and ceiling details unchanged.\n"
-        "4. **DO NOT ALTER LIGHTING/SHADOWS:** Keep natural lighting direction, intensity, and window light pattern consistent.\n"
-        "5. **DO NOT REMOVE FIXTURES:** Strictly preserve structural elements including Columns, Pillars, Beams, Windows (frames & glass), Doors, and built-in fireplaces.\n"
-        "6. **VIEW PROTECTION:** Keep the view outside the window 100% original.\n\n"
+        "4. **DO NOT ALTER LIGHTING/SHADOWS:** Keep existing lighting direction and intensity consistent with the input.\n"
+        "5. **DO NOT REMOVE FIXTURES:** Strictly preserve structural elements including Columns, Pillars, Beams, Doors, and built-in fireplaces. Do NOT add new openings.\n"
+        "6. **VIEW PROTECTION:** If the input shows an exterior view through any opening, keep it 100% original.\n\n"
         "7. **ONLY REMOVE MOVABLES:** Only remove furniture, rugs, lightings, curtains, and decorations that are NOT part of the building structure.\n\n"
         
         "<CRITICAL: COMPLETE ERADICATION (PRIORITY #1)>\n"
@@ -1987,7 +2047,7 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         "2. CLEAN SURFACES: The floor and walls must be perfectly empty. Remove all shadows, reflections, and traces.\n"
         "3. BARE SHELL: Restore the room to its initial construction state.\n\n"
         
-        "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural pillars and windows intact."
+        "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural elements intact. Do NOT add new openings."
     )
     
     safety_settings = {
@@ -2368,7 +2428,7 @@ def generate_furnished_room(
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
             
             "<CRITICAL: ARCHITECTURAL FREEZE (PRIORITY #1)>\n"
-            "1. **DO NOT RE-GENERATE THE ROOM:** The walls, ceiling, floor pattern, window size, and view outside the window must remain 100% IDENTICAL to the input image.\n"
+            "1. **DO NOT RE-GENERATE THE ROOM:** The walls, ceiling, floor pattern, and any visible openings/views must remain 100% IDENTICAL to the input image.\n"
             "2. **PERSPECTIVE LOCK:** You must use the EXACT same camera angle and perspective. Do not zoom in, do not zoom out.\n"
             "3. **DEPTH PRESERVATION:** Do not expand the room. Keep the original spatial depth.\n"
             "4. **FRAMING LOCK:** Keep the full room framing. Do NOT crop to a close-up. The ceiling and floor edges must match the input.\n"
@@ -2379,8 +2439,7 @@ def generate_furnished_room(
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
             "3. **STYLE:** Match the Reference Moodboard style.\n"
             "4. **ONLY LISTED ITEMS:** Render only the listed items. Do NOT add extra furniture or swap designs.\n"
-            "5. **WINDOW TREATMENT (CURTAINS - LOCATION STRICT):** Add floor-to-ceiling **Sheer White Chiffon Curtains**. <CRITICAL>: Place them **ONLY** along the vertical edges of the GLASS WINDOW. **DO NOT** generate curtains on solid walls, corners without windows, or doors. They must **HANG STRAIGHT DOWN NATURALLY** (do not tie) covering only the outer 15% of the glass to frame the view.\n\n"
-
+            
             "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and (optionally) a W/D/H SCALE GUIDE IMAGE. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
             
@@ -2399,33 +2458,34 @@ def generate_furnished_room(
             "   - Do NOT make a shorter item appear taller by placing it closer to the camera.\n"
             "   - Apparent height must respect the real H ratios across all items.\n"
 
-            "<CRITICAL: WINDOW LIGHT MUST BE ABUNDANT (PRIORITY #1)>\n"
-            "1. **ABUNDANT WINDOW LIGHT:** The scene MUST be strongly illuminated by abundant daylight coming from the window.\n"
+            "<CRITICAL: LIGHTING PRESERVATION (PRIORITY #1)>\n"
+            "1. **KEEP EXISTING LIGHTING LOGIC:** Follow the input image's visible light sources and direction.\n"
             "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
-            "3. **LIGHT DIRECTION:** Clearly visible light direction from the window; cast soft but present shadows across the floor.\n"
+            "3. **LIGHT DIRECTION:** Keep shadows consistent with the existing key light direction.\n"
             "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-            "5. **WHITE BALANCE:** Neutral daylight white balance (around 4000~5000K). **NO warm/yellow cast.**\n\n"
+            "5. **WHITE BALANCE:** Neutral white balance (around 4000~5000K). **NO warm/yellow cast.**\n"
+            "6. **NO NEW OPENINGS:** Do not add new windows/doors or fake exterior light sources.\n\n"
 
-        "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
+            "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
             "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
             "   - **ACTION:** Keep interior fixtures ON only if they appear in the reference; no extra fixtures.\n"
             "   - **VISUALS:** Avoid visible glow/bloom halos. Lights should look realistic and restrained.\n"
             
             "2. **LIGHTING HIERARCHY (KEY vs. FILL):**\n"
-            "   - **KEY LIGHT (DOMINANT):** Natural daylight from the window is the PRIMARY source (approx. 80% intensity).\n"
-            "   - **FILL LIGHT (SECONDARY):** Interior lights act as gentle fill (approx. 20%). They must NOT overpower the daylight.\n"
+            "   - **KEY LIGHT (DOMINANT):** Use the existing dominant light source visible in the input. Do NOT invent new openings.\n"
+            "   - **FILL LIGHT (SECONDARY):** Interior lights act as gentle fill. They must NOT overpower the key light.\n"
             
             "3. **STRICT COLOR TEMPERATURE CONTROL (NO YELLOW):**\n"
             "   - **Target Temperature:** Use **Neutral White (4000K-5000K)** for any artificial lights to match daylight.\n"
             "   - **PROHIBITED:** No warm/tungsten/orange bulbs (2700K). No vintage/sepia cast.\n"
             
             "4. **SHADOW PHYSICS:**\n"
-            "   - Cast soft, directional shadows driven by window light.\n"
+            "   - Cast soft, directional shadows driven by the existing key light direction.\n"
             "   - Use interior lights only to lift the darkest corners slightly.\n"
             
             "5. **ATMOSPHERE:**\n"
             "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
-            "   - **OUTPUT RULE:** Return the image with furniture added, blended with abundant daylight and subtle interior lighting.\n"
+            "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
         )
         
         prompt = (
@@ -2581,7 +2641,7 @@ def call_magnific_api(image_path, unique_id, start_time):
             "prompt": (
                 "Professional interior photography, architectural digest style, "
                 "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
-                "natural white daylight coming from window, soft shadows, "
+                "neutral white daylight or existing ambient light, soft shadows, "
                 "clean textures, true-to-source details, raw photo, 8k resolution. "
                 "--no dust, stains, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
             ),
@@ -2972,33 +3032,8 @@ def render_room(
                             f"p_w={p_w}mm p_d={p_d}mm p_h={p_h}mm step1_img={step1_img}"
                         )
 
-                        if room_w > 0 and room_d > 0 and room_h > 0 and p_w > 0 and p_d > 0 and p_h > 0 and step1_img:
-                            ratios = {"w": p_w / room_w, "d": p_d / room_d, "h": p_h / room_h}
-                            guide_out = os.path.join("outputs", f"scale_guide_{unique_id}.png")
-                            scale_guide_path = create_scale_guide_image(
-                                step1_img,
-                                wall_span_norm,
-                                ratios["w"],
-                                guide_out,
-                                room_planes=room_planes if room_planes else None,
-                                target_ratios=ratios if room_planes else None,
-                            )
-
-                            if scale_guide_path and os.path.exists(scale_guide_path):
-                                suffix = " (fallback W-only)" if not room_planes else ""
-                                logger.info(
-                                    f"[Scale] scale guide saved: {scale_guide_path} "
-                                    f"(W={ratios['w']:.4f}, D={ratios['d']:.4f}, H={ratios['h']:.4f}, anchor={scale_anchor_label})"
-                                    f"{suffix}"
-                                )
-                            else:
-                                logger.warning(f"[Scale] scale guide create returned: {scale_guide_path}")
-                        else:
-                            logger.warning("[Scale] Skipped W/D/H scale guide: missing room dims, item dims, or image")
-                            try:
-                                summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
-                            except Exception:
-                                pass
+                        # Scale guide disabled (no image generation).
+                        scale_guide_path = None
                     except Exception as e:
                         logger.exception(f"[Scale] scale guide exception: {e}")
 
@@ -3154,9 +3189,15 @@ def render_room_async(
         with open(mood_path, "wb") as buffer:
             shutil.copyfileobj(moodboard.file, buffer)
 
+    try:
+        file_ref = resolve_image_url(raw_path)
+        mood_ref = resolve_image_url(mood_path) if mood_path else None
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
     payload = {
-        "file_path": raw_path,
-        "moodboard_path": mood_path,
+        "file_path": file_ref or raw_path,
+        "moodboard_path": mood_ref or mood_path,
         "room": room,
         "style": style,
         "variant": variant,
@@ -3197,12 +3238,18 @@ def generate_image_edit_async(
             shutil.copyfileobj(mask.file, buffer)
 
 
+    try:
+        photo_refs = [resolve_image_url(p) or p for p in saved_photo_paths]
+        mask_ref = resolve_image_url(mask_path) if mask_path else None
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
     payload = {
-        "photo_paths": saved_photo_paths,
+        "photo_paths": photo_refs,
         "instructions": instructions,
         "mode": mode,
         "unique_id": unique_id,
-        "mask_path": mask_path,
+        "mask_path": mask_ref or mask_path,
     }
     job, err = _enqueue_job(job_image_edit, payload)
     if err:
@@ -3227,7 +3274,12 @@ def generate_frontal_view_async(
             shutil.copyfileobj(photo.file, buffer)
         saved_photo_paths.append(path)
 
-    payload = {"photo_paths": saved_photo_paths, "unique_id": unique_id}
+    try:
+        photo_refs = [resolve_image_url(p) or p for p in saved_photo_paths]
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+    payload = {"photo_paths": photo_refs, "unique_id": unique_id}
+
     job, err = _enqueue_job(job_frontal_view, payload)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
@@ -3261,9 +3313,8 @@ def finalize_download(req: FinalizeRequest):
         start_time = time.time()
         print(f"\n=== [Finalize] Download Request for {req.image_url} ===", flush=True)
 
-        filename = os.path.basename(req.image_url)
-        local_path = os.path.join("outputs", filename)
-        if not os.path.exists(local_path): 
+        local_path = _materialize_input(req.image_url, "finalize")
+        if not local_path or not os.path.exists(local_path):
             return JSONResponse(content={"error": "Original file not found"}, status_code=404)
 
         # [업그레이드]
@@ -3305,9 +3356,9 @@ def finalize_download(req: FinalizeRequest):
 @async_wrap
 def upscale_and_download(req: UpscaleRequest):
     try:
-        filename = os.path.basename(req.image_url)
-        local_path = os.path.join("outputs", filename)
-        if not os.path.exists(local_path): return JSONResponse(content={"error": "File not found"}, status_code=404)
+        local_path = _materialize_input(req.image_url, "upscale")
+        if not local_path or not os.path.exists(local_path):
+            return JSONResponse(content={"error": "File not found"}, status_code=404)
         final_path = call_magnific_api(local_path, uuid.uuid4().hex[:8], time.time())
         up_url = resolve_image_url(final_path)
         return JSONResponse(content={"upscaled_url": up_url, "message": "Success"})
