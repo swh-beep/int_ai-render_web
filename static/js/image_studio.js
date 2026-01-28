@@ -4,6 +4,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("✅ Image Studio Script Loaded (Multi-Feature Support)");
 
+    const JOB_POLL_INTERVAL = 2000;
+    const JOB_TIMEOUT_MS = 15 * 60 * 1000;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    async function pollJob(jobId, opts = {}) {
+        const interval = opts.interval || JOB_POLL_INTERVAL;
+        const timeoutMs = opts.timeoutMs || JOB_TIMEOUT_MS;
+        const started = Date.now();
+
+        while (true) {
+            const res = await fetch(`/jobs/${jobId}`);
+            if (!res.ok) {
+                throw new Error(`Job status error (${res.status})`);
+            }
+            const data = await res.json();
+            const status = data.status;
+
+            if (status === 'finished' || status === 'completed') {
+                if (data.result && data.result.error) {
+                    throw new Error(data.result.error);
+                }
+                return data.result || {};
+            }
+            if (status === 'failed') {
+                throw new Error(data.error || 'Job failed');
+            }
+            if (Date.now() - started > timeoutMs) {
+                throw new Error('Job timeout');
+            }
+            await sleep(interval);
+        }
+    }
+
 
     // --- Screen Navigation Logic ---
     const menuScreen = document.getElementById('menu-screen');
@@ -96,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.dropZone.addEventListener('click', (e) => {
                     // Don't open file dialog if we clicked the remove button in preview
                     if (e.target.closest('.remove-btn')) return;
+                    if (this.internalPreview && !this.internalPreview.classList.contains('hidden')) return;
                     this.fileInput.click();
                 });
                 this.dropZone.addEventListener('dragover', (e) => {
@@ -168,6 +203,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (this.uploadContent) this.uploadContent.classList.remove('hidden');
                     this.generateBtn.disabled = true;
                     this.dropZone?.classList.remove('has-preview');
+                    if (this.id === 'edit-image' && window.__editMaskManager) {
+                        window.__editMaskManager.reset();
+                    }
                 }
                 // Hide external preview container if it exists
                 if (this.previewContainer) this.previewContainer.style.display = 'none';
@@ -212,6 +250,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.previewContainer.style.display = 'none';
                 this.removeAllBtn?.classList.add('hidden');
                 this.generateBtn.disabled = true;
+                if (this.id === 'edit-image' && window.__editMaskManager) {
+                    window.__editMaskManager.reset();
+                }
             }
         }
 
@@ -249,11 +290,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const refFiles = (refInput && Array.isArray(refInput._refFiles)) ? refInput._refFiles : [];
                 refFiles.forEach(f => formData.append('input_photos', f));
             }
+            if (this.id === 'edit-image' && window.__editMaskManager) {
+                const maskBlob = await window.__editMaskManager.exportMaskBlob();
+                if (maskBlob) {
+                    formData.append('mask', maskBlob, 'edit_mask.png');
+                }
+            }
             
             // [핵심 수정] 엔드포인트 및 지시사항(Instructions) 처리 통합
             // 기존에 위쪽에 있던 'if (this.instructionInput)...' 코드를 삭제하고 여기서 한 번에 처리합니다.
             
-            let endpoint = '/generate-frontal-view'; // 기본값 (Real Photo)
+            let endpoint = '/async/generate-frontal-view'; // 기본값 (Real Photo)
             
             // 현재 입력된 텍스트 값을 실시간으로 가져옴 (참조 오류 방지)
             const currentInstructions = this.instructionInput ? this.instructionInput.value.trim() : "";
@@ -261,13 +308,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`[Generate] Mode: ${this.id}, Instructions: "${currentInstructions}"`); // 디버깅용 로그
 
             if (this.id === 'edit-image') {
-                endpoint = '/generate-image-edit';
+                endpoint = '/async/generate-image-edit';
                 formData.append('mode', 'edit');
                 // 입력값이 없으면 기본값 사용
                 formData.append('instructions', currentInstructions || "Rearrange furniture for better flow.");
             } 
             else if (this.id === 'decorate-image') {
-                endpoint = '/generate-image-edit';
+                endpoint = '/async/generate-image-edit';
                 formData.append('mode', 'decorate');
                 // 입력값이 없으면 기본값 사용
                 formData.append('instructions', currentInstructions || "Make it cozy and stylish.");
@@ -280,9 +327,13 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // 3. 서버 요청
                 const res = await fetch(endpoint, { method: 'POST', body: formData });
-                const data = await res.json();
+                const job = await res.json();
+                if (!res.ok) throw new Error(job.error || "Generation failed");
+                if (!job.job_id) throw new Error("Job queue failed");
 
-                if (res.ok && data.urls && data.urls.length > 0) {
+                const data = await pollJob(job.job_id);
+
+                if (data.urls && data.urls.length > 0) {
                     this.loadingEl?.classList.add('hidden');
                     this.resultContainer?.classList.remove('hidden');
 
@@ -355,6 +406,191 @@ document.addEventListener('DOMContentLoaded', () => {
         globalModal.classList.remove('hidden');
     }
 
+    function initEditMask() {
+        const dropZone = document.getElementById('edit-ref-drop-zone');
+        if (!dropZone) return null;
+        const preview = dropZone.querySelector('.is-internal-preview');
+        const img = preview?.querySelector('img');
+        const canvas = preview?.querySelector('.mask-canvas');
+        const cursor = preview?.querySelector('.mask-cursor');
+        const toggleBtn = document.getElementById('edit-mask-toggle');
+        const clearBtn = document.getElementById('edit-mask-clear');
+        const sizeInput = document.getElementById('edit-mask-size');
+        if (!preview || !img || !canvas || !toggleBtn || !clearBtn || !sizeInput) return null;
+
+        const dataCanvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const dataCtx = dataCanvas.getContext('2d');
+        let drawing = false;
+        let last = null;
+        let lastPointer = null;
+        let hasMask = false;
+        let active = false;
+
+        function positionCanvas() {
+            if (!img.naturalWidth || !img.naturalHeight) return;
+            const container = preview.getBoundingClientRect();
+            const cw = container.width;
+            const ch = container.height;
+            const ir = img.naturalWidth / img.naturalHeight;
+            const cr = cw / ch;
+            let dw, dh, dx, dy;
+            if (ir > cr) {
+                dw = cw;
+                dh = cw / ir;
+                dx = 0;
+                dy = (ch - dh) / 2;
+            } else {
+                dh = ch;
+                dw = ch * ir;
+                dy = 0;
+                dx = (cw - dw) / 2;
+            }
+            canvas.style.left = `${dx}px`;
+            canvas.style.top = `${dy}px`;
+            canvas.style.width = `${dw}px`;
+            canvas.style.height = `${dh}px`;
+        }
+
+        function syncCanvas() {
+            if (!img.naturalWidth || !img.naturalHeight) return;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            dataCanvas.width = img.naturalWidth;
+            dataCanvas.height = img.naturalHeight;
+            clearMask();
+            positionCanvas();
+        }
+
+        function clearMask() {
+            if (!ctx || !dataCtx) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            dataCtx.fillStyle = 'black';
+            dataCtx.fillRect(0, 0, dataCanvas.width, dataCanvas.height);
+            hasMask = false;
+        }
+
+        function setActive(on) {
+            active = on;
+            preview.classList.toggle('mask-active', on);
+            toggleBtn.classList.toggle('is-off', !on);
+            toggleBtn.innerHTML = `<span class="material-symbols-outlined">${on ? 'toggle_on' : 'toggle_off'}</span>`;
+            canvas.style.opacity = on ? '0.55' : '0';
+            if (cursor) cursor.style.display = on ? 'block' : 'none';
+        }
+
+        function getBrushSize() {
+            const rect = canvas.getBoundingClientRect();
+            const scale = canvas.width / rect.width;
+            return Number(sizeInput.value || 32) * scale;
+        }
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+            return { x, y };
+        }
+
+        function updateCursor(e) {
+            if (!cursor || !active) return;
+            const rect = canvas.getBoundingClientRect();
+            const previewRect = preview.getBoundingClientRect();
+            const size = Number(sizeInput.value || 32);
+            const drawSize = size;
+            cursor.style.width = `${drawSize}px`;
+            cursor.style.height = `${drawSize}px`;
+            if (e && typeof e.clientX === 'number') {
+                cursor.style.left = `${e.clientX - previewRect.left}px`;
+                cursor.style.top = `${e.clientY - previewRect.top}px`;
+                lastPointer = { x: e.clientX, y: e.clientY };
+            } else if (lastPointer) {
+                cursor.style.left = `${lastPointer.x - previewRect.left}px`;
+                cursor.style.top = `${lastPointer.y - previewRect.top}px`;
+            }
+        }
+
+        function drawLine(from, to) {
+            if (!ctx || !dataCtx) return;
+            const size = getBrushSize();
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = 'rgba(255, 80, 120, 0.65)';
+
+            dataCtx.lineWidth = size;
+            dataCtx.lineCap = 'round';
+            dataCtx.lineJoin = 'round';
+            dataCtx.strokeStyle = '#ffffff';
+
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.stroke();
+
+            dataCtx.beginPath();
+            dataCtx.moveTo(from.x, from.y);
+            dataCtx.lineTo(to.x, to.y);
+            dataCtx.stroke();
+            hasMask = true;
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!active) return;
+            drawing = true;
+            last = getPos(e);
+        });
+        window.addEventListener('mouseup', () => {
+            drawing = false;
+            last = null;
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            updateCursor(e);
+            if (!active || !drawing || !last) return;
+            const pos = getPos(e);
+            drawLine(last, pos);
+            last = pos;
+        });
+        canvas.addEventListener('mouseenter', (e) => {
+            updateCursor(e);
+            if (cursor) cursor.style.display = active ? 'block' : 'none';
+        });
+        canvas.addEventListener('mouseleave', () => {
+            if (cursor) cursor.style.display = 'none';
+        });
+
+        toggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            setActive(!active);
+        });
+        clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            clearMask();
+        });
+        sizeInput.addEventListener('input', (e) => {
+            if (!cursor || !active) return;
+            updateCursor(e);
+        });
+
+        img.addEventListener('load', () => {
+            syncCanvas();
+        });
+        window.addEventListener('resize', positionCanvas);
+
+        setActive(false);
+
+        return {
+            reset: () => {
+                clearMask();
+                setActive(false);
+            },
+            exportMaskBlob: () => new Promise((resolve) => {
+                if (!hasMask) return resolve(null);
+                dataCanvas.toBlob((blob) => resolve(blob), 'image/png');
+            }),
+        };
+    }
+
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && globalModal && !globalModal.classList.contains('hidden')) {
             globalModal.classList.add('hidden');
@@ -365,6 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
     new WorkspaceManager('real-photo', { prefix: 'fp-' });
     new WorkspaceManager('edit-image', { prefix: 'edit-' });
     new WorkspaceManager('decorate-image', { prefix: 'decor-' });
+    window.__editMaskManager = initEditMask();
 
     const refUploadBoxes = document.querySelectorAll('.is-reference-upload');
     refUploadBoxes.forEach((box) => {

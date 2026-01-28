@@ -12,6 +12,8 @@ import uuid
 import requests
 import json
 import google.generativeai as genai
+import boto3
+import mimetypes
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -32,6 +34,9 @@ import gc
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import Optional, List, Dict, Any
 from contextvars import ContextVar
+from redis import Redis
+from rq import Queue
+from rq.job import Job
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -74,6 +79,101 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
 TOTAL_TIMEOUT_LIMIT = 300 
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "default").strip() or "default"
+RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
+RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "3600"))
+S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+AWS_REGION = os.getenv("AWS_REGION", "").strip()
+S3_PREFIX = os.getenv("S3_PREFIX", "").strip()
+S3_REQUIRED = os.getenv("S3_REQUIRED", "0").strip().lower() in ("1", "true", "yes", "y")
+_PUBLISHED_URL_CACHE = {}
+
+def _s3_enabled() -> bool:
+    return bool(S3_BUCKET and AWS_REGION)
+
+def _get_s3_client():
+    return boto3.client("s3", region_name=AWS_REGION or None)
+
+def _normalize_s3_prefix(prefix: str) -> str:
+    if not prefix:
+        return ""
+    return prefix.strip("/").rstrip("/") + "/"
+
+def _s3_public_url(key: str) -> str:
+    return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
+def publish_image(local_path: Optional[str]) -> Optional[str]:
+    if not local_path:
+        return None
+    if local_path.startswith("http://") or local_path.startswith("https://"):
+        return local_path
+    if local_path in _PUBLISHED_URL_CACHE:
+        return _PUBLISHED_URL_CACHE[local_path]
+    if not _s3_enabled():
+        return None
+    if not os.path.exists(local_path):
+        return None
+    key = f"{_normalize_s3_prefix(S3_PREFIX)}{os.path.basename(local_path)}"
+    content_type, _ = mimetypes.guess_type(local_path)
+    extra = {"ContentType": content_type} if content_type else None
+    if extra:
+        _get_s3_client().upload_file(local_path, S3_BUCKET, key, ExtraArgs=extra)
+    else:
+        _get_s3_client().upload_file(local_path, S3_BUCKET, key)
+    url = _s3_public_url(key)
+    _PUBLISHED_URL_CACHE[local_path] = url
+    return url
+
+def resolve_image_url(local_path: Optional[str]) -> Optional[str]:
+    if not local_path:
+        return None
+    if local_path.startswith("http://") or local_path.startswith("https://"):
+        return local_path
+    if local_path.startswith("/outputs/"):
+        if S3_REQUIRED:
+            raise RuntimeError("S3_REQUIRED is enabled but output is still local (/outputs).")
+        return local_path
+    if local_path.startswith("/assets/"):
+        return local_path
+    url = publish_image(local_path)
+    if url:
+        return url
+    if S3_REQUIRED:
+        raise RuntimeError("S3_REQUIRED is enabled but S3 is not configured or upload failed.")
+    if os.path.exists(local_path):
+        return f"/outputs/{os.path.basename(local_path)}"
+    return None
+
+def _get_redis_conn():
+    if not REDIS_URL:
+        return None
+    try:
+        return Redis.from_url(REDIS_URL)
+    except Exception:
+        return None
+
+def _get_rq_queue():
+    conn = _get_redis_conn()
+    if not conn:
+        return None
+    return Queue(RQ_QUEUE_NAME, connection=conn, default_timeout=RQ_JOB_TIMEOUT, default_result_ttl=RQ_RESULT_TTL)
+
+def _enqueue_job(func, *args, **kwargs):
+    q = _get_rq_queue()
+    if not q:
+        return None, "REDIS_URL not configured"
+    job = q.enqueue(func, *args, **kwargs, job_timeout=RQ_JOB_TIMEOUT, result_ttl=RQ_RESULT_TTL)
+    return job, None
+
+def _fetch_job(job_id: str):
+    conn = _get_redis_conn()
+    if not conn:
+        return None
+    try:
+        return Job.fetch(job_id, connection=conn)
+    except Exception:
+        return None
 
 os.makedirs("outputs", exist_ok=True)
 os.makedirs("assets", exist_ok=True)
@@ -120,6 +220,93 @@ def async_wrap(func):
     async def wrapper(*args, **kwargs):
         return await run_in_threadpool(func, *args, **kwargs)
     return wrapper
+
+# -----------------------------------------------------------------------------
+# RQ async job helpers
+# -----------------------------------------------------------------------------
+class _LocalUpload:
+    def __init__(self, path: str):
+        self.filename = os.path.basename(path)
+        self.file = open(path, "rb")
+
+    def close(self):
+        try:
+            self.file.close()
+        except Exception:
+            pass
+
+def _json_from_response(resp):
+    if isinstance(resp, JSONResponse):
+        try:
+            return json.loads(resp.body.decode("utf-8"))
+        except Exception:
+            return {"error": "Invalid JSON response"}
+    if isinstance(resp, dict):
+        return resp
+    return {"result": resp}
+
+def job_render(payload: dict) -> dict:
+    file_path = payload.get("file_path")
+    moodboard_path = payload.get("moodboard_path")
+    room = payload.get("room", "")
+    style = payload.get("style", "")
+    variant = payload.get("variant", "")
+    dimensions = payload.get("dimensions", "")
+    placement = payload.get("placement", "")
+
+    if not file_path or not os.path.exists(file_path):
+        return {"error": "Input file not found"}
+
+    file_obj = _LocalUpload(file_path)
+    mood_obj = _LocalUpload(moodboard_path) if moodboard_path and os.path.exists(moodboard_path) else None
+    try:
+        resp = render_room.__wrapped__(
+            file=file_obj,
+            room=room,
+            style=style,
+            variant=variant,
+            moodboard=mood_obj,
+            dimensions=dimensions,
+            placement=placement,
+        )
+        return _json_from_response(resp)
+    finally:
+        file_obj.close()
+        if mood_obj:
+            mood_obj.close()
+
+def job_image_edit(payload: dict) -> dict:
+    photo_paths = payload.get("photo_paths") or []
+    instructions = payload.get("instructions", "")
+    mode = payload.get("mode", "edit")
+    unique_id = payload.get("unique_id") or uuid.uuid4().hex[:8]
+    mask_path = payload.get("mask_path")
+    if not photo_paths:
+        return {"error": "No input photos"}
+    res = process_image_edit_logic(photo_paths, instructions, mode, unique_id, 1, mask_path)
+    if res:
+        return {"urls": [res], "message": "Success"}
+    return {"error": "Failed to generate image"}
+
+def job_finalize(payload: dict) -> dict:
+    image_url = payload.get("image_url", "")
+    resp = finalize_download.__wrapped__(FinalizeRequest(image_url=image_url))
+    return _json_from_response(resp)
+
+def job_upscale(payload: dict) -> dict:
+    image_url = payload.get("image_url", "")
+    resp = upscale_and_download.__wrapped__(UpscaleRequest(image_url=image_url))
+    return _json_from_response(resp)
+
+def job_frontal_view(payload: dict) -> dict:
+    photo_paths = payload.get("photo_paths") or []
+    unique_id = payload.get("unique_id") or uuid.uuid4().hex[:8]
+    if not photo_paths:
+        return {"error": "No input photos"}
+    res = generate_frontal_room_from_photos(photo_paths, unique_id, 1)
+    if res:
+        return {"urls": [res], "message": "Success"}
+    return {"error": "Failed to generate images"}
 @app.middleware("http")
 async def log_requests(request, call_next):
     rid = uuid.uuid4().hex[:8]
@@ -307,6 +494,16 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
     except Exception as e:
         print(f"!! 표준화 실패: {e}", flush=True)
         return image_path
+
+def _set_png_dpi(path: str, dpi: tuple = (300, 300)) -> None:
+    """Set DPI metadata for PNG outputs (no pixel changes)."""
+    try:
+        if not path or os.path.splitext(path)[1].lower() != ".png":
+            return
+        with Image.open(path) as img:
+            img.save(path, "PNG", dpi=dpi)
+    except Exception:
+        pass
 # ---------------------------------------------------------
 # [NEW] Output Aspect Ratio Enforcement
 # - Gemini가 무드보드 비율/레이아웃을 따라가거나,
@@ -1505,7 +1702,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
                     
                     # [유지] 표준화 함수 (에러 없이 호출)
                     final_path = standardize_image(out_path)
-                    return f"/outputs/{os.path.basename(final_path)}"
+                    return resolve_image_url(final_path)
         return None
 
     except Exception as e:
@@ -1519,7 +1716,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
                 pass
 
 # [수정] 이미지 편집/데코레이션 처리 로직 (Inpainting & Resizing 강화 버전)
-def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
+def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, mask_path=None):
     try:
         print(f"   [{mode.upper()}] Processing step with instructions: {instructions}", flush=True)
         
@@ -1528,10 +1725,11 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         ref_paths = photo_paths[1:7]
         img = None
         ref_imgs = []
+        mask_img = None
         
         try:
             with Image.open(target_path) as base_img:
-                base_img.thumbnail((2048, 2048))
+                base_img.thumbnail((4096, 4096))
                 img = base_img.copy()
         except: return None
         try:
@@ -1539,13 +1737,24 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                 if not rp or not os.path.exists(rp):
                     continue
                 with Image.open(rp) as _ref:
-                    _ref.thumbnail((2048, 2048))
+                    _ref.thumbnail((4096, 4096))
                     ref_img = _ref.copy()
                     if img:
                         ref_img = pad_image_to_target_canvas(ref_img, img.size[0], img.size[1])
                     ref_imgs.append(ref_img)
         except Exception:
             ref_imgs = []
+        try:
+            if mask_path and os.path.exists(mask_path):
+                with Image.open(mask_path) as _mask:
+                    _mask = ImageOps.exif_transpose(_mask)
+                    if _mask.mode != 'L':
+                        _mask = _mask.convert('L')
+                    if img:
+                        _mask = _mask.resize(img.size, Image.Resampling.NEAREST)
+                    mask_img = _mask.copy()
+        except Exception:
+            mask_img = None
 
         # 모드별 시스템 프롬프트 분기
         if mode == 'edit':
@@ -1594,6 +1803,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
             "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.\n"
             "7. **INTEGRATION (MODERATE):** Insert reference-based objects into the scene with plausible perspective, floor contact, and soft contact shadows that match the target lighting. Avoid obvious cut-and-paste edges.\n"
             "8. **PADDING IGNORE:** If a reference contains padding/borders, ignore them and use only the object region as a style/shape guide.\n"
+            "9. **MASKED EDITING:** If a mask is provided, ONLY modify the white areas. Preserve black areas exactly.\n"
             "4. **OUTPUT:** Return a single, high-quality photorealistic image.\n"
             "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.\n"
             "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.\n"
@@ -1603,6 +1813,8 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
 
         # 모델 호출 (온도를 살짝 높여서 변화를 유도)
         content = [prompt, "Target image:", img]
+        if mask_img:
+            content.extend(["Mask image (white=edit, black=keep):", mask_img])
         for i, ref in enumerate(ref_imgs):
             content.extend([f"Reference image {i+1}:", ref])
         response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {})
@@ -1622,7 +1834,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
                             img.close()
                     except Exception:
                         pass
-                    return f"/outputs/{os.path.basename(final_path)}"
+                    return resolve_image_url(final_path)
         try:
             if img:
                 img.close()
@@ -1631,6 +1843,11 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         for rimg in ref_imgs:
             try:
                 rimg.close()
+            except Exception:
+                pass
+        if mask_img:
+            try:
+                mask_img.close()
             except Exception:
                 pass
         return None
@@ -1645,6 +1862,11 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index):
         for rimg in ref_imgs:
             try:
                 rimg.close()
+            except Exception:
+                pass
+        if mask_img:
+            try:
+                mask_img.close()
             except Exception:
                 pass
         return None
@@ -1696,7 +1918,8 @@ def generate_frontal_view_endpoint(
 def generate_image_edit_endpoint(
     input_photos: List[UploadFile] = File(...),
     instructions: str = Form(...),
-    mode: str = Form(...)  # 'edit' or 'decorate'
+    mode: str = Form(...),  # 'edit' or 'decorate'
+    mask: UploadFile = File(None)
 ):
     try:
         unique_id = uuid.uuid4().hex[:8]
@@ -1711,12 +1934,19 @@ def generate_image_edit_endpoint(
             with open(path, "wb") as buffer: 
                 shutil.copyfileobj(photo.file, buffer)
             saved_photo_paths.append(path)
+
+        mask_path = None
+        if mask is not None and mask.filename:
+            safe_mask = "".join([c for c in mask.filename if c.isalnum() or c in "._-"])
+            mask_path = os.path.join("outputs", f"mask_{mode}_{timestamp}_{unique_id}_{safe_mask}")
+            with open(mask_path, "wb") as buffer:
+                shutil.copyfileobj(mask.file, buffer)
         
         generated_results = []
         
         # 2. 생성 (단일 이미지 처리)
         with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(process_image_edit_logic, saved_photo_paths, instructions, mode, unique_id, i+1) for i in range(1)]
+            futures = [executor.submit(process_image_edit_logic, saved_photo_paths, instructions, mode, unique_id, i+1, mask_path) for i in range(1)]
             for future in futures:
                 res = future.result()
                 if res: generated_results.append(res)
@@ -1785,7 +2015,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                             img.close()
                         except Exception:
                             pass
-                        return standardize_image_to_reference_canvas(path, image_path)
+                        out = standardize_image_to_reference_canvas(path, image_path)
+                        return out
             else:
                 print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
         print(f"⚠️ [Retry] 시도 {try_count+1} 실패. 재시도...", flush=True)
@@ -2247,7 +2478,7 @@ def generate_furnished_room(
         if ref_path:
             try:
                 ref = Image.open(ref_path)
-                ref.thumbnail((2048, 2048))
+                ref.thumbnail((4096, 4096))
                 extra_imgs.append(ref)
                 content.extend(["Style Reference (Exact Furniture Designs):", ref])
             except: pass
@@ -2352,7 +2583,7 @@ def call_magnific_api(image_path, unique_id, start_time):
                 "shot on Phase One XF IQ4, 100mm lens, ISO 100, f/8, "
                 "natural white daylight coming from window, soft shadows, "
                 "clean textures, true-to-source details, raw photo, 8k resolution. "
-                "--no 3d render, cgi, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
+                "--no dust, stains, painting, drawing, cartoon, anime, illustration, plastic look, oversaturated, watermark, text, blur, distorted."
             ),
         }
         headers = {
@@ -2440,7 +2671,9 @@ def download_image(url, unique_id):
             filename = f"magnific_{timestamp}_{unique_id}.png"
             path = os.path.join("outputs", filename)
             with open(path, "wb") as f: f.write(res.content)
-            return standardize_image(path, keep_ratio=True)
+            out_path = standardize_image(path, keep_ratio=True)
+            _set_png_dpi(out_path, (300, 300))
+            return out_path
         return None
     except: return None
 
@@ -2652,7 +2885,7 @@ def render_room(
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
             with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
             ref_path = mb_path
-            mb_url = f"/outputs/{os.path.basename(mb_path)}"
+            mb_url = resolve_image_url(mb_path)
 
         furniture_specs_text = None
         full_analyzed_data = [] 
@@ -2805,8 +3038,8 @@ def render_room(
                     start_time=start_time,
                     room_planes=room_planes,
                 )
-                if res: return f"/outputs/{os.path.basename(res)}"
-            except Exception as e: print(f"   ❌ [Variation {index+1}] 에러: {e}", flush=True)
+                if res: return resolve_image_url(res)
+            except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
             return None
 
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -2832,20 +3065,21 @@ def render_room(
                 logger.warning("WARNING: %s | TextRead OK=%s FAIL=%s", '; '.join(reasons), ok, fail)
             else:
                 logger.info("OK: TextRead OK=%s FAIL=%s", ok, fail)
-        final_before_url = f"/outputs/{os.path.basename(step1_img)}"
-        if not generated_results: generated_results.append(f"/outputs/{os.path.basename(step1_img)}")
+        final_before_url = resolve_image_url(step1_img)
+        if not generated_results:
+            generated_results.append(final_before_url)
 
         scale_guide_url = None
         try:
             if scale_guide_path and os.path.exists(scale_guide_path):
-                scale_guide_url = f"/outputs/{os.path.basename(scale_guide_path)}"
+                scale_guide_url = resolve_image_url(scale_guide_path)
         except Exception:
             pass
 
         if summary_token is not None:
             SUMMARY_REF.reset(summary_token)
         return JSONResponse(content={
-            "original_url": f"/outputs/{os.path.basename(std_path)}",
+            "original_url": resolve_image_url(std_path),
             "empty_room_url": final_before_url,
             "result_url": generated_results[0],
             "result_urls": generated_results,
@@ -2869,6 +3103,155 @@ class UpscaleRequest(BaseModel): image_url: str
 
 class FinalizeRequest(BaseModel):
     image_url: str
+
+@app.get("/jobs/{job_id}")
+def get_job_status(job_id: str):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    job = _fetch_job(job_id)
+    if not job:
+        return JSONResponse(content={"error": "Job not found"}, status_code=404)
+
+    status = job.get_status()
+    payload = {
+        "id": job.id,
+        "status": status,
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+    }
+    if job.is_finished:
+        payload["result"] = job.result
+    if job.is_failed:
+        payload["error"] = job.exc_info
+    return JSONResponse(content=payload)
+
+@app.post("/async/render")
+@async_wrap
+def render_room_async(
+    file: UploadFile = File(...),
+    room: str = Form(...),
+    style: str = Form(...),
+    variant: str = Form(...),
+    moodboard: UploadFile = File(None),
+    dimensions: str = Form(""),
+    placement: str = Form("")
+):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
+    raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
+    with open(raw_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    mood_path = None
+    if moodboard is not None:
+        mb_safe = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
+        mood_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_safe}")
+        with open(mood_path, "wb") as buffer:
+            shutil.copyfileobj(moodboard.file, buffer)
+
+    payload = {
+        "file_path": raw_path,
+        "moodboard_path": mood_path,
+        "room": room,
+        "style": style,
+        "variant": variant,
+        "dimensions": dimensions,
+        "placement": placement,
+    }
+    job, err = _enqueue_job(job_render, payload)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/async/generate-image-edit")
+@async_wrap
+def generate_image_edit_async(
+    input_photos: List[UploadFile] = File(...),
+    instructions: str = Form(...),
+    mode: str = Form(...),
+    mask: UploadFile = File(None)
+):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    saved_photo_paths = []
+    for idx, photo in enumerate(input_photos):
+        safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
+        path = os.path.join("outputs", f"src_{mode}_{timestamp}_{unique_id}_{idx}_{safe_name}")
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+        saved_photo_paths.append(path)
+
+    mask_path = None
+    if mask is not None and mask.filename:
+        safe_mask = "".join([c for c in mask.filename if c.isalnum() or c in "._-"])
+        mask_path = os.path.join("outputs", f"mask_{mode}_{timestamp}_{unique_id}_{safe_mask}")
+        with open(mask_path, "wb") as buffer:
+            shutil.copyfileobj(mask.file, buffer)
+
+
+    payload = {
+        "photo_paths": saved_photo_paths,
+        "instructions": instructions,
+        "mode": mode,
+        "unique_id": unique_id,
+        "mask_path": mask_path,
+    }
+    job, err = _enqueue_job(job_image_edit, payload)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/async/generate-frontal-view")
+@async_wrap
+def generate_frontal_view_async(
+    input_photos: List[UploadFile] = File(...)
+):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    saved_photo_paths = []
+    for idx, photo in enumerate(input_photos):
+        safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
+        path = os.path.join("outputs", f"src_{timestamp}_{unique_id}_{idx}_{safe_name}")
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+        saved_photo_paths.append(path)
+
+    payload = {"photo_paths": saved_photo_paths, "unique_id": unique_id}
+    job, err = _enqueue_job(job_frontal_view, payload)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/async/upscale")
+@async_wrap
+def upscale_and_download_async(req: UpscaleRequest):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    job, err = _enqueue_job(job_upscale, {"image_url": req.image_url})
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/async/finalize-download")
+@async_wrap
+def finalize_download_async(req: FinalizeRequest):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    job, err = _enqueue_job(job_finalize, {"image_url": req.image_url})
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
 @app.post("/finalize-download")
 @async_wrap
@@ -2905,9 +3288,11 @@ def finalize_download(req: FinalizeRequest):
             final_furnished_path = future_furnished.result()
             final_empty_path = future_empty.result()
 
+        furnished_url = resolve_image_url(final_furnished_path)
+        empty_url = resolve_image_url(final_empty_path)
         return JSONResponse(content={
-            "upscaled_furnished": f"/outputs/{os.path.basename(final_furnished_path)}",
-            "upscaled_empty": f"/outputs/{os.path.basename(final_empty_path)}",
+            "upscaled_furnished": furnished_url,
+            "upscaled_empty": empty_url,
             "message": "Success"
         })
 
@@ -2924,7 +3309,8 @@ def upscale_and_download(req: UpscaleRequest):
         local_path = os.path.join("outputs", filename)
         if not os.path.exists(local_path): return JSONResponse(content={"error": "File not found"}, status_code=404)
         final_path = call_magnific_api(local_path, uuid.uuid4().hex[:8], time.time())
-        return JSONResponse(content={"upscaled_url": f"/outputs/{os.path.basename(final_path)}", "message": "Success"})
+        up_url = resolve_image_url(final_path)
+        return JSONResponse(content={"upscaled_url": up_url, "message": "Success"})
     except Exception as e: return JSONResponse(content={"error": str(e)}, status_code=500)
 
 def construct_dynamic_styles(analyzed_items):
@@ -3049,7 +3435,7 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
                             img.close()
                     except Exception:
                         pass
-                    return f"/outputs/{filename}"
+                    return resolve_image_url(path)
         try:
             if img:
                 img.close()
@@ -3273,7 +3659,7 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
                             img.close()
                     except Exception:
                         pass
-                    return f"/outputs/{filename}"
+                    return resolve_image_url(path)
         try:
             if img:
                 img.close()

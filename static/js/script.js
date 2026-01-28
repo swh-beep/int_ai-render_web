@@ -1,3 +1,37 @@
+const JOB_POLL_INTERVAL = 2000;
+const JOB_TIMEOUT_MS = 15 * 60 * 1000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function pollJob(jobId, opts = {}) {
+    const interval = opts.interval || JOB_POLL_INTERVAL;
+    const timeoutMs = opts.timeoutMs || JOB_TIMEOUT_MS;
+    const started = Date.now();
+
+    while (true) {
+        const res = await fetch(`/jobs/${jobId}`);
+        if (!res.ok) {
+            throw new Error(`Job status error (${res.status})`);
+        }
+        const data = await res.json();
+        const status = data.status;
+
+        if (status === 'finished' || status === 'completed') {
+            if (data.result && data.result.error) {
+                throw new Error(data.result.error);
+            }
+            return data.result || {};
+        }
+        if (status === 'failed') {
+            throw new Error(data.error || 'Job failed');
+        }
+        if (Date.now() - started > timeoutMs) {
+            throw new Error('Job timeout');
+        }
+        await sleep(interval);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const PAGE = document.body?.dataset?.page || 'home';
     if (PAGE !== 'home') return;
@@ -504,13 +538,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             // [중요] 엔드포인트 변경 (/generate-frontal-view)
-            const res = await fetch('/generate-frontal-view', {
+            const res = await fetch('/async/generate-frontal-view', {
                 method: 'POST',
                 body: formData
             });
-            const data = await res.json();
+            const job = await res.json();
+            if (!res.ok) throw new Error(job.error || 'Generation failed');
+            if (!job.job_id) throw new Error('Job queue failed');
 
-            if (res.ok && data.urls && data.urls.length > 0) {
+            const data = await pollJob(job.job_id);
+
+            if (data.urls && data.urls.length > 0) {
                 const resultUrls = data.urls;
                 fpGenGrid.innerHTML = '';
                 fpGenGrid.style.display = 'flex';
@@ -897,10 +935,11 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('placement', placement);
 
             try {
-                const res = await fetch('/render', { method: 'POST', body: formData });
-                if (!res.ok) throw new Error(`서버 에러 (${res.status})`);
-                const data = await res.json();
-
+                const res = await fetch('/async/render', { method: 'POST', body: formData });
+                const job = await res.json();
+                if (!res.ok) throw new Error(job.error || `Server error (${res.status})`);
+                if (!job.job_id) throw new Error('Job queue failed');
+                const data = await pollJob(job.job_id);
                 if (data.furniture_data) {
                     console.log("📦 가구 분석 데이터 저장 완료:", data.furniture_data.length + "개");
                     currentFurnitureData = data.furniture_data;
@@ -1022,15 +1061,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
             try {
-                const res = await fetch("/finalize-download", {
+                const res = await fetch("/async/finalize-download", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ image_url: afterUrl })
                 });
+                const job = await res.json();
+                if (!res.ok) throw new Error(job.error || "Processing failed");
+                if (!job.job_id) throw new Error('Job queue failed');
 
-                const data = await res.json();
+                const data = await pollJob(job.job_id);
 
-                if (res.ok && data.upscaled_furnished && data.upscaled_empty) {
+                if (data.upscaled_furnished && data.upscaled_empty) {
                     await downloadFile(data.upscaled_furnished, "Result_After_HighRes");
                     setTimeout(() => {
                         downloadFile(data.upscaled_empty, "Result_Before_Empty_HighRes");
@@ -1288,23 +1330,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function upscaleAndDownload(imgUrl, filenamePrefix) {
     try {
-        console.log("🚀 Upscaling start:", imgUrl);
+        console.log("?? Upscaling start:", imgUrl);
 
-        const res = await fetch("/upscale", {
+        const res = await fetch("/async/upscale", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ image_url: imgUrl })
         });
-
+        const job = await res.json();
         if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`Server Error (${res.status}): ${errText}`);
+            throw new Error(job.error || `Server Error (${res.status})`);
         }
+        if (!job.job_id) throw new Error('Job queue failed');
 
-        const data = await res.json();
+        const data = await pollJob(job.job_id);
 
         if (data.upscaled_url) {
-            console.log("✅ Upscale success:", data.upscaled_url);
+            console.log("??Upscale success:", data.upscaled_url);
             const link = document.createElement("a");
             link.href = data.upscaled_url;
             link.download = `${filenamePrefix}_${Date.now()}.jpg`;
@@ -1316,10 +1358,11 @@ async function upscaleAndDownload(imgUrl, filenamePrefix) {
             throw new Error(data.error || data.warning || "Unknown error during upscale");
         }
     } catch (e) {
-        console.error("❌ Upscale failed:", e);
+        console.error("??Upscale failed:", e);
         return false;
     }
 }
+
 // =========================
 // Video Studio Page (standalone)
 // =========================
