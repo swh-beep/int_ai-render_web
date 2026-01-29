@@ -14,7 +14,7 @@ import json
 import google.generativeai as genai
 import boto3
 import mimetypes
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -105,7 +105,84 @@ S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
 AWS_REGION = os.getenv("AWS_REGION", "").strip()
 S3_PREFIX = os.getenv("S3_PREFIX", "").strip()
 S3_REQUIRED = os.getenv("S3_REQUIRED", "0").strip().lower() in ("1", "true", "yes", "y")
+DEFAULT_AUDIENCE = os.getenv("DEFAULT_AUDIENCE", "internal").strip().lower() or "internal"
+MOODBOARD_S3_PREFIX = os.getenv("MOODBOARD_S3_PREFIX", "moodboard/").strip()
+USE_S3_MOODBOARD = os.getenv("USE_S3_MOODBOARD", "0").strip().lower() in ("1", "true", "yes", "y")
+API_AUTH_DISABLED = os.getenv("API_AUTH_DISABLED", "0").strip().lower() in ("1", "true", "yes", "y")
+INTERNAL_INTEA_API_KEYS = set()
+EXTERNAL_INTEA_API_KEYS = set()
+PRESET_MAP_PATH = os.getenv("PRESET_MAP_PATH", "").strip()
+CART_LIMITS_JSON = os.getenv("CART_LIMITS_JSON", "").strip()
 _PUBLISHED_URL_CACHE = {}
+
+def _normalize_audience(audience: Optional[str]) -> str:
+    aud = (audience or DEFAULT_AUDIENCE or "internal").strip().lower()
+    if aud in ("external", "public", "customer", "client"):
+        return "external"
+    return "internal"
+
+def _build_s3_prefix(audience: Optional[str], category: Optional[str] = None, subfolder: Optional[str] = None) -> str:
+    base = _normalize_s3_prefix(S3_PREFIX)
+    parts = []
+    if category == "moodboard":
+        parts = [MOODBOARD_S3_PREFIX.strip("/")]
+    elif category:
+        parts = [_normalize_audience(audience), category]
+        if subfolder:
+            parts.append(subfolder)
+    if parts:
+        return base + "/".join([p for p in parts if p]) + "/"
+    return base
+
+def _s3_prefix_from_url(url: str) -> Optional[str]:
+    try:
+        if not url:
+            return None
+        parsed = urlparse(url)
+        if not parsed.scheme.startswith("http"):
+            return None
+        if S3_BUCKET and S3_BUCKET not in parsed.netloc:
+            return None
+        path = parsed.path.lstrip("/")
+        if not path or "/" not in path:
+            return None
+        return path.rsplit("/", 1)[0] + "/"
+    except Exception:
+        return None
+
+
+def _parse_key_list(value: str) -> set:
+    if not value:
+        return set()
+    parts = [p.strip() for p in value.replace(";", ",").split(",")]
+    return {p for p in parts if p}
+
+INTERNAL_INTEA_API_KEYS = _parse_key_list(os.getenv("INTERNAL_INTEA_API_KEYS", ""))
+EXTERNAL_INTEA_API_KEYS = _parse_key_list(os.getenv("EXTERNAL_INTEA_API_KEYS", ""))
+
+PRESET_MAP_CACHE = None
+
+DEFAULT_CART_LIMITS = {
+    "sofa": 2,
+    "sectional": 1,
+    "lounge_chair": 4,
+    "chair": 6,
+    "dining_chair": 8,
+    "table": 2,
+    "dining_table": 1,
+    "bed": 2,
+    "rug": 2,
+    "lamp": 6,
+    "floor_lamp": 4,
+    "table_lamp": 6,
+    "decor": 20,
+}
+
+try:
+    CART_LIMITS = json.loads(CART_LIMITS_JSON) if CART_LIMITS_JSON else DEFAULT_CART_LIMITS
+except Exception:
+    CART_LIMITS = DEFAULT_CART_LIMITS
+
 
 def _s3_enabled() -> bool:
     return bool(S3_BUCKET and AWS_REGION)
@@ -121,18 +198,65 @@ def _normalize_s3_prefix(prefix: str) -> str:
 def _s3_public_url(key: str) -> str:
     return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
 
-def publish_image(local_path: Optional[str]) -> Optional[str]:
+def _s3_list_keys(prefix: str, max_keys: int = 1000) -> list[str]:
+    if not _s3_enabled():
+        return []
+    try:
+        resp = _get_s3_client().list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=max_keys)
+        contents = resp.get("Contents") or []
+        return [obj.get("Key") for obj in contents if obj.get("Key")]
+    except Exception:
+        return []
+
+def _find_s3_moodboard_key(safe_room: str, safe_style: str, variant: str) -> Optional[str]:
+    prefix_root = _normalize_s3_prefix(_build_s3_prefix(None, "moodboard"))
+    if not prefix_root:
+        prefix_root = ""
+    import re
+    pattern = rf"(?:^|[^0-9]){re.escape(str(variant))}(?:[^0-9]|$)"
+
+    # Preferred structure: moodboard/<room>/<style>/<variant>.<ext>
+    nested_prefix = f"{prefix_root}{safe_room}/{safe_style}/"
+    keys = _s3_list_keys(nested_prefix)
+    if keys:
+        for k in keys:
+            base = os.path.basename(k)
+            if re.search(pattern, base, re.IGNORECASE):
+                return k
+        # Fallback: first file under room/style
+        return keys[0]
+
+    # Legacy flat structure: moodboard/<room>_<style>_<variant>.<ext>
+    name_prefix = f"{safe_room}_{safe_style}_"
+    search_prefix = f"{prefix_root}{name_prefix}"
+    keys = _s3_list_keys(search_prefix)
+    if not keys:
+        keys = _s3_list_keys(prefix_root)
+    if not keys:
+        return None
+    cand = [k for k in keys if os.path.basename(k).startswith(name_prefix)]
+    if not cand:
+        cand = keys
+    for k in cand:
+        base = os.path.basename(k)
+        if re.search(pattern, base, re.IGNORECASE):
+            return k
+    return cand[0] if cand else None
+
+def publish_image(local_path: Optional[str], s3_prefix_override: Optional[str] = None) -> Optional[str]:
     if not local_path:
         return None
     if local_path.startswith("http://") or local_path.startswith("https://"):
         return local_path
-    if local_path in _PUBLISHED_URL_CACHE:
-        return _PUBLISHED_URL_CACHE[local_path]
+    key_prefix = _normalize_s3_prefix(s3_prefix_override if s3_prefix_override is not None else S3_PREFIX)
+    cache_key = f"{local_path}::{key_prefix}"
+    if cache_key in _PUBLISHED_URL_CACHE:
+        return _PUBLISHED_URL_CACHE[cache_key]
     if not _s3_enabled():
         return None
     if not os.path.exists(local_path):
         return None
-    key = f"{_normalize_s3_prefix(S3_PREFIX)}{os.path.basename(local_path)}"
+    key = f"{key_prefix}{os.path.basename(local_path)}"
     content_type, _ = mimetypes.guess_type(local_path)
     extra = {"ContentType": content_type} if content_type else None
     if extra:
@@ -140,10 +264,10 @@ def publish_image(local_path: Optional[str]) -> Optional[str]:
     else:
         _get_s3_client().upload_file(local_path, S3_BUCKET, key)
     url = _s3_public_url(key)
-    _PUBLISHED_URL_CACHE[local_path] = url
+    _PUBLISHED_URL_CACHE[cache_key] = url
     return url
 
-def resolve_image_url(local_path: Optional[str]) -> Optional[str]:
+def resolve_image_url(local_path: Optional[str], s3_prefix_override: Optional[str] = None) -> Optional[str]:
     if not local_path:
         return None
     if local_path.startswith("http://") or local_path.startswith("https://"):
@@ -154,7 +278,7 @@ def resolve_image_url(local_path: Optional[str]) -> Optional[str]:
         return local_path
     if local_path.startswith("/assets/"):
         return local_path
-    url = publish_image(local_path)
+    url = publish_image(local_path, s3_prefix_override=s3_prefix_override)
     if url:
         return url
     if S3_REQUIRED:
@@ -170,6 +294,123 @@ def _get_redis_conn():
         return Redis.from_url(REDIS_URL)
     except Exception:
         return None
+
+
+
+def _extract_api_key(request: Request) -> Optional[str]:
+    key = request.headers.get("x-api-key") or request.headers.get("X-API-KEY")
+    if not key:
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            key = auth[7:].strip()
+    return key or None
+
+
+def _resolve_api_role(api_key: Optional[str]) -> Optional[str]:
+    if not api_key:
+        return None
+    if api_key in INTERNAL_INTEA_API_KEYS:
+        return "internal"
+    if api_key in EXTERNAL_INTEA_API_KEYS:
+        return "external"
+    return None
+
+
+def _require_role(request: Request, allowed_roles: set[str]) -> str:
+    if API_AUTH_DISABLED or not (INTERNAL_INTEA_API_KEYS or EXTERNAL_INTEA_API_KEYS):
+        return "internal"
+    role = _resolve_api_role(_extract_api_key(request))
+    if not role:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if role == "internal":
+        if "internal" in allowed_roles:
+            return role
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if role not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return role
+
+
+def _load_preset_map() -> dict:
+    global PRESET_MAP_CACHE
+    if PRESET_MAP_CACHE is not None:
+        return PRESET_MAP_CACHE
+    if not PRESET_MAP_PATH or not os.path.exists(PRESET_MAP_PATH):
+        PRESET_MAP_CACHE = {}
+        return PRESET_MAP_CACHE
+    try:
+        with open(PRESET_MAP_PATH, "r", encoding="utf-8") as f:
+            PRESET_MAP_CACHE = json.load(f)
+    except Exception:
+        PRESET_MAP_CACHE = {}
+    return PRESET_MAP_CACHE
+
+
+def _apply_cart_limits(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    kept = []
+    dropped = []
+    counts: dict[str, int] = {}
+    items_sorted = sorted(items, key=lambda x: (x.get("priority", 3), x.get("category", "")))
+    for it in items_sorted:
+        cat = (it.get("category") or "decor").lower().strip()
+        limit = int(CART_LIMITS.get(cat, CART_LIMITS.get("decor", 20)))
+        qty = int(it.get("qty") or 1)
+        used = counts.get(cat, 0)
+        allowed = max(0, limit - used)
+        if allowed <= 0:
+            dropped.append({**it, "dropped": qty})
+            continue
+        take = min(qty, allowed)
+        counts[cat] = used + take
+        kept.append({**it, "qty": take})
+        if qty > take:
+            dropped.append({**it, "dropped": qty - take})
+    return kept, dropped
+
+
+def _build_cart_summary(items: list[dict]) -> str:
+    lines = []
+    for it in items:
+        dims = it.get("dims_mm") or {}
+        w = dims.get("w") or dims.get("width") or dims.get("width_mm")
+        d = dims.get("d") or dims.get("depth") or dims.get("depth_mm")
+        h = dims.get("h") or dims.get("height") or dims.get("height_mm")
+        lines.append(f"- {it.get('category')} x{it.get('qty')} (W={w} D={d} H={h} mm) id={it.get('id')}")
+    return "Customer-selected items:\n" + "\n".join(lines)
+
+
+def _build_cart_moodboard(items: list[dict], unique_id: str) -> str:
+    tile = 512
+    cols = min(4, max(1, len(items)))
+    rows = (len(items) + cols - 1) // cols
+    width = cols * tile
+    height = rows * tile
+    canvas = Image.new("RGB", (width, height), (255, 255, 255))
+    for idx, it in enumerate(items):
+        img_url = it.get("image_url") or it.get("image")
+        if not img_url:
+            continue
+        local_path = _materialize_input(img_url, f"item_{idx}")
+        if not local_path or not os.path.exists(local_path):
+            continue
+        try:
+            with Image.open(local_path) as im:
+                im = ImageOps.exif_transpose(im)
+                if im.mode in ("RGBA", "LA"):
+                    bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+                    bg.paste(im, mask=im.split()[-1])
+                    im = bg.convert("RGB")
+                else:
+                    im = im.convert("RGB")
+                im.thumbnail((tile, tile), Image.Resampling.LANCZOS)
+                x = (idx % cols) * tile + (tile - im.width) // 2
+                y = (idx // cols) * tile + (tile - im.height) // 2
+                canvas.paste(im, (x, y))
+        except Exception:
+            continue
+    out_path = os.path.join("outputs", f"cart_moodboard_{unique_id}.png")
+    canvas.save(out_path)
+    return out_path
 
 def _get_rq_queue(queue_name: str | None = None):
     conn = _get_redis_conn()
@@ -299,6 +540,7 @@ def job_render(payload: dict) -> dict:
     variant = payload.get("variant", "")
     dimensions = payload.get("dimensions", "")
     placement = payload.get("placement", "")
+    audience = payload.get("audience", "")
 
     if not file_path or not os.path.exists(file_path):
         return {"error": "Input file not found"}
@@ -315,6 +557,7 @@ def job_render(payload: dict) -> dict:
             moodboard=mood_obj,
             dimensions=dimensions,
             placement=placement,
+            audience=audience,
         )
         return _json_from_response(resp)
     finally:
@@ -322,12 +565,44 @@ def job_render(payload: dict) -> dict:
         if mood_obj:
             mood_obj.close()
 
+def job_render_with_details(payload: dict) -> dict:
+    render_payload = payload.get("render") or {}
+    include_details = bool(payload.get("include_details", True))
+    extra = payload.get("extra") or {}
+
+    render_result = job_render(render_payload)
+    if "error" in render_result:
+        return {"error": render_result.get("error"), "render": render_result, **extra}
+    if not include_details:
+        return {"render": render_result, **extra}
+
+    result_url = render_result.get("result_url")
+    if not result_url:
+        urls = render_result.get("result_urls") or []
+        result_url = urls[0] if urls else None
+    if not result_url:
+        return {"render": render_result, "details": {"error": "Result image not available"}, **extra}
+
+    details_payload = {
+        "image_url": result_url,
+        "moodboard_url": render_result.get("moodboard_url"),
+        "furniture_data": render_result.get("furniture_data"),
+        "audience": render_payload.get("audience"),
+    }
+    details_result = job_generate_details(details_payload)
+    return {"render": render_result, "details": details_result, **extra}
+
 def job_image_edit(payload: dict) -> dict:
     photo_paths = payload.get("photo_paths") or []
     instructions = payload.get("instructions", "")
     mode = payload.get("mode", "edit")
     unique_id = payload.get("unique_id") or uuid.uuid4().hex[:8]
     mask_path = payload.get("mask_path")
+    audience = payload.get("audience")
+    aud = _normalize_audience(audience)
+    category = "editrendered" if mode == "edit" else "decorrendered"
+    prefix_user = _build_s3_prefix(aud, category, "user-photos")
+    prefix_rendered = _build_s3_prefix(aud, category, "rendered")
     if not photo_paths:
         return {"error": "No input photos"}
     local_photos = []
@@ -335,12 +610,14 @@ def job_image_edit(payload: dict) -> dict:
         lp = _materialize_input(p, f"edit_{idx}")
         if lp:
             local_photos.append(lp)
+            resolve_image_url(lp, s3_prefix_override=prefix_user)
     if not local_photos:
         return {"error": "Input file not found"}
     local_mask = _materialize_input(mask_path, "mask") if mask_path else None
     res = process_image_edit_logic(local_photos, instructions, mode, unique_id, 1, local_mask)
     if res:
-        return {"urls": [res], "message": "Success"}
+        url = resolve_image_url(res, s3_prefix_override=prefix_rendered)
+        return {"urls": [url] if url else [], "message": "Success"} if url else {"error": "Failed to generate image"}
     return {"error": "Failed to generate image"}
 
 def job_finalize(payload: dict) -> dict:
@@ -356,6 +633,10 @@ def job_upscale(payload: dict) -> dict:
 def job_frontal_view(payload: dict) -> dict:
     photo_paths = payload.get("photo_paths") or []
     unique_id = payload.get("unique_id") or uuid.uuid4().hex[:8]
+    audience = payload.get("audience")
+    aud = _normalize_audience(audience)
+    prefix_user = _build_s3_prefix(aud, "realphotorendered", "user-photos")
+    prefix_rendered = _build_s3_prefix(aud, "realphotorendered", "rendered")
     if not photo_paths:
         return {"error": "No input photos"}
     local_photos = []
@@ -363,11 +644,13 @@ def job_frontal_view(payload: dict) -> dict:
         lp = _materialize_input(p, f"frontal_{idx}")
         if lp:
             local_photos.append(lp)
+            resolve_image_url(lp, s3_prefix_override=prefix_user)
     if not local_photos:
         return {"error": "Input file not found"}
     res = generate_frontal_room_from_photos(local_photos, unique_id, 1)
     if res:
-        return {"urls": [res], "message": "Success"}
+        url = resolve_image_url(res, s3_prefix_override=prefix_rendered)
+        return {"urls": [url] if url else [], "message": "Success"} if url else {"error": "Failed to generate images"}
     return {"error": "Failed to generate images"}
 
 def job_generate_details(payload: dict) -> dict:
@@ -375,10 +658,17 @@ def job_generate_details(payload: dict) -> dict:
         image_url = payload.get("image_url")
         moodboard_url = payload.get("moodboard_url")
         furniture_data = payload.get("furniture_data")
+        audience = payload.get("audience")
+
+        aud = _normalize_audience(audience)
+        prefix_detail_user = _build_s3_prefix(aud, "detailrendered", "user-photos")
+        prefix_detail_rendered = _build_s3_prefix(aud, "detailrendered", "rendered")
 
         local_path = _materialize_input(image_url, "detail_src")
         if not local_path or not os.path.exists(local_path):
             return {"error": "Original image not found"}
+        # Store source image under detail user-photos
+        resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
         unique_id = uuid.uuid4().hex[:6]
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
@@ -419,7 +709,7 @@ def job_generate_details(payload: dict) -> dict:
         if not dynamic_styles:
             return {"error": "No styles available"}
 
-        generated_results = []
+        generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
@@ -428,13 +718,21 @@ def job_generate_details(payload: dict) -> dict:
             for i, future in futures:
                 res = future.result()
                 if res:
-                    generated_results.append({"index": i, "url": res})
+                    generated_paths.append({"index": i, "path": res})
 
-        print(f"=== [Detail View] 완료: {len(generated_results)}장 생성됨 ===", flush=True)
-        if not generated_results:
+        print(f"=== [Detail View] 완료: {len(generated_paths)}장 생성됨 ===", flush=True)
+        if not generated_paths:
             return {"error": "Failed to generate images"}
 
-        return {"details": generated_results, "message": "Detail views generated successfully"}
+        details = []
+        for item in generated_paths:
+            url = resolve_image_url(item["path"], s3_prefix_override=prefix_detail_rendered)
+            if url:
+                details.append({"index": item["index"], "url": url})
+        if not details:
+            return {"error": "Failed to generate images"}
+
+        return {"details": details, "message": "Detail views generated successfully"}
     except Exception as e:
         print(f"🔥🔥🔥 [Detail Error] {e}", flush=True)
         return {"error": str(e)}
@@ -444,10 +742,16 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         original_image_url = payload.get("original_image_url")
         style_index = int(payload.get("style_index") or 0)
         furniture_data = payload.get("furniture_data")
+        audience = payload.get("audience")
+
+        aud = _normalize_audience(audience)
+        prefix_detail_user = _build_s3_prefix(aud, "detailrendered", "user-photos")
+        prefix_detail_rendered = _build_s3_prefix(aud, "detailrendered", "rendered")
 
         local_path = _materialize_input(original_image_url, "detail_src")
         if not local_path or not os.path.exists(local_path):
             return {"error": "Original image not found"}
+        resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
         analyzed_items = []
         if furniture_data and len(furniture_data) > 0:
@@ -470,7 +774,8 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         style = dynamic_styles[idx]
         res = generate_detail_view(local_path, style, unique_id, idx + 1)
         if res:
-            return {"url": res, "message": "Success"}
+            url = resolve_image_url(res, s3_prefix_override=prefix_detail_rendered)
+            return {"url": url, "message": "Success"} if url else {"error": "Generation failed"}
         return {"error": "Generation failed"}
     except Exception as e:
         return {"error": str(e)}
@@ -2034,7 +2339,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
                     
                     # [유지] 표준화 함수 (에러 없이 호출)
                     final_path = standardize_image(out_path)
-                    return resolve_image_url(final_path)
+                    return final_path
         return None
 
     except Exception as e:
@@ -2183,7 +2488,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
                             img.close()
                     except Exception:
                         pass
-                    return resolve_image_url(final_path)
+                    return final_path
         try:
             if img:
                 img.close()
@@ -3076,7 +3381,8 @@ def render_room(
     variant: str = Form(...),
     moodboard: UploadFile = File(None),
     dimensions: str = Form(""),
-    placement: str = Form("")
+    placement: str = Form(""),
+    audience: str = Form("")
 ):
     summary_token = None
     try:
@@ -3092,6 +3398,12 @@ def render_room(
             'scale_guide_skipped': 0,
         }
         summary_token = SUMMARY_REF.set(summary)
+
+        aud = _normalize_audience(audience)
+        prefix_main_user = _build_s3_prefix(aud, "mainrendered", "user-photos")
+        prefix_main_empty = _build_s3_prefix(aud, "mainrendered", "empty")
+        prefix_main_rendered = _build_s3_prefix(aud, "mainrendered", "rendered")
+        prefix_customize = _build_s3_prefix(aud, "customize")
         
         timestamp = int(time.time())
         safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
@@ -3128,63 +3440,57 @@ def render_room(
         if style != "Customize":
             safe_room = room.lower().replace(" ", "") 
             safe_style = style.lower().replace(" ", "-").replace("_", "-")
-            
-            # [수정] 폴더 대소문자 무시하고 찾기 로직
-            target_path = os.path.join("assets", safe_room, safe_style)
             assets_dir = None
 
-            # 1. 정확한 경로가 있으면 사용
-            if os.path.exists(target_path):
-                assets_dir = target_path
-            else:
-                # 2. 없으면 대소문자 무시하고 탐색 (assets 폴더 안을 뒤짐)
-                # 예: 코드는 'livingroom'을 찾지만 폴더는 'LivingRoom'이어도 찾게 함
-                root_assets = "assets"
-                if os.path.exists(root_assets):
-                    # Room 찾기
-                    found_room = next((d for d in os.listdir(root_assets) if d.lower() == safe_room), None)
-                    if found_room:
-                        room_path = os.path.join(root_assets, found_room)
-                        # Style 찾기
-                        found_style = next((d for d in os.listdir(room_path) if d.lower() == safe_style), None)
-                        if found_style:
-                            assets_dir = os.path.join(room_path, found_style)
+            # Try local assets unless S3-only mode enabled
+            if not USE_S3_MOODBOARD:
+                target_path = os.path.join("assets", safe_room, safe_style)
+                if os.path.exists(target_path):
+                    assets_dir = target_path
+                else:
+                    root_assets = "assets"
+                    if os.path.exists(root_assets):
+                        found_room = next((d for d in os.listdir(root_assets) if d.lower() == safe_room), None)
+                        if found_room:
+                            room_path = os.path.join(root_assets, found_room)
+                            found_style = next((d for d in os.listdir(room_path) if d.lower() == safe_style), None)
+                            if found_style:
+                                assets_dir = os.path.join(room_path, found_style)
 
-            # 폴더를 찾았으면 파일 검색 시작
-            if assets_dir and os.path.exists(assets_dir):
-                files = sorted(os.listdir(assets_dir))
-                found = False
-                import re 
-                
-                # 파일명 검색 (대소문자 무시 플래그 re.IGNORECASE 추가)
-                pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
-                
-                # 지원할 확장자
-                valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+                if assets_dir and os.path.exists(assets_dir):
+                    files = sorted(os.listdir(assets_dir))
+                    found = False
+                    import re 
+                    pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
+                    valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
 
-                for f in files:
-                    # 확장자 체크 & 번호 매칭 (대소문자 무시)
-                    if f.lower().endswith(valid_exts) and re.search(pattern, f, re.IGNORECASE):
-                        ref_path = os.path.join(assets_dir, f)
-                        # URL 경로 생성 시 역슬래시(\)를 슬래시(/)로 바꿔야 웹에서 안깨짐
-                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
-                        found = True
-                        break
-                
-                # 못 찾았는데 파일이 있다면 첫번째 파일 사용 (확장자 맞는 것 중)
-                if not found:
-                    valid_files = [f for f in files if f.lower().endswith(valid_exts)]
-                    if valid_files:
-                        f = valid_files[0]
-                        ref_path = os.path.join(assets_dir, f)
-                        mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
+                    for f in files:
+                        if f.lower().endswith(valid_exts) and re.search(pattern, f, re.IGNORECASE):
+                            ref_path = os.path.join(assets_dir, f)
+                            mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
+                            found = True
+                            break
+                    
+                    if not found:
+                        valid_files = [f for f in files if f.lower().endswith(valid_exts)]
+                        if valid_files:
+                            f = valid_files[0]
+                            ref_path = os.path.join(assets_dir, f)
+                            mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
+
+            # Fallback to S3 moodboard (or S3-only mode)
+            if USE_S3_MOODBOARD or not ref_path:
+                s3_key = _find_s3_moodboard_key(safe_room, safe_style, variant)
+                if s3_key:
+                    mb_url = _s3_public_url(s3_key)
+                    ref_path = _materialize_input(mb_url, "mb")
         
         if style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
             with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
             ref_path = mb_path
-            mb_url = resolve_image_url(mb_path)
+            mb_url = resolve_image_url(mb_path, s3_prefix_override=prefix_customize)
 
         furniture_specs_text = None
         full_analyzed_data = [] 
@@ -3314,7 +3620,7 @@ def render_room(
                     windows_present=windows_present,
                     protected_boxes=protected_boxes,
                 )
-                if res: return resolve_image_url(res)
+                if res: return res
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
             return None
 
@@ -3341,24 +3647,28 @@ def render_room(
                 logger.warning("WARNING: %s | TextRead OK=%s FAIL=%s", '; '.join(reasons), ok, fail)
             else:
                 logger.info("OK: TextRead OK=%s FAIL=%s", ok, fail)
-        final_before_url = resolve_image_url(step1_img)
+        final_before_url = resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)
         if not generated_results:
-            generated_results.append(final_before_url)
+            generated_results.append(step1_img)
 
         scale_guide_url = None
         try:
             if scale_guide_path and os.path.exists(scale_guide_path):
-                scale_guide_url = resolve_image_url(scale_guide_path)
+                scale_guide_url = resolve_image_url(scale_guide_path, s3_prefix_override=prefix_main_rendered)
         except Exception:
             pass
+
+        result_urls = [resolve_image_url(p, s3_prefix_override=prefix_main_rendered) for p in generated_results if p]
+        if not result_urls and step1_img:
+            result_urls = [resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)]
 
         if summary_token is not None:
             SUMMARY_REF.reset(summary_token)
         return JSONResponse(content={
-            "original_url": resolve_image_url(std_path),
+            "original_url": resolve_image_url(std_path, s3_prefix_override=prefix_main_user),
             "empty_room_url": final_before_url,
-            "result_url": generated_results[0],
-            "result_urls": generated_results,
+            "result_url": result_urls[0] if result_urls else None,
+            "result_urls": result_urls,
             "moodboard_url": mb_url,
             "scale_guide_url": scale_guide_url,   # ✅ 추가
             "furniture_data": full_analyzed_data,
@@ -3379,6 +3689,45 @@ class UpscaleRequest(BaseModel): image_url: str
 
 class FinalizeRequest(BaseModel):
     image_url: str
+
+class InternalRenderRequest(BaseModel):
+    image_url: str
+    room: str
+    style: str
+    variant: str
+    moodboard_url: Optional[str] = None
+    dimensions: Optional[str] = ""
+    placement: Optional[str] = ""
+    include_details: bool = False
+
+class PresetRenderRequest(BaseModel):
+    image_url: str
+    preset_id: Optional[str] = None
+    room: Optional[str] = None
+    style: Optional[str] = None
+    variant: Optional[str] = None
+    dimensions: Optional[str] = ""
+    placement: Optional[str] = ""
+    include_details: bool = True
+
+class CartItem(BaseModel):
+    id: str
+    category: str
+    image_url: str
+    qty: int = 1
+    dims_mm: Optional[Dict[str, Any]] = None
+    priority: Optional[int] = 3
+    name: Optional[str] = None
+
+class CartRenderRequest(BaseModel):
+    image_url: str
+    items: List[CartItem]
+    room: Optional[str] = None
+    style: Optional[str] = None
+    variant: Optional[str] = None
+    dimensions: Optional[str] = ""
+    placement: Optional[str] = ""
+    include_details: bool = True
 
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str):
@@ -3411,7 +3760,8 @@ def render_room_async(
     variant: str = Form(...),
     moodboard: UploadFile = File(None),
     dimensions: str = Form(""),
-    placement: str = Form("")
+    placement: str = Form(""),
+    audience: str = Form("")
 ):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
@@ -3431,8 +3781,9 @@ def render_room_async(
             shutil.copyfileobj(moodboard.file, buffer)
 
     try:
-        file_ref = resolve_image_url(raw_path)
-        mood_ref = resolve_image_url(mood_path) if mood_path else None
+        aud = _normalize_audience(audience)
+        file_ref = resolve_image_url(raw_path, s3_prefix_override=_build_s3_prefix(aud, "mainrendered", "user-photos"))
+        mood_ref = resolve_image_url(mood_path, s3_prefix_override=_build_s3_prefix(aud, "customize")) if mood_path else None
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -3444,6 +3795,7 @@ def render_room_async(
         "variant": variant,
         "dimensions": dimensions,
         "placement": placement,
+        "audience": audience,
     }
     job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -3456,7 +3808,8 @@ def generate_image_edit_async(
     input_photos: List[UploadFile] = File(...),
     instructions: str = Form(...),
     mode: str = Form(...),
-    mask: UploadFile = File(None)
+    mask: UploadFile = File(None),
+    audience: str = Form("")
 ):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
@@ -3480,8 +3833,11 @@ def generate_image_edit_async(
 
 
     try:
-        photo_refs = [resolve_image_url(p) or p for p in saved_photo_paths]
-        mask_ref = resolve_image_url(mask_path) if mask_path else None
+        aud = _normalize_audience(audience)
+        category = "editrendered" if mode == "edit" else "decorrendered"
+        prefix_user = _build_s3_prefix(aud, category, "user-photos")
+        photo_refs = [resolve_image_url(p, s3_prefix_override=prefix_user) or p for p in saved_photo_paths]
+        mask_ref = resolve_image_url(mask_path, s3_prefix_override=prefix_user) if mask_path else None
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -3491,6 +3847,7 @@ def generate_image_edit_async(
         "mode": mode,
         "unique_id": unique_id,
         "mask_path": mask_ref or mask_path,
+        "audience": audience,
     }
     job, err = _enqueue_job(job_image_edit, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -3500,7 +3857,8 @@ def generate_image_edit_async(
 @app.post("/async/generate-frontal-view")
 @async_wrap
 def generate_frontal_view_async(
-    input_photos: List[UploadFile] = File(...)
+    input_photos: List[UploadFile] = File(...),
+    audience: str = Form("")
 ):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
@@ -3516,10 +3874,12 @@ def generate_frontal_view_async(
         saved_photo_paths.append(path)
 
     try:
-        photo_refs = [resolve_image_url(p) or p for p in saved_photo_paths]
+        aud = _normalize_audience(audience)
+        prefix_user = _build_s3_prefix(aud, "realphotorendered", "user-photos")
+        photo_refs = [resolve_image_url(p, s3_prefix_override=prefix_user) or p for p in saved_photo_paths]
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-    payload = {"photo_paths": photo_refs, "unique_id": unique_id}
+    payload = {"photo_paths": photo_refs, "unique_id": unique_id, "audience": audience}
 
     job, err = _enqueue_job(job_frontal_view, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -3545,6 +3905,146 @@ def finalize_download_async(req: FinalizeRequest):
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/api/internal/render")
+@async_wrap
+def api_internal_render(req: InternalRenderRequest, request: Request):
+    _require_role(request, {"internal"})
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="image_url is required")
+    payload = {
+        "file_path": req.image_url,
+        "moodboard_path": req.moodboard_url,
+        "room": req.room,
+        "style": req.style,
+        "variant": req.variant,
+        "dimensions": req.dimensions or "",
+        "placement": req.placement or "",
+        "audience": "internal",
+    }
+    if req.include_details:
+        job_payload = {"render": payload, "include_details": True}
+        job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
+    else:
+        job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
+@app.post("/api/external/render/preset")
+@async_wrap
+def api_external_render_preset(req: PresetRenderRequest, request: Request):
+    _require_role(request, {"external"})
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="image_url is required")
+
+    preset_room = None
+    preset_style = None
+    preset_variant = None
+    preset_dims = ""
+    preset_placement = ""
+    if req.preset_id:
+        preset_map = _load_preset_map()
+        preset = preset_map.get(req.preset_id)
+        if not preset:
+            raise HTTPException(status_code=400, detail="Unknown preset_id")
+        preset_room = preset.get("room") or preset.get("room_type") or preset.get("room_name")
+        preset_style = preset.get("style")
+        preset_variant = preset.get("variant") or preset.get("variant_id") or preset.get("variant_index")
+        preset_dims = preset.get("dimensions") or ""
+        preset_placement = preset.get("placement") or ""
+    room = preset_room or req.room
+    style = preset_style or req.style
+    variant = str(preset_variant or req.variant or "1")
+    if not room or not style:
+        raise HTTPException(status_code=400, detail="room/style required or preset_id invalid")
+
+    placement_parts = []
+    if preset_placement:
+        placement_parts.append(str(preset_placement))
+    if req.placement:
+        placement_parts.append(req.placement)
+    placement = "\n".join([p for p in placement_parts if p])
+    dimensions = req.dimensions or preset_dims or ""
+
+    payload = {
+        "file_path": req.image_url,
+        "moodboard_path": None,
+        "room": room,
+        "style": style,
+        "variant": variant,
+        "dimensions": dimensions,
+        "placement": placement,
+        "audience": "external",
+    }
+    if req.include_details:
+        job_payload = {
+            "render": payload,
+            "include_details": True,
+            "extra": {"preset_id": req.preset_id, "resolved": {"room": room, "style": style, "variant": variant}},
+        }
+        job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
+    else:
+        job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued", "resolved": {"room": room, "style": style, "variant": variant}})
+
+@app.post("/api/external/render/cart")
+@async_wrap
+def api_external_render_cart(req: CartRenderRequest, request: Request):
+    _require_role(request, {"external"})
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="image_url is required")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items are required")
+
+    items = [it.dict() for it in req.items]
+    kept, dropped = _apply_cart_limits(items)
+    if not kept:
+        raise HTTPException(status_code=400, detail="No items after applying limits")
+
+    unique_id = uuid.uuid4().hex[:8]
+    moodboard_path = _build_cart_moodboard(kept, unique_id)
+    try:
+        moodboard_ref = resolve_image_url(moodboard_path, s3_prefix_override=_build_s3_prefix("external", "customize"))
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    placement_parts = []
+    if req.style:
+        placement_parts.append(f"STYLE: {req.style}")
+    if req.placement:
+        placement_parts.append(req.placement)
+    placement_parts.append(_build_cart_summary(kept))
+    placement = "\n".join([p for p in placement_parts if p])
+
+    room = req.room or "livingroom"
+    payload = {
+        "file_path": req.image_url,
+        "moodboard_path": moodboard_ref or moodboard_path,
+        "room": room,
+        "style": "Customize",
+        "variant": str(req.variant or "1"),
+        "dimensions": req.dimensions or "",
+        "placement": placement,
+        "audience": "external",
+    }
+    job_payload = {
+        "render": payload,
+        "include_details": bool(req.include_details),
+        "extra": {"cart_kept": kept, "cart_dropped": dropped},
+    }
+    job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
 
 def finalize_download(req: FinalizeRequest):
     try:
@@ -3578,8 +4078,9 @@ def finalize_download(req: FinalizeRequest):
             final_furnished_path = future_furnished.result()
             final_empty_path = future_empty.result()
 
-        furnished_url = resolve_image_url(final_furnished_path)
-        empty_url = resolve_image_url(final_empty_path)
+        base_prefix = _s3_prefix_from_url(req.image_url)
+        furnished_url = resolve_image_url(final_furnished_path, s3_prefix_override=base_prefix)
+        empty_url = resolve_image_url(final_empty_path, s3_prefix_override=base_prefix)
         return JSONResponse(content={
             "upscaled_furnished": furnished_url,
             "upscaled_empty": empty_url,
@@ -3597,7 +4098,8 @@ def upscale_and_download(req: UpscaleRequest):
         if not local_path or not os.path.exists(local_path):
             return JSONResponse(content={"error": "File not found"}, status_code=404)
         final_path = call_magnific_api(local_path, uuid.uuid4().hex[:8], time.time())
-        up_url = resolve_image_url(final_path)
+        base_prefix = _s3_prefix_from_url(req.image_url)
+        up_url = resolve_image_url(final_path, s3_prefix_override=base_prefix)
         return JSONResponse(content={"upscaled_url": up_url, "message": "Success"})
     except Exception as e: return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -3723,7 +4225,7 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
                             img.close()
                     except Exception:
                         pass
-                    return resolve_image_url(path)
+                    return path
         try:
             if img:
                 img.close()
@@ -3743,12 +4245,14 @@ class DetailRequest(BaseModel):
     image_url: str
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None 
+    audience: Optional[str] = None
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None 
+    audience: Optional[str] = None
 
 @app.post("/regenerate-single-detail")
 @async_wrap
@@ -3760,6 +4264,7 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
         "style_index": req.style_index,
         "furniture_data": req.furniture_data,
         "moodboard_url": req.moodboard_url,
+        "audience": req.audience,
     }
     job, err = _enqueue_job(job_regenerate_single_detail, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -3777,6 +4282,7 @@ def generate_details_endpoint(req: DetailRequest):
         "image_url": req.image_url,
         "moodboard_url": req.moodboard_url,
         "furniture_data": req.furniture_data,
+        "audience": req.audience,
     }
     job, err = _enqueue_job(job_generate_details, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -3848,7 +4354,7 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
                             img.close()
                     except Exception:
                         pass
-                    return resolve_image_url(path)
+                    return path
         try:
             if img:
                 img.close()
@@ -3866,7 +4372,10 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
 
 @app.post("/generate-moodboard-options")
 @async_wrap
-def generate_moodboard_options(file: UploadFile = File(...)):
+def generate_moodboard_options(
+    file: UploadFile = File(...),
+    audience: str = Form("")
+):
     try:
         unique_id = uuid.uuid4().hex[:8]
         timestamp = int(time.time())
@@ -3874,6 +4383,11 @@ def generate_moodboard_options(file: UploadFile = File(...)):
         raw_path = os.path.join("outputs", f"ref_room_{timestamp}_{unique_id}_{safe_name}")
         
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
+
+        aud = _normalize_audience(audience)
+        prefix_customize = _build_s3_prefix(aud, "customize")
+        # Store the input reference image for backup/auditing.
+        resolve_image_url(raw_path, s3_prefix_override=prefix_customize)
         
         log_section(f"[Moodboard Gen] Starting 3 variations for {unique_id}")
 
@@ -3892,7 +4406,10 @@ def generate_moodboard_options(file: UploadFile = File(...)):
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(3)]
             for future in futures:
                 res = future.result()
-                if res: generated_results.append(res)
+                if res:
+                    url = resolve_image_url(res, s3_prefix_override=prefix_customize)
+                    if url:
+                        generated_results.append(url)
         
         if not generated_results:
             return JSONResponse(content={"error": "Failed to generate moodboards"}, status_code=500)
