@@ -37,6 +37,7 @@ from contextvars import ContextVar
 from redis import Redis
 from rq import Queue
 from rq.job import Job
+from rq import Retry
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -46,8 +47,8 @@ LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
 SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
-GEMINI_MAX_CONCURRENCY_ANALYSIS = int(os.getenv("GEMINI_MAX_CONCURRENCY_ANALYSIS", "30"))
-GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "5"))
+GEMINI_MAX_CONCURRENCY_ANALYSIS = int(os.getenv("GEMINI_MAX_CONCURRENCY_ANALYSIS", "12"))
+GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "4"))
 GEMINI_SEMAPHORE_ANALYSIS = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_ANALYSIS))
 GEMINI_SEMAPHORE_GEN = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_GEN))
 
@@ -101,6 +102,8 @@ RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "3600"))
+RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
+RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
 AWS_REGION = os.getenv("AWS_REGION", "").strip()
 S3_PREFIX = os.getenv("S3_PREFIX", "").strip()
@@ -471,7 +474,33 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
     q = _get_rq_queue(queue_name)
     if not q:
         return None, "REDIS_URL not configured"
-    job = q.enqueue(func, *args, **kwargs, job_timeout=RQ_JOB_TIMEOUT, result_ttl=RQ_RESULT_TTL)
+    retry = None
+    try:
+        if RQ_RETRY_MAX > 0:
+            intervals = []
+            if RQ_RETRY_INTERVALS:
+                for part in RQ_RETRY_INTERVALS.split(","):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    try:
+                        intervals.append(int(part))
+                    except Exception:
+                        continue
+            if intervals:
+                retry = Retry(max=RQ_RETRY_MAX, interval=intervals)
+            else:
+                retry = Retry(max=RQ_RETRY_MAX)
+    except Exception:
+        retry = None
+    job = q.enqueue(
+        func,
+        *args,
+        **kwargs,
+        job_timeout=RQ_JOB_TIMEOUT,
+        result_ttl=RQ_RESULT_TTL,
+        retry=retry,
+    )
     return job, None
 
 def _fetch_job(job_id: str):
@@ -757,7 +786,7 @@ def job_generate_details(payload: dict) -> dict:
                     detected_items = detect_furniture_boxes(target_analysis_path)
                     print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
 
-                    with ThreadPoolExecutor(max_workers=10) as executor:
+                    with ThreadPoolExecutor(max_workers=4) as executor:
                         futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
                         analyzed_items = [f.result() for f in futures]
                 except Exception as e:
@@ -772,7 +801,7 @@ def job_generate_details(payload: dict) -> dict:
 
         generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1)))
@@ -3442,7 +3471,7 @@ def render_room(
                 if item_refs:
                     if not LOG_BRIEF:
                         print(f">> [Global Analysis] Using direct item references: {len(item_refs)}", flush=True)
-                    with ThreadPoolExecutor(max_workers=30) as executor:
+                    with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = []
                         for idx, meta in enumerate(item_refs):
                             futures.append(
@@ -3497,7 +3526,7 @@ def render_room(
                         detected.extend(detect_furniture_boxes(rp))
                     if not LOG_BRIEF:
                         print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
-                    with ThreadPoolExecutor(max_workers=30) as executor:
+                    with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = []
                         for idx, item in enumerate(detected):
                             rp = ref_paths[min(idx, len(ref_paths) - 1)]
@@ -3619,7 +3648,7 @@ def render_room(
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(3)]
             for future in futures:
                 res = future.result()
@@ -4108,7 +4137,7 @@ def finalize_download(req: FinalizeRequest):
         final_furnished_path = ""
 
         # 업스케일링도 5-worker로 병렬 처리 (동시 요청 처리 여유)
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             print(">> [Step 1] Upscaling Furnished in parallel...", flush=True)
             future_furnished = executor.submit(call_magnific_api, local_path, unique_id + "_upscale_furnished", start_time)
 
@@ -4446,7 +4475,7 @@ def generate_moodboard_options(
         
         generated_results = []
         
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(3)]
             for future in futures:
                 res = future.result()

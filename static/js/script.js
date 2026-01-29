@@ -1604,7 +1604,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (st.status === "COMPLETED" && st.result_url) {
                         clearInterval(iv);
                         if (preview) preview.src = st.result_url;
-                        if (download) download.href = st.result_url;
+                        if (download) download.href = `/download?url=${encodeURIComponent(st.result_url)}`;
                         if (resultWrap) resultWrap.classList.remove('hidden');
                         resolve();
                     }

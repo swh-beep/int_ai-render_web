@@ -416,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const modalMsg = $('modal-msg');
             modalContent?.classList.remove('preview-wide');
             modalMsg.innerHTML = `<video src="${finalUrl}" controls style="width:100%; border-radius:8px;"></video>
-                                  <a href="${finalUrl}" download class="glow-btn burgundy" style="display:block; margin-top:15px; text-decoration:none;">DOWNLOAD FINAL VIDEO</a>`;
+                                  <a href="/download?url=${encodeURIComponent(finalUrl)}" download class="glow-btn burgundy" style="display:block; margin-top:15px; text-decoration:none;">DOWNLOAD FINAL VIDEO</a>`;
             $('modal-title').textContent = "Video Exported Successfully";
             $('modal-ok-btn').onclick = () => globalModal.classList.add('hidden');
             globalModal.classList.remove('hidden');
