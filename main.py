@@ -81,6 +81,8 @@ MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/a
 TOTAL_TIMEOUT_LIMIT = 300 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "default").strip() or "default"
+RQ_QUEUE_RENDER = os.getenv("RQ_QUEUE_RENDER", RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
+RQ_QUEUE_UPSCALE = os.getenv("RQ_QUEUE_UPSCALE", RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "3600"))
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
@@ -153,14 +155,15 @@ def _get_redis_conn():
     except Exception:
         return None
 
-def _get_rq_queue():
+def _get_rq_queue(queue_name: str | None = None):
     conn = _get_redis_conn()
     if not conn:
         return None
-    return Queue(RQ_QUEUE_NAME, connection=conn, default_timeout=RQ_JOB_TIMEOUT, default_result_ttl=RQ_RESULT_TTL)
+    name = (queue_name or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
+    return Queue(name, connection=conn, default_timeout=RQ_JOB_TIMEOUT, default_result_ttl=RQ_RESULT_TTL)
 
-def _enqueue_job(func, *args, **kwargs):
-    q = _get_rq_queue()
+def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
+    q = _get_rq_queue(queue_name)
     if not q:
         return None, "REDIS_URL not configured"
     job = q.enqueue(func, *args, **kwargs, job_timeout=RQ_JOB_TIMEOUT, result_ttl=RQ_RESULT_TTL)
@@ -1068,6 +1071,171 @@ def detect_back_wall_span_norm(empty_room_path: str) -> tuple:
     except Exception:
         pass
     return (0.0, 1.0)
+
+def detect_windows_present(room_path: str) -> bool:
+    """
+    Returns True only when windows/glass exterior openings are clearly visible.
+    If unsure, returns False.
+    """
+    try:
+        with Image.open(room_path) as img:
+            img.thumbnail((1024, 1024))
+            prompt = (
+                "TASK: WINDOW VISIBILITY CHECK.\n"
+                "Answer ONLY with YES or NO.\n"
+                "Question: Are any windows or glass exterior openings clearly visible in this room image?\n"
+                "If uncertain, answer NO."
+            )
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 15}, {})
+            txt = (res.text if res and hasattr(res, "text") else "").strip().lower()
+            if txt.startswith("yes"):
+                return True
+            if txt.startswith("no"):
+                return False
+    except Exception:
+        pass
+    return False
+
+def detect_protected_boxes(room_path: str, include_windows: bool = False) -> List[Dict[str, float]]:
+    """
+    Returns list of protected structural element boxes (normalized 0..1).
+    These areas will be locked to the empty room to prevent structural edits.
+    """
+    try:
+        with Image.open(room_path) as img:
+            img.thumbnail((1280, 1280))
+            prompt = (
+                "TASK: IDENTIFY NON-EDITABLE STRUCTURAL ELEMENTS.\n"
+                "Return STRICT JSON ONLY:\n"
+                "{\"boxes\":[{\"label\":\"kitchen cabinet\",\"x1\":0.0,\"y1\":0.0,\"x2\":1.0,\"y2\":1.0}]}\n"
+                "Include built-in cabinetry, kitchen units, fixed appliances, built-in closets, fixed shelving, doors, columns, beams, fireplaces, radiators.\n"
+                + ("Include windows/window frames.\n" if include_windows else "Exclude windows/window frames.\n")
+                + "If nothing found, return {\"boxes\":[]}.\n"
+                "All coordinates must be normalized 0..1."
+            )
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
+            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+            boxes = []
+            if isinstance(obj, dict):
+                for b in obj.get("boxes") or []:
+                    try:
+                        x1 = float(b.get("x1"))
+                        y1 = float(b.get("y1"))
+                        x2 = float(b.get("x2"))
+                        y2 = float(b.get("y2"))
+                        if x2 <= x1 or y2 <= y1:
+                            continue
+                        x1 = max(0.0, min(1.0, x1))
+                        y1 = max(0.0, min(1.0, y1))
+                        x2 = max(0.0, min(1.0, x2))
+                        y2 = max(0.0, min(1.0, y2))
+                        boxes.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+                    except Exception:
+                        continue
+            return boxes[:30]
+    except Exception:
+        pass
+    return []
+
+def detect_added_decor_boxes(empty_path: str, gen_path: str) -> List[Dict[str, float]]:
+    """
+    Find newly added movable items (decor, furniture, wall art) in generated image
+    compared to the empty room. Used to avoid clipping them when protecting structure.
+    """
+    try:
+        with Image.open(empty_path) as empty_img, Image.open(gen_path) as gen_img:
+            empty_img.thumbnail((1280, 1280))
+            gen_img.thumbnail((1280, 1280))
+            prompt = (
+                "TASK: FIND NEWLY ADDED OBJECTS.\n"
+                "You are given two images: (1) Empty Room, (2) Generated Room with furniture.\n"
+                "Return STRICT JSON ONLY:\n"
+                "{\"boxes\":[{\"label\":\"mirror\",\"x1\":0.0,\"y1\":0.0,\"x2\":1.0,\"y2\":1.0}]}\n"
+                "Include only NEW movable items added in the generated image (furniture, decor, wall art, curtains, plants, lamps, tables).\n"
+                "Exclude structural elements: walls, ceiling, floor, built-ins, doors, columns, beams, windows.\n"
+                "If nothing found, return {\"boxes\":[]}.\n"
+                "All coordinates must be normalized 0..1."
+            )
+            res = call_gemini_with_failover(
+                ANALYSIS_MODEL_NAME,
+                ["Empty Room:", empty_img, "Generated Room:", gen_img, prompt],
+                {"timeout": 20},
+                {},
+            )
+            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+            boxes = []
+            if isinstance(obj, dict):
+                for b in obj.get("boxes") or []:
+                    try:
+                        x1 = float(b.get("x1"))
+                        y1 = float(b.get("y1"))
+                        x2 = float(b.get("x2"))
+                        y2 = float(b.get("y2"))
+                        if x2 <= x1 or y2 <= y1:
+                            continue
+                        x1 = max(0.0, min(1.0, x1))
+                        y1 = max(0.0, min(1.0, y1))
+                        x2 = max(0.0, min(1.0, x2))
+                        y2 = max(0.0, min(1.0, y2))
+                        boxes.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+                    except Exception:
+                        continue
+            return boxes[:40]
+    except Exception:
+        pass
+    return []
+
+def apply_structure_protection(
+    base_path: str,
+    gen_path: str,
+    protected_boxes: List[Dict[str, float]],
+    keep_boxes: Optional[List[Dict[str, float]]] = None,
+) -> str:
+    if not protected_boxes:
+        return gen_path
+    try:
+        with Image.open(gen_path) as gen_img, Image.open(base_path) as base_img:
+            gen = gen_img.convert("RGB")
+            base = base_img.convert("RGB")
+            if base.size != gen.size:
+                base = base.resize(gen.size, Image.Resampling.LANCZOS)
+
+            mask = Image.new("L", gen.size, 255)
+            w, h = gen.size
+            pad = max(2, int(min(w, h) * 0.01))
+            draw = ImageDraw.Draw(mask)
+            for b in protected_boxes:
+                x1 = int(b.get("x1", 0.0) * w) - pad
+                y1 = int(b.get("y1", 0.0) * h) - pad
+                x2 = int(b.get("x2", 1.0) * w) + pad
+                y2 = int(b.get("y2", 1.0) * h) + pad
+                x1 = max(0, min(w - 1, x1))
+                y1 = max(0, min(h - 1, y1))
+                x2 = max(0, min(w, x2))
+                y2 = max(0, min(h, y2))
+                if x2 > x1 and y2 > y1:
+                    draw.rectangle([x1, y1, x2, y2], fill=0)
+
+            if keep_boxes:
+                keep_pad = max(2, int(min(w, h) * 0.005))
+                for b in keep_boxes:
+                    x1 = int(b.get("x1", 0.0) * w) - keep_pad
+                    y1 = int(b.get("y1", 0.0) * h) - keep_pad
+                    x2 = int(b.get("x2", 1.0) * w) + keep_pad
+                    y2 = int(b.get("y2", 1.0) * h) + keep_pad
+                    x1 = max(0, min(w - 1, x1))
+                    y1 = max(0, min(h - 1, y1))
+                    x2 = max(0, min(w, x2))
+                    y2 = max(0, min(h, y2))
+                    if x2 > x1 and y2 > y1:
+                        draw.rectangle([x1, y1, x2, y2], fill=255)
+
+            mask = mask.filter(ImageFilter.GaussianBlur(radius=max(1, int(min(w, h) * 0.002))))
+            composited = Image.composite(gen, base, mask)
+            composited.save(gen_path)
+    except Exception as e:
+        print(f"!! Structure protection failed: {e}", flush=True)
+    return gen_path
 
 def _crop_ref_item_image(ref_path: str, box_2d: list, out_path: str):
     try:
@@ -2105,12 +2273,20 @@ def generate_furnished_room(
     size_hierarchy=None,
     start_time=0,
     room_planes=None,
+    windows_present=None,
+    protected_boxes=None,
 ):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     room_img = None
     extra_imgs = []
     try:
         room_img = Image.open(room_path)
+        if windows_present is None:
+            windows_present = detect_windows_present(room_path)
+        try:
+            logger.info(f"[WindowCheck] present={bool(windows_present)} path={room_path}")
+        except Exception:
+            pass
         
         # [NEW] 이미지 비율 계산 (가로형/세로형 판단)
         width, height = room_img.size
@@ -2422,6 +2598,20 @@ def generate_furnished_room(
         except Exception:
             size_hierarchy_hint = ""
 
+        window_context = ""
+        if windows_present:
+            window_context = (
+                "<WINDOWS DETECTED: YES>\n"
+                "Curtains are the ONLY allowed extra element even if not listed.\n"
+                "Add minimal floor-to-ceiling **Sheer White Chiffon Curtains** ONLY along the vertical edges of the visible window glass.\n"
+                "Do NOT cover solid walls or doors. Keep coverage to outer 10-15% of the glass.\n"
+                "If any window is unclear or not visible, do NOT add curtains there.\n\n"
+            )
+        else:
+            window_context = (
+                "<WINDOWS DETECTED: NO>\n"
+                "Do NOT add curtains or blinds. Do NOT add or invent windows.\n\n"
+            )
 
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
@@ -2439,6 +2629,8 @@ def generate_furnished_room(
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
             "3. **STYLE:** Match the Reference Moodboard style.\n"
             "4. **ONLY LISTED ITEMS:** Render only the listed items. Do NOT add extra furniture or swap designs.\n"
+
+            f"{window_context}"
             
             "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and (optionally) a W/D/H SCALE GUIDE IMAGE. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
@@ -2573,7 +2765,15 @@ def generate_furnished_room(
                                 return None
                         except Exception:
                             return None
-                        return standardize_image_to_reference_canvas(path, room_path)
+                        final_path = standardize_image_to_reference_canvas(path, room_path)
+                        if protected_boxes:
+                            keep_boxes = detect_added_decor_boxes(room_path, final_path)
+                            try:
+                                logger.info(f"[KeepBoxes] count={len(keep_boxes)}")
+                            except Exception:
+                                pass
+                            final_path = apply_structure_protection(room_path, final_path, protected_boxes, keep_boxes=keep_boxes)
+                        return final_path
             return None
 
         max_attempts = 3
@@ -2872,11 +3072,19 @@ def render_room(
 
         # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
         room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
-        room_planes = detect_room_planes_norm(step1_img) if step1_img else None
+        room_planes = None
+        if SCALE_CHECK and step1_img:
+            room_planes = detect_room_planes_norm(step1_img)
         if room_planes:
             wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
         else:
             wall_span_norm = detect_back_wall_span_norm(step1_img) if step1_img else (0.0, 1.0)
+        windows_present = detect_windows_present(step1_img) if step1_img else False
+        protected_boxes = detect_protected_boxes(step1_img, include_windows=not windows_present) if step1_img else []
+        try:
+            logger.info(f"[ProtectedBoxes] count={len(protected_boxes)} windows_present={windows_present}")
+        except Exception:
+            pass
 
         furniture_specs_json = None
         primary_item = None
@@ -3072,6 +3280,8 @@ def render_room(
                     size_hierarchy=size_hierarchy,
                     start_time=start_time,
                     room_planes=room_planes,
+                    windows_present=windows_present,
+                    protected_boxes=protected_boxes,
                 )
                 if res: return resolve_image_url(res)
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
@@ -3204,7 +3414,7 @@ def render_room_async(
         "dimensions": dimensions,
         "placement": placement,
     }
-    job, err = _enqueue_job(job_render, payload)
+    job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
@@ -3251,7 +3461,7 @@ def generate_image_edit_async(
         "unique_id": unique_id,
         "mask_path": mask_ref or mask_path,
     }
-    job, err = _enqueue_job(job_image_edit, payload)
+    job, err = _enqueue_job(job_image_edit, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
@@ -3280,7 +3490,7 @@ def generate_frontal_view_async(
         return JSONResponse(content={"error": str(e)}, status_code=500)
     payload = {"photo_paths": photo_refs, "unique_id": unique_id}
 
-    job, err = _enqueue_job(job_frontal_view, payload)
+    job, err = _enqueue_job(job_frontal_view, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
@@ -3290,7 +3500,7 @@ def generate_frontal_view_async(
 def upscale_and_download_async(req: UpscaleRequest):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
-    job, err = _enqueue_job(job_upscale, {"image_url": req.image_url})
+    job, err = _enqueue_job(job_upscale, {"image_url": req.image_url}, queue_name=RQ_QUEUE_UPSCALE)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
@@ -3300,7 +3510,7 @@ def upscale_and_download_async(req: UpscaleRequest):
 def finalize_download_async(req: FinalizeRequest):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
-    job, err = _enqueue_job(job_finalize, {"image_url": req.image_url})
+    job, err = _enqueue_job(job_finalize, {"image_url": req.image_url}, queue_name=RQ_QUEUE_UPSCALE)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
