@@ -16,7 +16,7 @@ import boto3
 import mimetypes
 from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from dotenv import load_dotenv
@@ -286,6 +286,23 @@ def resolve_image_url(local_path: Optional[str], s3_prefix_override: Optional[st
     if os.path.exists(local_path):
         return f"/outputs/{os.path.basename(local_path)}"
     return None
+
+def _is_allowed_download_url(url: str, request: Request) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = (parsed.netloc or "").lower()
+        req_host = (request.url.hostname or "").lower()
+        if host == req_host and host:
+            return True
+        if S3_BUCKET and S3_BUCKET.lower() in host:
+            return True
+        if host.endswith("amazonaws.com"):
+            return True
+    except Exception:
+        return False
+    return False
 
 def _get_redis_conn():
     if not REDIS_URL:
@@ -3707,6 +3724,36 @@ class CartRenderRequest(BaseModel):
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
     include_details: bool = True
+
+@app.get("/download")
+def download_proxy(url: str, request: Request):
+    if not url:
+        return JSONResponse(content={"error": "url is required"}, status_code=400)
+
+    if url.startswith("/outputs/") or url.startswith("/assets/"):
+        rel = url.lstrip("/")
+        safe_path = os.path.join(*rel.split("/"))
+        if not os.path.exists(safe_path):
+            return JSONResponse(content={"error": "File not found"}, status_code=404)
+        filename = os.path.basename(safe_path) or "download"
+        return FileResponse(safe_path, filename=filename)
+
+    if not _is_allowed_download_url(url, request):
+        return JSONResponse(content={"error": "URL not allowed"}, status_code=403)
+
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=502)
+
+    if not resp.ok:
+        return JSONResponse(content={"error": f"Upstream error ({resp.status_code})"}, status_code=resp.status_code)
+
+    content_type = resp.headers.get("content-type") or "application/octet-stream"
+    parsed = urlparse(url)
+    filename = os.path.basename(parsed.path) or "download"
+    headers = {"Content-Disposition": f'attachment; filename=\"{filename}\"'}
+    return StreamingResponse(resp.iter_content(chunk_size=1024 * 1024), media_type=content_type, headers=headers)
 
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str):

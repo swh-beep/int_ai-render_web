@@ -1041,7 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function downloadFile(url, prefix) {
         try {
             const link = document.createElement("a");
-            link.href = url;
+            link.href = `/download?url=${encodeURIComponent(url)}`;
             link.download = `${prefix}_${Date.now()}.jpg`;
             document.body.appendChild(link);
             link.click();
@@ -1360,7 +1360,7 @@ async function upscaleAndDownload(imgUrl, filenamePrefix) {
         if (data.upscaled_url) {
             console.log("??Upscale success:", data.upscaled_url);
             const link = document.createElement("a");
-            link.href = data.upscaled_url;
+            link.href = `/download?url=${encodeURIComponent(data.upscaled_url)}`;
             link.download = `${filenamePrefix}_${Date.now()}.jpg`;
             document.body.appendChild(link);
             link.click();

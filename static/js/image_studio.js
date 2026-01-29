@@ -354,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         downBtn.onclick = (e) => {
                             e.stopPropagation();
                             const link = document.createElement('a');
-                            link.href = url;
+                            link.href = `/download?url=${encodeURIComponent(url)}`;
                             link.download = `Result_${this.id}_${Date.now()}_${idx}.png`;
                             document.body.appendChild(link);
                             link.click();
