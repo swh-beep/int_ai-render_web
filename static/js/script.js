@@ -1142,9 +1142,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify(payload)
                 });
 
-                const data = await res.json();
+                const job = await res.json();
+                if (!res.ok) {
+                    throw new Error(job.error || `Server Error (${res.status})`);
+                }
+                if (!job.job_id) throw new Error('Job queue failed');
 
-                if (res.ok && data.details && data.details.length > 0) {
+                const data = await pollJob(job.job_id);
+
+                if (data.details && data.details.length > 0) {
                     const detailUrls = data.details.map(d => d.url);
 
                     data.details.forEach(item => {
@@ -1269,8 +1275,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     furniture_data: currentFurnitureData
                 })
             });
-            const data = await res.json();
-            if (res.ok && data.url) {
+            const job = await res.json();
+            if (!res.ok) {
+                throw new Error(job.error || `Server Error (${res.status})`);
+            }
+            if (!job.job_id) throw new Error('Job queue failed');
+
+            const data = await pollJob(job.job_id);
+            if (data.url) {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
                 imgElement.onclick = () => openLightbox(data.url, [data.url], 0);

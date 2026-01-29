@@ -80,9 +80,25 @@ MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
 TOTAL_TIMEOUT_LIMIT = 300 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
-RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "default").strip() or "default"
-RQ_QUEUE_RENDER = os.getenv("RQ_QUEUE_RENDER", RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
-RQ_QUEUE_UPSCALE = os.getenv("RQ_QUEUE_UPSCALE", RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
+
+def _split_queue_names(val: str) -> List[str]:
+    return [p.strip() for p in val.replace(";", ",").split(",") if p.strip()]
+
+_rq_name_raw = os.getenv("RQ_QUEUE_NAME", "").strip()
+_rq_render_raw = os.getenv("RQ_QUEUE_RENDER", "").strip()
+_rq_upscale_raw = os.getenv("RQ_QUEUE_UPSCALE", "").strip()
+
+_rq_name_parts = _split_queue_names(_rq_name_raw) if _rq_name_raw else []
+RQ_QUEUE_NAME = (_rq_name_parts[0] if _rq_name_parts else (_rq_name_raw or "default")).strip() or "default"
+
+# If render/upscale not explicitly set, try to derive from RQ_QUEUE_NAME list.
+if not _rq_render_raw and _rq_name_parts:
+    _rq_render_raw = _rq_name_parts[0]
+if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
+    _rq_upscale_raw = _rq_name_parts[1]
+
+RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
+RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "3600"))
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
@@ -353,6 +369,111 @@ def job_frontal_view(payload: dict) -> dict:
     if res:
         return {"urls": [res], "message": "Success"}
     return {"error": "Failed to generate images"}
+
+def job_generate_details(payload: dict) -> dict:
+    try:
+        image_url = payload.get("image_url")
+        moodboard_url = payload.get("moodboard_url")
+        furniture_data = payload.get("furniture_data")
+
+        local_path = _materialize_input(image_url, "detail_src")
+        if not local_path or not os.path.exists(local_path):
+            return {"error": "Original image not found"}
+
+        unique_id = uuid.uuid4().hex[:6]
+        log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
+
+        analyzed_items = []
+        if furniture_data and len(furniture_data) > 0:
+            print(">> [Smart Cache] Using pre-analyzed furniture data!", flush=True)
+            analyzed_items = furniture_data
+        else:
+            print(">> [Smart Cache] No cached data found. Starting Analysis...", flush=True)
+
+            target_analysis_path = None
+            if moodboard_url:
+                if moodboard_url.startswith("/assets/"):
+                    rel_path = moodboard_url.lstrip("/")
+                    target_analysis_path = os.path.join(*rel_path.split("/"))
+                else:
+                    target_analysis_path = _materialize_input(moodboard_url, "mb")
+            else:
+                print(">> [Info] No Moodboard provided. Analyzing the Main Image itself.", flush=True)
+                target_analysis_path = local_path
+
+            if target_analysis_path and os.path.exists(target_analysis_path):
+                try:
+                    detected_items = detect_furniture_boxes(target_analysis_path)
+                    print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
+
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
+                        analyzed_items = [f.result() for f in futures]
+                except Exception as e:
+                    print(f"!! [Deep Analysis Failed] {e}", flush=True)
+
+        if not analyzed_items:
+            analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
+
+        dynamic_styles = construct_dynamic_styles(analyzed_items)
+        if not dynamic_styles:
+            return {"error": "No styles available"}
+
+        generated_results = []
+        print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for i, style in enumerate(dynamic_styles):
+                futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1)))
+            for i, future in futures:
+                res = future.result()
+                if res:
+                    generated_results.append({"index": i, "url": res})
+
+        print(f"=== [Detail View] 완료: {len(generated_results)}장 생성됨 ===", flush=True)
+        if not generated_results:
+            return {"error": "Failed to generate images"}
+
+        return {"details": generated_results, "message": "Detail views generated successfully"}
+    except Exception as e:
+        print(f"🔥🔥🔥 [Detail Error] {e}", flush=True)
+        return {"error": str(e)}
+
+def job_regenerate_single_detail(payload: dict) -> dict:
+    try:
+        original_image_url = payload.get("original_image_url")
+        style_index = int(payload.get("style_index") or 0)
+        furniture_data = payload.get("furniture_data")
+
+        local_path = _materialize_input(original_image_url, "detail_src")
+        if not local_path or not os.path.exists(local_path):
+            return {"error": "Original image not found"}
+
+        analyzed_items = []
+        if furniture_data and len(furniture_data) > 0:
+            print(">> [Single Retry] Using cached furniture data!", flush=True)
+            analyzed_items = furniture_data
+        else:
+            analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
+
+        dynamic_styles = construct_dynamic_styles(analyzed_items)
+        if not dynamic_styles:
+            return {"error": "No styles available"}
+
+        idx = style_index
+        if idx < 0:
+            idx = 0
+        elif idx >= len(dynamic_styles):
+            idx = len(dynamic_styles) - 1
+
+        unique_id = uuid.uuid4().hex[:6]
+        style = dynamic_styles[idx]
+        res = generate_detail_view(local_path, style, unique_id, idx + 1)
+        if res:
+            return {"url": res, "message": "Success"}
+        return {"error": "Generation failed"}
+    except Exception as e:
+        return {"error": str(e)}
 @app.middleware("http")
 async def log_requests(request, call_next):
     rid = uuid.uuid4().hex[:8]
@@ -3726,134 +3847,35 @@ class RegenerateDetailRequest(BaseModel):
 @app.post("/regenerate-single-detail")
 @async_wrap
 def regenerate_single_detail(req: RegenerateDetailRequest):
-    try:
-        filename = os.path.basename(req.original_image_url)
-        local_path = os.path.join("outputs", filename)
-        if not os.path.exists(local_path):
-            return JSONResponse(content={"error": "Original image not found"}, status_code=404)
-        
-        analyzed_items = []
-        if req.furniture_data and len(req.furniture_data) > 0:
-            print(">> [Single Retry] Using cached furniture data!", flush=True)
-            analyzed_items = req.furniture_data
-        else:
-            analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
-        
-        dynamic_styles = construct_dynamic_styles(analyzed_items)
-        
-        if not dynamic_styles:
-            return JSONResponse(content={"error": "No styles available"}, status_code=400)
-
-        idx = req.style_index
-        if idx < 0:
-            idx = 0
-        elif idx >= len(dynamic_styles):
-            idx = len(dynamic_styles) - 1
-
-        unique_id = uuid.uuid4().hex[:6]
-        style = dynamic_styles[idx]
-        
-        res = generate_detail_view(local_path, style, unique_id, idx + 1)
-        
-        if res:
-            return JSONResponse(content={"url": res, "message": "Success"})
-        else:
-            return JSONResponse(content={"error": "Generation failed"}, status_code=500)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    payload = {
+        "original_image_url": req.original_image_url,
+        "style_index": req.style_index,
+        "furniture_data": req.furniture_data,
+        "moodboard_url": req.moodboard_url,
+    }
+    job, err = _enqueue_job(job_regenerate_single_detail, payload, queue_name=RQ_QUEUE_RENDER)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
 # [수정] main.py 내부의 generate_details_endpoint 함수 교체
 
 @app.post("/generate-details")
 @async_wrap
 def generate_details_endpoint(req: DetailRequest):
-    try:
-        # 1. 대상 이미지 경로 확보
-        filename = os.path.basename(req.image_url)
-        local_path = os.path.join("outputs", filename)
-        if not os.path.exists(local_path):
-            return JSONResponse(content={"error": "Original image not found"}, status_code=404)
-
-        unique_id = uuid.uuid4().hex[:6]
-        log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
-
-        analyzed_items = []
-        
-        # 2. 가구 데이터 확인 (캐시 or 신규 분석)
-        if req.furniture_data and len(req.furniture_data) > 0:
-            print(">> [Smart Cache] Using pre-analyzed furniture data!", flush=True)
-            analyzed_items = req.furniture_data
-        else:
-            print(">> [Smart Cache] No cached data found. Starting Analysis...", flush=True)
-            
-            # [NEW] 분석할 대상 이미지 결정 로직 (무드보드 우선 -> 없으면 메인 이미지 사용)
-            target_analysis_path = None
-            
-            if req.moodboard_url:
-                # A. 무드보드 URL이 있는 경우 (경로 파싱)
-                if req.moodboard_url.startswith("/assets/"):
-                    rel_path = req.moodboard_url.lstrip("/")
-                    target_analysis_path = os.path.join(*rel_path.split("/"))
-                else:
-                    mb_filename = os.path.basename(req.moodboard_url)
-                    target_analysis_path = os.path.join("outputs", mb_filename)
-            else:
-                # B. [핵심 수정] 무드보드가 없으면? -> 메인 이미지 분석 대상을 설정!
-                print(">> [Info] No Moodboard provided. Analyzing the Main Image itself.", flush=True)
-                target_analysis_path = local_path
-
-            # 3. 실제 분석 실행
-            if target_analysis_path and os.path.exists(target_analysis_path):
-                try:
-                    detected_items = detect_furniture_boxes(target_analysis_path)
-                    print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
-                    
-                    with ThreadPoolExecutor(max_workers=10) as executor: # Worker 수 약간 증량
-                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
-                        analyzed_items = [f.result() for f in futures]
-                        
-                    print(f">> [Analysis Done] Items: {[item['label'] for item in analyzed_items]}", flush=True)
-                except Exception as e:
-                    print(f"!! Analysis Failed: {e}. Using defaults.", flush=True)
-                    analyzed_items = []
-            else:
-                 print(f"!! Target path not found: {target_analysis_path}", flush=True)
-
-            # 4. 분석 실패 시 최후의 보루 (기본값)
-            if not analyzed_items:
-                 print("!! Fallback to default list.", flush=True)
-                 analyzed_items = [{"label": "Sofa"}, {"label": "Chair"}, {"label": "Table"}]
-        
-        # 5. 동적 스타일 구성 및 생성 요청
-        dynamic_styles = construct_dynamic_styles(analyzed_items)
-        
-        generated_results = []
-        print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-        
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = []
-            for i, style in enumerate(dynamic_styles):
-                futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i+1)))
-            
-            for i, future in futures:
-                res = future.result()
-                if res: 
-                    generated_results.append({"index": i, "url": res})
-                
-        print(f"=== [Detail View] 완료: {len(generated_results)}장 생성됨 ===", flush=True)
-        
-        if not generated_results:
-            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
-
-        return JSONResponse(content={
-            "details": generated_results,
-            "message": "Detail views generated successfully"
-        })
-
-    except Exception as e:
-        print(f"🔥🔥🔥 [Detail Error] {e}")
-        traceback.print_exc()
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    payload = {
+        "image_url": req.image_url,
+        "moodboard_url": req.moodboard_url,
+        "furniture_data": req.furniture_data,
+    }
+    job, err = _enqueue_job(job_generate_details, payload, queue_name=RQ_QUEUE_RENDER)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
 MOODBOARD_SYSTEM_PROMPT = """
 ACT AS: An Expert Image Retoucher and Cataloguer.
