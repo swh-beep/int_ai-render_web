@@ -307,7 +307,7 @@ def job_render(payload: dict) -> dict:
     mood_local = _materialize_input(moodboard_path, "mood") if moodboard_path else None
     mood_obj = _LocalUpload(mood_local) if mood_local and os.path.exists(mood_local) else None
     try:
-        resp = render_room.__wrapped__(
+        resp = render_room(
             file=file_obj,
             room=room,
             style=style,
@@ -345,12 +345,12 @@ def job_image_edit(payload: dict) -> dict:
 
 def job_finalize(payload: dict) -> dict:
     image_url = payload.get("image_url", "")
-    resp = finalize_download.__wrapped__(FinalizeRequest(image_url=image_url))
+    resp = finalize_download(FinalizeRequest(image_url=image_url))
     return _json_from_response(resp)
 
 def job_upscale(payload: dict) -> dict:
     image_url = payload.get("image_url", "")
-    resp = upscale_and_download.__wrapped__(UpscaleRequest(image_url=image_url))
+    resp = upscale_and_download(UpscaleRequest(image_url=image_url))
     return _json_from_response(resp)
 
 def job_frontal_view(payload: dict) -> dict:
@@ -2221,94 +2221,6 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
         return None
 
 # [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
-@app.post("/generate-frontal-view")
-@async_wrap
-def generate_frontal_view_endpoint(
-    input_photos: List[UploadFile] = File(...) 
-):
-    try:
-        unique_id = uuid.uuid4().hex[:8]
-        timestamp = int(time.time())
-        print(f"\n=== [Frontal View Gen] Processing {len(input_photos)} photos ===", flush=True)
-
-        # 1. 업로드된 사진들 저장
-        saved_photo_paths = []
-        for idx, photo in enumerate(input_photos):
-            # 파일명 안전하게 처리
-            safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
-            path = os.path.join("outputs", f"src_{timestamp}_{unique_id}_{idx}_{safe_name}")
-            
-            with open(path, "wb") as buffer: 
-                shutil.copyfileobj(photo.file, buffer)
-            saved_photo_paths.append(path)
-        
-        generated_results = []
-        
-        # 2. 병렬 생성 (5장 시도)
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(generate_frontal_room_from_photos, saved_photo_paths, unique_id, i+1) for i in range(3)]
-            for future in futures:
-                res = future.result()
-                if res: generated_results.append(res)
-        
-        if generated_results:
-            return JSONResponse(content={"urls": generated_results, "message": "Success"})
-        else:
-            return JSONResponse(content={"error": "Failed to generate images"}, status_code=500)
-            
-    except Exception as e:
-        print(f"🔥🔥🔥 [Error] {e}")
-        traceback.print_exc()
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-# [NEW] 편집/데코레이션 전용 엔드포인트
-@app.post("/generate-image-edit")
-@async_wrap
-def generate_image_edit_endpoint(
-    input_photos: List[UploadFile] = File(...),
-    instructions: str = Form(...),
-    mode: str = Form(...),  # 'edit' or 'decorate'
-    mask: UploadFile = File(None)
-):
-    try:
-        unique_id = uuid.uuid4().hex[:8]
-        timestamp = int(time.time())
-        print(f"\n=== [Image {mode.upper()}] Request: {instructions} ===", flush=True)
-
-        # 1. 사진 저장
-        saved_photo_paths = []
-        for idx, photo in enumerate(input_photos):
-            safe_name = "".join([c for c in photo.filename if c.isalnum() or c in "._-"])
-            path = os.path.join("outputs", f"src_{mode}_{timestamp}_{unique_id}_{idx}_{safe_name}")
-            with open(path, "wb") as buffer: 
-                shutil.copyfileobj(photo.file, buffer)
-            saved_photo_paths.append(path)
-
-        mask_path = None
-        if mask is not None and mask.filename:
-            safe_mask = "".join([c for c in mask.filename if c.isalnum() or c in "._-"])
-            mask_path = os.path.join("outputs", f"mask_{mode}_{timestamp}_{unique_id}_{safe_mask}")
-            with open(mask_path, "wb") as buffer:
-                shutil.copyfileobj(mask.file, buffer)
-        
-        generated_results = []
-        
-        # 2. 생성 (단일 이미지 처리)
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [executor.submit(process_image_edit_logic, saved_photo_paths, instructions, mode, unique_id, i+1, mask_path) for i in range(1)]
-            for future in futures:
-                res = future.result()
-                if res: generated_results.append(res)
-        
-        if generated_results:
-            return JSONResponse(content={"urls": generated_results, "message": "Success"})
-        else:
-            return JSONResponse(content={"error": "Failed to generate image"}, status_code=500)
-            
-    except Exception as e:
-        print(f"🔥🔥🔥 [Error] {e}")
-        traceback.print_exc()
-        return JSONResponse(content={"error": str(e)}, status_code=500)
 # -----------------------------------------------------------------------------
 # Generation Logic
 # -----------------------------------------------------------------------------
@@ -3157,8 +3069,6 @@ def get_available_thumbnails(room_name: str, style_name: str):
         return []
 
 # --- 메인 렌더링 엔드포인트 ---
-@app.post("/render")
-@async_wrap
 def render_room(
     file: UploadFile = File(...), 
     room: str = Form(...), 
@@ -3636,8 +3546,6 @@ def finalize_download_async(req: FinalizeRequest):
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
-@app.post("/finalize-download")
-@async_wrap
 def finalize_download(req: FinalizeRequest):
     try:
         unique_id = uuid.uuid4().hex[:6]
@@ -3683,8 +3591,6 @@ def finalize_download(req: FinalizeRequest):
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.post("/upscale")
-@async_wrap
 def upscale_and_download(req: UpscaleRequest):
     try:
         local_path = _materialize_input(req.image_url, "upscale")
