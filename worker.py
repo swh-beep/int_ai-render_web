@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 from redis import Redis
 from rq import Connection
 from rq.worker import Worker, SimpleWorker
@@ -35,12 +36,31 @@ conn = Redis.from_url(REDIS_URL)
 
 worker_class = SimpleWorker if os.name == "nt" else Worker
 
-with Connection(conn):
-    worker = worker_class(queue_names)
-    if os.name == "nt":
-        class _NoopDeathPenalty(BaseDeathPenalty):
-            def __enter__(self): return self
-            def __exit__(self, exc_type, exc, tb): return False
-        worker.disable_job_timeout = True
-        worker.death_penalty_class = _NoopDeathPenalty
-    worker.work()
+def _run_worker():
+    with Connection(conn):
+        worker = worker_class(queue_names)
+        if os.name == "nt":
+            class _NoopDeathPenalty(BaseDeathPenalty):
+                def __enter__(self): return self
+                def __exit__(self, exc_type, exc, tb): return False
+            worker.disable_job_timeout = True
+            worker.death_penalty_class = _NoopDeathPenalty
+        worker.work()
+
+def main():
+    workers = int(os.getenv("RQ_WORKERS", "1") or 1)
+    workers = max(1, workers)
+    if workers == 1:
+        _run_worker()
+        return
+    procs = []
+    for _ in range(workers):
+        p = multiprocessing.Process(target=_run_worker)
+        p.start()
+        procs.append(p)
+    for p in procs:
+        p.join()
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    main()

@@ -375,7 +375,18 @@ def _build_cart_summary(items: list[dict]) -> str:
         w = dims.get("w") or dims.get("width") or dims.get("width_mm")
         d = dims.get("d") or dims.get("depth") or dims.get("depth_mm")
         h = dims.get("h") or dims.get("height") or dims.get("height_mm")
-        lines.append(f"- {it.get('category')} x{it.get('qty')} (W={w} D={d} H={h} mm) id={it.get('id')}")
+        options = it.get("options")
+        opt_text = ""
+        try:
+            if isinstance(options, dict) and options:
+                opt_text = " options=" + json.dumps(options, ensure_ascii=False)
+            elif isinstance(options, list) and options:
+                opt_text = " options=" + json.dumps(options, ensure_ascii=False)
+            elif isinstance(options, str) and options.strip():
+                opt_text = " options=" + options.strip()
+        except Exception:
+            opt_text = ""
+        lines.append(f"- {it.get('category')} x{it.get('qty')} (W={w} D={d} H={h} mm) id={it.get('id')}{opt_text}")
     return "Customer-selected items:\n" + "\n".join(lines)
 
 
@@ -411,6 +422,26 @@ def _build_cart_moodboard(items: list[dict], unique_id: str) -> str:
     out_path = os.path.join("outputs", f"cart_moodboard_{unique_id}.png")
     canvas.save(out_path)
     return out_path
+
+def _normalize_item_image(local_path: str, unique_id: str, index: int, max_size: int = 1024) -> Optional[str]:
+    if not local_path or not os.path.exists(local_path):
+        return None
+    try:
+        with Image.open(local_path) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.mode in ("RGBA", "LA"):
+                bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+                bg.paste(im, mask=im.split()[-1])
+                im = bg.convert("RGB")
+            else:
+                im = im.convert("RGB")
+            im.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            filename = f"cart_item_{unique_id}_{index}.png"
+            out_path = os.path.join("outputs", filename)
+            im.save(out_path)
+            return out_path
+    except Exception:
+        return None
 
 def _get_rq_queue(queue_name: str | None = None):
     conn = _get_redis_conn()
@@ -535,6 +566,7 @@ def _json_from_response(resp):
 def job_render(payload: dict) -> dict:
     file_path = _materialize_input(payload.get("file_path"), "input")
     moodboard_path = payload.get("moodboard_path")
+    moodboard_items = payload.get("moodboard_items") or []
     room = payload.get("room", "")
     style = payload.get("style", "")
     variant = payload.get("variant", "")
@@ -548,6 +580,17 @@ def job_render(payload: dict) -> dict:
     file_obj = _LocalUpload(file_path)
     mood_local = _materialize_input(moodboard_path, "mood") if moodboard_path else None
     mood_obj = _LocalUpload(mood_local) if mood_local and os.path.exists(mood_local) else None
+    local_items = []
+    if moodboard_items:
+        for it in moodboard_items:
+            try:
+                p = it.get("path") or it.get("url")
+                label = it.get("label") or it.get("name") or it.get("category") or "Item"
+                lp = _materialize_input(p, "mood")
+                if lp and os.path.exists(lp):
+                    local_items.append({"label": label, "path": lp})
+            except Exception:
+                continue
     try:
         resp = render_room(
             file=file_obj,
@@ -558,6 +601,7 @@ def job_render(payload: dict) -> dict:
             dimensions=dimensions,
             placement=placement,
             audience=audience,
+            moodboard_items=local_items,
         )
         return _json_from_response(resp)
     finally:
@@ -2924,13 +2968,21 @@ def generate_furnished_room(
                 content += ["SCALE GUIDE IMAGE (W/D/H guide; do NOT render; use only for measurement):", guide_img]
         except Exception:
             pass
+        ref_paths = []
         if ref_path:
+            if isinstance(ref_path, list):
+                ref_paths = [p for p in ref_path if p]
+            else:
+                ref_paths = [ref_path]
+        for idx, rp in enumerate(ref_paths):
             try:
-                ref = Image.open(ref_path)
+                ref = Image.open(rp)
                 ref.thumbnail((4096, 4096))
                 extra_imgs.append(ref)
-                content.extend(["Style Reference (Exact Furniture Designs):", ref])
-            except: pass
+                label = "Style Reference (Exact Furniture Designs)" if len(ref_paths) == 1 else f"Style Reference #{idx+1}"
+                content.extend([label + ":", ref])
+            except Exception:
+                pass
         
         remaining = max(30, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
         
@@ -3234,7 +3286,8 @@ def render_room(
     moodboard: UploadFile = File(None),
     dimensions: str = Form(""),
     placement: str = Form(""),
-    audience: str = Form("")
+    audience: str = Form(""),
+    moodboard_items: Optional[List[Dict[str, Any]]] = None,
 ):
     summary_token = None
     try:
@@ -3284,8 +3337,27 @@ def render_room(
         
         ref_path = None
         mb_url = None
+        ref_paths: List[str] = []
+        item_refs: List[Dict[str, str]] = []
 
-        if style != "Customize":
+        if moodboard_items:
+            for it in moodboard_items:
+                try:
+                    label = str(it.get("label") or it.get("name") or it.get("category") or "Item")
+                    src = it.get("path") or it.get("url")
+                    lp = _materialize_input(src, "mb") if src else None
+                    if lp and os.path.exists(lp):
+                        item_refs.append({
+                            "label": label,
+                            "path": lp,
+                            "dims_mm": it.get("dims_mm"),
+                            "options": it.get("options"),
+                        })
+                        ref_paths.append(lp)
+                except Exception:
+                    continue
+
+        if not ref_paths and style != "Customize":
             safe_room = room.lower().replace(" ", "") 
             safe_style = style.lower().replace(" ", "-").replace("_", "-")
             assets_dir = None
@@ -3333,30 +3405,87 @@ def render_room(
                     mb_url = _s3_public_url(s3_key)
                     ref_path = _materialize_input(mb_url, "mb")
         
-        if style == "Customize" and moodboard:
+        if not ref_paths and style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
             with open(mb_path, "wb") as buffer: shutil.copyfileobj(moodboard.file, buffer)
             ref_path = mb_path
             mb_url = resolve_image_url(mb_path, s3_prefix_override=prefix_customize)
 
+        if not ref_paths and ref_path:
+            ref_paths = [ref_path]
+
         furniture_specs_text = None
         full_analyzed_data = [] 
 
-        if ref_path and os.path.exists(ref_path):
+        if ref_paths:
             if not LOG_BRIEF:
-                print(f">> [Global Analysis] Analyzing furniture in {ref_path}...", flush=True)
+                print(f">> [Global Analysis] Analyzing furniture in {ref_paths}...", flush=True)
             try:
-                detected = detect_furniture_boxes(ref_path)
-                
-                if not LOG_BRIEF:
-                    print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
-                with ThreadPoolExecutor(max_workers=30) as executor:
-                    futures = [
-                        executor.submit(analyze_cropped_item, ref_path, item, unique_id, idx + 1, True)
-                        for idx, item in enumerate(detected)
-                    ]
-                    full_analyzed_data = [f.result() for f in futures]
+                if item_refs:
+                    if not LOG_BRIEF:
+                        print(f">> [Global Analysis] Using direct item references: {len(item_refs)}", flush=True)
+                    with ThreadPoolExecutor(max_workers=30) as executor:
+                        futures = []
+                        for idx, meta in enumerate(item_refs):
+                            futures.append(
+                                (
+                                    meta,
+                                    executor.submit(
+                                        analyze_cropped_item,
+                                        meta["path"],
+                                        {"label": meta["label"], "box_2d": [0, 0, 1000, 1000]},
+                                        unique_id,
+                                        idx + 1,
+                                        True,
+                                    ),
+                                )
+                            )
+                        results = []
+                        for meta, future in futures:
+                            res = future.result()
+                            if not res or not isinstance(res, dict):
+                                continue
+                            dims = meta.get("dims_mm") or {}
+                            opts = meta.get("options")
+                            extra_lines = []
+                            if isinstance(dims, dict) and dims:
+                                w = dims.get("w") or dims.get("width") or dims.get("width_mm")
+                                d = dims.get("d") or dims.get("depth") or dims.get("depth_mm")
+                                h = dims.get("h") or dims.get("height") or dims.get("height_mm")
+                                if w or d or h:
+                                    extra_lines.append(f"Requested size: W={w} D={d} H={h} mm.")
+                            if isinstance(opts, dict) and opts:
+                                try:
+                                    extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                                except Exception:
+                                    pass
+                            elif isinstance(opts, list) and opts:
+                                try:
+                                    extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                                except Exception:
+                                    pass
+                            elif isinstance(opts, str) and opts.strip():
+                                extra_lines.append("Options: " + opts.strip())
+                            if extra_lines:
+                                desc = res.get("description") or ""
+                                res["description"] = (desc + " " + " ".join(extra_lines)).strip()
+                                res["options"] = opts
+                                res["requested_dims_mm"] = dims
+                            results.append(res)
+                        full_analyzed_data = results
+                else:
+                    detected = []
+                    for rp in ref_paths:
+                        detected.extend(detect_furniture_boxes(rp))
+                    if not LOG_BRIEF:
+                        print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
+                    with ThreadPoolExecutor(max_workers=30) as executor:
+                        futures = []
+                        for idx, item in enumerate(detected):
+                            rp = ref_paths[min(idx, len(ref_paths) - 1)]
+                            futures.append(executor.submit(analyze_cropped_item, rp, item, unique_id, idx + 1, True))
+                        full_analyzed_data = [f.result() for f in futures if f is not None]
                 try:
                     if full_analyzed_data and not LOG_BRIEF:
                         logger.info(f"[Analysis] items={len(full_analyzed_data)}")
@@ -3445,6 +3574,8 @@ def render_room(
         generated_results = []
         log_section("[Stage 2] 3 variations start (Specs Injection)")
 
+        ref_input = ref_paths if len(ref_paths) > 1 else (ref_paths[0] if ref_paths else None)
+
         def process_one_variant(index):
             sub_id = f"{unique_id}_v{index+1}"
             try:
@@ -3452,7 +3583,7 @@ def render_room(
                 res = generate_furnished_room(
                     step1_img,
                     current_style_prompt,
-                    ref_path,
+                    ref_input,
                     sub_id,
                     furniture_specs=furniture_specs_text,
                     furniture_specs_json=furniture_specs_json,
@@ -3565,6 +3696,7 @@ class CartItem(BaseModel):
     dims_mm: Optional[Dict[str, Any]] = None
     priority: Optional[int] = 3
     name: Optional[str] = None
+    options: Optional[Any] = None
 
 class CartRenderRequest(BaseModel):
     image_url: str
@@ -3858,11 +3990,29 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
         raise HTTPException(status_code=400, detail="No items after applying limits")
 
     unique_id = uuid.uuid4().hex[:8]
-    moodboard_path = _build_cart_moodboard(kept, unique_id)
+    item_refs = []
     try:
-        moodboard_ref = resolve_image_url(moodboard_path, s3_prefix_override=_build_s3_prefix("external", "customize"))
+        for idx, it in enumerate(kept):
+            img_url = it.get("image_url") or it.get("image")
+            if not img_url:
+                continue
+            local_src = _materialize_input(img_url, f"cart_item_{idx}")
+            norm_path = _normalize_item_image(local_src, unique_id, idx + 1, max_size=1024) if local_src else None
+            if not norm_path:
+                continue
+            ref_url = resolve_image_url(norm_path, s3_prefix_override=_build_s3_prefix("external", "customize"))
+            label = it.get("name") or it.get("category") or it.get("id") or "Item"
+            item_refs.append({
+                "label": label,
+                "path": ref_url or norm_path,
+                "dims_mm": it.get("dims_mm"),
+                "options": it.get("options"),
+            })
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    if not item_refs:
+        raise HTTPException(status_code=400, detail="No valid item images after processing")
 
     placement_parts = []
     if req.style:
@@ -3875,7 +4025,7 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
     room = req.room or "livingroom"
     payload = {
         "file_path": req.image_url,
-        "moodboard_path": moodboard_ref or moodboard_path,
+        "moodboard_items": item_refs,
         "room": room,
         "style": "Customize",
         "variant": str(req.variant or "1"),
