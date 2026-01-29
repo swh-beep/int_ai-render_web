@@ -1522,146 +1522,6 @@ def detect_windows_present(room_path: str) -> bool:
         pass
     return False
 
-def detect_protected_boxes(room_path: str, include_windows: bool = False) -> List[Dict[str, float]]:
-    """
-    Returns list of protected structural element boxes (normalized 0..1).
-    These areas will be locked to the empty room to prevent structural edits.
-    """
-    try:
-        with Image.open(room_path) as img:
-            img.thumbnail((1280, 1280))
-            prompt = (
-                "TASK: IDENTIFY NON-EDITABLE STRUCTURAL ELEMENTS.\n"
-                "Return STRICT JSON ONLY:\n"
-                "{\"boxes\":[{\"label\":\"kitchen cabinet\",\"x1\":0.0,\"y1\":0.0,\"x2\":1.0,\"y2\":1.0}]}\n"
-                "Include built-in cabinetry, kitchen units, fixed appliances, built-in closets, fixed shelving, doors, columns, beams, fireplaces, radiators.\n"
-                + ("Include windows/window frames.\n" if include_windows else "Exclude windows/window frames.\n")
-                + "If nothing found, return {\"boxes\":[]}.\n"
-                "All coordinates must be normalized 0..1."
-            )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
-            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-            boxes = []
-            if isinstance(obj, dict):
-                for b in obj.get("boxes") or []:
-                    try:
-                        x1 = float(b.get("x1"))
-                        y1 = float(b.get("y1"))
-                        x2 = float(b.get("x2"))
-                        y2 = float(b.get("y2"))
-                        if x2 <= x1 or y2 <= y1:
-                            continue
-                        x1 = max(0.0, min(1.0, x1))
-                        y1 = max(0.0, min(1.0, y1))
-                        x2 = max(0.0, min(1.0, x2))
-                        y2 = max(0.0, min(1.0, y2))
-                        boxes.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
-                    except Exception:
-                        continue
-            return boxes[:30]
-    except Exception:
-        pass
-    return []
-
-def detect_added_decor_boxes(empty_path: str, gen_path: str) -> List[Dict[str, float]]:
-    """
-    Find newly added movable items (decor, furniture, wall art) in generated image
-    compared to the empty room. Used to avoid clipping them when protecting structure.
-    """
-    try:
-        with Image.open(empty_path) as empty_img, Image.open(gen_path) as gen_img:
-            empty_img.thumbnail((1280, 1280))
-            gen_img.thumbnail((1280, 1280))
-            prompt = (
-                "TASK: FIND NEWLY ADDED OBJECTS.\n"
-                "You are given two images: (1) Empty Room, (2) Generated Room with furniture.\n"
-                "Return STRICT JSON ONLY:\n"
-                "{\"boxes\":[{\"label\":\"mirror\",\"x1\":0.0,\"y1\":0.0,\"x2\":1.0,\"y2\":1.0}]}\n"
-                "Include only NEW movable items added in the generated image (furniture, decor, wall art, curtains, plants, lamps, tables).\n"
-                "Exclude structural elements: walls, ceiling, floor, built-ins, doors, columns, beams, windows.\n"
-                "If nothing found, return {\"boxes\":[]}.\n"
-                "All coordinates must be normalized 0..1."
-            )
-            res = call_gemini_with_failover(
-                ANALYSIS_MODEL_NAME,
-                ["Empty Room:", empty_img, "Generated Room:", gen_img, prompt],
-                {"timeout": 20},
-                {},
-            )
-            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
-            boxes = []
-            if isinstance(obj, dict):
-                for b in obj.get("boxes") or []:
-                    try:
-                        x1 = float(b.get("x1"))
-                        y1 = float(b.get("y1"))
-                        x2 = float(b.get("x2"))
-                        y2 = float(b.get("y2"))
-                        if x2 <= x1 or y2 <= y1:
-                            continue
-                        x1 = max(0.0, min(1.0, x1))
-                        y1 = max(0.0, min(1.0, y1))
-                        x2 = max(0.0, min(1.0, x2))
-                        y2 = max(0.0, min(1.0, y2))
-                        boxes.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
-                    except Exception:
-                        continue
-            return boxes[:40]
-    except Exception:
-        pass
-    return []
-
-def apply_structure_protection(
-    base_path: str,
-    gen_path: str,
-    protected_boxes: List[Dict[str, float]],
-    keep_boxes: Optional[List[Dict[str, float]]] = None,
-) -> str:
-    if not protected_boxes:
-        return gen_path
-    try:
-        with Image.open(gen_path) as gen_img, Image.open(base_path) as base_img:
-            gen = gen_img.convert("RGB")
-            base = base_img.convert("RGB")
-            if base.size != gen.size:
-                base = base.resize(gen.size, Image.Resampling.LANCZOS)
-
-            mask = Image.new("L", gen.size, 255)
-            w, h = gen.size
-            pad = max(2, int(min(w, h) * 0.01))
-            draw = ImageDraw.Draw(mask)
-            for b in protected_boxes:
-                x1 = int(b.get("x1", 0.0) * w) - pad
-                y1 = int(b.get("y1", 0.0) * h) - pad
-                x2 = int(b.get("x2", 1.0) * w) + pad
-                y2 = int(b.get("y2", 1.0) * h) + pad
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w, x2))
-                y2 = max(0, min(h, y2))
-                if x2 > x1 and y2 > y1:
-                    draw.rectangle([x1, y1, x2, y2], fill=0)
-
-            if keep_boxes:
-                keep_pad = max(2, int(min(w, h) * 0.005))
-                for b in keep_boxes:
-                    x1 = int(b.get("x1", 0.0) * w) - keep_pad
-                    y1 = int(b.get("y1", 0.0) * h) - keep_pad
-                    x2 = int(b.get("x2", 1.0) * w) + keep_pad
-                    y2 = int(b.get("y2", 1.0) * h) + keep_pad
-                    x1 = max(0, min(w - 1, x1))
-                    y1 = max(0, min(h - 1, y1))
-                    x2 = max(0, min(w, x2))
-                    y2 = max(0, min(h, y2))
-                    if x2 > x1 and y2 > y1:
-                        draw.rectangle([x1, y1, x2, y2], fill=255)
-
-            mask = mask.filter(ImageFilter.GaussianBlur(radius=max(1, int(min(w, h) * 0.002))))
-            composited = Image.composite(gen, base, mask)
-            composited.save(gen_path)
-    except Exception as e:
-        print(f"!! Structure protection failed: {e}", flush=True)
-    return gen_path
 
 def _crop_ref_item_image(ref_path: str, box_2d: list, out_path: str):
     try:
@@ -2612,7 +2472,6 @@ def generate_furnished_room(
     start_time=0,
     room_planes=None,
     windows_present=None,
-    protected_boxes=None,
 ):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     room_img = None
@@ -3104,13 +2963,6 @@ def generate_furnished_room(
                         except Exception:
                             return None
                         final_path = standardize_image_to_reference_canvas(path, room_path)
-                        if protected_boxes:
-                            keep_boxes = detect_added_decor_boxes(room_path, final_path)
-                            try:
-                                logger.info(f"[KeepBoxes] count={len(keep_boxes)}")
-                            except Exception:
-                                pass
-                            final_path = apply_structure_protection(room_path, final_path, protected_boxes, keep_boxes=keep_boxes)
                         return final_path
             return None
 
@@ -3423,11 +3275,7 @@ def render_room(
         else:
             wall_span_norm = detect_back_wall_span_norm(step1_img) if step1_img else (0.0, 1.0)
         windows_present = detect_windows_present(step1_img) if step1_img else False
-        protected_boxes = detect_protected_boxes(step1_img, include_windows=not windows_present) if step1_img else []
-        try:
-            logger.info(f"[ProtectedBoxes] count={len(protected_boxes)} windows_present={windows_present}")
-        except Exception:
-            pass
+        # Structure protection removed for rendering quality and performance.
 
         furniture_specs_json = None
         primary_item = None
@@ -3618,7 +3466,6 @@ def render_room(
                     start_time=start_time,
                     room_planes=room_planes,
                     windows_present=windows_present,
-                    protected_boxes=protected_boxes,
                 )
                 if res: return res
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
