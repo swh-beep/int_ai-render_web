@@ -627,6 +627,8 @@ def job_render(payload: dict) -> dict:
     mood_local = _materialize_input(moodboard_path, "mood") if moodboard_path else None
     mood_obj = _LocalUpload(mood_local) if mood_local and os.path.exists(mood_local) else None
     local_items = []
+    cleanup_paths = []
+    cleanup_sources = []
     if moodboard_items:
         for it in moodboard_items:
             try:
@@ -635,6 +637,12 @@ def job_render(payload: dict) -> dict:
                 lp = _materialize_input(p, "mood")
                 if lp and os.path.exists(lp):
                     local_items.append({"label": label, "path": lp})
+                    if os.path.basename(lp).startswith("mood_"):
+                        cleanup_paths.append(lp)
+                if isinstance(p, str) and p.startswith("/outputs/"):
+                    src_local = p.lstrip("/")
+                    if os.path.basename(src_local).startswith("cart_item_") and os.path.exists(src_local):
+                        cleanup_sources.append(src_local)
             except Exception:
                 continue
     try:
@@ -654,6 +662,18 @@ def job_render(payload: dict) -> dict:
         file_obj.close()
         if mood_obj:
             mood_obj.close()
+        for p in cleanup_paths:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+        for p in cleanup_sources:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
 def job_render_with_details(payload: dict) -> dict:
     render_payload = payload.get("render") or {}
@@ -2580,7 +2600,7 @@ def generate_furnished_room(
         is_portrait = height > width
         ratio_instruction = "PORTRAIT (4:5 Ratio)" if is_portrait else "LANDSCAPE (16:9 Ratio)"
         expected_ratio = (4 / 5) if is_portrait else (16 / 9)
-        ratio_tol = 0.05
+        ratio_tol = 0.1
         
         system_instruction = "You are an expert interior designer AI."
         
@@ -4077,6 +4097,22 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
             if not norm_path:
                 continue
             ref_url = resolve_image_url(norm_path, s3_prefix_override=_build_s3_prefix("external", "customize"))
+            # If uploaded to S3, we can remove local normalized file immediately.
+            if ref_url and isinstance(ref_url, str) and ref_url.startswith("http"):
+                try:
+                    if os.path.exists(norm_path):
+                        os.remove(norm_path)
+                except Exception:
+                    pass
+            # Remove temp downloaded source if it was created under outputs.
+            try:
+                if local_src and os.path.exists(local_src):
+                    abs_src = os.path.abspath(local_src)
+                    abs_out = os.path.abspath("outputs") + os.sep
+                    if abs_src.startswith(abs_out) and os.path.basename(local_src).startswith("cart_item_"):
+                        os.remove(local_src)
+            except Exception:
+                pass
             label = it.get("name") or it.get("category") or it.get("id") or "Item"
             item_refs.append({
                 "label": label,
