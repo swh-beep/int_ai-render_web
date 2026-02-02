@@ -47,7 +47,7 @@ LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
 SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
-GEMINI_MAX_CONCURRENCY_ANALYSIS = 10
+GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
 GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "4"))
 GEMINI_SEMAPHORE_ANALYSIS = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_ANALYSIS))
 GEMINI_SEMAPHORE_GEN = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_GEN))
@@ -806,7 +806,8 @@ def job_generate_details(payload: dict) -> dict:
                     detected_items = detect_furniture_boxes(target_analysis_path)
                     print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
 
-                    with ThreadPoolExecutor(max_workers=10) as executor:
+                    analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(detected_items)))
+                    with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
                         futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
                         analyzed_items = [f.result() for f in futures]
                 except Exception as e:
@@ -1464,6 +1465,7 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
             "label": label,
             "is_rug": is_rug,
             "category_score": cat_score, # [NEW]
+            "qty": int(it.get("qty") or 1),
             "dims_mm": {
                 "width_mm": dims.get("width_mm"),
                 "depth_mm": dims.get("depth_mm"),
@@ -1520,6 +1522,89 @@ def _safe_json_from_model_text(txt: str):
     except Exception:
         pass
     return None
+
+def _extract_qty_from_text(text: str) -> Optional[int]:
+    if not text:
+        return None
+    try:
+        t = str(text).lower()
+        patterns = [
+            r"\bqty\s*[:=]?\s*(\d+)\b",
+            r"\bx\s*(\d+)\b",
+            r"\b(\d+)\s*(?:ea|pcs|pieces|개)\b",
+        ]
+        for pat in patterns:
+            m = re.search(pat, t)
+            if m:
+                q = int(m.group(1))
+                if q > 0:
+                    return q
+    except Exception:
+        pass
+    return None
+
+def _summarize_items_for_ranking(items: list, max_items: int = 30) -> str:
+    if not items:
+        return ""
+    lines = []
+    for i, it in enumerate(items[:max_items], start=1):
+        label = (it.get("label") or f"Item{i}").strip()
+        qty = it.get("qty") or 1
+        desc = (it.get("description") or "").strip()
+        if len(desc) > 220:
+            desc = desc[:220] + "..."
+        qtxt = f" qty={qty}" if qty and qty > 1 else ""
+        lines.append(f"{i}. {label}{qtxt}: {desc}")
+    return "\n".join(lines)
+
+def _rank_best_variant_flash(candidate_paths: list, analyzed_items: list) -> Optional[int]:
+    if not candidate_paths or len(candidate_paths) < 2:
+        return 0 if candidate_paths else None
+    try:
+        items_text = _summarize_items_for_ranking(analyzed_items or [])
+        prompt = (
+            "You are an expert interior photo curator.\n"
+            "You will receive multiple candidate images of the SAME room, labeled Candidate #1..#N.\n"
+            "Select the SINGLE best candidate based on:\n"
+            "1) Furniture similarity to the provided item descriptions (shape, material, color, proportions, qty).\n"
+            "2) Photographic realism and aesthetic quality (lighting, coherence, natural look).\n"
+            "3) Constraint compliance (no new windows/doors, no extra or missing items).\n\n"
+            "ITEM LIST (REFERENCE):\n"
+            f"{items_text or '(no items list)'}\n\n"
+            "Return STRICT JSON ONLY:\n"
+            "{\"best_index\": 1, \"reason\": \"...\"}\n"
+            "best_index is 1-based."
+        )
+        content = [prompt]
+        opened = []
+        for i, p in enumerate(candidate_paths, start=1):
+            try:
+                img = Image.open(p)
+                img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                opened.append(img)
+                content.extend([f"Candidate #{i}", img])
+            except Exception:
+                continue
+
+        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {})
+        for im in opened:
+            try: im.close()
+            except Exception: pass
+
+        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+        if isinstance(obj, dict):
+            idx = obj.get("best_index")
+            if isinstance(idx, str):
+                try: idx = int(idx.strip())
+                except Exception: idx = None
+            if isinstance(idx, (int, float)):
+                idx = int(idx)
+                if 1 <= idx <= len(candidate_paths):
+                    return idx - 1
+        return None
+    except Exception:
+        return None
+
 
 def detect_room_planes_norm(empty_room_path: str):
     try:
@@ -2144,6 +2229,11 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
     room_img = None
     try:
         room_img = Image.open(room_path) if room_path else None
+        try:
+            if room_img:
+                room_img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+        except Exception:
+            pass
         item_lines = []
         for i, it in enumerate(items or [], start=1):
             label = it.get("label") or f"Item{i}"
@@ -2167,19 +2257,20 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
             "Image #1 is the EMPTY ROOM. Images #2..N are individual furniture/props in the exact order below.\n\n"
             "ITEM ORDER:\n"
             + ("\n".join(item_lines) if item_lines else "(no items)") + "\n\n"
-            "TASK A (ROOM): Write a long structural analysis of the room (80-140 words). "
+            "TASK A (ROOM): Write a structural analysis of the room (50-60 words). "
             "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
             "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
             f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
-            "TASK B (ITEMS): For EACH item in order, write 40-80 words describing shape, proportions, silhouette, "
-            "scale cues, materials, and fine geometry. If exact dimensions are provided or readable, include them in "
+            "TASK B (ITEMS): For EACH item in order, write 30-40 words describing material, color, shape, proportions, "
+            "silhouette, scale cues, and fine geometry. If exact dimensions are provided or readable, include them in "
             "dimensions_mm AND mention them in the description. Do NOT invent missing dimensions.\n\n"
+            "If the text indicates quantity (e.g., 'x 2', '2 ea', '2pcs'), set quantity accordingly.\n"
             "Return STRICT JSON ONLY:\n"
             "{\n"
             "  \"room_text\": \"...\",\n"
             "  \"windows_present\": true/false,\n"
             "  \"items\": [\n"
-            "    {\"label\":\"...\",\"description\":\"...\",\"dimensions_mm\":{\"width\":null,\"depth\":null,\"height\":null},\"raw_text_found\":\"\"}\n"
+            "    {\"label\":\"...\",\"description\":\"...\",\"dimensions_mm\":{\"width\":null,\"depth\":null,\"height\":null},\"raw_text_found\":\"\",\"quantity\":1}\n"
             "  ]\n"
             "}\n"
         )
@@ -2190,6 +2281,10 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
         for it in items or []:
             img = it.get("image") or it.get("_image")
             if img is not None:
+                try:
+                    img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+                except Exception:
+                    pass
                 content.append(img)
 
         res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {'timeout': timeout}, {})
@@ -2305,7 +2400,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             f"Analyze this image cutout of a '{label}'.\n"
             "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
             "1. **READ EXTRACT DIMENSIONS:** If there is text like 'W: 2800', 'Width 2800mm', '2800*1450', extract these numbers EXACTLY in millimeters.\n"
-            "2. **LONG DESCRIPTION (40-80 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
+            "2. **LONG DESCRIPTION (30-40 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
             "\n"
             "Return STRICT JSON only:\n"
             "{\n"
@@ -2796,10 +2891,12 @@ def generate_furnished_room(
         specs_context = ""
         if furniture_specs:
             specs_context = (
-                "\n<REFERENCE FURNITURE LIST (EXACT MATCH)>\n"
+                "\n<REFERENCE FURNITURE LIST (GUIDANCE ONLY)>\n"
                 "The following list describes the items detected from the moodboard.\n"
-                "You MUST match the exact design, shape, material, and color of each item.\n"
-                "Do NOT copy the moodboard layout. Do NOT add extra items. Do NOT omit any listed items.\n"
+                "Use this as a soft reference for material, color, shape, and scale cues.\n"
+                "If there is any conflict, prioritize the provided furniture cutout images.\n"
+                "Respect quantities exactly. If qty>1, render multiple identical instances.\n"
+                "Do NOT add extra items. Do NOT omit any listed items.\n"
                 "Do NOT replace any listed item with a generic substitute (no sofa instead of a desk, etc.).\n"
                 f"{furniture_specs}\n"
                 "--------------------------------------------------\n"
@@ -2812,20 +2909,22 @@ def generate_furnished_room(
                 rows = []
                 for it in (furniture_specs_json.get("items") or []):
                     lbl = (it.get("label") or "").strip()
+                    qty = it.get("qty") or 1
                     dm = it.get("dims_mm") or {}
                     w = dm.get("width_mm"); d = dm.get("depth_mm"); h = dm.get("height_mm")
                     if any([w, d, h]):
-                        rows.append(f"- {lbl}: W={w or 'null'}mm, D={d or 'null'}mm, H={h or 'null'}mm")
+                        qtxt = f" qty={qty}" if qty and qty > 1 else ""
+                        rows.append(f"- {lbl}{qtxt}: W={w or 'null'}mm, D={d or 'null'}mm, H={h or 'null'}mm")
                 if rows:
                     dims_table_context = (
-                        "\n<FURNITURE DIMENSIONS TABLE (MM) - STRICT>\n"
-                        "Use these real-world measurements. Do NOT invent new sizes.\n"
-                        "Items with null W/D/H are incomplete; do NOT guess missing numbers. Use moodboard scale and keep within room limits.\n"
+                        "\n<FURNITURE DIMENSIONS TABLE (MM) - REFERENCE>\n"
+                        "Use these real-world measurements as guidance. Do NOT invent new sizes.\n"
+                        "Items with null W/D/H are incomplete; do NOT guess missing numbers. Use visual scale cues and keep within room limits.\n"
                         + "\n".join(rows) + "\n"
-                        "Hard constraints:\n"
-                        "- No furniture item may exceed room width or room depth.\n"
-                        "- Rugs/carpets: if rug width is within 10% of room width, it must visually span almost wall-to-wall.\n"
-                        "- Wall storage/sideboard: if width is <= 1500mm in specs, it must NOT look like it spans most of the wall.\n"
+                        "Guidelines:\n"
+                        "- No furniture item should exceed room width or room depth.\n"
+                        "- Rugs/carpets: if rug width is within 10% of room width, it should visually span almost wall-to-wall.\n"
+                        "- Wall storage/sideboard: if width is <= 1500mm in specs, it should NOT look like it spans most of the wall.\n"
                         "--------------------------------------------------\n"
                     )
         except Exception:
@@ -3123,7 +3222,7 @@ def generate_furnished_room(
             "<CRITICAL: FURNITURE COMPOSITING>\n"
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
-            "3. **STYLE:** Match the Reference Moodboard style.\n"
+            "3. **STYLE:** Match the intended style implied by the provided furniture items.\n"
             "4. **ONLY LISTED ITEMS:** Render only the listed items. Do NOT add extra furniture or swap designs.\n"
 
             f"{window_context}"
@@ -3193,7 +3292,7 @@ def generate_furnished_room(
             "3. **ASPECT RATIO LOCK (HARD):** You MUST output EXACTLY " + ratio_instruction + ". Any other ratio is invalid.\n"
             "4. **NO PORTRAIT FOR LANDSCAPE INPUTS:** If the input is landscape, output must remain landscape (16:9). Never generate portrait.\n"
             "5. **NO LANDSCAPE FOR PORTRAIT INPUTS:** If the input is portrait, output must remain portrait (4:5). Never generate landscape.\n"
-            "6. **IGNORE REFERENCE RATIO:** Even if the Style Reference (Moodboard) is vertical, you MUST output a " + ratio_instruction + " image. Do not mimic the moodboard's shape.\n"
+            "6. **IGNORE REFERENCE RATIO:** You MUST output a " + ratio_instruction + " image. Do not mimic any reference image shape.\n"
             "7. **NO MULTI-PANEL OUTPUT:** Output must be ONE single staged room photograph only. Do NOT append catalog sheets, white inventory panels, split layouts, or include the reference image anywhere."
         )
         
@@ -3210,8 +3309,12 @@ def generate_furnished_room(
                     lbl = (it.get("label") or "").strip()
                     if cp and os.path.exists(cp):
                         cutouts.append((lbl, cp))
-                for lbl, cp in cutouts[:10]:
+                for lbl, cp in cutouts:
                     cutout_img = Image.open(cp)
+                    try:
+                        cutout_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
                     extra_imgs.append(cutout_img)
                     content += [f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN). Label: {lbl}", cutout_img]
         except Exception:
@@ -3224,21 +3327,7 @@ def generate_furnished_room(
                 content += ["SCALE GUIDE IMAGE (W/D/H guide; do NOT render; use only for measurement):", guide_img]
         except Exception:
             pass
-        ref_paths = []
-        if ref_path:
-            if isinstance(ref_path, list):
-                ref_paths = [p for p in ref_path if p]
-            else:
-                ref_paths = [ref_path]
-        for idx, rp in enumerate(ref_paths):
-            try:
-                ref = Image.open(rp)
-                ref.thumbnail((4096, 4096))
-                extra_imgs.append(ref)
-                label = "Style Reference (Exact Furniture Designs)" if len(ref_paths) == 1 else f"Style Reference #{idx+1}"
-                content.extend([label + ":", ref])
-            except Exception:
-                pass
+        # [INFO] Moodboard/style reference images are intentionally NOT sent to the model.
         
         remaining = max(30, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
         
@@ -3740,9 +3829,21 @@ def render_room(
                     if req_dims:
                         dims = req_dims
                     dims_str = _dims_to_str(dims)
+                    qty = None
+                    if isinstance(res_item, dict):
+                        qty = res_item.get("quantity")
+                        if isinstance(qty, str):
+                            try:
+                                qty = int(qty.strip())
+                            except Exception:
+                                qty = None
+                    if not qty:
+                        qty = _extract_qty_from_text((res_item or {}).get("raw_text_found") if isinstance(res_item, dict) else "") or 1
 
                     opts = meta.get("options")
                     extra_lines = []
+                    if qty and qty > 1:
+                        extra_lines.append(f"Quantity: {qty}")
                     if req_dims:
                         extra_lines.append(
                             f"Requested size: W={req_dims.get('width_mm') or 'null'} "
@@ -3769,6 +3870,7 @@ def render_room(
                         "box_2d": meta.get("box_2d") or [0, 0, 1000, 1000],
                         "crop_path": meta.get("crop_path"),
                         "options": opts,
+                        "qty": qty,
                         "requested_dims_mm": req_dims or None,
                     })
 
@@ -3788,7 +3890,9 @@ def render_room(
 
                 specs_list = []
                 for idx, item in enumerate(full_analyzed_data):
-                    specs_list.append(f"{idx+1}. {item['label']}: {item['description']}")
+                    q = item.get("qty") or 1
+                    q_txt = f" (qty={q})" if q and q > 1 else ""
+                    specs_list.append(f"{idx+1}. {item['label']}{q_txt}: {item['description']}")
                 furniture_specs_text = "\n".join(specs_list)
 
                 try:
@@ -3892,6 +3996,18 @@ def render_room(
                 res = future.result()
                 if res: generated_results.append(res)
                 gc.collect()
+
+        # Rank best variation (Flash, 1 call) and reorder results
+        try:
+            best_idx = _rank_best_variant_flash(generated_results, full_analyzed_data)
+            if best_idx is not None and 0 <= best_idx < len(generated_results):
+                if aud == "external":
+                    generated_results = [generated_results[best_idx]]
+                else:
+                    best_path = generated_results[best_idx]
+                    generated_results = [best_path] + [p for i, p in enumerate(generated_results) if i != best_idx]
+        except Exception:
+            pass
 
         if LOG_SUMMARY:
             reasons = []

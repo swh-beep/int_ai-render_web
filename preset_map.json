@@ -1,0 +1,1537 @@
+{
+  "livingroom_french-modern_10": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "10"
+  },
+  "livingroom_french-modern_11": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "11"
+  },
+  "livingroom_french-modern_12": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "12"
+  },
+  "livingroom_french-modern_1": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "1"
+  },
+  "livingroom_french-modern_2": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "2"
+  },
+  "livingroom_french-modern_3": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "3"
+  },
+  "livingroom_french-modern_4": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "4"
+  },
+  "livingroom_french-modern_5": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "5"
+  },
+  "livingroom_french-modern_6": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "6"
+  },
+  "livingroom_french-modern_7": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "7"
+  },
+  "livingroom_french-modern_8": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "8"
+  },
+  "livingroom_french-modern_9": {
+    "room": "livingroom",
+    "style": "french-modern",
+    "variant": "9"
+  },
+  "livingroom_luxury_10": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "10"
+  },
+  "livingroom_luxury_11": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "11"
+  },
+  "livingroom_luxury_12": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "12"
+  },
+  "livingroom_luxury_13": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "13"
+  },
+  "livingroom_luxury_14": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "14"
+  },
+  "livingroom_luxury_15": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "15"
+  },
+  "livingroom_luxury_16": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "16"
+  },
+  "livingroom_luxury_17": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "17"
+  },
+  "livingroom_luxury_18": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "18"
+  },
+  "livingroom_luxury_19": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "19"
+  },
+  "livingroom_luxury_1": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "1"
+  },
+  "livingroom_luxury_20": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "20"
+  },
+  "livingroom_luxury_21": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "21"
+  },
+  "livingroom_luxury_22": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "22"
+  },
+  "livingroom_luxury_2": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "2"
+  },
+  "livingroom_luxury_3": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "3"
+  },
+  "livingroom_luxury_4": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "4"
+  },
+  "livingroom_luxury_5": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "5"
+  },
+  "livingroom_luxury_6": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "6"
+  },
+  "livingroom_luxury_7": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "7"
+  },
+  "livingroom_luxury_8": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "8"
+  },
+  "livingroom_luxury_9": {
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "9"
+  },
+  "livingroom_mid-century_10": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "10"
+  },
+  "livingroom_mid-century_11": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "11"
+  },
+  "livingroom_mid-century_12": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "12"
+  },
+  "livingroom_mid-century_1": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "1"
+  },
+  "livingroom_mid-century_2": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "2"
+  },
+  "livingroom_mid-century_3": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "3"
+  },
+  "livingroom_mid-century_4": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "4"
+  },
+  "livingroom_mid-century_5": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "5"
+  },
+  "livingroom_mid-century_6": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "6"
+  },
+  "livingroom_mid-century_7": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "7"
+  },
+  "livingroom_mid-century_8": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "8"
+  },
+  "livingroom_mid-century_9": {
+    "room": "livingroom",
+    "style": "mid-century",
+    "variant": "9"
+  },
+  "livingroom_modern_10": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "10"
+  },
+  "livingroom_modern_11": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "11"
+  },
+  "livingroom_modern_12": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "12"
+  },
+  "livingroom_modern_13": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "13"
+  },
+  "livingroom_modern_14": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "14"
+  },
+  "livingroom_modern_15": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "15"
+  },
+  "livingroom_modern_16": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "16"
+  },
+  "livingroom_modern_17": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "17"
+  },
+  "livingroom_modern_1": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "1"
+  },
+  "livingroom_modern_2": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "2"
+  },
+  "livingroom_modern_3": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "3"
+  },
+  "livingroom_modern_4": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "4"
+  },
+  "livingroom_modern_5": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "5"
+  },
+  "livingroom_modern_6": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "6"
+  },
+  "livingroom_modern_7": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "7"
+  },
+  "livingroom_modern_8": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "8"
+  },
+  "livingroom_modern_9": {
+    "room": "livingroom",
+    "style": "modern",
+    "variant": "9"
+  },
+  "livingroom_natural_10": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "10"
+  },
+  "livingroom_natural_11": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "11"
+  },
+  "livingroom_natural_12": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "12"
+  },
+  "livingroom_natural_13": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "13"
+  },
+  "livingroom_natural_14": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "14"
+  },
+  "livingroom_natural_15": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "15"
+  },
+  "livingroom_natural_16": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "16"
+  },
+  "livingroom_natural_17": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "17"
+  },
+  "livingroom_natural_18": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "18"
+  },
+  "livingroom_natural_19": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "19"
+  },
+  "livingroom_natural_1": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "1"
+  },
+  "livingroom_natural_20": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "20"
+  },
+  "livingroom_natural_2": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "2"
+  },
+  "livingroom_natural_3": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "3"
+  },
+  "livingroom_natural_4": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "4"
+  },
+  "livingroom_natural_5": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "5"
+  },
+  "livingroom_natural_6": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "6"
+  },
+  "livingroom_natural_7": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "7"
+  },
+  "livingroom_natural_8": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "8"
+  },
+  "livingroom_natural_9": {
+    "room": "livingroom",
+    "style": "natural",
+    "variant": "9"
+  },
+  "livingroom_oriental_10": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "10"
+  },
+  "livingroom_oriental_11": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "11"
+  },
+  "livingroom_oriental_12": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "12"
+  },
+  "livingroom_oriental_1": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "1"
+  },
+  "livingroom_oriental_2": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "2"
+  },
+  "livingroom_oriental_3": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "3"
+  },
+  "livingroom_oriental_4": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "4"
+  },
+  "livingroom_oriental_5": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "5"
+  },
+  "livingroom_oriental_6": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "6"
+  },
+  "livingroom_oriental_7": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "7"
+  },
+  "livingroom_oriental_8": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "8"
+  },
+  "livingroom_oriental_9": {
+    "room": "livingroom",
+    "style": "oriental",
+    "variant": "9"
+  },
+  "livingroom_scandinavian_10": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "10"
+  },
+  "livingroom_scandinavian_1": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "1"
+  },
+  "livingroom_scandinavian_2": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "2"
+  },
+  "livingroom_scandinavian_3": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "3"
+  },
+  "livingroom_scandinavian_4": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "4"
+  },
+  "livingroom_scandinavian_5": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "5"
+  },
+  "livingroom_scandinavian_6": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "6"
+  },
+  "livingroom_scandinavian_7": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "7"
+  },
+  "livingroom_scandinavian_8": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "8"
+  },
+  "livingroom_scandinavian_9": {
+    "room": "livingroom",
+    "style": "scandinavian",
+    "variant": "9"
+  },
+  "livingroom_unique_10": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "10"
+  },
+  "livingroom_unique_11": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "11"
+  },
+  "livingroom_unique_12": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "12"
+  },
+  "livingroom_unique_1": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "1"
+  },
+  "livingroom_unique_2": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "2"
+  },
+  "livingroom_unique_3": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "3"
+  },
+  "livingroom_unique_4": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "4"
+  },
+  "livingroom_unique_5": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "5"
+  },
+  "livingroom_unique_6": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "6"
+  },
+  "livingroom_unique_7": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "7"
+  },
+  "livingroom_unique_8": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "8"
+  },
+  "livingroom_unique_9": {
+    "room": "livingroom",
+    "style": "unique",
+    "variant": "9"
+  },
+  "diningroom_french-modern_10": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "10"
+  },
+  "diningroom_french-modern_11": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "11"
+  },
+  "diningroom_french-modern_12": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "12"
+  },
+  "diningroom_french-modern_13": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "13"
+  },
+  "diningroom_french-modern_14": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "14"
+  },
+  "diningroom_french-modern_1": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "1"
+  },
+  "diningroom_french-modern_2": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "2"
+  },
+  "diningroom_french-modern_3": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "3"
+  },
+  "diningroom_french-modern_4": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "4"
+  },
+  "diningroom_french-modern_5": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "5"
+  },
+  "diningroom_french-modern_6": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "6"
+  },
+  "diningroom_french-modern_7": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "7"
+  },
+  "diningroom_french-modern_8": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "8"
+  },
+  "diningroom_french-modern_9": {
+    "room": "diningroom",
+    "style": "french-modern",
+    "variant": "9"
+  },
+  "diningroom_luxury_10": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "10"
+  },
+  "diningroom_luxury_11": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "11"
+  },
+  "diningroom_luxury_12": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "12"
+  },
+  "diningroom_luxury_13": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "13"
+  },
+  "diningroom_luxury_14": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "14"
+  },
+  "diningroom_luxury_15": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "15"
+  },
+  "diningroom_luxury_16": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "16"
+  },
+  "diningroom_luxury_17": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "17"
+  },
+  "diningroom_luxury_18": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "18"
+  },
+  "diningroom_luxury_1": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "1"
+  },
+  "diningroom_luxury_2": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "2"
+  },
+  "diningroom_luxury_3": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "3"
+  },
+  "diningroom_luxury_4": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "4"
+  },
+  "diningroom_luxury_5": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "5"
+  },
+  "diningroom_luxury_6": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "6"
+  },
+  "diningroom_luxury_7": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "7"
+  },
+  "diningroom_luxury_8": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "8"
+  },
+  "diningroom_luxury_9": {
+    "room": "diningroom",
+    "style": "luxury",
+    "variant": "9"
+  },
+  "diningroom_mid-century_10": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "10"
+  },
+  "diningroom_mid-century_11": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "11"
+  },
+  "diningroom_mid-century_1": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "1"
+  },
+  "diningroom_mid-century_2": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "2"
+  },
+  "diningroom_mid-century_3": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "3"
+  },
+  "diningroom_mid-century_4": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "4"
+  },
+  "diningroom_mid-century_5": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "5"
+  },
+  "diningroom_mid-century_6": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "6"
+  },
+  "diningroom_mid-century_7": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "7"
+  },
+  "diningroom_mid-century_8": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "8"
+  },
+  "diningroom_mid-century_9": {
+    "room": "diningroom",
+    "style": "mid-century",
+    "variant": "9"
+  },
+  "diningroom_modern_10": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "10"
+  },
+  "diningroom_modern_11": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "11"
+  },
+  "diningroom_modern_12": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "12"
+  },
+  "diningroom_modern_13": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "13"
+  },
+  "diningroom_modern_14": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "14"
+  },
+  "diningroom_modern_15": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "15"
+  },
+  "diningroom_modern_1": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "1"
+  },
+  "diningroom_modern_2": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "2"
+  },
+  "diningroom_modern_3": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "3"
+  },
+  "diningroom_modern_4": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "4"
+  },
+  "diningroom_modern_5": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "5"
+  },
+  "diningroom_modern_6": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "6"
+  },
+  "diningroom_modern_7": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "7"
+  },
+  "diningroom_modern_8": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "8"
+  },
+  "diningroom_modern_9": {
+    "room": "diningroom",
+    "style": "modern",
+    "variant": "9"
+  },
+  "diningroom_natural_10": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "10"
+  },
+  "diningroom_natural_11": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "11"
+  },
+  "diningroom_natural_12": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "12"
+  },
+  "diningroom_natural_13": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "13"
+  },
+  "diningroom_natural_14": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "14"
+  },
+  "diningroom_natural_15": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "15"
+  },
+  "diningroom_natural_16": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "16"
+  },
+  "diningroom_natural_17": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "17"
+  },
+  "diningroom_natural_1": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "1"
+  },
+  "diningroom_natural_2": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "2"
+  },
+  "diningroom_natural_3": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "3"
+  },
+  "diningroom_natural_4": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "4"
+  },
+  "diningroom_natural_5": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "5"
+  },
+  "diningroom_natural_6": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "6"
+  },
+  "diningroom_natural_7": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "7"
+  },
+  "diningroom_natural_8": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "8"
+  },
+  "diningroom_natural_9": {
+    "room": "diningroom",
+    "style": "natural",
+    "variant": "9"
+  },
+  "diningroom_oriental_10": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "10"
+  },
+  "diningroom_oriental_11": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "11"
+  },
+  "diningroom_oriental_12": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "12"
+  },
+  "diningroom_oriental_1": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "1"
+  },
+  "diningroom_oriental_2": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "2"
+  },
+  "diningroom_oriental_3": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "3"
+  },
+  "diningroom_oriental_4": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "4"
+  },
+  "diningroom_oriental_5": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "5"
+  },
+  "diningroom_oriental_6": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "6"
+  },
+  "diningroom_oriental_7": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "7"
+  },
+  "diningroom_oriental_8": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "8"
+  },
+  "diningroom_oriental_9": {
+    "room": "diningroom",
+    "style": "oriental",
+    "variant": "9"
+  },
+  "diningroom_scandinavian_10": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "10"
+  },
+  "diningroom_scandinavian_1": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "1"
+  },
+  "diningroom_scandinavian_2": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "2"
+  },
+  "diningroom_scandinavian_3": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "3"
+  },
+  "diningroom_scandinavian_4": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "4"
+  },
+  "diningroom_scandinavian_5": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "5"
+  },
+  "diningroom_scandinavian_6": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "6"
+  },
+  "diningroom_scandinavian_7": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "7"
+  },
+  "diningroom_scandinavian_8": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "8"
+  },
+  "diningroom_scandinavian_9": {
+    "room": "diningroom",
+    "style": "scandinavian",
+    "variant": "9"
+  },
+  "diningroom_unique_10": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "10"
+  },
+  "diningroom_unique_11": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "11"
+  },
+  "diningroom_unique_1": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "1"
+  },
+  "diningroom_unique_2": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "2"
+  },
+  "diningroom_unique_3": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "3"
+  },
+  "diningroom_unique_4": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "4"
+  },
+  "diningroom_unique_5": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "5"
+  },
+  "diningroom_unique_6": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "6"
+  },
+  "diningroom_unique_7": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "7"
+  },
+  "diningroom_unique_8": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "8"
+  },
+  "diningroom_unique_9": {
+    "room": "diningroom",
+    "style": "unique",
+    "variant": "9"
+  },
+  "bedroom_french-modern_10": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "10"
+  },
+  "bedroom_french-modern_1": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "1"
+  },
+  "bedroom_french-modern_2": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "2"
+  },
+  "bedroom_french-modern_3": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "3"
+  },
+  "bedroom_french-modern_4": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "4"
+  },
+  "bedroom_french-modern_5": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "5"
+  },
+  "bedroom_french-modern_6": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "6"
+  },
+  "bedroom_french-modern_7": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "7"
+  },
+  "bedroom_french-modern_8": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "8"
+  },
+  "bedroom_french-modern_9": {
+    "room": "bedroom",
+    "style": "french-modern",
+    "variant": "9"
+  },
+  "bedroom_luxury_10": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "10"
+  },
+  "bedroom_luxury_11": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "11"
+  },
+  "bedroom_luxury_12": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "12"
+  },
+  "bedroom_luxury_1": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "1"
+  },
+  "bedroom_luxury_2": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "2"
+  },
+  "bedroom_luxury_3": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "3"
+  },
+  "bedroom_luxury_4": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "4"
+  },
+  "bedroom_luxury_5": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "5"
+  },
+  "bedroom_luxury_6": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "6"
+  },
+  "bedroom_luxury_7": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "7"
+  },
+  "bedroom_luxury_8": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "8"
+  },
+  "bedroom_luxury_9": {
+    "room": "bedroom",
+    "style": "luxury",
+    "variant": "9"
+  },
+  "bedroom_mid-century_10": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "10"
+  },
+  "bedroom_mid-century_1": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "1"
+  },
+  "bedroom_mid-century_2": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "2"
+  },
+  "bedroom_mid-century_3": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "3"
+  },
+  "bedroom_mid-century_4": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "4"
+  },
+  "bedroom_mid-century_5": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "5"
+  },
+  "bedroom_mid-century_6": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "6"
+  },
+  "bedroom_mid-century_7": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "7"
+  },
+  "bedroom_mid-century_8": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "8"
+  },
+  "bedroom_mid-century_9": {
+    "room": "bedroom",
+    "style": "mid-century",
+    "variant": "9"
+  },
+  "bedroom_modern_10": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "10"
+  },
+  "bedroom_modern_1": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "1"
+  },
+  "bedroom_modern_2": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "2"
+  },
+  "bedroom_modern_3": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "3"
+  },
+  "bedroom_modern_4": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "4"
+  },
+  "bedroom_modern_5": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "5"
+  },
+  "bedroom_modern_6": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "6"
+  },
+  "bedroom_modern_7": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "7"
+  },
+  "bedroom_modern_8": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "8"
+  },
+  "bedroom_modern_9": {
+    "room": "bedroom",
+    "style": "modern",
+    "variant": "9"
+  },
+  "bedroom_natural_10": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "10"
+  },
+  "bedroom_natural_1": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "1"
+  },
+  "bedroom_natural_2": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "2"
+  },
+  "bedroom_natural_3": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "3"
+  },
+  "bedroom_natural_4": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "4"
+  },
+  "bedroom_natural_5": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "5"
+  },
+  "bedroom_natural_6": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "6"
+  },
+  "bedroom_natural_7": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "7"
+  },
+  "bedroom_natural_8": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "8"
+  },
+  "bedroom_natural_9": {
+    "room": "bedroom",
+    "style": "natural",
+    "variant": "9"
+  },
+  "bedroom_oriental_10": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "10"
+  },
+  "bedroom_oriental_1": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "1"
+  },
+  "bedroom_oriental_2": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "2"
+  },
+  "bedroom_oriental_3": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "3"
+  },
+  "bedroom_oriental_4": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "4"
+  },
+  "bedroom_oriental_5": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "5"
+  },
+  "bedroom_oriental_6": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "6"
+  },
+  "bedroom_oriental_7": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "7"
+  },
+  "bedroom_oriental_8": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "8"
+  },
+  "bedroom_oriental_9": {
+    "room": "bedroom",
+    "style": "oriental",
+    "variant": "9"
+  },
+  "bedroom_scandinavia_10": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "10"
+  },
+  "bedroom_scandinavia_1": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "1"
+  },
+  "bedroom_scandinavia_2": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "2"
+  },
+  "bedroom_scandinavia_3": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "3"
+  },
+  "bedroom_scandinavia_4": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "4"
+  },
+  "bedroom_scandinavia_5": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "5"
+  },
+  "bedroom_scandinavia_6": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "6"
+  },
+  "bedroom_scandinavia_7": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "7"
+  },
+  "bedroom_scandinavia_8": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "8"
+  },
+  "bedroom_scandinavia_9": {
+    "room": "bedroom",
+    "style": "scandinavia",
+    "variant": "9"
+  },
+  "bedroom_unique_10": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "10"
+  },
+  "bedroom_unique_1": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "1"
+  },
+  "bedroom_unique_2": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "2"
+  },
+  "bedroom_unique_3": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "3"
+  },
+  "bedroom_unique_4": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "4"
+  },
+  "bedroom_unique_5": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "5"
+  },
+  "bedroom_unique_6": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "6"
+  },
+  "bedroom_unique_7": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "7"
+  },
+  "bedroom_unique_8": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "8"
+  },
+  "bedroom_unique_9": {
+    "room": "bedroom",
+    "style": "unique",
+    "variant": "9"
+  }
+}
