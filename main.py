@@ -1430,9 +1430,9 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         "bed": 90, 
         "table": 80, "desk": 80, "dining": 80,
         "console": 60, "shelf": 60, "cabinet": 60, "storage": 60,
-        "tv": 50,
+        "lamp": 50, "light": 50,
         "chair": 40, "armchair": 40,
-        "lamp": 10, "light": 10, "plant": 5
+        "tv": 10, "plant": 5
     }
 
     for i, it in enumerate(analyzed_items or []):
@@ -3304,7 +3304,11 @@ def generate_furnished_room(
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
-                for it in (furniture_specs_json.get("items") or []):
+                items_for_cutout = list(furniture_specs_json.get("items") or [])
+                # Category-only priority: higher category_score first
+                items_for_cutout.sort(key=lambda x: (-(x.get("category_score") or 0), x.get("index") or 0))
+                items_for_cutout = items_for_cutout[:10]
+                for it in items_for_cutout:
                     cp = it.get("crop_path")
                     lbl = (it.get("label") or "").strip()
                     if cp and os.path.exists(cp):
