@@ -1,0 +1,140 @@
+{
+  "info": {
+    "name": "AI Render External API",
+    "_postman_id": "f2e0c0c5-7d5f-4f8d-9f62-1b5e38b8b2a7",
+    "description": "External integration endpoints for AI rendering (preset/cart) + job status polling.\n\nAll render endpoints are async: they return a job_id. Poll /jobs/{job_id} to get status + result payloads.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "https://YOUR_DOMAIN"
+    },
+    {
+      "key": "EXTERNAL_API_KEY",
+      "value": "YOUR_EXTERNAL_KEY"
+    },
+    {
+      "key": "JOB_ID",
+      "value": "YOUR_JOB_ID"
+    }
+  ],
+  "item": [
+    {
+      "name": "Render - Preset (External)",
+      "description": "### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nPOST {{BASE_URL}}/api/external/render/preset\n\n**Required**\n- image_url (string): public URL to the room photo\n\n**One of**\n- preset_id (string): if provided, server resolves room/style/variant/dimensions/placement from preset map\n- room + style (strings): required if preset_id is not provided\n\n**Optional**\n- variant (string/int): default \"1\"\n- dimensions (string): free-form room dimensions (e.g. \"W:4000 D:6000 H:2700\")\n- placement (string): extra instructions\n- include_details (boolean): default true\n\n### Response (Queued)\n- job_id (string)\n- status = \"queued\"\n- resolved.room/style/variant\n\n### Notes\n- All rendering is async. Poll /jobs/{job_id} to get results.\n\n\n### Field Rules\n- image_url: public URL to the room photo (jpg/png/webp).\n- preset_id: if provided, server resolves room/style/variant/dimensions/placement from preset map.\n- If preset_id is NOT provided, room + style are required.\n- variant: string/int, default \"1\".\n- dimensions: free-form string (e.g. \"W:4000 D:6000 H:2700\").\n- placement: free-form instruction text.\n- include_details: true/false. If true, result includes detail shots.\n\n### Error Codes\n- 400: Missing required fields (image_url) or invalid preset_id.\n- 401/403: Invalid or missing x-api-key.\n- 500: Server error (render/queue/redis).\n",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{EXTERNAL_API_KEY}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"image_url\": \"https://.../room.jpg\",\n  \"preset_id\": \"LR_MODERN_01\",\n  \"include_details\": true,\n  \"dimensions\": \"W:4000 D:6000 H:2700\",\n  \"placement\": \"Optional extra instruction\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{BASE_URL}}/api/external/render/preset"
+      },
+      "response": [
+        {
+          "name": "Queued",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"job_id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"status\": \"queued\",\n  \"resolved\": {\n    \"room\": \"livingroom\",\n    \"style\": \"Modern\",\n    \"variant\": \"1\"\n  }\n}"
+        },
+        {
+          "name": "Error - Invalid preset_id",
+          "status": "Bad Request",
+          "code": 400,
+          "body": "{\n  \"detail\": \"Unknown preset_id\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Render - Cart (External)",
+      "description": "### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nPOST {{BASE_URL}}/api/external/render/cart\n\n**Required**\n- image_url (string): public URL to the room photo\n- items (array)\n\n**Item fields**\n- id (string)\n- category (string)\n- image_url (string): public URL to item image\n- qty (int, default 1)\n- dims_mm (object, optional): accepts width_mm/depth_mm/height_mm or w/d/h or width/depth/height\n- priority (int, default 3)\n- name (string, optional)\n- options (string|object|array, optional)\n\n**Optional**\n- room (string) default \"livingroom\"\n- style (string) optional (used in placement text)\n- variant (string/int) default \"1\"\n- dimensions (string)\n- placement (string)\n- include_details (boolean) default true\n\n### Response (Queued)\n- job_id (string)\n- status = \"queued\"\n- cart_kept (array) / cart_dropped (array)\n\n### Notes\n- Server may drop items based on internal limits; dropped items are returned in cart_dropped.\n- All rendering is async. Poll /jobs/{job_id} to get results.\n\n\n### Field Rules\n- image_url: public URL to the room photo (jpg/png/webp).\n- items: array of item objects.\n- item.id: string (required).\n- item.category: string (required).\n- item.image_url: public URL to item image (required).\n- item.qty: int, default 1.\n- item.dims_mm: object (optional). Accepted keys:\n  - width_mm / depth_mm / height_mm\n  - OR w / d / h\n  - OR width / depth / height\n- item.options: string | object | array (optional).\n- item.priority: int, default 3.\n- item.name: string (optional).\n- room: default \"livingroom\" if omitted.\n- style: optional (used for placement text).\n- variant: string/int, default \"1\".\n- include_details: true/false.\n\n### Error Codes\n- 400: Missing image_url or items, or all items dropped by limits.\n- 401/403: Invalid or missing x-api-key.\n- 500: Server error (render/queue/redis).\n",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{EXTERNAL_API_KEY}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"image_url\": \"https://.../room.jpg\",\n  \"room\": \"livingroom\",\n  \"style\": \"Modern\",\n  \"include_details\": true,\n  \"items\": [\n    {\n      \"id\": \"SKU123\",\n      \"category\": \"sofa\",\n      \"image_url\": \"https://.../sofa.png\",\n      \"qty\": 1,\n      \"dims_mm\": { \"w\": 2200, \"d\": 900, \"h\": 750 },\n      \"priority\": 1,\n      \"name\": \"Optional name\",\n      \"options\": \"color:black, material:leather\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{BASE_URL}}/api/external/render/cart"
+      },
+      "response": [
+        {
+          "name": "Queued",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"job_id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"status\": \"queued\",\n  \"cart_kept\": [ {\"id\": \"SKU123\"} ],\n  \"cart_dropped\": []\n}"
+        },
+        {
+          "name": "Error - Missing items",
+          "status": "Bad Request",
+          "code": 400,
+          "body": "{\n  \"detail\": \"items are required\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Job Status (Polling)",
+      "description": "### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nGET {{BASE_URL}}/jobs/{{JOB_ID}}\n\n### Response\n- status: queued | started | finished | failed\n- result: present only when finished\n- error: present only when failed\n\n### Result payloads (finished)\n- If include_details=true: result.render + result.details\n- render.result_url / render.result_urls\n- details.details[] (list of detail view URLs)\n\n\n### Field Rules\n- job_id: UUID returned by render endpoint.\n- status: queued | started | finished | failed.\n- result: included only when finished.\n- error: included only when failed.\n\n### Error Codes\n- 404: Job not found.\n- 401/403: Invalid or missing x-api-key.\n- 500: REDIS_URL not configured or server error.\n",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{EXTERNAL_API_KEY}}"
+          }
+        ],
+        "url": "{{BASE_URL}}/jobs/{{JOB_ID}}"
+      },
+      "response": [
+        {
+          "name": "Finished",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"status\": \"finished\",\n  \"enqueued_at\": \"2026-01-30T07:18:38.948587\",\n  \"started_at\": \"2026-01-30T07:18:38.964692\",\n  \"ended_at\": \"2026-01-30T07:21:54.728584\",\n  \"result\": {\n    \"render\": {\n      \"result_url\": \"https://.../result_v1.png\",\n      \"result_urls\": [\"https://.../result_v1.png\", \"https://.../result_v2.png\"]\n    },\n    \"details\": {\n      \"details\": [\n        {\"index\": 0, \"url\": \"https://.../detail_0.png\"}\n      ]\n    }\n  }\n}"
+        },
+        {
+          "name": "Queued",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"status\": \"queued\",\n  \"enqueued_at\": \"2026-01-30T07:18:38.948587\",\n  \"started_at\": null,\n  \"ended_at\": null\n}"
+        },
+        {
+          "name": "Failed",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"status\": \"failed\",\n  \"error\": \"Traceback...\"\n}"
+        }
+      ]
+    }
+  ]
+}

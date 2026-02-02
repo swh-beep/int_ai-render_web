@@ -47,7 +47,7 @@ LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
 SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
-GEMINI_MAX_CONCURRENCY_ANALYSIS = int(os.getenv("GEMINI_MAX_CONCURRENCY_ANALYSIS", "12"))
+GEMINI_MAX_CONCURRENCY_ANALYSIS = 10
 GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "4"))
 GEMINI_SEMAPHORE_ANALYSIS = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_ANALYSIS))
 GEMINI_SEMAPHORE_GEN = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_GEN))
@@ -806,7 +806,7 @@ def job_generate_details(payload: dict) -> dict:
                     detected_items = detect_furniture_boxes(target_analysis_path)
                     print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
 
-                    with ThreadPoolExecutor(max_workers=4) as executor:
+                    with ThreadPoolExecutor(max_workers=10) as executor:
                         futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
                         analyzed_items = [f.result() for f in futures]
                 except Exception as e:
@@ -821,7 +821,7 @@ def job_generate_details(payload: dict) -> dict:
 
         generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1)))
@@ -922,10 +922,9 @@ QUOTA_EXCEEDED_KEYS = set()
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
-    max_retries = len(API_KEY_POOL) + 2
-    timeout_retry_used = False
+    max_attempts = 5
 
-    # 간단하게 payload 타입만 로깅 (이미지는 너무 크니 길이만)
+    # Log payload types only (skip image bytes)
     try:
         content_types = []
         for c in contents or []:
@@ -939,7 +938,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
     except Exception:
         pass
 
-    for attempt in range(max_retries):
+    for attempt in range(max_attempts):
         available_keys = [k for k in API_KEY_POOL if k not in QUOTA_EXCEEDED_KEYS]
         if not available_keys:
             logger.warning("[Gemini] All keys locked. Cooldown 5s then reset.")
@@ -967,22 +966,18 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
             error_lower = error_msg.lower()
             is_timeout = any(x in error_lower for x in ["504", "deadline", "timeout", "timed out"])
             if is_timeout:
-                if timeout_retry_used:
-                    logger.error(f"[Gemini] timeout retry exhausted key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:200]}")
-                    break
-                timeout_retry_used = True
-                logger.warning(f"[Gemini] timeout key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:200]}")
+                logger.warning(f"[Gemini] timeout key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:200]}")
                 time.sleep(1)
                 continue
             if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
-                logger.warning(f"[Gemini] 📉 quota key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:180]}")
+                logger.warning(f"[Gemini] quota key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:180]}")
                 QUOTA_EXCEEDED_KEYS.add(current_key)
                 time.sleep(2 + attempt)
             else:
-                logger.error(f"[Gemini] ⚠️ error key=...{masked_key} attempt={attempt+1}/{max_retries} :: {error_msg[:250]}")
+                logger.error(f"[Gemini] error key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:250]}")
                 time.sleep(1)
 
-    logger.error("[Gemini] ❌ fatal: all keys failed")
+    logger.error("[Gemini] ??fatal: all keys failed")
     return None
 
 # ---------------------------------------------------------
@@ -2030,6 +2025,190 @@ def detect_furniture_boxes(moodboard_path):
     
     return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
 
+def _normalize_dims_dict(raw: dict) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    w = raw.get("width_mm")
+    d = raw.get("depth_mm")
+    h = raw.get("height_mm")
+    if w is None:
+        w = raw.get("width") or raw.get("w")
+    if d is None:
+        d = raw.get("depth") or raw.get("d")
+    if h is None:
+        h = raw.get("height") or raw.get("h")
+    out = {}
+    if w is not None: out["width_mm"] = int(w)
+    if d is not None: out["depth_mm"] = int(d)
+    if h is not None: out["height_mm"] = int(h)
+    return out
+
+def _dims_to_str(dims: dict) -> str:
+    if not isinstance(dims, dict):
+        return ""
+    w = dims.get("width_mm")
+    d = dims.get("depth_mm")
+    h = dims.get("height_mm")
+    if w or d or h:
+        return f" Dimensions: W={w or 'null'}mm, D={d or 'null'}mm, H={h or 'null'}mm."
+    return ""
+
+def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):
+    box = item_data.get('box_2d')
+    label = item_data.get('label', 'Furniture')
+    cropped_img = None
+    crop_path = None
+    cutout_img = None
+    try:
+        img = Image.open(moodboard_path)
+        W, H = img.size
+        if box:
+            ymin, xmin, ymax, xmax = box
+            base_top = int(ymin / 1000 * H)
+            base_bottom = int(ymax / 1000 * H)
+            base_left = int(xmin / 1000 * W)
+            base_right = int(xmax / 1000 * W)
+
+            box_w_px = max(1, base_right - base_left)
+            box_h_px = max(1, base_bottom - base_top)
+
+            pad_bottom_px = max(int(box_h_px * 2.0), int(H * 0.18))
+            pad_top_px = max(int(box_h_px * 1.2), int(H * 0.12))
+            pad_left_px = max(int(box_w_px * 1.2), int(W * 0.16))
+            pad_right_px = max(int(box_w_px * 2.0), int(W * 0.24))
+
+            space_left = base_left
+            space_right = W - base_right
+            if space_right > space_left * 1.2:
+                pad_right_px = max(pad_right_px, int(W * 0.34))
+                pad_left_px = max(pad_left_px, int(W * 0.12))
+            elif space_left > space_right * 1.2:
+                pad_left_px = max(pad_left_px, int(W * 0.34))
+                pad_right_px = max(pad_right_px, int(W * 0.12))
+
+            top = max(0, base_top - pad_top_px)
+            bottom = min(H, base_bottom + pad_bottom_px)
+            left = max(0, base_left - pad_left_px)
+            right = min(W, base_right + pad_right_px)
+
+            min_w = int(W * 0.26)
+            min_h = int(H * 0.26)
+            if right - left < min_w:
+                pad = int(min_w / 2)
+                left = max(0, base_left - pad)
+                right = min(W, base_right + pad)
+            if bottom - top < min_h:
+                pad = int(min_h / 2)
+                top = max(0, base_top - pad)
+                bottom = min(H, base_bottom + pad)
+
+            cropped_img = img.crop((left, top, right, bottom))
+            cutout_img = img.crop((base_left, base_top, base_right, base_bottom))
+        else:
+            cropped_img = img.copy()
+            cutout_img = img.copy()
+        img.close()
+
+        # Upscale small crops to help OCR read small text.
+        try:
+            if cropped_img:
+                cw, ch = cropped_img.size
+                target_max = 1600
+                if max(cw, ch) < target_max:
+                    scale = target_max / max(cw, ch)
+                    nw = max(1, int(cw * scale))
+                    nh = max(1, int(ch * scale))
+                    cropped_img = cropped_img.resize((nw, nh), Image.LANCZOS)
+        except Exception:
+            pass
+
+        try:
+            if save_crop and unique_id is not None and item_index is not None and cutout_img is not None:
+                safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(label))[:40]
+                crop_filename = f"crop_{unique_id}_{int(item_index):02d}_{safe_label}.png"
+                crop_path = os.path.join("outputs", crop_filename)
+                cutout_img.save(crop_path, "PNG")
+        except Exception:
+            crop_path = None
+    finally:
+        if cutout_img:
+            try: cutout_img.close()
+            except Exception: pass
+    return cropped_img, crop_path
+
+def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=60):
+    """
+    Single long analysis for room structure + all items.
+    items: list of dicts with keys: label, image (PIL), dims_mm(optional), options(optional)
+    """
+    room_img = None
+    try:
+        room_img = Image.open(room_path) if room_path else None
+        item_lines = []
+        for i, it in enumerate(items or [], start=1):
+            label = it.get("label") or f"Item{i}"
+            line = f"{i}. label='{label}'"
+            dims = it.get("dims_mm")
+            opts = it.get("options")
+            if isinstance(dims, dict) and dims:
+                try:
+                    line += f", provided_dims_mm={json.dumps(dims, ensure_ascii=False)}"
+                except Exception:
+                    pass
+            if opts is not None and opts != "":
+                try:
+                    line += f", options={json.dumps(opts, ensure_ascii=False)}"
+                except Exception:
+                    line += f", options={str(opts)}"
+            item_lines.append(line)
+
+        prompt = (
+            "You will receive multiple images.\n"
+            "Image #1 is the EMPTY ROOM. Images #2..N are individual furniture/props in the exact order below.\n\n"
+            "ITEM ORDER:\n"
+            + ("\n".join(item_lines) if item_lines else "(no items)") + "\n\n"
+            "TASK A (ROOM): Write a long structural analysis of the room (80-140 words). "
+            "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
+            "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
+            f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
+            "TASK B (ITEMS): For EACH item in order, write 40-80 words describing shape, proportions, silhouette, "
+            "scale cues, materials, and fine geometry. If exact dimensions are provided or readable, include them in "
+            "dimensions_mm AND mention them in the description. Do NOT invent missing dimensions.\n\n"
+            "Return STRICT JSON ONLY:\n"
+            "{\n"
+            "  \"room_text\": \"...\",\n"
+            "  \"windows_present\": true/false,\n"
+            "  \"items\": [\n"
+            "    {\"label\":\"...\",\"description\":\"...\",\"dimensions_mm\":{\"width\":null,\"depth\":null,\"height\":null},\"raw_text_found\":\"\"}\n"
+            "  ]\n"
+            "}\n"
+        )
+
+        content = [prompt]
+        if room_img:
+            content.append(room_img)
+        for it in items or []:
+            img = it.get("image") or it.get("_image")
+            if img is not None:
+                content.append(img)
+
+        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {'timeout': timeout}, {})
+        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+        if isinstance(obj, dict):
+            return obj
+    except Exception as e:
+        print(f"!! [Long Analysis Failed] {e}", flush=True)
+    finally:
+        if room_img:
+            try: room_img.close()
+            except Exception: pass
+        for it in items or []:
+            img = it.get("image") or it.get("_image")
+            if img is not None:
+                try: img.close()
+                except Exception: pass
+    return {}
+
 def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):
     """
     Crop detected item WITH PADDING to capture specification text below the item.
@@ -2126,7 +2305,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             f"Analyze this image cutout of a '{label}'.\n"
             "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
             "1. **READ EXTRACT DIMENSIONS:** If there is text like 'W: 2800', 'Width 2800mm', '2800*1450', extract these numbers EXACTLY in millimeters.\n"
-            "2. Describe: Material, Color, Shape.\n"
+            "2. **LONG DESCRIPTION (40-80 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
             "\n"
             "Return STRICT JSON only:\n"
             "{\n"
@@ -2582,6 +2761,7 @@ def generate_furnished_room(
     start_time=0,
     room_planes=None,
     windows_present=None,
+    room_analysis_text=None,
 ):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     room_img = None
@@ -2604,6 +2784,15 @@ def generate_furnished_room(
         
         system_instruction = "You are an expert interior designer AI."
         
+        room_analysis_context = ""
+        if room_analysis_text:
+            room_analysis_context = (
+                "\n<ROOM STRUCTURE & SCALE ANALYSIS (LONG)>\n"
+                "Use this to preserve architecture and scale. Do NOT invent new openings.\n"
+                f"{room_analysis_text}\n"
+                "--------------------------------------------------\n"
+            )
+
         specs_context = ""
         if furniture_specs:
             specs_context = (
@@ -2989,6 +3178,7 @@ def generate_furnished_room(
         
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
+            f"{room_analysis_context}\n"
             f"{specs_context}\n" 
             f"{dims_table_context}\n"
             f"{incomplete_dims_context}\n"
@@ -3392,8 +3582,9 @@ def render_room(
         if room_planes:
             wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
         else:
-            wall_span_norm = detect_back_wall_span_norm(step1_img) if step1_img else (0.0, 1.0)
-        windows_present = detect_windows_present(step1_img) if step1_img else False
+            wall_span_norm = (0.0, 1.0)
+        windows_present = None
+        room_analysis_text = ""
         # Structure protection removed for rendering quality and performance.
 
         furniture_specs_json = None
@@ -3482,76 +3673,105 @@ def render_room(
             ref_paths = [ref_path]
 
         furniture_specs_text = None
-        full_analyzed_data = [] 
+        full_analyzed_data = []
+        analysis_items = []
 
-        if ref_paths:
+        if ref_paths or item_refs:
             if not LOG_BRIEF:
-                print(f">> [Global Analysis] Analyzing furniture in {ref_paths}...", flush=True)
+                print(">> [Global Analysis] Running unified long analysis...", flush=True)
             try:
                 if item_refs:
                     if not LOG_BRIEF:
                         print(f">> [Global Analysis] Using direct item references: {len(item_refs)}", flush=True)
-                    with ThreadPoolExecutor(max_workers=8) as executor:
-                        futures = []
-                        for idx, meta in enumerate(item_refs):
-                            futures.append(
-                                (
-                                    meta,
-                                    executor.submit(
-                                        analyze_cropped_item,
-                                        meta["path"],
-                                        {"label": meta["label"], "box_2d": [0, 0, 1000, 1000]},
-                                        unique_id,
-                                        idx + 1,
-                                        True,
-                                    ),
-                                )
-                            )
-                        results = []
-                        for meta, future in futures:
-                            res = future.result()
-                            if not res or not isinstance(res, dict):
-                                continue
-                            dims = meta.get("dims_mm") or {}
-                            opts = meta.get("options")
-                            extra_lines = []
-                            if isinstance(dims, dict) and dims:
-                                w = dims.get("w") or dims.get("width") or dims.get("width_mm")
-                                d = dims.get("d") or dims.get("depth") or dims.get("depth_mm")
-                                h = dims.get("h") or dims.get("height") or dims.get("height_mm")
-                                if w or d or h:
-                                    extra_lines.append(f"Requested size: W={w} D={d} H={h} mm.")
-                            if isinstance(opts, dict) and opts:
-                                try:
-                                    extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
-                                except Exception:
-                                    pass
-                            elif isinstance(opts, list) and opts:
-                                try:
-                                    extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
-                                except Exception:
-                                    pass
-                            elif isinstance(opts, str) and opts.strip():
-                                extra_lines.append("Options: " + opts.strip())
-                            if extra_lines:
-                                desc = res.get("description") or ""
-                                res["description"] = (desc + " " + " ".join(extra_lines)).strip()
-                                res["options"] = opts
-                                res["requested_dims_mm"] = dims
-                            results.append(res)
-                        full_analyzed_data = results
+                    for idx, meta in enumerate(item_refs):
+                        try:
+                            img = Image.open(meta["path"])
+                        except Exception:
+                            continue
+                        analysis_items.append({
+                            "label": meta.get("label") or "Item",
+                            "box_2d": [0, 0, 1000, 1000],
+                            "crop_path": None,
+                            "dims_mm": meta.get("dims_mm"),
+                            "options": meta.get("options"),
+                            "_image": img,
+                        })
                 else:
                     detected = []
                     for rp in ref_paths:
                         detected.extend(detect_furniture_boxes(rp))
                     if not LOG_BRIEF:
-                        print(f">> [Global Analysis] Parallel analyzing {len(detected)} items...", flush=True)
-                    with ThreadPoolExecutor(max_workers=8) as executor:
-                        futures = []
-                        for idx, item in enumerate(detected):
-                            rp = ref_paths[min(idx, len(ref_paths) - 1)]
-                            futures.append(executor.submit(analyze_cropped_item, rp, item, unique_id, idx + 1, True))
-                        full_analyzed_data = [f.result() for f in futures if f is not None]
+                        print(f">> [Global Analysis] Detected {len(detected)} items for long analysis", flush=True)
+                    for idx, item in enumerate(detected):
+                        rp = ref_paths[min(idx, len(ref_paths) - 1)]
+                        cropped_img, crop_path = _crop_item_with_padding(rp, item, unique_id, idx + 1, True)
+                        if cropped_img is None:
+                            continue
+                        analysis_items.append({
+                            "label": item.get("label") or "Item",
+                            "box_2d": item.get("box_2d"),
+                            "crop_path": crop_path,
+                            "_image": cropped_img,
+                        })
+
+                analysis_result = analyze_room_and_items_long(step1_img, analysis_items, room_dimensions=dimensions, timeout=60)
+                room_analysis_text = (analysis_result.get("room_text") or "").strip()
+                wp = analysis_result.get("windows_present")
+                if isinstance(wp, bool):
+                    windows_present = wp
+                elif isinstance(wp, (int, float)):
+                    windows_present = bool(wp)
+                elif isinstance(wp, str):
+                    windows_present = wp.strip().lower() in ("1", "true", "yes", "y")
+                if windows_present is None:
+                    windows_present = False
+
+                items_result = analysis_result.get("items") if isinstance(analysis_result, dict) else []
+                if not isinstance(items_result, list):
+                    items_result = []
+
+                full_analyzed_data = []
+                for idx, meta in enumerate(analysis_items):
+                    label = meta.get("label") or f"Item{idx+1}"
+                    res_item = items_result[idx] if idx < len(items_result) else {}
+                    desc = (res_item.get("description") if isinstance(res_item, dict) else None) or f"A high quality {label}."
+                    dims = _normalize_dims_dict((res_item or {}).get("dimensions_mm") if isinstance(res_item, dict) else {})
+                    req_dims = _normalize_dims_dict(meta.get("dims_mm") or {})
+                    if req_dims:
+                        dims = req_dims
+                    dims_str = _dims_to_str(dims)
+
+                    opts = meta.get("options")
+                    extra_lines = []
+                    if req_dims:
+                        extra_lines.append(
+                            f"Requested size: W={req_dims.get('width_mm') or 'null'} "
+                            f"D={req_dims.get('depth_mm') or 'null'} "
+                            f"H={req_dims.get('height_mm') or 'null'} mm."
+                        )
+                    if isinstance(opts, dict) and opts:
+                        try:
+                            extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                        except Exception:
+                            pass
+                    elif isinstance(opts, list) and opts:
+                        try:
+                            extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                        except Exception:
+                            pass
+                    elif isinstance(opts, str) and opts.strip():
+                        extra_lines.append("Options: " + opts.strip())
+
+                    full_desc = (desc + dims_str + (" " + " ".join(extra_lines) if extra_lines else "")).strip()
+                    full_analyzed_data.append({
+                        "label": label,
+                        "description": full_desc,
+                        "box_2d": meta.get("box_2d") or [0, 0, 1000, 1000],
+                        "crop_path": meta.get("crop_path"),
+                        "options": opts,
+                        "requested_dims_mm": req_dims or None,
+                    })
+
                 try:
                     if full_analyzed_data and not LOG_BRIEF:
                         logger.info(f"[Analysis] items={len(full_analyzed_data)}")
@@ -3565,13 +3785,12 @@ def render_room(
                             )
                 except Exception:
                     logger.exception("[Analysis] logging failed")
-                
+
                 specs_list = []
                 for idx, item in enumerate(full_analyzed_data):
                     specs_list.append(f"{idx+1}. {item['label']}: {item['description']}")
                 furniture_specs_text = "\n".join(specs_list)
 
-                # [SCALE FIX vB] Build furniture JSON + select PRIMARY (largest volume, exclude rugs/carpets)
                 try:
                     furniture_specs_json = build_furniture_specs_json(full_analyzed_data)
                     primary_item = (furniture_specs_json or {}).get("primary")
@@ -3580,7 +3799,6 @@ def render_room(
                     logger.info(f"[Scale] primary_item={ (primary_item or {}).get('label') }")
                     logger.info(f"[Scale] room_dims_parsed={room_dims_parsed} wall_span_norm={wall_span_norm}")
 
-                    # Optional: W/D/H scale guide image (requires room dims + complete item dims + room planes)
                     try:
                         room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
                         room_d = int((room_dims_parsed or {}).get("depth_mm") or 0)
@@ -3589,7 +3807,6 @@ def render_room(
                         p_w = int(((primary_item or {}).get("dims_mm") or {}).get("width_mm") or 0)
                         p_d = int(((primary_item or {}).get("dims_mm") or {}).get("depth_mm") or 0)
                         p_h = int(((primary_item or {}).get("dims_mm") or {}).get("height_mm") or 0)
-                        scale_anchor_label = (primary_item or {}).get("label")
 
                         if not p_w and furniture_specs_json and isinstance(furniture_specs_json, dict):
                             try:
@@ -3613,7 +3830,6 @@ def render_room(
                             if best:
                                 _, best_item, w, d, h = best
                                 p_w, p_d, p_h = w, d, h
-                                scale_anchor_label = best_item.get("label") or scale_anchor_label
 
                         logger.info(
                             f"[Scale] room_w={room_w}mm room_d={room_d}mm room_h={room_h}mm "
@@ -3631,12 +3847,13 @@ def render_room(
                     primary_item = None
                     scale_guide_path = None
                     size_hierarchy = None
-                
-                print(f">> [Global Analysis] Complete. Specs injected.", flush=True)
-                
+
+                print(">> [Global Analysis] Complete. Specs injected.", flush=True)
             except Exception as e:
                 print(f"!! [Global Analysis Failed] {e}", flush=True)
 
+        if windows_present is None:
+            windows_present = False
         generated_results = []
         log_section("[Stage 2] 3 variations start (Specs Injection)")
 
@@ -3663,12 +3880,13 @@ def render_room(
                     start_time=start_time,
                     room_planes=room_planes,
                     windows_present=windows_present,
+                    room_analysis_text=room_analysis_text,
                 )
                 if res: return res
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
             return None
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(process_one_variant, i) for i in range(3)]
             for future in futures:
                 res = future.result()
