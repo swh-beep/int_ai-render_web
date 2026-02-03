@@ -2974,6 +2974,11 @@ def generate_furnished_room(
                         if w <= 0: missing.append("W")
                         if d <= 0: missing.append("D")
                         if h <= 0: missing.append("H")
+                        # Allow 2D dims for certain flat items (tv, mirror, frame, art, painting, rug)
+                        allow_2d = bool(re.search(r"\b(tv|mirror|frame|art|painting|rug|carpet)\b", label.lower()))
+                        if allow_2d:
+                            if w > 0 and (d > 0 or h > 0):
+                                missing = []
                         if missing:
                             incomplete_items.append((label, missing))
                             if LOG_BRIEF:
@@ -3269,9 +3274,11 @@ def generate_furnished_room(
             "4. **SHADOW PHYSICS:**\n"
             "   - Cast soft, directional shadows driven by the existing key light direction.\n"
             "   - Use interior lights only to lift the darkest corners slightly.\n"
+            "   - Shadows and light gradients must be smooth and clean; avoid blotchy noise or muddy patches on floors.\n"
             
             "5. **ATMOSPHERE:**\n"
             "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
+            "   - Lighting must feel natural and cohesive across all surfaces (especially floors); no artificial blotches.\n"
             "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
         )
         
