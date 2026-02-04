@@ -677,7 +677,8 @@ def job_render(payload: dict) -> dict:
 
 def job_render_with_details(payload: dict) -> dict:
     render_payload = payload.get("render") or {}
-    include_details = bool(payload.get("include_details", True))
+    # Always generate details (ignore include_details flag)
+    include_details = True
     extra = payload.get("extra") or {}
 
     render_result = job_render(render_payload)
@@ -817,6 +818,13 @@ def job_generate_details(payload: dict) -> dict:
             analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
 
         dynamic_styles = construct_dynamic_styles(analyzed_items)
+        if aud == "external":
+            detail_only = []
+            for s in dynamic_styles:
+                name = (s.get("name") or "")
+                if name.startswith("Detail:"):
+                    detail_only.append(s)
+            dynamic_styles = detail_only[:9]
         if not dynamic_styles:
             return {"error": "No styles available"}
 
@@ -3314,7 +3322,7 @@ def generate_furnished_room(
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
                 # Category-only priority: higher category_score first
                 items_for_cutout.sort(key=lambda x: (-(x.get("category_score") or 0), x.get("index") or 0))
-                items_for_cutout = items_for_cutout[:10]
+                items_for_cutout = items_for_cutout[:12]
                 for it in items_for_cutout:
                     cp = it.get("crop_path")
                     lbl = (it.get("label") or "").strip()
