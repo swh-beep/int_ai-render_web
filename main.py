@@ -367,25 +367,8 @@ def _load_preset_map() -> dict:
 
 
 def _apply_cart_limits(items: list[dict]) -> tuple[list[dict], list[dict]]:
-    kept = []
-    dropped = []
-    counts: dict[str, int] = {}
-    items_sorted = sorted(items, key=lambda x: (x.get("priority", 3), x.get("category", "")))
-    for it in items_sorted:
-        cat = (it.get("category") or "decor").lower().strip()
-        limit = int(CART_LIMITS.get(cat, CART_LIMITS.get("decor", 20)))
-        qty = int(it.get("qty") or 1)
-        used = counts.get(cat, 0)
-        allowed = max(0, limit - used)
-        if allowed <= 0:
-            dropped.append({**it, "dropped": qty})
-            continue
-        take = min(qty, allowed)
-        counts[cat] = used + take
-        kept.append({**it, "qty": take})
-        if qty > take:
-            dropped.append({**it, "dropped": qty - take})
-    return kept, dropped
+    # Cart-side already enforces item limits, so keep everything.
+    return list(items), []
 
 
 def _build_cart_summary(items: list[dict]) -> str:
@@ -4113,7 +4096,6 @@ class CartItem(BaseModel):
     image_url: str
     qty: int = 1
     dims_mm: Optional[Dict[str, Any]] = None
-    priority: Optional[int] = 3
     name: Optional[str] = None
     options: Optional[Any] = None
 
