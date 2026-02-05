@@ -59,7 +59,7 @@ def _get_gemini_semaphore(model_name: str):
     return GEMINI_SEMAPHORE_GEN
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-flash-preview'
+ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
 API_KEY_POOL = []
 i = 1
 while True:
@@ -2341,6 +2341,51 @@ def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_inde
             except Exception: pass
     return cropped_img, crop_path
 
+def analyze_room_structure(room_path, room_dimensions=None, timeout=60):
+    """Room-only analysis (structure + windows)."""
+    room_img = None
+    try:
+        room_img = Image.open(room_path) if room_path else None
+        try:
+            if room_img:
+                room_img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+        except Exception:
+            pass
+
+        prompt = (
+            "You will receive ONE image: the EMPTY ROOM.\n\n"
+            "TASK: Write a structural analysis of the room (80-100 words). "
+            "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
+            "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
+            f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
+            "Return STRICT JSON ONLY:\n"
+            "{\n"
+            "  \"room_text\": \"...\",\n"
+            "  \"windows_present\": true/false\n"
+            "}\n"
+        )
+        content = [prompt]
+        if room_img:
+            content.append(room_img)
+        res = call_gemini_with_failover(
+            ANALYSIS_MODEL_NAME,
+            content,
+            {'timeout': timeout},
+            {},
+            log_tag="Analysis.RoomOnly",
+        )
+        obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+        if isinstance(obj, dict):
+            return obj
+    except Exception as e:
+        print(f"!! [Room Analysis Failed] {e}", flush=True)
+    finally:
+        if room_img:
+            try: room_img.close()
+            except Exception: pass
+    return {}
+
+
 def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=120):
     """
     Single long analysis for room structure + all items.
@@ -2520,7 +2565,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             f"Analyze this image cutout of a '{label}'.\n"
             "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
             "1. **READ EXTRACT DIMENSIONS:** If there is text like 'W: 2800', 'Width 2800mm', '2800*1450', extract these numbers EXACTLY in millimeters.\n"
-            "2. **LONG DESCRIPTION (30-40 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
+            "2. **LONG DESCRIPTION (50-70 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
             "\n"
             "Return STRICT JSON only:\n"
             "{\n"
@@ -3539,7 +3584,6 @@ def generate_furnished_room(
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
-                # Category-only priority: higher category_score first
                 items_for_cutout.sort(key=lambda x: (-(x.get("category_score") or 0), x.get("index") or 0))
                 items_for_cutout = items_for_cutout[:12]
                 for it in items_for_cutout:
@@ -4012,45 +4056,50 @@ def render_room(
 
         if ref_paths or item_refs:
             if not LOG_BRIEF:
-                print(">> [Global Analysis] Running unified long analysis...", flush=True)
+                print(">> [Split Analysis] Room + Items (separate calls)...", flush=True)
             try:
+                item_metas = []
                 if item_refs:
                     if not LOG_BRIEF:
-                        print(f">> [Global Analysis] Using direct item references: {len(item_refs)}", flush=True)
-                    for idx, meta in enumerate(item_refs):
+                        print(f">> [Item Analysis] Using direct item references: {len(item_refs)}", flush=True)
+                    for meta in item_refs:
                         try:
-                            img = Image.open(meta["path"])
+                            src_path = meta.get("path")
+                            if not src_path or not os.path.exists(src_path):
+                                continue
+                            item_metas.append({
+                                "label": meta.get("label") or "Item",
+                                "box_2d": [0, 0, 1000, 1000],
+                                "dims_mm": meta.get("dims_mm"),
+                                "options": meta.get("options"),
+                                "qty": meta.get("qty") or 1,
+                                "source_path": src_path,
+                            })
                         except Exception:
                             continue
-                        analysis_items.append({
-                            "label": meta.get("label") or "Item",
-                            "box_2d": [0, 0, 1000, 1000],
-                            "crop_path": None,
-                            "dims_mm": meta.get("dims_mm"),
-                            "options": meta.get("options"),
-                            "_image": img,
-                        })
                 else:
                     detected = []
                     for rp in ref_paths:
                         detected.extend(detect_furniture_boxes(rp))
                     if not LOG_BRIEF:
-                        print(f">> [Global Analysis] Detected {len(detected)} items for long analysis", flush=True)
+                        print(f">> [Item Analysis] Detected {len(detected)} items for split analysis", flush=True)
                     for idx, item in enumerate(detected):
-                        rp = ref_paths[min(idx, len(ref_paths) - 1)]
-                        cropped_img, crop_path = _crop_item_with_padding(rp, item, unique_id, idx + 1, True)
-                        if cropped_img is None:
+                        try:
+                            rp = ref_paths[min(idx, len(ref_paths) - 1)]
+                            item_metas.append({
+                                "label": item.get("label") or "Item",
+                                "box_2d": item.get("box_2d"),
+                                "dims_mm": None,
+                                "options": None,
+                                "qty": 1,
+                                "source_path": rp,
+                            })
+                        except Exception:
                             continue
-                        analysis_items.append({
-                            "label": item.get("label") or "Item",
-                            "box_2d": item.get("box_2d"),
-                            "crop_path": crop_path,
-                            "_image": cropped_img,
-                        })
 
-                analysis_result = analyze_room_and_items_long(step1_img, analysis_items, room_dimensions=dimensions, timeout=60)
-                room_analysis_text = (analysis_result.get("room_text") or "").strip()
-                wp = analysis_result.get("windows_present")
+                room_result = analyze_room_structure(step1_img, room_dimensions=dimensions, timeout=60)
+                room_analysis_text = (room_result.get("room_text") or "").strip()
+                wp = room_result.get("windows_present")
                 if isinstance(wp, bool):
                     windows_present = wp
                 elif isinstance(wp, (int, float)):
@@ -4060,70 +4109,73 @@ def render_room(
                 if windows_present is None:
                     windows_present = False
 
-                items_result = analysis_result.get("items") if isinstance(analysis_result, dict) else []
-                if not isinstance(items_result, list):
-                    items_result = []
-
                 full_analyzed_data = []
-                for idx, meta in enumerate(analysis_items):
-                    label = meta.get("label") or f"Item{idx+1}"
-                    res_item = items_result[idx] if idx < len(items_result) else {}
-                    desc = (res_item.get("description") if isinstance(res_item, dict) else None) or f"A high quality {label}."
-                    dims = _normalize_dims_dict((res_item or {}).get("dimensions_mm") if isinstance(res_item, dict) else {})
-                    req_dims = _normalize_dims_dict(meta.get("dims_mm") or {})
-                    if req_dims:
-                        dims = req_dims
-                    dims_str = _dims_to_str(dims)
-                    qty = None
-                    if isinstance(res_item, dict):
-                        qty = res_item.get("quantity")
-                        if isinstance(qty, str):
+                if item_metas:
+                    analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(item_metas)))
+                    results = [None] * len(item_metas)
+                    with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
+                        futures = []
+                        for i, meta in enumerate(item_metas):
+                            item_data = {"label": meta.get("label"), "box_2d": meta.get("box_2d")}
+                            futures.append((i, executor.submit(
+                                analyze_cropped_item,
+                                meta.get("source_path"),
+                                item_data,
+                                unique_id,
+                                i + 1,
+                                True,
+                            )))
+                        for i, future in futures:
                             try:
-                                qty = int(qty.strip())
+                                results[i] = future.result()
                             except Exception:
-                                qty = None
-                    if not qty:
-                        qty = _extract_qty_from_text((res_item or {}).get("raw_text_found") if isinstance(res_item, dict) else "") or 1
+                                results[i] = None
 
-                    opts = meta.get("options")
-                    extra_lines = []
-                    if qty and qty > 1:
-                        extra_lines.append(f"Quantity: {qty}")
-                    if req_dims:
-                        extra_lines.append(
-                            f"Requested size: W={req_dims.get('width_mm') or 'null'} "
-                            f"D={req_dims.get('depth_mm') or 'null'} "
-                            f"H={req_dims.get('height_mm') or 'null'} mm."
-                        )
-                    if isinstance(opts, dict) and opts:
-                        try:
-                            extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
-                        except Exception:
-                            pass
-                    elif isinstance(opts, list) and opts:
-                        try:
-                            extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
-                        except Exception:
-                            pass
-                    elif isinstance(opts, str) and opts.strip():
-                        extra_lines.append("Options: " + opts.strip())
+                    for idx, meta in enumerate(item_metas):
+                        res_item = results[idx] if isinstance(results[idx], dict) else {}
+                        label = (meta.get("label") or res_item.get("label") or f"Item{idx+1}")
+                        desc = (res_item.get("description") if isinstance(res_item, dict) else None) or f"A high quality {label}."
+                        req_dims = _normalize_dims_dict(meta.get("dims_mm") or {})
+                        opts = meta.get("options")
+                        qty = meta.get("qty") or 1
+                        extra_lines = []
+                        if qty and qty > 1:
+                            extra_lines.append(f"Quantity: {qty}")
+                        if req_dims:
+                            extra_lines.append(
+                                f"Requested size: W={req_dims.get('width_mm') or 'null'} "
+                                f"D={req_dims.get('depth_mm') or 'null'} "
+                                f"H={req_dims.get('height_mm') or 'null'} mm."
+                            )
+                        if isinstance(opts, dict) and opts:
+                            try:
+                                extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                            except Exception:
+                                pass
+                        elif isinstance(opts, list) and opts:
+                            try:
+                                extra_lines.append("Options: " + json.dumps(opts, ensure_ascii=False))
+                            except Exception:
+                                pass
+                        elif isinstance(opts, str) and opts.strip():
+                            extra_lines.append("Options: " + opts.strip())
 
-                    full_desc = (desc + dims_str + (" " + " ".join(extra_lines) if extra_lines else "")).strip()
-                    full_analyzed_data.append({
-                        "label": label,
-                        "description": full_desc,
-                        "box_2d": meta.get("box_2d") or [0, 0, 1000, 1000],
-                        "crop_path": meta.get("crop_path"),
-                        "options": opts,
-                        "qty": qty,
-                        "requested_dims_mm": req_dims or None,
-                    })
+                        full_desc = (desc + (" " + " ".join(extra_lines) if extra_lines else "")).strip()
+                        full_analyzed_data.append({
+                            "label": label,
+                            "description": full_desc,
+                            "box_2d": meta.get("box_2d") or res_item.get("box_2d") or [0, 0, 1000, 1000],
+                            "crop_path": res_item.get("crop_path"),
+                            "options": opts,
+                            "qty": qty,
+                            "requested_dims_mm": req_dims or None,
+                        })
 
                 try:
                     if full_analyzed_data and not LOG_BRIEF:
                         logger.info(f"[Analysis] items={len(full_analyzed_data)}")
                         for i, it in enumerate(full_analyzed_data[:30]):
-                            dims = parse_object_dimensions_mm(it.get("description",""))
+                            dims = parse_object_dimensions_mm(it.get("description", ""))
                             logger.info(
                                 f"[Analysis] #{i} {it.get('label')} "
                                 f"dims(mm) W={dims.get('width_mm')} D={dims.get('depth_mm')} H={dims.get('height_mm')} "
@@ -4197,10 +4249,9 @@ def render_room(
                     scale_guide_path = None
                     size_hierarchy = None
 
-                print(">> [Global Analysis] Complete. Specs injected.", flush=True)
+                print(">> [Split Analysis] Complete. Specs injected.", flush=True)
             except Exception as e:
-                print(f"!! [Global Analysis Failed] {e}", flush=True)
-
+                print(f"!! [Split Analysis Failed] {e}", flush=True)
         if windows_present is None:
             windows_present = False
         generated_results = []
@@ -4321,7 +4372,6 @@ class InternalRenderRequest(BaseModel):
     moodboard_url: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
-    include_details: bool = False
 
 class PresetRenderRequest(BaseModel):
     image_url: str
@@ -4331,7 +4381,6 @@ class PresetRenderRequest(BaseModel):
     variant: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
-    include_details: bool = True
 
 class CartItem(BaseModel):
     id: str
@@ -4350,7 +4399,6 @@ class CartRenderRequest(BaseModel):
     variant: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
-    include_details: bool = True
 
 @app.get("/download")
 def download_proxy(url: str, request: Request):
