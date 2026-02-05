@@ -35,9 +35,8 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import Optional, List, Dict, Any
 from contextvars import ContextVar
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry, get_current_job
 from rq.job import Job
-from rq import Retry
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -60,11 +59,11 @@ def _get_gemini_semaphore(model_name: str):
     return GEMINI_SEMAPHORE_GEN
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
+ANALYSIS_MODEL_NAME = 'gemini-3-flash-preview'
 API_KEY_POOL = []
 i = 1
 while True:
-    key = os.getenv(f"NANOBANANA_API_KEY_{i}") 
+    key = os.getenv(f"NANOBANANA_API_KEY_{i}")
     if not key:
         key = os.getenv(f"NANOBANANA_API_KEY{i}")
         if not key: break
@@ -79,7 +78,7 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-TOTAL_TIMEOUT_LIMIT = 300 
+TOTAL_TIMEOUT_LIMIT = 300
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
 def _split_queue_names(val: str) -> List[str]:
@@ -101,13 +100,14 @@ if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
-RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "3600"))
+RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
 RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
 RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
 AWS_REGION = os.getenv("AWS_REGION", "").strip()
 S3_PREFIX = os.getenv("S3_PREFIX", "").strip()
 S3_REQUIRED = os.getenv("S3_REQUIRED", "0").strip().lower() in ("1", "true", "yes", "y")
+JOB_RESULT_S3_PREFIX = os.getenv("JOB_RESULT_S3_PREFIX", "job-results/").strip()
 DEFAULT_AUDIENCE = os.getenv("DEFAULT_AUDIENCE", "internal").strip().lower() or "internal"
 MOODBOARD_S3_PREFIX = os.getenv("MOODBOARD_S3_PREFIX", "moodboard/").strip()
 USE_S3_MOODBOARD = os.getenv("USE_S3_MOODBOARD", "0").strip().lower() in ("1", "true", "yes", "y")
@@ -200,6 +200,65 @@ def _normalize_s3_prefix(prefix: str) -> str:
 
 def _s3_public_url(key: str) -> str:
     return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
+def _job_result_prefix(audience: Optional[str] = None) -> str:
+    base = _normalize_s3_prefix(S3_PREFIX)
+    if JOB_RESULT_S3_PREFIX:
+        return f"{base}{_normalize_s3_prefix(JOB_RESULT_S3_PREFIX)}"
+    if audience:
+        return _build_s3_prefix(audience, "job-results")
+    return f"{base}job-results/"
+
+def _job_result_key(job_id: str, audience: Optional[str] = None) -> Optional[str]:
+    if not job_id:
+        return None
+    prefix = _job_result_prefix(audience)
+    return f"{prefix}{job_id}.json"
+
+def _job_result_key_candidates(job_id: str) -> list[str]:
+    if not job_id:
+        return []
+    base = _normalize_s3_prefix(S3_PREFIX)
+    candidates: list[str] = []
+    if JOB_RESULT_S3_PREFIX:
+        candidates.append(f"{base}{_normalize_s3_prefix(JOB_RESULT_S3_PREFIX)}{job_id}.json")
+    else:
+        candidates.append(f"{_build_s3_prefix('external', 'job-results')}{job_id}.json")
+        candidates.append(f"{_build_s3_prefix('internal', 'job-results')}{job_id}.json")
+        candidates.append(f"{base}job-results/{job_id}.json")
+    # De-duplicate while preserving order
+    seen = set()
+    return [c for c in candidates if not (c in seen or seen.add(c))]
+
+def _save_job_result_s3(job_id: str, result: dict, audience: Optional[str] = None) -> Optional[str]:
+    if not _s3_enabled():
+        return None
+    key = _job_result_key(job_id, audience=audience)
+    if not key:
+        return None
+    try:
+        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        _get_s3_client().put_object(
+            Bucket=S3_BUCKET,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+        return _s3_public_url(key)
+    except Exception:
+        return None
+
+def _load_job_result_s3(job_id: str) -> Optional[dict]:
+    if not _s3_enabled():
+        return None
+    for key in _job_result_key_candidates(job_id):
+        try:
+            obj = _get_s3_client().get_object(Bucket=S3_BUCKET, Key=key)
+            data = obj["Body"].read()
+            return json.loads(data.decode("utf-8"))
+        except Exception:
+            continue
+    return None
 
 def _s3_list_keys(prefix: str, max_keys: int = 1000) -> list[str]:
     if not _s3_enabled():
@@ -592,7 +651,16 @@ def _json_from_response(resp):
         return resp
     return {"result": resp}
 
-def job_render(payload: dict) -> dict:
+def _persist_job_result(result: dict, audience: Optional[str] = None):
+    try:
+        job = get_current_job()
+        if not job:
+            return
+        _save_job_result_s3(job.id, result, audience=audience)
+    except Exception:
+        pass
+
+def job_render(payload: dict, persist_result: bool = True) -> dict:
     file_path = _materialize_input(payload.get("file_path"), "input")
     moodboard_path = payload.get("moodboard_path")
     moodboard_items = payload.get("moodboard_items") or []
@@ -640,7 +708,10 @@ def job_render(payload: dict) -> dict:
             audience=audience,
             moodboard_items=local_items,
         )
-        return _json_from_response(resp)
+        result = _json_from_response(resp)
+        if persist_result:
+            _persist_job_result(result, audience=audience)
+        return result
     finally:
         file_obj.close()
         if mood_obj:
@@ -660,22 +731,29 @@ def job_render(payload: dict) -> dict:
 
 def job_render_with_details(payload: dict) -> dict:
     render_payload = payload.get("render") or {}
+    audience = render_payload.get("audience")
     # Always generate details (ignore include_details flag)
     include_details = True
     extra = payload.get("extra") or {}
 
-    render_result = job_render(render_payload)
+    render_result = job_render(render_payload, persist_result=False)
     if "error" in render_result:
-        return {"error": render_result.get("error"), "render": render_result, **extra}
+        result = {"error": render_result.get("error"), "render": render_result, **extra}
+        _persist_job_result(result, audience=audience)
+        return result
     if not include_details:
-        return {"render": render_result, **extra}
+        result = {"render": render_result, **extra}
+        _persist_job_result(result, audience=audience)
+        return result
 
     result_url = render_result.get("result_url")
     if not result_url:
         urls = render_result.get("result_urls") or []
         result_url = urls[0] if urls else None
     if not result_url:
-        return {"render": render_result, "details": {"error": "Result image not available"}, **extra}
+        result = {"render": render_result, "details": {"error": "Result image not available"}, **extra}
+        _persist_job_result(result, audience=audience)
+        return result
 
     details_payload = {
         "image_url": result_url,
@@ -684,7 +762,9 @@ def job_render_with_details(payload: dict) -> dict:
         "audience": render_payload.get("audience"),
     }
     details_result = job_generate_details(details_payload)
-    return {"render": render_result, "details": details_result, **extra}
+    result = {"render": render_result, "details": details_result, **extra}
+    _persist_job_result(result, audience=audience)
+    return result
 
 def job_image_edit(payload: dict) -> dict:
     photo_paths = payload.get("photo_paths") or []
@@ -830,7 +910,8 @@ def job_generate_details(payload: dict) -> dict:
         for item in generated_paths:
             url = resolve_image_url(item["path"], s3_prefix_override=prefix_detail_rendered)
             if url:
-                details.append({"index": item["index"], "url": url})
+                # Expose 1-based indices in API response (file names are already 1-based)
+                details.append({"index": item["index"] + 1, "url": url})
         if not details:
             return {"error": "Failed to generate images"}
 
@@ -842,7 +923,8 @@ def job_generate_details(payload: dict) -> dict:
 def job_regenerate_single_detail(payload: dict) -> dict:
     try:
         original_image_url = payload.get("original_image_url")
-        style_index = int(payload.get("style_index") or 0)
+        # Accept both 0-based and 1-based indices from callers.
+        raw_style_index = int(payload.get("style_index") or 1)
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
 
@@ -866,7 +948,7 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         if not dynamic_styles:
             return {"error": "No styles available"}
 
-        idx = style_index
+        idx = raw_style_index - 1 if raw_style_index >= 1 else raw_style_index
         if idx < 0:
             idx = 0
         elif idx >= len(dynamic_styles):
@@ -912,9 +994,10 @@ app.add_middleware(
 
 QUOTA_EXCEEDED_KEYS = set()
 
-def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None):
+def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
     max_attempts = 5
+    tag = f" tag={log_tag}" if log_tag else ""
 
     # Log payload types only (skip image bytes)
     try:
@@ -926,7 +1009,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
                 content_types.append(type(c).__name__)
         if not LOG_BRIEF:
 
-            logger.info(f"[Gemini] model={model_name} timeout={request_options.get('timeout')} contents={content_types}")
+            logger.info(f"[Gemini] model={model_name} timeout={request_options.get('timeout')} contents={content_types}{tag}")
     except Exception:
         pass
 
@@ -950,7 +1033,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
                 response = model.generate_content(contents, request_options=request_options, safety_settings=safety_settings)
                 dt = (time.time() - t0) * 1000
             if not LOG_BRIEF:
-                logger.info(f"[Gemini] success key=...{masked_key} ({dt:.0f}ms) model={model_name}")
+                logger.info(f"[Gemini] success key=...{masked_key} ({dt:.0f}ms) model={model_name}{tag}")
             return response
 
         except Exception as e:
@@ -958,18 +1041,18 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
             error_lower = error_msg.lower()
             is_timeout = any(x in error_lower for x in ["504", "deadline", "timeout", "timed out"])
             if is_timeout:
-                logger.warning(f"[Gemini] timeout key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:200]}")
+                logger.warning(f"[Gemini] timeout{tag} key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:200]}")
                 time.sleep(1)
                 continue
             if any(x in error_msg for x in ["429", "403", "Quota", "limit", "Resource has been exhausted"]):
-                logger.warning(f"[Gemini] quota key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:180]}")
+                logger.warning(f"[Gemini] quota{tag} key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:180]}")
                 QUOTA_EXCEEDED_KEYS.add(current_key)
                 time.sleep(2 + attempt)
             else:
-                logger.error(f"[Gemini] error key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:250]}")
+                logger.error(f"[Gemini] error{tag} key=...{masked_key} attempt={attempt+1}/{max_attempts} :: {error_msg[:250]}")
                 time.sleep(1)
 
-    logger.error("[Gemini] ??fatal: all keys failed")
+    logger.error(f"[Gemini] ??fatal{tag}: all keys failed")
     return None
 
 # ---------------------------------------------------------
@@ -1015,18 +1098,18 @@ def standardize_image(image_path, output_path=None, keep_ratio=False, force_land
         if output_path is None: output_path = image_path
         with Image.open(image_path) as img:
             img = ImageOps.exif_transpose(img)
-            
+
             # [수정] 투명 배경(RGBA) 처리: 흰색 소품이 흰 배경에 묻히는 것을 방지하기 위해 중립 그레이(#D2D2D2) 배경 사용
             if img.mode in ("RGBA", "P"):
                 img = img.convert("RGBA")
                 # 밝은 가구와 어두운 가구 모두 대비가 잘 보이는 중립적인 회색 배경 생성
-                background = Image.new("RGBA", img.size, (210, 210, 210, 255)) 
+                background = Image.new("RGBA", img.size, (210, 210, 210, 255))
                 img = Image.alpha_composite(background, img).convert("RGB")
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
 
             width, height = img.size
-            
+
             # [FIX] force_landscape가 True면 -> 무조건 16:9 (1920x1080) 설정
             if force_landscape:
                 target_size = (1920, 1080)
@@ -1460,11 +1543,11 @@ def _volume_proxy(dims: dict) -> int:
 
 def build_furniture_specs_json(analyzed_items: list) -> dict:
     items = []
-    
+
     # [FIX] 우선순위 카테고리 정의 (이 단어가 포함되면 가중치 부여)
     PRIORITY_KEYWORDS = {
         "sofa": 100, "couch": 100, "sectional": 100,
-        "bed": 90, 
+        "bed": 90,
         "table": 80, "desk": 80, "dining": 80,
         "console": 60, "shelf": 60, "cabinet": 60, "storage": 60,
         "lamp": 50, "light": 50,
@@ -1476,17 +1559,17 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         label = it.get("label", "") or ""
         desc  = it.get("description", "") or ""
         box   = it.get("box_2d")
-        
+
         # 1. 치수 파싱 시도 (분석된 description에서)
         dims = parse_object_dimensions_mm(desc)
-        
+
         # 2. 러그 판단
         is_rug = _is_rug_like(label)
-        
+
         # 3. 부피 대용값 계산 (높이 없으면 기본값 1000mm 가정하여 0 방지)
         w = dims.get("width_mm") or 0
         d = dims.get("depth_mm") or 0
-        h = dims.get("height_mm") or 1000 
+        h = dims.get("height_mm") or 1000
         vp = (w * d * h) if (w or d) else 0
         if is_rug: vp = 0 # 러그는 기준점 제외
 
@@ -1496,7 +1579,7 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         for key, score in PRIORITY_KEYWORDS.items():
             if key in norm_label:
                 cat_score = max(cat_score, score)
-        
+
         items.append({
             "index": i,
             "label": label,
@@ -1623,7 +1706,7 @@ def _rank_best_variant_flash(candidate_paths: list, analyzed_items: list) -> Opt
             except Exception:
                 continue
 
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {})
+        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 80}, {}, log_tag="RankBestVariant")
         for im in opened:
             try: im.close()
             except Exception: pass
@@ -1658,7 +1741,7 @@ def detect_room_planes_norm(empty_room_path: str):
                 "- vanish_x/vanish_y: floor vanishing point where floor lines converge.\n"
                 "All values normalized 0..1."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 25}, {})
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 50}, {}, log_tag="Analysis.RoomPlanes")
             obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
             if isinstance(obj, dict):
                 def _clamp(v):
@@ -1714,7 +1797,7 @@ def detect_back_wall_span_norm(empty_room_path: str) -> tuple:
                 "Return STRICT JSON ONLY: {\\\"x_left\\\":0.0, \\\"x_right\\\":1.0} using normalized [0..1].\\n"
                 "Use the floor-wall boundary; ignore doors/windows if they reduce usable span. Approximate if unsure."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 20}, {})
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 40}, {}, log_tag="Analysis.BackWallSpan")
             obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
             if isinstance(obj, dict):
                 xl = float(obj.get("x_left", 0.0)); xr = float(obj.get("x_right", 1.0))
@@ -1739,7 +1822,7 @@ def detect_windows_present(room_path: str) -> bool:
                 "Question: Are any windows or glass exterior openings clearly visible in this room image?\n"
                 "If uncertain, answer NO."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 15}, {})
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 30}, {}, log_tag="Analysis.WindowsPresent")
             txt = (res.text if res and hasattr(res, "text") else "").strip().lower()
             if txt.startswith("yes"):
                 return True
@@ -1897,7 +1980,7 @@ def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str]
                 if ref_item_crop_path and os.path.exists(ref_item_crop_path):
                     ref_img = Image.open(ref_item_crop_path)
                     content += ["Reference item crop:", ref_img]
-                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 20}, {})
+                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {}, log_tag="Analysis.PrimaryBBox")
             finally:
                 if ref_img:
                     ref_img.close()
@@ -1930,7 +2013,7 @@ def detect_item_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], i
                 if ref_item_crop_path and os.path.exists(ref_item_crop_path):
                     ref_img = Image.open(ref_item_crop_path)
                     content += ["Reference item crop:", ref_img]
-                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 20}, {})
+                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {}, log_tag="Analysis.ItemBBox")
             finally:
                 if ref_img:
                     ref_img.close()
@@ -2131,12 +2214,12 @@ def detect_furniture_boxes(moodboard_path):
                 "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
                 "Ignore walls, windows, and floors. Focus on movable objects."
             )
-            response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {'timeout': 60}, {})
+            response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {'timeout': 120}, {}, log_tag="Analysis.DetectFurniture")
             if response and response.text:
                 text = response.text.strip()
                 if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
                 elif "```" in text: text = text.split("```")[0].strip()
-                
+
                 items = json.loads(text)
                 if isinstance(items, list) and len(items) > 0:
                     if not LOG_BRIEF:
@@ -2144,7 +2227,7 @@ def detect_furniture_boxes(moodboard_path):
                     return items
     except Exception as e:
         print(f"!! Detection Failed: {e}", flush=True)
-    
+
     return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
 
 def _normalize_dims_dict(raw: dict) -> dict:
@@ -2258,7 +2341,7 @@ def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_inde
             except Exception: pass
     return cropped_img, crop_path
 
-def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=60):
+def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=120):
     """
     Single long analysis for room structure + all items.
     items: list of dicts with keys: label, image (PIL), dims_mm(optional), options(optional)
@@ -2294,11 +2377,11 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
             "Image #1 is the EMPTY ROOM. Images #2..N are individual furniture/props in the exact order below.\n\n"
             "ITEM ORDER:\n"
             + ("\n".join(item_lines) if item_lines else "(no items)") + "\n\n"
-            "TASK A (ROOM): Write a structural analysis of the room (50-60 words). "
+            "TASK A (ROOM): Write a structural analysis of the room (80-100 words). "
             "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
             "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
             f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
-            "TASK B (ITEMS): For EACH item in order, write 30-40 words describing material, color, shape, proportions, "
+            "TASK B (ITEMS): For EACH item in order, write 50-70 words describing material, color, shape, proportions, "
             "silhouette, scale cues, and fine geometry. If exact dimensions are provided or readable, include them in "
             "dimensions_mm AND mention them in the description. Do NOT invent missing dimensions.\n\n"
             "If the text indicates quantity (e.g., 'x 2', '2 ea', '2pcs'), set quantity accordingly.\n"
@@ -2324,7 +2407,7 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
                     pass
                 content.append(img)
 
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {'timeout': timeout}, {})
+        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {'timeout': timeout}, {}, log_tag="Analysis.RoomAndItemsLong")
         obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
         if isinstance(obj, dict):
             return obj
@@ -2350,10 +2433,10 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
         label = item_data.get('label', 'Furniture')
         cropped_img = None
         cutout_img = None
-        
+
         img = Image.open(moodboard_path)
         W, H = img.size
-        
+
         if box:
             ymin, xmin, ymax, xmax = box
 
@@ -2446,23 +2529,23 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             "  \"raw_text_found\": \"copy the text you read here\"\n"
             "}\n"
         )
-        
-        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 30}, {})
-        
+
+        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 60}, {}, log_tag="Analysis.CropItem")
+
         desc = f"A high quality {label}."
         dims_str = ""
-        
+
         if response and response.text:
             data = _safe_extract_json(response.text)
             if data:
                 desc = data.get("description", desc)
                 raw_dims = data.get("dimensions_mm", {})
-                
+
                 # 강제로 description에 치수 정보를 텍스트로 박아넣음 (파싱 로직이 읽을 수 있게)
                 w = raw_dims.get("width")
                 d = raw_dims.get("depth")
                 h = raw_dims.get("height")
-                
+
                 if w and d and h:
                     dims_str = f" Dimensions: W={w}mm, D={d}mm, H={h}mm."
                     if LOG_BRIEF:
@@ -2484,7 +2567,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
                             _g["text_fail"] = _g.get("text_fail", 0) + 1
                     except Exception:
                         pass
-                
+
         if cropped_img:
             try:
                 cropped_img.close()
@@ -2501,7 +2584,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             "box_2d": box,
             "crop_path": crop_path,
         }
-            
+
     except Exception as e:
         print(f"!! Crop Analysis Failed for {item_data.get('label','Furniture')}: {e}", flush=True)
         if cropped_img:
@@ -2514,7 +2597,7 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
                 cutout_img.close()
             except Exception:
                 pass
-    
+
     return {
         "label": item_data.get('label', 'Furniture'),
         "description": f"A high quality {item_data.get('label','Furniture')}.",
@@ -2528,7 +2611,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
     input_images = []
     try:
         print(f"   [Frontal Gen] Step 1: Analyzing {len(photo_paths)} photos with Flash (Spatial Mapping)...", flush=True)
-        
+
         # 1. 이미지 로드
         for path in photo_paths:
             try:
@@ -2553,11 +2636,11 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
             "3. **Symmetry Plan:** If we place a camera in the exact center of the room facing the main window, describe what should be seen on the Left, Center, and Right to achieve perfect symmetry.\n"
             "Output ONLY the spatial blueprint description."
         )
-        
+
         # 분석 모델 호출
-        analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 45}, {})
+        analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 90}, {}, log_tag="Frontal.Analysis")
         spatial_blueprint = analysis_res.text if (analysis_res and analysis_res.text) else "A modern living room with large windows and tiled floor."
-        
+
         print(f"   [Frontal Gen] Step 2: Synthesizing Frontal View based on Spatial Blueprint...", flush=True)
 
         # ---------------------------------------------------------
@@ -2567,27 +2650,27 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
         generation_prompt = (
             f"TASK: Generative Space Reconstruction (Multi-View to Single Frontal View).\n"
             f"ACT AS: High-end Architectural Photographer.\n\n"
-            
+
             f"<SPATIAL BLUEPRINT (SOURCE TRUTH)>\n"
             f"{spatial_blueprint}\n"
             f"--------------------------------------------------\n\n"
-            
+
             "VIRTUAL CAMERA SETUP:\n"
             "- **Position:** Place the virtual camera in the DEAD CENTER of the room.\n"
             "- **Target:** Face strictly forward towards the main focal point (usually the window).\n"
             "- **Lens:** 10mm Wide-Angle Rectilinear Lens (Capture the full width, NO fish-eye distortion).\n"
             "- **Height:** Eye-level (approx 130cm).\n\n"
-            
+
             "COMPOSITION RULES (STRICT SYMMETRY):\n"
             "1. **Reconstruct the Space:** Synthesize a single, coherent 1-point perspective view using features from ALL input images.\n"
             "2. **Alignment:** Vertical lines (pillars, window frames) must be perfectly vertical. Horizontal lines (floor/ceiling) must converge to a single center vanishing point.\n"
             "3. **Consistency:** Ensure the 'Black Wall' (if present) and 'Pillars' are placed correctly relative to the center view as defined in the blueprint.\n\n"
-            
+
             "LIGHTING & FIDELITY:\n"
             "- **Reflections:** Render accurate reflections on the floor tiles matching the ceiling lights.\n"
             "- **Lighting:** Uniform, bright, high-end interior lighting. No dark corners.\n"
             "- **Resolution:** 8k, extremely sharp, photorealistic.\n\n"
-            
+
             "NEGATIVE CONSTRAINTS:\n"
             "- Do NOT produce a collage or grid. Output ONE single image.\n"
             "- No text, watermarks, blurred textures, or distorted geometry.\n"
@@ -2600,7 +2683,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
         # 이미지 생성 모델 호출
         # input_images를 함께 넣어주어 시각적 텍스처(Texture)를 참조하게 함
         content_list = [generation_prompt] + input_images
-        
+
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -2608,7 +2691,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
 
-        response = call_gemini_with_failover(MODEL_NAME, content_list, {'timeout': 100}, safety_settings)
+        response = call_gemini_with_failover(MODEL_NAME, content_list, {'timeout': 100}, safety_settings, log_tag="Frontal.Generate")
 
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
@@ -2617,7 +2700,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
                     out_filename = f"frontal_view_{timestamp}_{unique_id}_{index}.png"
                     out_path = os.path.join("outputs", out_filename)
                     with open(out_path, 'wb') as f: f.write(part.inline_data.data)
-                    
+
                     # [유지] 표준화 함수 (에러 없이 호출)
                     final_path = standardize_image(out_path)
                     return final_path
@@ -2637,13 +2720,13 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
 def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, mask_path=None):
     try:
         print(f"   [{mode.upper()}] Processing step with instructions: {instructions}", flush=True)
-        
+
         if not photo_paths: return None
         target_path = photo_paths[0]
         ref_paths = photo_paths[1:7]
         img = None
         mask_img = None
-        
+
         try:
             with Image.open(target_path) as base_img:
                 base_img.thumbnail((4096, 4096))
@@ -2763,45 +2846,31 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
                 role = "Expert Interior Rearrangement Editor."
                 task = "Reposition existing furniture and props per the user's request while keeping the room structure intact."
                 critical_rule = (
-                    "1. **REPOSITIONING ALLOWED:** You MAY move furniture to new locations as requested.
-"
-                    "2. **NO NEW OBJECTS:** Do NOT invent new furniture or decor unless explicitly requested.
-"
-                    "3. **KEEP ROOM STRUCTURE:** Walls, windows, doors, and architecture must remain unchanged.
-"
-                    "4. **LIGHTING CONSISTENCY:** Keep lighting direction and exposure consistent with the original photo.
-"
-                    "5. **NATURAL CONTACT:** Ensure furniture sits naturally on the floor with correct perspective and shadows.
-"
-                    f"6. **USER PRIORITY:** {user_override}
-"
+                    "1. **REPOSITIONING ALLOWED:** You MAY move furniture to new locations as requested.\n"
+                    "2. **NO NEW OBJECTS:** Do NOT invent new furniture or decor unless explicitly requested.\n"
+                    "3. **KEEP ROOM STRUCTURE:** Walls, windows, doors, and architecture must remain unchanged.\n"
+                    "4. **LIGHTING CONSISTENCY:** Keep lighting direction and exposure consistent with the original photo.\n"
+                    "5. **NATURAL CONTACT:** Ensure furniture sits naturally on the floor with correct perspective and shadows.\n"
+                    f"6. **USER PRIORITY:** {user_override}\n"
                 )
             elif step_kind == "decorate":
                 role = "Expert Home Stager."
                 task = "Add decorations and props to the EXISTING room without changing furniture layout."
                 critical_rule = (
-                    "1. **ADDITIVE ONLY:** Do NOT move or remove existing large furniture.
-"
-                    "2. **PROPS:** Add items like plants, cushions, rugs, lamps, books as requested.
-"
-                    "3. **STYLE:** Match the lighting and shadow of the original photo perfectly.
-"
+                    "1. **ADDITIVE ONLY:** Do NOT move or remove existing large furniture.\n"
+                    "2. **PROPS:** Add items like plants, cushions, rugs, lamps, books as requested.\n"
+                    "3. **STYLE:** Match the lighting and shadow of the original photo perfectly.\n"
                     f"4. **USER PRIORITY:** {user_override}"
                 )
             else:
                 role = "Expert AI Inpainter & Scene Reconstructor."
                 task = "Modify the scene by removing or replacing objects per the user's request."
                 critical_rule = (
-                    "1. **DESTRUCTIVE EDITING:** Remove the original object and redraw a new one when a change is requested.
-"
-                    "2. **BACKGROUND INPAINT:** Recreate missing wall/floor textures seamlessly after removal.
-"
-                    "3. **SCALE CHANGE:** If the user says smaller/larger, make the change clearly visible.
-"
-                    "4. **COLOR/MATERIAL:** Overwrite pixel colors completely if a color/material change is requested.
-"
-                    f"5. **USER PRIORITY:** {user_override}
-"
+                    "1. **DESTRUCTIVE EDITING:** Remove the original object and redraw a new one when a change is requested.\n"
+                    "2. **BACKGROUND INPAINT:** Recreate missing wall/floor textures seamlessly after removal.\n"
+                    "3. **SCALE CHANGE:** If the user says smaller/larger, make the change clearly visible.\n"
+                    "4. **COLOR/MATERIAL:** Overwrite pixel colors completely if a color/material change is requested.\n"
+                    f"5. **USER PRIORITY:** {user_override}\n"
                 )
 
             step_instructions = _filter_instructions(step_kind, instructions)
@@ -2822,73 +2891,40 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
 
             ref_imgs = _load_ref_images(img.size[0], img.size[1])
             mask_img = _load_mask(img.size[0], img.size[1])
-
             strict_mask_rules = ""
             if mask_img:
                 strict_mask_rules = (
-                    "<STRICT MASK COMPLIANCE>
-"
-                    "- You MUST keep every pixel outside the white mask area EXACTLY identical to the target image.
-"
-                    "- Do NOT alter lighting, color, or any objects outside the mask.
-"
+                    "<STRICT MASK COMPLIANCE>\n"
+                    "- You MUST keep every pixel outside the white mask area EXACTLY identical to the target image.\n"
+                    "- Do NOT alter lighting, color, or any objects outside the mask.\n"
                 )
 
             prompt = (
-                f"ACT AS: {role}
-"
-                f"TASK: {task}
-
-"
-                f"<STEP FOCUS>
-{step_focus}
-"
-                "ONLY apply instructions relevant to this step. Ignore unrelated requests for this step.
-"
-                "--------------------------------------------------
-
-"
-                f"<REFERENCE IMAGES>
-"
-                "If provided, use them ONLY as material/shape references for the specific objects to be added or replaced.
-"
-                "They are NOT a layout or framing guide; do NOT copy their composition or aspect ratio.
-"
-                "--------------------------------------------------
-
-"
-                f"<USER INSTRUCTIONS (EXECUTE AGGRESSIVELY)>
-"
-                f""{step_instructions}"
-"
-                f"--------------------------------------------------
-
-"
-                f"<CRITICAL RULES>
-"
-                f"{critical_rule}
-"
-                "4. **FRAMING LOCK (ABSOLUTE):** The output MUST match the target image's framing, composition, and camera viewpoint exactly.
-"
-                "5. **ASPECT LOCK:** The output MUST keep the SAME aspect ratio as the target image. Resolution may differ.
-"
-                "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.
-"
-                "7. **INTEGRATION (MODERATE):** Insert reference-based objects into the scene with plausible perspective, floor contact, and soft contact shadows that match the target lighting. Avoid obvious cut-and-paste edges.
-"
-                "8. **PADDING IGNORE:** If a reference contains padding/borders, ignore them and use only the object region as a style/shape guide.
-"
-                "9. **MASKED EDITING:** If a mask is provided, ONLY modify the white areas. Preserve black areas exactly.
-"
+                f"ACT AS: {role}\n"
+                f"TASK: {task}\n\n"
+                f"<STEP FOCUS>\n{step_focus}\n"
+                "ONLY apply instructions relevant to this step. Ignore unrelated requests for this step.\n"
+                "--------------------------------------------------\n\n"
+                "<REFERENCE IMAGES>\n"
+                "If provided, use them ONLY as material/shape references for the specific objects to be added or replaced.\n"
+                "They are NOT a layout or framing guide; do NOT copy their composition or aspect ratio.\n"
+                "--------------------------------------------------\n\n"
+                "<USER INSTRUCTIONS (EXECUTE AGGRESSIVELY)>\n"
+                f"{step_instructions}\n"
+                "--------------------------------------------------\n\n"
+                "<CRITICAL RULES>\n"
+                f"{critical_rule}\n"
+                "4. **FRAMING LOCK (ABSOLUTE):** The output MUST match the target image's framing, composition, and camera viewpoint exactly.\n"
+                "5. **ASPECT LOCK:** The output MUST keep the SAME aspect ratio as the target image. Resolution may differ.\n"
+                "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.\n"
+                "7. **INTEGRATION (MODERATE):** Insert reference-based objects into the scene with plausible perspective, floor contact, and soft contact shadows that match the target lighting. Avoid obvious cut-and-paste edges.\n"
+                "8. **PADDING IGNORE:** If a reference contains padding/borders, ignore them and use only the object region as a style/shape guide.\n"
+                "9. **MASKED EDITING:** If a mask is provided, ONLY modify the white areas. Preserve black areas exactly.\n"
                 f"{strict_mask_rules}"
-                "4. **OUTPUT:** Return a single, high-quality photorealistic image.
-"
-                "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.
-"
-                "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.
-"
-                "7. **NO TEXT:** Do not add watermarks or text.
-"
+                "4. **OUTPUT:** Return a single, high-quality photorealistic image.\n"
+                "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.\n"
+                "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.\n"
+                "7. **NO TEXT:** Do not add watermarks or text.\n"
                 "8. **NO NOISE:** Do NOT add film grain or artificial noise; keep the image clean."
             )
 
@@ -2898,7 +2934,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
             for i, ref in enumerate(ref_imgs):
                 content.extend([f"Reference image {i+1}:", ref])
 
-            response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {})
+            response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {}, log_tag="Edit.Generate")
 
             for rimg in ref_imgs:
                 try:
@@ -2961,10 +2997,10 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
 def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1"):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
     log_step(f"[{stage_name}] Empty Room Generation ({MODEL_NAME})")
-    
+
     img = Image.open(image_path)
     system_instruction = "You are an expert architectural AI."
-    
+
     prompt = (
         "IMAGE EDITING TASK: Extreme Cleaning & Architectural Restoration.\n\n"
         "<CRITICAL: STRUCTURAL PRESERVATION (PRIORITY #0)>\n"
@@ -2975,15 +3011,15 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         "5. **DO NOT REMOVE FIXTURES:** Strictly preserve structural elements including Columns, Pillars, Beams, Doors, and built-in fireplaces. Do NOT add new openings.\n"
         "6. **VIEW PROTECTION:** If the input shows an exterior view through any opening, keep it 100% original.\n\n"
         "7. **ONLY REMOVE MOVABLES:** Only remove furniture, rugs, lightings, curtains, and decorations that are NOT part of the building structure.\n\n"
-        
+
         "<CRITICAL: COMPLETE ERADICATION (PRIORITY #1)>\n"
         "1. REMOVE EVERYTHING ELSE: Identify and remove ALL movable furniture, rugs, curtains, lightings, wall decor, and small objects.\n"
         "2. CLEAN SURFACES: The floor and walls must be perfectly empty. Remove all shadows, reflections, and traces.\n"
         "3. BARE SHELL: Restore the room to its initial construction state.\n\n"
-        
+
         "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural elements intact. Do NOT add new openings."
     )
-    
+
     safety_settings = {
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -2993,8 +3029,15 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
 
     for try_count in range(3):
         remaining = max(10, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
-        response = call_gemini_with_failover(MODEL_NAME, [prompt, img], {'timeout': remaining}, safety_settings, system_instruction)
-        
+        response = call_gemini_with_failover(
+            MODEL_NAME,
+            [prompt, img],
+            {'timeout': remaining},
+            safety_settings,
+            system_instruction,
+            log_tag="Stage1.EmptyRoom",
+        )
+
         if response and hasattr(response, 'candidates') and response.candidates:
             if hasattr(response, 'parts') and response.parts:
                 for part in response.parts:
@@ -3053,16 +3096,16 @@ def generate_furnished_room(
             logger.info(f"[WindowCheck] present={bool(windows_present)} path={room_path}")
         except Exception:
             pass
-        
+
         # [NEW] 이미지 비율 계산 (가로형/세로형 판단)
         width, height = room_img.size
         is_portrait = height > width
         ratio_instruction = "PORTRAIT (4:5 Ratio)" if is_portrait else "LANDSCAPE (16:9 Ratio)"
         expected_ratio = (4 / 5) if is_portrait else (16 / 9)
         ratio_tol = 0.1
-        
+
         system_instruction = "You are an expert interior designer AI."
-        
+
         room_analysis_context = ""
         if room_analysis_text:
             room_analysis_context = (
@@ -3400,14 +3443,14 @@ def generate_furnished_room(
         user_original_prompt = (
             "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
             "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
-            
+
             "<CRITICAL: ARCHITECTURAL FREEZE (PRIORITY #1)>\n"
             "1. **DO NOT RE-GENERATE THE ROOM:** The walls, ceiling, floor pattern, and any visible openings/views must remain 100% IDENTICAL to the input image.\n"
             "2. **PERSPECTIVE LOCK:** You must use the EXACT same camera angle and perspective. Do not zoom in, do not zoom out.\n"
             "3. **DEPTH PRESERVATION:** Do not expand the room. Keep the original spatial depth.\n"
             "4. **FRAMING LOCK:** Keep the full room framing. Do NOT crop to a close-up. The ceiling and floor edges must match the input.\n"
             "5. **CORNER VISIBILITY:** Both left and right wall corners must remain visible, matching the input framing.\n\n"
-            
+
             "<CRITICAL: FURNITURE COMPOSITING>\n"
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
             "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
@@ -3415,17 +3458,17 @@ def generate_furnished_room(
             "4. **ONLY LISTED ITEMS:** Render only the listed items. Do NOT add extra furniture or swap designs.\n"
 
             f"{window_context}"
-            
+
             "<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and (optionally) a W/D/H SCALE GUIDE IMAGE. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
-            
+
             "1. **SPECIFIC SCALE ANALYSIS FOR THIS REQUEST:**\n"
             f"{calculated_analysis if calculated_analysis else '   - (Apply relative scaling based on provided specs)'}\n"
-            
+
             "2. **RELATIVE W/D/H HIERARCHY:**\n"
             "   - You MUST maintain the visual width/depth/height hierarchy specified in the specs.\n"
             "   - Example: If Item A (H: 950mm) is taller than Item B (H: 775mm), Item A MUST be rendered taller than Item B in the image.\n"
-            
+
             "3. **RATIO LOCK:**\n"
             "   - Calculate: (Furniture W/D/H) / (Room W/D/H) = Coverage ratios.\n"
             "   - Strictly follow these percentages. Do not shrink items into 'miniature' versions to create empty space.\n"
@@ -3446,37 +3489,37 @@ def generate_furnished_room(
             "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
             "   - **ACTION:** Keep interior fixtures ON only if they appear in the reference; no extra fixtures.\n"
             "   - **VISUALS:** Avoid visible glow/bloom halos. Lights should look realistic and restrained.\n"
-            
+
             "2. **LIGHTING HIERARCHY (KEY vs. FILL):**\n"
             "   - **KEY LIGHT (DOMINANT):** Use the existing dominant light source visible in the input. Do NOT invent new openings.\n"
             "   - **FILL LIGHT (SECONDARY):** Interior lights act as gentle fill. They must NOT overpower the key light.\n"
-            
+
             "3. **STRICT COLOR TEMPERATURE CONTROL (NO YELLOW):**\n"
             "   - **Target Temperature:** Use **Neutral White (4000K-5000K)** for any artificial lights to match daylight.\n"
             "   - **PROHIBITED:** No warm/tungsten/orange bulbs (2700K). No vintage/sepia cast.\n"
-            
+
             "4. **SHADOW PHYSICS:**\n"
             "   - Cast soft, directional shadows driven by the existing key light direction.\n"
             "   - Use interior lights only to lift the darkest corners slightly.\n"
             "   - Shadows and light gradients must be smooth and clean; avoid blotchy noise or muddy patches on floors.\n"
-            
+
             "5. **ATMOSPHERE:**\n"
             "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
             "   - Lighting must feel natural and cohesive across all surfaces (especially floors); no artificial blotches.\n"
             "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
         )
-        
+
         prompt = (
             "ACT AS: Professional Interior Photographer.\n"
             f"{room_analysis_context}\n"
-            f"{specs_context}\n" 
+            f"{specs_context}\n"
             f"{dims_table_context}\n"
             f"{incomplete_dims_context}\n"
             f"{spatial_context}\n"
             f"{inventory_context}\n"
             f"{ratio_rules_context}\n"
             f"{user_original_prompt}\n\n"
-            
+
             f"<CRITICAL: OUTPUT FORMAT ENFORCEMENT -> {ratio_instruction}>\n"
             "1. **FULL BLEED CANVAS:** The output image MUST fill the entire canvas from edge to edge. **NO WHITE BARS.** NO SPLIT SCREENS.\n"
             "2. **NO TEXT OVERLAY:** Do NOT write any dimensions, labels, or watermarks on the final image. It must be a clean photo.\n"
@@ -3486,7 +3529,7 @@ def generate_furnished_room(
             "6. **IGNORE REFERENCE RATIO:** You MUST output a " + ratio_instruction + " image. Do not mimic any reference image shape.\n"
             "7. **NO MULTI-PANEL OUTPUT:** Output must be ONE single staged room photograph only. Do NOT append catalog sheets, white inventory panels, split layouts, or include the reference image anywhere."
         )
-        
+
         prompt = prompt.replace("{size_hierarchy_hint}", size_hierarchy_hint or "")
 
         content = [prompt, "Empty Room (Target Canvas - KEEP THIS):", room_img]
@@ -3523,18 +3566,25 @@ def generate_furnished_room(
         except Exception:
             pass
         # [INFO] Moodboard/style reference images are intentionally NOT sent to the model.
-        
+
         remaining = max(30, TOTAL_TIMEOUT_LIMIT - (time.time() - start_time))
-        
+
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
-        
+
         def _render_once():
-            response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': remaining}, safety_settings, system_instruction)
+            response = call_gemini_with_failover(
+                MODEL_NAME,
+                content,
+                {'timeout': remaining},
+                safety_settings,
+                system_instruction,
+                log_tag="Stage2.Furnish",
+            )
             if response and hasattr(response, 'candidates') and response.candidates and hasattr(response, 'parts'):
                 for part in response.parts:
                     if hasattr(part, 'inline_data'):
@@ -3791,7 +3841,7 @@ def get_available_thumbnails(room_name: str, style_name: str):
     safe_room = room_name.lower().replace(" ", "")
     safe_style = style_name.lower().replace(" ", "-").replace("_", "-")
     prefix = f"{safe_room}_{safe_style}_"
-    
+
     base_dir = "static/thumbnails"
     if not os.path.exists(base_dir): return []
 
@@ -3809,7 +3859,7 @@ def get_available_thumbnails(room_name: str, style_name: str):
                         # [변경] 번호와 '실제 파일명'을 함께 저장
                         valid_items.append({"index": int(num_part), "file": f})
                 except: continue
-        
+
         # 번호 순서대로 정렬
         valid_items.sort(key=lambda x: x["index"])
         return valid_items
@@ -3819,9 +3869,9 @@ def get_available_thumbnails(room_name: str, style_name: str):
 
 # --- 메인 렌더링 엔드포인트 ---
 def render_room(
-    file: UploadFile = File(...), 
-    room: str = Form(...), 
-    style: str = Form(...), 
+    file: UploadFile = File(...),
+    room: str = Form(...),
+    style: str = Form(...),
     variant: str = Form(...),
     moodboard: UploadFile = File(None),
     dimensions: str = Form(""),
@@ -3849,12 +3899,12 @@ def render_room(
         prefix_main_empty = _build_s3_prefix(aud, "mainrendered", "empty")
         prefix_main_rendered = _build_s3_prefix(aud, "mainrendered", "rendered")
         prefix_customize = _build_s3_prefix(aud, "customize")
-        
+
         timestamp = int(time.time())
         safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
         raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{safe_name}")
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
-        
+
         std_path = standardize_image(raw_path)
         step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
 
@@ -3875,7 +3925,7 @@ def render_room(
         primary_item = None
         scale_guide_path = None
         size_hierarchy = None
-        
+
         ref_path = None
         mb_url = None
         ref_paths: List[str] = []
@@ -3899,7 +3949,7 @@ def render_room(
                     continue
 
         if not ref_paths and style != "Customize":
-            safe_room = room.lower().replace(" ", "") 
+            safe_room = room.lower().replace(" ", "")
             safe_style = style.lower().replace(" ", "-").replace("_", "-")
             assets_dir = None
 
@@ -3921,7 +3971,7 @@ def render_room(
                 if assets_dir and os.path.exists(assets_dir):
                     files = sorted(os.listdir(assets_dir))
                     found = False
-                    import re 
+                    import re
                     pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
                     valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
 
@@ -3931,7 +3981,7 @@ def render_room(
                             mb_url = f"/assets/{os.path.basename(os.path.dirname(assets_dir))}/{os.path.basename(assets_dir)}/{f}"
                             found = True
                             break
-                    
+
                     if not found:
                         valid_files = [f for f in files if f.lower().endswith(valid_exts)]
                         if valid_files:
@@ -3945,7 +3995,7 @@ def render_room(
                 if s3_key:
                     mb_url = _s3_public_url(s3_key)
                     ref_path = _materialize_input(mb_url, "mb")
-        
+
         if not ref_paths and style == "Customize" and moodboard:
             mb_name = "".join([c for c in moodboard.filename if c.isalnum() or c in "._-"])
             mb_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{mb_name}")
@@ -4338,6 +4388,17 @@ def get_job_status(job_id: str):
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
     job = _fetch_job(job_id)
     if not job:
+        saved = _load_job_result_s3(job_id)
+        if saved is not None:
+            return JSONResponse(content={
+                "id": job_id,
+                "status": "finished",
+                "enqueued_at": None,
+                "started_at": None,
+                "ended_at": None,
+                "result": saved,
+                "result_source": "s3",
+            })
         return JSONResponse(content={"error": "Job not found"}, status_code=404)
 
     status = job.get_status()
@@ -4350,6 +4411,11 @@ def get_job_status(job_id: str):
     }
     if job.is_finished:
         payload["result"] = job.result
+        if payload["result"] is None:
+            saved = _load_job_result_s3(job_id)
+            if saved is not None:
+                payload["result"] = saved
+                payload["result_source"] = "s3"
     if job.is_failed:
         payload["error"] = job.exc_info
     return JSONResponse(content=payload)
@@ -4527,11 +4593,8 @@ def api_internal_render(req: InternalRenderRequest, request: Request):
         "placement": req.placement or "",
         "audience": "internal",
     }
-    if req.include_details:
-        job_payload = {"render": payload, "include_details": True}
-        job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
-    else:
-        job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
+    job_payload = {"render": payload}
+    job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
@@ -4584,15 +4647,11 @@ def api_external_render_preset(req: PresetRenderRequest, request: Request):
         "placement": placement,
         "audience": "external",
     }
-    if req.include_details:
-        job_payload = {
-            "render": payload,
-            "include_details": True,
-            "extra": {"preset_id": req.preset_id, "resolved": {"room": room, "style": style, "variant": variant}},
-        }
-        job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
-    else:
-        job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
+    job_payload = {
+        "render": payload,
+        "extra": {"preset_id": req.preset_id, "resolved": {"room": room, "style": style, "variant": variant}},
+    }
+    job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "resolved": {"room": room, "style": style, "variant": variant}})
@@ -4675,7 +4734,6 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
     }
     job_payload = {
         "render": payload,
-        "include_details": bool(req.include_details),
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }
     job, err = _enqueue_job(job_render_with_details, job_payload, queue_name=RQ_QUEUE_RENDER)
@@ -4743,49 +4801,49 @@ def upscale_and_download(req: UpscaleRequest):
 def construct_dynamic_styles(analyzed_items):
     styles = []
     styles.append({
-        "name": "High Angle Overview", 
+        "name": "High Angle Overview",
         "prompt": (
             "CAMERA POSITION: High-angle view looking down from the ceiling.\n"
             "SUBJECT: The entire room layout exactly as shown in the original image.\n"
-        ), 
+        ),
         "ratio": "16:9"
     })
     # [수정 1] 좌측 공간 강조 (카메라 이동 X, 프레임 집중 O)
     styles.append({
-        "name": "Side Composition (Focus Left)", 
+        "name": "Side Composition (Focus Left)",
         "prompt": (
             "COMPOSITION: Asymmetrical framing focusing heavily on the LEFT SIDE of the room.\n"
             "VISUAL PRIORITY: Highlight the furniture and details located near the left wall.\n"
             "CAMERA ANGLE: Slight pan to the left, but keep the original standing position.\n"
             "CRITICAL: Do not move any furniture. Keep the exact arrangement."
-        ), 
+        ),
         "ratio": "16:9"
     })
 
     # [수정 2] 우측 공간 강조
     styles.append({
-        "name": "Side Composition (Focus Right)", 
+        "name": "Side Composition (Focus Right)",
         "prompt": (
             "COMPOSITION: Asymmetrical framing focusing heavily on the RIGHT SIDE of the room.\n"
             "VISUAL PRIORITY: Highlight the furniture and details located near the right wall.\n"
             "CAMERA ANGLE: Slight pan to the right, but keep the original standing position.\n"
             "CRITICAL: Do not move any furniture. Keep the exact arrangement."
-        ), 
+        ),
         "ratio": "16:9"
     })
-    
+
     count = 0
     for item in analyzed_items:
         if count >= 20: break
-        
+
         label = item['label']
         desc = item.get('description', '')
         box = item.get('box_2d', [0,0,1000,1000])
-        
+
         lens_type = "85mm Telephoto Lens"
         context_instruction = "Include parts of neighboring furniture to prove location."
         position_instruction = "Do NOT move this item. Shoot it exactly where it stands."
-        
+
         if "rug" in label.lower() or "carpet" in label.lower():
             position_instruction = "CRITICAL: The rug MUST be UNDER the sofas/tables. Show furniture legs pressing on it."
             lens_type = "50mm Standard Lens"
@@ -4800,10 +4858,10 @@ def construct_dynamic_styles(analyzed_items):
             "prompt": (
                 f"ACT AS: Documentary Interior Photographer.\n"
                 f"TASK: Take a candid shot of the '{label}' strictly IN-SITU.\n\n"
-                
+
                 f"TARGET VISUALS: {desc}\n"
                 f"TARGET COORDINATES: Focus on area {box} (Normalized 0-1000).\n\n"
-                
+
                 f"<CRITICAL: ABSOLUTE LAYOUT FREEZE>\n"
                 f"1. {position_instruction}\n"
                 f"2. {context_instruction}\n"
@@ -4813,7 +4871,7 @@ def construct_dynamic_styles(analyzed_items):
             "ratio": "4:5"
         })
         count += 1
-        
+
     return styles
 
 def generate_detail_view(original_image_path, style_config, unique_id, index):
@@ -4847,8 +4905,8 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
 
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
-        
-        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings)
+
+        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings, log_tag="Detail.Generate")
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
@@ -4881,14 +4939,14 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
 class DetailRequest(BaseModel):
     image_url: str
     moodboard_url: Optional[str] = None
-    furniture_data: Optional[List[Dict[str, Any]]] = None 
+    furniture_data: Optional[List[Dict[str, Any]]] = None
     audience: Optional[str] = None
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
     style_index: int
     moodboard_url: Optional[str] = None
-    furniture_data: Optional[List[Dict[str, Any]]] = None 
+    furniture_data: Optional[List[Dict[str, Any]]] = None
     audience: Optional[str] = None
 
 @app.post("/regenerate-single-detail")
@@ -4965,7 +5023,7 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
     img = None
     try:
         img = Image.open(image_path)
-        
+
         final_prompt = MOODBOARD_SYSTEM_PROMPT
         if furniture_specs:
             final_prompt += f"\n\n<CONTEXT: DETECTED FURNITURE LIST>\nUse this list to ensure you capture all key items:\n{furniture_specs}"
@@ -4976,9 +5034,9 @@ def generate_moodboard_logic(image_path, unique_id, index, furniture_specs=None)
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
-        
-        response = call_gemini_with_failover(MODEL_NAME, [final_prompt, img], {'timeout': 45}, safety_settings)
-        
+
+        response = call_gemini_with_failover(MODEL_NAME, [final_prompt, img], {'timeout': 45}, safety_settings, log_tag="Moodboard.Generate")
+
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
@@ -5018,14 +5076,14 @@ def generate_moodboard_options(
         timestamp = int(time.time())
         safe_name = "".join([c for c in file.filename if c.isalnum() or c in "._-"])
         raw_path = os.path.join("outputs", f"ref_room_{timestamp}_{unique_id}_{safe_name}")
-        
+
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
 
         aud = _normalize_audience(audience)
         prefix_customize = _build_s3_prefix(aud, "customize")
         # Store the input reference image for backup/auditing.
         resolve_image_url(raw_path, s3_prefix_override=prefix_customize)
-        
+
         log_section(f"[Moodboard Gen] Starting 3 variations for {unique_id}")
 
         furniture_specs_text = None
@@ -5036,9 +5094,9 @@ def generate_moodboard_options(
             furniture_specs_text = "\n".join(specs_list)
         except:
             print("!! [Moodboard Gen] Context analysis failed (skipping)")
-        
+
         generated_results = []
-        
+
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(3)]
             for future in futures:
@@ -5047,15 +5105,15 @@ def generate_moodboard_options(
                     url = resolve_image_url(res, s3_prefix_override=prefix_customize)
                     if url:
                         generated_results.append(url)
-        
+
         if not generated_results:
             return JSONResponse(content={"error": "Failed to generate moodboards"}, status_code=500)
-            
+
         return JSONResponse(content={
             "moodboards": generated_results,
             "message": "Moodboards generated successfully"
         })
-        
+
     except Exception as e:
         print(f"🔥🔥🔥 [Moodboard Gen Error] {e}")
         traceback.print_exc()
@@ -5128,10 +5186,10 @@ def _download_to_path(url: str, out_path: Path):
     if url.startswith("/"):
         # 맨 앞의 슬래시 제거 (절대경로 -> 상대경로 변환, 예: /outputs/a.png -> outputs/a.png)
         local_path = url.lstrip("/")
-        
+
         if not os.path.exists(local_path):
             raise FileNotFoundError(f"Local file not found on server: {local_path}")
-            
+
         # 단순히 파일 복사
         with open(local_path, "rb") as src, open(out_path, "wb") as dst:
             shutil.copyfileobj(src, dst)
@@ -5294,7 +5352,7 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "Keep ALL furniture and layout exactly the same as the input image. "
         "No warping, no distortion. "
     )
-    
+
     # 2. 모션 프롬프트 매핑
     motion_map = {
         "static": "Static camera shot, extremely subtle movement.",
@@ -5307,7 +5365,7 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "zoom_in_fast": "Fast camera dolly-in at eye-level. Rapid straight movement towards the subject.",
         "zoom_out_fast": "Fast camera dolly-out at eye-level. Rapid straight movement away from the subject.",
     }
-    
+
     # 3. 이펙트 프롬프트 매핑
     effect_map = {
         "none": "Natural lighting, static environment.",
@@ -5321,7 +5379,7 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
     # 프롬프트 조합
     p_motion = motion_map.get(motion, motion_map["static"])
     p_effect = effect_map.get(effect, effect_map["none"])
-    
+
     final_prompt = f"{base_keep} {p_motion} {p_effect}"
 
     # 네거티브 프롬프트
@@ -5330,7 +5388,7 @@ def _kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "changing furniture, melting objects, distorted geometry, "
         "text, watermark, logo, frame borders, low quality, cartoon"
     )
-    
+
     return {"prompt": final_prompt, "negative_prompt": neg}
 
 def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str, duration: str, cfg_scale: float) -> str:
@@ -5350,26 +5408,26 @@ def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str
         raise RuntimeError("Kling/Freepik rate limit hit (429). Try again later or lower VIDEO_MAX_CONCURRENCY.")
     if not r.ok:
         raise RuntimeError(f"Kling create failed ({r.status_code}): {r.text[:500]}")
-    
+
     data = r.json()
-    
+
     # ✅ 디버깅: 실제 응답 구조 출력
     print(f"🔍 [DEBUG] Kling API Response: {json.dumps(data, indent=2)}", flush=True)
-    
+
     # 여러 가능한 필드 시도
     task_id = (
-        data.get("task_id") or 
-        data.get("id") or 
-        data.get("data", {}).get("task_id") or 
+        data.get("task_id") or
+        data.get("id") or
+        data.get("data", {}).get("task_id") or
         data.get("data", {}).get("id") or
         data.get("result", {}).get("task_id") or
         data.get("taskId")
     )
-    
+
     if not task_id:
         print(f"❌ [ERROR] Could not find task_id. Full response keys: {list(data.keys())}", flush=True)
         raise RuntimeError(f"No task_id returned from Kling create. Response: {json.dumps(data)[:300]}")
-    
+
     print(f"✅ [SUCCESS] Task created: {task_id}", flush=True)
     return task_id
 
@@ -5379,7 +5437,7 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
     headers = {"x-freepik-api-key": FREEPIK_API_KEY}
     start = time.time()
     poll_count = 0
-    
+
     # [UX] 각 클립당 할당할 최대 진행률 (전체의 90%를 클립 생성에 분배)
     # 예: 클립이 1개면 90%까지, 2개면 개당 45%까지 할당
     clip_share_percent = 90 / max(1, total_clips)
@@ -5388,14 +5446,14 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
     while True:
         if time.time() - start > timeout_sec:
             raise RuntimeError("Kling task timeout.")
-        
+
         poll_count += 1
-        
+
         # 1. API 호출 (네트워크 에러 방어)
         try:
             with _video_sem:
                 r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
-            
+
             if not r.ok:
                 # 500 에러 등은 잠시 대기 후 재시도
                 if r.status_code >= 500:
@@ -5403,9 +5461,9 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                     time.sleep(3)
                     continue
                 raise RuntimeError(f"Kling status failed ({r.status_code}): {r.text[:300]}")
-                
+
             st = r.json()
-            
+
         except requests.exceptions.RequestException as e:
             print(f"⚠️ [Network Warning] Polling failed temporarily: {e}. Retrying...", flush=True)
             time.sleep(3)
@@ -5420,14 +5478,14 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
         elif isinstance(st, dict):
              # data가 없거나 문자열이면 top-level에서 status 확인
             status = st.get("status", "").upper()
-        
+
         # 3. [FIX] 진행률 로직 개선 (15% 멈춤 해결)
         # 로그 함수를 사용하여 시간이 지날수록 천천히 오르지만 100%는 넘지 않게 설정
         # poll_count가 늘어날수록 clip_share_percent의 95% 수준까지 점진적으로 접근
         simulated_progress = clip_share_percent * 0.95 * (1 - math.exp(-0.05 * poll_count))
-        
+
         current_total_progress = int(clip_start_percent + simulated_progress)
-        
+
         # 로그 출력 (사용자 안심용)
         if poll_count <= 3 or poll_count % 5 == 0:
             print(f"🔍 [Poll #{poll_count}] Clip {clip_index+1}/{total_clips} Status: {status} (Progress: {current_total_progress}%)", flush=True)
@@ -5437,11 +5495,11 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                 video_jobs[job_id]["progress"] = current_total_progress
                 # 메시지에 실제 서버 상태 포함
                 video_jobs[job_id]["message"] = f"Generating clip {clip_index+1}/{total_clips}: {status}..."
-        
+
         # 4. 완료 처리
         if status in ("COMPLETED", "SUCCEEDED", "SUCCESS", "DONE"):
             print(f"✅ [COMPLETED] Clip {clip_index+1}/{total_clips}. Fetching URL...", flush=True)
-            
+
             # generated 필드 안전 추출
             generated = []
             if isinstance(data, dict):
@@ -5455,7 +5513,7 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                 print(f"⏳ [WAIT] Generated array empty, retrying... ({retry_count+1}/5)", flush=True)
                 time.sleep(2)
                 retry_count += 1
-                
+
                 with _video_sem:
                     r = requests.get(f"{KLING_ENDPOINT}/{task_id}", headers=headers, timeout=60)
                 if r.ok:
@@ -5474,21 +5532,21 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                     url = first.get("url") or first.get("video")
                 elif isinstance(first, str):
                     url = first
-            
+
             if not url and isinstance(data, dict):
                  url = data.get("video_url") or data.get("url") or data.get("video")
-            
+
             if not url:
                 url = st.get("result_url") or st.get("video_url")
 
             if url:
                 print(f"✅ [SUCCESS] Found URL: {url[:60]}...", flush=True)
                 return url
-            
+
             print(f"❌ [ERROR] Completed but no URL. Response dump:", flush=True)
             print(json.dumps(st, indent=2), flush=True)
             raise RuntimeError("Kling completed but no result URL found.")
-        
+
         if status in ("FAILED", "ERROR", "CANCELLED"):
             error_msg = "Unknown error"
             if isinstance(data, dict):
@@ -5497,9 +5555,9 @@ def _freepik_kling_poll(task_id: str, job_id: str, clip_index: int, total_clips:
                 error_msg = data
             elif isinstance(st, dict):
                  error_msg = st.get("error") or st.get("message") or error_msg
-            
+
             raise RuntimeError(f"Kling task failed: {error_msg}")
-        
+
         time.sleep(2)
 
 def _image_url_to_b64(url: str) -> str:
@@ -5511,7 +5569,7 @@ def _image_url_to_b64(url: str) -> str:
         local_path = url.lstrip("/")
         if not os.path.exists(local_path):
             raise FileNotFoundError(f"Local file not found for b64 conversion: {local_path}")
-            
+
         with open(local_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
@@ -5557,7 +5615,7 @@ def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
     """
     filename = f"source_{job_id}_{idx}.mp4"
     out_path = out_dir / filename
-    
+
     # [최적화] 움직임도 없고, 효과도 없으면 -> 그냥 이미지 5초 영상으로 변환 (Kling X)
     if item.motion == "static" and item.effect == "none":
         print(f"🚀 [Clip {idx}] Static detected. Skipping Kling (Fast generation).", flush=True)
@@ -5565,11 +5623,11 @@ def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
         try:
             # 1. 이미지 다운로드
             _download_to_path(item.url, temp_img)
-            
+
             # [수정] 1080, 1920 (세로) 파라미터 확인
             _ffmpeg_image_to_video(
-                temp_img, out_path, 
-                5.0, 
+                temp_img, out_path,
+                5.0,
                 1080, 1920, # <--- 여기가 1080, 1920 이어야 함
                 VIDEO_TARGET_FPS
             )
@@ -5584,22 +5642,22 @@ def _generate_raw_only(idx, item, job_id, out_dir, cfg_scale):
     # 그 외 (모션이나 이펙트가 있는 경우) -> Kling 호출
     # ---------------------------------------------------------
     print(f"🎥 [Clip {idx}] Kling AI Generating... ({item.motion}/{item.effect})", flush=True)
-    
+
     prompts = _kling_prompts_dynamic(item.motion, item.effect)
     img_b64 = _image_url_to_b64(item.url)
-    
+
     # 5초 생성 요청
     task_id = _freepik_kling_create_task(
-        img_b64, prompts["prompt"], prompts["negative_prompt"], 
+        img_b64, prompts["prompt"], prompts["negative_prompt"],
         "5", cfg_scale
     )
-    
+
     # 폴링 대기
     video_url = _freepik_kling_poll(task_id, job_id, idx, 1)
-    
+
     # 다운로드
     _download_to_path(video_url, out_path)
-    
+
     return out_path
 
 def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: float):
@@ -5609,10 +5667,10 @@ def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: floa
 
         out_dir = Path("outputs")
         out_dir.mkdir(parents=True, exist_ok=True)
-        
+
         total_steps = len(items)
         results_map = [None] * total_steps # 순서 보장용
-        
+
         # 병렬 실행 (최대 5개 동시)
         with ThreadPoolExecutor(max_workers=VIDEO_MAX_CONCURRENCY) as executor:
             future_map = {}
@@ -5624,14 +5682,14 @@ def _run_source_generation(job_id: str, items: List[SourceItem], cfg_scale: floa
             for future in as_completed(future_map):
                 idx = future_map[future]
                 try:
-                    path = future.result() 
+                    path = future.result()
                     if path:
                         # 웹에서 접근 가능한 경로로 저장
                         results_map[idx] = f"/outputs/{path.name}"
                 except Exception as e:
                     print(f"Clip {idx} failed: {e}")
                     results_map[idx] = None # 실패 시 None
-                
+
                 completed_count += 1
                 # 진행률 업데이트
                 with video_jobs_lock:
@@ -5656,81 +5714,81 @@ def _run_final_compile(job_id: str, req: CompileRequest):
     try:
         with video_jobs_lock:
             video_jobs[job_id] = {"status": "RUNNING", "message": "Compiling...", "progress": 0}
-            
+
         out_dir = Path("outputs")
         processed_paths = []
-        
+
         total_clips = len(req.clips)
-        
+
         # 1. 각 클립 가공 (Trim -> Speed -> Resize)
         for i, clip in enumerate(req.clips):
             if not clip.video_url: continue
-            
+
             # 원본 파일 확보 (로컬에 없으면 다운로드)
             src_name = _safe_filename_from_url(clip.video_url)
             local_src = out_dir / src_name
             if not local_src.exists():
                 _download_to_path(clip.video_url, local_src)
-            
+
             final_path = out_dir / f"proc_{job_id}_{i}.mp4"
-            
+
             # 파라미터 계산
             t_start = max(0.0, clip.trim_start)
             t_end = min(5.0, clip.trim_end)
             if t_end <= t_start: t_end = 5.0
-            
+
             dur = t_end - t_start
             # 속도 안전장치 (0이면 1.0으로)
             speed = clip.speed if clip.speed > 0.1 else 1.0
-            
+
             # FFmpeg 필터 구성:
             # 1. trim: 구간 자르기
             # 2. setpts: 속도 조절 ((PTS-STARTPTS)/speed)
             # 3. scale/crop: 해상도 강제 통일 (1080x1920 등 기존 설정 따름)
             # 4. setsar=1: 픽셀 비율 초기화 (병합 오류 방지)
             setpts = f"(PTS-STARTPTS)/{speed}"
-            
+
 # [수정] 1080x1920 세로형(9:16) 강제 적용
             vf = (
                 f"trim=start={t_start}:duration={dur},setpts={setpts},"
                 f"scale=1080:1920:force_original_aspect_ratio=increase," # 9:16 비율로 늘리고
                 f"crop=1080:1920,setsar=1,fps={VIDEO_TARGET_FPS}"       # 중앙 크롭
             )
-            
+
             cmd = [
                 "ffmpeg", "-y", "-i", str(local_src),
-                "-vf", vf, "-an", 
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", 
+                "-vf", vf, "-an",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
                 "-preset", "veryslow", # [수정] veryfast -> veryslow
                 "-crf", "10",          # [수정] 18 -> 10
                 str(final_path)
             ]
             _run_ffmpeg(cmd)
             processed_paths.append(final_path)
-            
+
             # 진행률 (0~80%)
             with video_jobs_lock:
                 video_jobs[job_id]["progress"] = int(((i + 1) / total_clips) * 80)
 
         # 2. 병합 (Concat)
         if not processed_paths: raise RuntimeError("No clips to merge")
-        
+
         list_file = out_dir / f"list_{job_id}.txt"
         with open(list_file, "w", encoding="utf-8") as f:
             for p in processed_paths:
                 f.write(f"file '{p.resolve().as_posix()}'\n")
-        
+
         final_out = out_dir / f"final_{job_id}.mp4"
         # Concat 실행
         _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(final_out)])
-        
+
         result_url = f"/outputs/{final_out.name}"
-        
+
         with video_jobs_lock:
             video_jobs[job_id]["status"] = "COMPLETED"
             video_jobs[job_id]["result_url"] = result_url
             video_jobs[job_id]["progress"] = 100
-            
+
     except Exception as e:
         print(f"Compile Error: {e}")
         traceback.print_exc()
@@ -5746,7 +5804,7 @@ async def api_generate_sources(req: SourceGenRequest):
     job_id = uuid.uuid4().hex
     with video_jobs_lock:
         video_jobs[job_id] = {"status": "QUEUED", "progress": 0}
-    
+
     # 백그라운드 스레드로 실행
     threading.Thread(target=_run_source_generation, args=(job_id, req.items, req.cfg_scale)).start()
     return {"job_id": job_id}
@@ -5757,7 +5815,7 @@ async def api_compile_final(req: CompileRequest):
     job_id = uuid.uuid4().hex
     with video_jobs_lock:
         video_jobs[job_id] = {"status": "QUEUED", "progress": 0}
-        
+
     threading.Thread(target=_run_final_compile, args=(job_id, req)).start()
     return {"job_id": job_id}
 
@@ -5771,14 +5829,14 @@ async def video_mvp_status(job_id: str):
 
 
 # --- Auto Cleanup System ---
-RETENTION_SECONDS = 7 * 24 * 60 * 60  # 7 days 
+RETENTION_SECONDS = 7 * 24 * 60 * 60  # 7 days
 CLEANUP_INTERVAL = 600
 
 def auto_cleanup_task():
     while True:
         try:
             now = time.time()
-            
+
             # 1. 파일 정리 (기존 로직 유지)
             deleted_count = 0
             folder = "outputs"
@@ -5792,10 +5850,10 @@ def auto_cleanup_task():
                                 os.remove(file_path)
                                 deleted_count += 1
                             except Exception: pass
-            
+
             # 2. [FIX] 메모리 정리: 완료되었거나 오래된 Job ID 삭제 (메모리 누수 방지)
             # Job 생성 후 24시간(86400초) 지난 기록은 삭제
-            JOB_RETENTION = 86400 
+            JOB_RETENTION = 86400
             with video_jobs_lock:
                 # 딕셔너리를 순회하며 삭제해야 하므로 키 리스트 복사 사용
                 for jid in list(video_jobs.keys()):
@@ -5806,10 +5864,10 @@ def auto_cleanup_task():
                     # 현재 구조상 '너무 많아지면 강제 정리' 방식으로 구현.
                     if len(video_jobs) > 1000: # 혹시 1000개가 넘어가면
                         video_jobs.pop(jid, None) # 앞에서부터 하나 지움 (Python 3.7+ 딕셔너리는 삽입 순서 유지되므로 가장 오래된 것 삭제됨)
-            
+
             if deleted_count > 0:
                 print(f"✨ [System] Cleaned up {deleted_count} old files.", flush=True)
-                
+
         except Exception as e:
             print(f"!! [Cleanup Error] {e}", flush=True)
         time.sleep(CLEANUP_INTERVAL)
