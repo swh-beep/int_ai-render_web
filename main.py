@@ -60,7 +60,7 @@ def _get_gemini_semaphore(model_name: str):
     return GEMINI_SEMAPHORE_GEN
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-flash-preview'  # 절대 변경 금지
+ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
 API_KEY_POOL = []
 i = 1
 while True:
@@ -1223,6 +1223,52 @@ def standardize_image_to_target_canvas(
             return out_path
     except Exception as e:
         print(f"!! [Target Canvas Fit Failed] {e}", flush=True)
+        return image_path
+
+
+def match_aspect_to_target(
+    image_path: str,
+    target_path: str,
+    output_path: Optional[str] = None,
+) -> str:
+    """Match only aspect ratio to target (no resize)."""
+    try:
+        with Image.open(target_path) as tgt_img:
+            tgt_img = ImageOps.exif_transpose(tgt_img)
+            tgt_w, tgt_h = tgt_img.size
+            if tgt_w <= 0 or tgt_h <= 0:
+                return image_path
+
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            w, h = img.size
+            if w <= 0 or h <= 0:
+                return image_path
+
+            target_ratio = tgt_w / tgt_h
+            current_ratio = w / h
+            if abs(current_ratio - target_ratio) < 1e-3:
+                return image_path
+
+            # Center-crop to target ratio, keep pixel size (no resize).
+            if current_ratio > target_ratio:
+                new_w = int(h * target_ratio)
+                x0 = max(0, (w - new_w) // 2)
+                img = img.crop((x0, 0, x0 + new_w, h))
+            else:
+                new_h = int(w / target_ratio)
+                y0 = max(0, (h - new_h) // 2)
+                img = img.crop((0, y0, w, y0 + new_h))
+
+            base, _ = os.path.splitext(output_path or image_path)
+            out_path = f"{base}_aspect.png"
+            img.save(out_path, "PNG")
+            return out_path
+    except Exception as e:
+        print(f"!! [Aspect Fit Failed] {e}", flush=True)
         return image_path
 # -----------------------------------------------------------------------------
 # [CORE] Analysis Logic (Global Definition)
@@ -2596,7 +2642,6 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
         target_path = photo_paths[0]
         ref_paths = photo_paths[1:7]
         img = None
-        ref_imgs = []
         mask_img = None
         
         try:
@@ -2604,142 +2649,300 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
                 base_img.thumbnail((4096, 4096))
                 img = base_img.copy()
         except: return None
-        try:
+        ref_paths = [rp for rp in ref_paths if rp and os.path.exists(rp)]
+        # Mask is loaded per-step to match the current image size.
+
+        # 모드별 시스템 프롬프트 분기 (edit/rearrange/decorate)
+        inst_lower = instructions.lower()
+        wants_move = any(x in inst_lower for x in [
+            "옮겨", "옮기", "이동", "재배치", "재배열", "자리바꿔", "자리 바꿔", "배치바꿔", "배치 바꿔",
+            "swap", "swap with", "move", "relocate", "rearrange", "reposition"
+        ])
+        wants_remove = any(x in inst_lower for x in [
+            "없애", "지워", "치워", "빼", "제거", "삭제", "remove", "delete", "erase", "take out"
+        ])
+        wants_resize = any(x in inst_lower for x in [
+            "크게", "작게", "줄여", "줄이", "늘려", "늘리", "키워", "키우", "확대", "축소", "크기",
+            "shrink", "smaller", "reduce", "tiny", "enlarge", "bigger", "larger", "increase size", "decrease size"
+        ])
+        wants_replace = any(x in inst_lower for x in [
+            "바꿔", "바꾸", "교체", "변경", "대체", "갈아", "replace", "swap to", "change to", "substitute"
+        ])
+        user_override = (
+            "USER INSTRUCTIONS OVERRIDE ALL OTHER RULES. "
+            "If any conflict exists, follow the user's request."
+        )
+
+        def _filter_instructions(step_kind: str, text: str) -> str:
+            t = (text or "").strip()
+            if not t:
+                return t
+            step_keywords = {
+                "replace": [
+                    "바꿔", "바꾸", "교체", "변경", "대체", "갈아", "replace", "swap", "change", "substitute"
+                ],
+                "remove": [
+                    "없애", "지워", "삭제", "빼", "제거", "없애줘", "remove", "delete", "erase", "take out"
+                ],
+                "resize": [
+                    "크게", "작게", "줄여", "줄이", "늘려", "늘리", "키워", "키우", "확대", "축소", "크기",
+                    "shrink", "smaller", "reduce", "tiny", "enlarge", "bigger", "larger", "increase size", "decrease size"
+                ],
+                "rearrange": [
+                    "옮겨", "이동", "재배치", "자리바꿔", "자리 바꿔", "배치바꿔", "배치 바꿔",
+                    "swap", "swap with", "move", "relocate", "rearrange", "reposition"
+                ],
+            }
+            keys = step_keywords.get(step_kind, [])
+            parts = re.split(r"[\n\r]+|[.!?。！？]+", t)
+            kept = []
+            for p in parts:
+                pl = p.lower()
+                if any(k in pl for k in keys):
+                    kept.append(p.strip())
+            if kept:
+                return ". ".join([k for k in kept if k])
+            return t
+
+        # Build sequential steps based on triggers.
+        steps = []
+        if mode == 'edit':
+            if wants_replace:
+                steps.append("replace")
+            if wants_remove:
+                steps.append("remove")
+            if wants_resize:
+                steps.append("resize")
+            if wants_move:
+                steps.append("rearrange")
+            if not steps:
+                steps.append("edit")
+        else:
+            steps = ["decorate"]
+
+        def _load_ref_images(target_w: int, target_h: int):
+            refs = []
             for rp in ref_paths:
-                if not rp or not os.path.exists(rp):
+                try:
+                    with Image.open(rp) as _ref:
+                        _ref.thumbnail((4096, 4096))
+                        ref_img = _ref.copy()
+                        ref_img = pad_image_to_target_canvas(ref_img, target_w, target_h)
+                        refs.append(ref_img)
+                except Exception:
                     continue
-                with Image.open(rp) as _ref:
-                    _ref.thumbnail((4096, 4096))
-                    ref_img = _ref.copy()
-                    if img:
-                        ref_img = pad_image_to_target_canvas(ref_img, img.size[0], img.size[1])
-                    ref_imgs.append(ref_img)
-        except Exception:
-            ref_imgs = []
-        try:
-            if mask_path and os.path.exists(mask_path):
+            return refs
+
+        def _load_mask(target_w: int, target_h: int):
+            if not mask_path or not os.path.exists(mask_path):
+                return None
+            try:
                 with Image.open(mask_path) as _mask:
                     _mask = ImageOps.exif_transpose(_mask)
                     if _mask.mode != 'L':
                         _mask = _mask.convert('L')
-                    if img:
-                        _mask = _mask.resize(img.size, Image.Resampling.NEAREST)
-                    mask_img = _mask.copy()
-        except Exception:
-            mask_img = None
+                    _mask = _mask.resize((target_w, target_h), Image.Resampling.NEAREST)
+                    return _mask.copy()
+            except Exception:
+                return None
 
-        # 모드별 시스템 프롬프트 분기
-        if mode == 'edit':
-            # [EDIT MODE] - Inpainting & Regeneration Focus
-            role = "Expert AI Inpainter & Scene Reconstructor."
-            task = "Your goal is to MODIFY the scene by ERASING existing objects and REDRAWING them according to the user's size/position requests."
-            
-            critical_rule = (
-                "1. **DESTRUCTIVE EDITING (CRITICAL):** If the user asks to make an object SMALLER, do NOT just shrink it. You MUST **ERASE** the original large object and **REDRAW** a completely new, smaller version in its place.\n"
-                "2. **BACKGROUND HALLUCINATION:** When you shrink an object, the wall and floor behind it will be exposed. You MUST **INPAINT** (generate) this missing background texture (wallpaper, skirting board, flooring) seamlessly. Do NOT leave artifacts or the ghost of the old object.\n"
-                "3. **AGGRESSIVE SCALE CHANGE:** If the user says 'shrink by 50%' or 'make it small', the new object MUST be visually TINY compared to the original. Do not be subtle. Make the change DRASTIC.\n"
-                "4. **ISOLATION:** Ensure the modified object does NOT touch the edges of the room if it's meant to be freestanding. Add empty space on both sides.\n"
-                "5. **COLOR/MATERIAL:** Overwrite pixel colors completely if a color change is requested."
+        def _run_step(current_path: str, step_kind: str) -> Optional[str]:
+            step_focus = ""
+            if step_kind == "replace":
+                step_focus = "STEP FOCUS: Replace the specified objects with the requested new designs."
+            elif step_kind == "remove":
+                step_focus = "STEP FOCUS: Remove the specified objects and inpaint the background cleanly."
+            elif step_kind == "resize":
+                step_focus = "STEP FOCUS: Resize the specified objects as requested."
+            elif step_kind == "rearrange":
+                step_focus = "STEP FOCUS: Reposition the specified objects to new locations."
+            elif step_kind == "decorate":
+                step_focus = "STEP FOCUS: Add decorations/props only."
+
+            if step_kind == "rearrange":
+                role = "Expert Interior Rearrangement Editor."
+                task = "Reposition existing furniture and props per the user's request while keeping the room structure intact."
+                critical_rule = (
+                    "1. **REPOSITIONING ALLOWED:** You MAY move furniture to new locations as requested.
+"
+                    "2. **NO NEW OBJECTS:** Do NOT invent new furniture or decor unless explicitly requested.
+"
+                    "3. **KEEP ROOM STRUCTURE:** Walls, windows, doors, and architecture must remain unchanged.
+"
+                    "4. **LIGHTING CONSISTENCY:** Keep lighting direction and exposure consistent with the original photo.
+"
+                    "5. **NATURAL CONTACT:** Ensure furniture sits naturally on the floor with correct perspective and shadows.
+"
+                    f"6. **USER PRIORITY:** {user_override}
+"
+                )
+            elif step_kind == "decorate":
+                role = "Expert Home Stager."
+                task = "Add decorations and props to the EXISTING room without changing furniture layout."
+                critical_rule = (
+                    "1. **ADDITIVE ONLY:** Do NOT move or remove existing large furniture.
+"
+                    "2. **PROPS:** Add items like plants, cushions, rugs, lamps, books as requested.
+"
+                    "3. **STYLE:** Match the lighting and shadow of the original photo perfectly.
+"
+                    f"4. **USER PRIORITY:** {user_override}"
+                )
+            else:
+                role = "Expert AI Inpainter & Scene Reconstructor."
+                task = "Modify the scene by removing or replacing objects per the user's request."
+                critical_rule = (
+                    "1. **DESTRUCTIVE EDITING:** Remove the original object and redraw a new one when a change is requested.
+"
+                    "2. **BACKGROUND INPAINT:** Recreate missing wall/floor textures seamlessly after removal.
+"
+                    "3. **SCALE CHANGE:** If the user says smaller/larger, make the change clearly visible.
+"
+                    "4. **COLOR/MATERIAL:** Overwrite pixel colors completely if a color/material change is requested.
+"
+                    f"5. **USER PRIORITY:** {user_override}
+"
+                )
+
+            step_instructions = _filter_instructions(step_kind, instructions)
+            if step_kind == "resize":
+                step_instructions += " (IMPORTANT: The object MUST change size clearly. REVEAL wall/floor if shrinking.)"
+            if step_kind == "remove":
+                step_instructions += " (IMPORTANT: Fully remove the object and inpaint the background.)"
+            if step_kind == "replace" and ref_paths:
+                step_instructions += " (IMPORTANT: Use the reference image as the replacement object's design.)"
+
+            try:
+                with Image.open(current_path) as base_img:
+                    base_img = ImageOps.exif_transpose(base_img)
+                    base_img.thumbnail((4096, 4096))
+                    img = base_img.copy()
+            except Exception:
+                return None
+
+            ref_imgs = _load_ref_images(img.size[0], img.size[1])
+            mask_img = _load_mask(img.size[0], img.size[1])
+
+            strict_mask_rules = ""
+            if mask_img:
+                strict_mask_rules = (
+                    "<STRICT MASK COMPLIANCE>
+"
+                    "- You MUST keep every pixel outside the white mask area EXACTLY identical to the target image.
+"
+                    "- Do NOT alter lighting, color, or any objects outside the mask.
+"
+                )
+
+            prompt = (
+                f"ACT AS: {role}
+"
+                f"TASK: {task}
+
+"
+                f"<STEP FOCUS>
+{step_focus}
+"
+                "ONLY apply instructions relevant to this step. Ignore unrelated requests for this step.
+"
+                "--------------------------------------------------
+
+"
+                f"<REFERENCE IMAGES>
+"
+                "If provided, use them ONLY as material/shape references for the specific objects to be added or replaced.
+"
+                "They are NOT a layout or framing guide; do NOT copy their composition or aspect ratio.
+"
+                "--------------------------------------------------
+
+"
+                f"<USER INSTRUCTIONS (EXECUTE AGGRESSIVELY)>
+"
+                f""{step_instructions}"
+"
+                f"--------------------------------------------------
+
+"
+                f"<CRITICAL RULES>
+"
+                f"{critical_rule}
+"
+                "4. **FRAMING LOCK (ABSOLUTE):** The output MUST match the target image's framing, composition, and camera viewpoint exactly.
+"
+                "5. **ASPECT LOCK:** The output MUST keep the SAME aspect ratio as the target image. Resolution may differ.
+"
+                "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.
+"
+                "7. **INTEGRATION (MODERATE):** Insert reference-based objects into the scene with plausible perspective, floor contact, and soft contact shadows that match the target lighting. Avoid obvious cut-and-paste edges.
+"
+                "8. **PADDING IGNORE:** If a reference contains padding/borders, ignore them and use only the object region as a style/shape guide.
+"
+                "9. **MASKED EDITING:** If a mask is provided, ONLY modify the white areas. Preserve black areas exactly.
+"
+                f"{strict_mask_rules}"
+                "4. **OUTPUT:** Return a single, high-quality photorealistic image.
+"
+                "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.
+"
+                "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.
+"
+                "7. **NO TEXT:** Do not add watermarks or text.
+"
+                "8. **NO NOISE:** Do NOT add film grain or artificial noise; keep the image clean."
             )
-            
-            # 사용자 지시사항에 '줄여'나 'shrink', 'smaller'가 포함되어 있으면 강제로 강조 문구 추가
-            inst_lower = instructions.lower()
-            if any(x in inst_lower for x in ['줄여', '작게', 'shrink', 'small', 'reduce', 'tiny']):
-                instructions += " (IMPORTANT: The object MUST become significantly smaller. REVEAL the wall/floor behind it.)"
 
-        else:
-            # [DECORATE MODE] - 기존 유지
-            role = "Expert Home Stager."
-            task = "Add decorations and props to the EXISTING room without changing furniture layout."
-            critical_rule = (
-                "1. **ADDITIVE ONLY:** Do NOT move or remove existing large furniture.\n"
-                "2. **PROPS:** Add items like plants, cushions, rugs, lamps, books as requested.\n"
-                "3. **STYLE:** Match the lighting and shadow of the original photo perfectly."
-            )
+            content = [prompt, "Target image:", img]
+            if mask_img:
+                content.extend(["Mask image (white=edit, black=keep):", mask_img])
+            for i, ref in enumerate(ref_imgs):
+                content.extend([f"Reference image {i+1}:", ref])
 
-        prompt = (
-            f"ACT AS: {role}\n"
-            f"TASK: {task}\n\n"
-            f"<REFERENCE IMAGES>\n"
-            "If provided, use them ONLY as material/shape references for the specific objects to be added or replaced.\n"
-            "They are NOT a layout or framing guide; do NOT copy their composition or aspect ratio.\n"
-            "--------------------------------------------------\n\n"
-            f"<USER INSTRUCTIONS (EXECUTE AGGRESSIVELY)>\n"
-            f"\"{instructions}\"\n"
-            f"--------------------------------------------------\n\n"
-            
-            f"<CRITICAL RULES>\n"
-            f"{critical_rule}\n"
-            "4. **FRAMING LOCK (ABSOLUTE):** The output MUST match the target image's framing, composition, and camera viewpoint exactly.\n"
-            "5. **ASPECT/SIZE LOCK (ABSOLUTE):** The output MUST be the SAME aspect ratio and resolution as the target image. No cropping, no letterboxing.\n"
-            "6. **REFERENCE ROLE:** Reference images are ONLY for object design details; they are composited into the target scene, not re-framed around.\n"
-            "7. **INTEGRATION (MODERATE):** Insert reference-based objects into the scene with plausible perspective, floor contact, and soft contact shadows that match the target lighting. Avoid obvious cut-and-paste edges.\n"
-            "8. **PADDING IGNORE:** If a reference contains padding/borders, ignore them and use only the object region as a style/shape guide.\n"
-            "9. **MASKED EDITING:** If a mask is provided, ONLY modify the white areas. Preserve black areas exactly.\n"
-            "4. **OUTPUT:** Return a single, high-quality photorealistic image.\n"
-            "5. **PHOTOREALISM ONLY:** Output must be indistinguishable from a real photograph.\n"
-            "6. **NO CGI / RENDER / ILLUSTRATION:** Avoid any stylized, CGI, or illustrative look.\n"
-            "7. **NO TEXT:** Do not add watermarks or text.\n"
-            "8. **NO NOISE:** Do NOT add film grain or artificial noise; keep the image clean."
-        )
+            response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {})
 
-        # 모델 호출 (온도를 살짝 높여서 변화를 유도)
-        content = [prompt, "Target image:", img]
-        if mask_img:
-            content.extend(["Mask image (white=edit, black=keep):", mask_img])
-        for i, ref in enumerate(ref_imgs):
-            content.extend([f"Reference image {i+1}:", ref])
-        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, {})
+            for rimg in ref_imgs:
+                try:
+                    rimg.close()
+                except Exception:
+                    pass
+            if mask_img:
+                try:
+                    mask_img.close()
+                except Exception:
+                    pass
 
-        if response and hasattr(response, 'candidates') and response.candidates:
-            for part in response.parts:
-                if hasattr(part, 'inline_data'):
-                    timestamp = int(time.time())
-                    out_filename = f"{mode}_{timestamp}_{unique_id}_{index}.png"
-                    out_path = os.path.join("outputs", out_filename)
-                    with open(out_path, 'wb') as f: f.write(part.inline_data.data)
-                    
-                    # 해상도/비율 복구
-                    final_path = standardize_image_to_target_canvas(out_path, target_path)
-                    if mask_img:
+            if response and hasattr(response, 'candidates') and response.candidates:
+                for part in response.parts:
+                    if hasattr(part, 'inline_data'):
+                        timestamp = int(time.time())
+                        out_filename = f"{mode}_{timestamp}_{unique_id}_{index}.png"
+                        out_path = os.path.join("outputs", out_filename)
+                        with open(out_path, 'wb') as f:
+                            f.write(part.inline_data.data)
+                        final_path = match_aspect_to_target(out_path, current_path)
                         try:
-                            with Image.open(final_path) as _gen, Image.open(target_path) as _base:
-                                gen_img = _gen.convert("RGB")
-                                base_img = _base.convert("RGB")
-                                if gen_img.size != base_img.size:
-                                    base_img = base_img.resize(gen_img.size, Image.Resampling.LANCZOS)
-                                mask = mask_img.convert("L")
-                                if mask.size != gen_img.size:
-                                    mask = mask.resize(gen_img.size, Image.Resampling.NEAREST)
-                                blur_radius = max(2, int(min(gen_img.size) * 0.003))
-                                if blur_radius > 0:
-                                    mask = mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-                                composited = Image.composite(gen_img, base_img, mask)
-                                composited.save(final_path)
-                        except Exception as e:
-                            print(f"!! Mask composite failed: {e}", flush=True)
-                    try:
-                        if img:
-                            img.close()
-                    except Exception:
-                        pass
-                    return final_path
-        try:
-            if img:
-                img.close()
-        except Exception:
-            pass
-        for rimg in ref_imgs:
+                            if img:
+                                img.close()
+                        except Exception:
+                            pass
+                        return final_path
+
             try:
-                rimg.close()
+                if img:
+                    img.close()
             except Exception:
                 pass
-        if mask_img:
-            try:
-                mask_img.close()
-            except Exception:
-                pass
-        return None
+            return None
+
+
+        current_path = target_path
+        for step_kind in steps:
+            next_path = _run_step(current_path, step_kind)
+            if not next_path:
+                return None
+            current_path = next_path
+
+        return current_path
 
     except Exception as e:
         print(f"!! {mode} Gen Error: {e}", flush=True)
@@ -2748,16 +2951,6 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
                 img.close()
         except Exception:
             pass
-        for rimg in ref_imgs:
-            try:
-                rimg.close()
-            except Exception:
-                pass
-        if mask_img:
-            try:
-                mask_img.close()
-            except Exception:
-                pass
         return None
 
 # [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
@@ -2816,7 +3009,7 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                             img.close()
                         except Exception:
                             pass
-                        out = standardize_image_to_reference_canvas(path, image_path)
+                        out = match_aspect_to_target(path, image_path)
                         return out
             else:
                 print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
@@ -3361,7 +3554,7 @@ def generate_furnished_room(
                                 return None
                         except Exception:
                             return None
-                        final_path = standardize_image_to_reference_canvas(path, room_path)
+                        final_path = match_aspect_to_target(path, room_path)
                         return final_path
             return None
 
