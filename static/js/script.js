@@ -1178,17 +1178,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const img = document.createElement('img');
         img.src = url;
+        const parsedIndex = Number(styleIndex);
+        const index = Number.isFinite(parsedIndex) && parsedIndex > 0
+            ? parsedIndex
+            : (fullList ? (fullList.indexOf(url) + 1) : 1);
 
-        if (styleIndex < 3) {
+        if (index <= 3) {
             img.style.aspectRatio = "16 / 9";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, styleIndex + 1, fullList);
+            appendButtonsToCard(card, img, url, index, fullList);
             const landscapeGrid = document.getElementById('detail-grid-landscape');
             if (landscapeGrid) landscapeGrid.appendChild(card);
         } else {
             img.style.aspectRatio = "4 / 5";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, styleIndex + 1, fullList);
+            appendButtonsToCard(card, img, url, index, fullList);
             const portraitGrid = document.getElementById('detail-grid-portrait');
             if (portraitGrid) portraitGrid.appendChild(card);
         }
