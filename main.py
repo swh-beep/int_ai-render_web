@@ -71,19 +71,10 @@ def _calc_app_build_id() -> str:
 
 APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
-GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "4"))
-GEMINI_SEMAPHORE_ANALYSIS = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_ANALYSIS))
-GEMINI_SEMAPHORE_GEN = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_GEN))
-
-def _get_gemini_semaphore(model_name: str):
-    name = (model_name or "").lower()
-    analysis_name = (ANALYSIS_MODEL_NAME or "").lower()
-    if name == analysis_name or "flash" in name:
-        return GEMINI_SEMAPHORE_ANALYSIS
-    return GEMINI_SEMAPHORE_GEN
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
+RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
 API_KEY_POOL = []
 i = 1
 while True:
@@ -383,6 +374,8 @@ def _is_allowed_download_url(url: str, request: Request) -> bool:
         if host == req_host and host:
             return True
         if S3_BUCKET and S3_BUCKET.lower() in host:
+            return True
+        if host.endswith("cloudfront.net"):
             return True
         if host.endswith("amazonaws.com"):
             return True
@@ -825,6 +818,24 @@ def job_finalize(payload: dict) -> dict:
     resp = finalize_download(FinalizeRequest(image_url=image_url))
     return _json_from_response(resp)
 
+def job_generate_empty_room(payload: dict) -> dict:
+    image_url = payload.get("image_url", "")
+    audience = payload.get("audience")
+    aud = _normalize_audience(audience)
+    local_path = _materialize_input(image_url, "empty_src")
+    if not local_path or not os.path.exists(local_path):
+        return {"error": "Input file not found"}
+    start_time = time.time()
+    unique_id = uuid.uuid4().hex[:8]
+    empty_path = generate_empty_room(local_path, unique_id, start_time, stage_name="Direct: Empty Gen")
+    if not empty_path or not os.path.exists(empty_path):
+        return {"error": "Empty room generation failed"}
+    prefix_empty = _build_s3_prefix(aud, "mainrendered", "empty")
+    empty_url = resolve_image_url(empty_path, s3_prefix_override=prefix_empty)
+    result = {"empty_room_url": empty_url or empty_path}
+    _persist_job_result(result, audience=aud)
+    return result
+
 def job_upscale(payload: dict) -> dict:
     image_url = payload.get("image_url", "")
     resp = upscale_and_download(UpscaleRequest(image_url=image_url))
@@ -919,7 +930,7 @@ def job_generate_details(payload: dict) -> dict:
 
         generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=30) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1)))
@@ -1054,10 +1065,9 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
             genai.configure(api_key=current_key)
             model = genai.GenerativeModel(model_name, system_instruction=system_instruction) if system_instruction else genai.GenerativeModel(model_name)
 
-            with _get_gemini_semaphore(model_name):
-                t0 = time.time()
-                response = model.generate_content(contents, request_options=request_options, safety_settings=safety_settings)
-                dt = (time.time() - t0) * 1000
+            t0 = time.time()
+            response = model.generate_content(contents, request_options=request_options, safety_settings=safety_settings)
+            dt = (time.time() - t0) * 1000
             if not LOG_BRIEF:
                 logger.info(f"[Gemini] success key=...{masked_key} ({dt:.0f}ms) model={model_name}{tag}")
             return response
@@ -1732,7 +1742,7 @@ def _rank_best_variant_flash(candidate_paths: list, analyzed_items: list) -> Opt
             except Exception:
                 continue
 
-        res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 80}, {}, log_tag="RankBestVariant")
+        res = call_gemini_with_failover(RANK_MODEL_NAME, content, {"timeout": 80}, {}, log_tag="RankBestVariant")
         for im in opened:
             try: im.close()
             except Exception: pass
@@ -1767,7 +1777,7 @@ def detect_room_planes_norm(empty_room_path: str):
                 "- vanish_x/vanish_y: floor vanishing point where floor lines converge.\n"
                 "All values normalized 0..1."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 50}, {}, log_tag="Analysis.RoomPlanes")
+            res = call_gemini_with_failover("gemini-3-flash-preview", [prompt, img], {"timeout": 120}, {}, log_tag="Analysis.RoomPlanes")
             obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
             if isinstance(obj, dict):
                 def _clamp(v):
@@ -1986,6 +1996,349 @@ def create_scale_guide_image(
             composed = Image.alpha_composite(base, overlay).convert("RGB")
             composed.save(out_path, "PNG")
             return out_path
+    except Exception:
+        return None
+
+def _room_dims_valid(room_dims: dict) -> bool:
+    try:
+        w = int(room_dims.get("width_mm") or 0)
+        d = int(room_dims.get("depth_mm") or 0)
+        h = int(room_dims.get("height_mm") or 0)
+        return w > 0 and d > 0 and h > 0
+    except Exception:
+        return False
+
+def estimate_room_dimensions_from_image(room_path: str) -> dict:
+    try:
+        with Image.open(room_path) as img:
+            prompt = (
+                "TASK: Estimate real-world room dimensions (width, depth, height) in millimeters.\n"
+                "If a door is visible, assume a typical door height ~2100mm to scale.\n"
+                "Use ceiling height cues if visible. Provide your best estimate.\n"
+                "Return STRICT JSON ONLY:\n"
+                "{\"width_mm\": 0, \"depth_mm\": 0, \"height_mm\": 0}\n"
+            )
+            res = call_gemini_with_failover(
+                ANALYSIS_MODEL_NAME,
+                [prompt, img],
+                {"timeout": 50},
+                {},
+                log_tag="Analysis.RoomDimsEstimate",
+            )
+            obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
+            if isinstance(obj, dict):
+                w = int(float(obj.get("width_mm") or 0) or 0)
+                d = int(float(obj.get("depth_mm") or 0) or 0)
+                h = int(float(obj.get("height_mm") or 0) or 0)
+                if w > 0 and d > 0 and h > 0:
+                    return {"width_mm": w, "depth_mm": d, "height_mm": h}
+    except Exception:
+        pass
+    return {"width_mm": 0, "depth_mm": 0, "height_mm": 0}
+
+def estimate_vanishing_point_from_edges(room_path: str, yb_norm: float, xl: float, xr: float):
+    try:
+        with Image.open(room_path) as img:
+            gray = img.convert("L")
+            max_w = 640
+            if gray.size[0] > max_w:
+                scale = max_w / float(gray.size[0])
+                gray = gray.resize((int(gray.size[0] * scale), int(gray.size[1] * scale)), Image.Resampling.LANCZOS)
+
+            W, H = gray.size
+            if W < 40 or H < 40:
+                return None
+
+            gx = gray.filter(ImageFilter.Kernel((3, 3), [-1, 0, 1, -2, 0, 2, -1, 0, 1], scale=1))
+            gy = gray.filter(ImageFilter.Kernel((3, 3), [-1, -2, -1, 0, 0, 0, 1, 2, 1], scale=1))
+            px = gx.load()
+            py = gy.load()
+
+            y_start = int(max(1, yb_norm * H + 2))
+            y_end = H - 2
+            if y_start >= y_end:
+                return None
+
+            x0 = int(xl * W)
+            x1 = int(xr * W)
+            margin = int(max(2, 0.05 * max(1, (x1 - x0))))
+            x0 = max(1, min(W - 2, x0 + margin))
+            x1 = max(x0 + 2, min(W - 2, x1 - margin))
+
+            s_aa = s_ab = s_bb = s_ac = s_bc = 0.0
+            count = 0
+            step = 2
+            mag_thresh = 40
+
+            for y in range(y_start, y_end, step):
+                for x in range(x0, x1, step):
+                    gxv = px[x, y]
+                    gyv = py[x, y]
+                    mag = abs(gxv) + abs(gyv)
+                    if mag < mag_thresh:
+                        continue
+                    # Edge direction (perpendicular to gradient)
+                    dx = -gyv
+                    dy = gxv
+                    if abs(dy) < abs(dx) * 0.4:
+                        continue  # skip near-horizontal lines
+                    norm = math.hypot(dx, dy)
+                    if norm < 1e-6:
+                        continue
+                    dx /= norm
+                    dy /= norm
+                    a = dy
+                    b = -dx
+                    c = -(a * x + b * y)
+                    s_aa += a * a
+                    s_ab += a * b
+                    s_bb += b * b
+                    s_ac += a * c
+                    s_bc += b * c
+                    count += 1
+
+            if count < 80:
+                return None
+
+            det = s_aa * s_bb - s_ab * s_ab
+            if abs(det) < 1e-6:
+                return None
+
+            vx = (-s_ac * s_bb + s_ab * s_bc) / det
+            vy = (-s_aa * s_bc + s_ab * s_ac) / det
+
+            if vx != vx or vy != vy:
+                return None
+
+            return (vx / float(W), vy / float(H))
+    except Exception:
+        pass
+    return None
+
+def create_scale_guide_overlay(
+    empty_room_path: str,
+    room_planes: dict,
+    wall_span_norm: tuple,
+    room_dims: dict,
+    furniture_specs_json: dict,
+    out_path: str,
+):
+    try:
+        if not room_planes or not _room_dims_valid(room_dims):
+            return None
+        if not furniture_specs_json or not isinstance(furniture_specs_json, dict):
+            return None
+
+        room_w = int(room_dims.get("width_mm") or 0)
+        room_d = int(room_dims.get("depth_mm") or 0)
+        room_h = int(room_dims.get("height_mm") or 0)
+        if room_w <= 0 or room_d <= 0 or room_h <= 0:
+            return None
+
+        with Image.open(empty_room_path) as base_img:
+            base = base_img.convert("RGBA")
+            W, H = base.size
+            overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+
+            xl, xr = wall_span_norm if wall_span_norm else (0.0, 1.0)
+            xl = max(0.0, min(1.0, float(xl)))
+            xr = max(0.0, min(1.0, float(xr)))
+
+            yt = float(room_planes.get("y_top", 0.0))
+            yb = float(room_planes.get("y_bottom", 1.0))
+            ff = float(room_planes.get("floor_front_y", 1.0))
+            vx = float(room_planes.get("vanish_x", (xl + xr) / 2.0))
+            vy = float(room_planes.get("vanish_y", yt))
+
+            yt = max(0.0, min(1.0, yt))
+            yb = max(0.0, min(1.0, yb))
+            ff = max(0.0, min(1.0, ff))
+            vx = max(0.0, min(1.0, vx))
+            vy = max(0.0, min(1.0, vy))
+            # Refine back-wall baseline (yb): find the lowest strong horizontal edge in lower half.
+            try:
+                gray = base_img.convert("L")
+                max_w = 640
+                if gray.size[0] > max_w:
+                    scale = max_w / float(gray.size[0])
+                    gray = gray.resize(
+                        (int(gray.size[0] * scale), int(gray.size[1] * scale)),
+                        Image.Resampling.LANCZOS,
+                    )
+                gW, gH = gray.size
+                x0 = int(xl * gW)
+                x1 = int(xr * gW)
+                margin = int(max(4, 0.1 * (x1 - x0)))
+                x0 = max(0, min(gW - 2, x0 + margin))
+                x1 = max(x0 + 1, min(gW - 1, x1 - margin))
+                if x1 - x0 < 10:
+                    x0 = int(0.2 * gW)
+                    x1 = int(0.8 * gW)
+
+                y_start = int(max(1, 0.35 * gH))
+                y_end = min(gH - 2, int(0.90 * gH))
+                pix = gray.load()
+
+                best_score = -1.0
+                best_y = None
+                scores = []
+                for yy in range(y_start, y_end + 1):
+                    s = 0
+                    for xx in range(x0, x1):
+                        s += abs(pix[xx, yy] - pix[xx, yy - 1])
+                    score = s / max(1, (x1 - x0))
+                    scores.append((yy, score))
+                    if score > best_score:
+                        best_score = score
+                        best_y = yy
+
+                if scores and best_score > 0:
+                    threshold = best_score * 0.80
+                    candidates = [yy for yy, sc in scores if sc >= threshold]
+                    # Prefer the lowest strong edge (closer to floor)
+                    pick_y = max(candidates) if candidates else best_y
+                    if pick_y is not None:
+                        yb = max(0.0, min(1.0, pick_y / float(gH)))
+            except Exception:
+                pass
+
+            # Refine vanishing point using floor edges (CV-style)
+            try:
+                vp = estimate_vanishing_point_from_edges(empty_room_path, yb, xl, xr)
+                if vp:
+                    vx, vy = vp
+            except Exception:
+                pass
+
+            vx = max(xl, min(xr, vx))
+            vy = max(yt, min(yb, vy))
+
+            if ff < yb:
+                ff = yb
+
+            back_left = (xl * W, yb * H)
+            back_right = (xr * W, yb * H)
+            vanish = (vx * W, vy * H)
+
+            def _front_point(x_back: float):
+                denom = (yb * H - vanish[1])
+                if denom == 0:
+                    return (x_back, ff * H)
+                t = (ff * H - vanish[1]) / denom
+                x = vanish[0] + t * (x_back - vanish[0])
+                return (x, ff * H)
+
+            front_left = _front_point(back_left[0])
+            front_right = _front_point(back_right[0])
+
+            def _map_floor(x_norm: float, depth_ratio: float):
+                x_norm = max(0.0, min(1.0, x_norm))
+                depth_ratio = max(0.0, min(1.0, depth_ratio))
+                back_x = back_left[0] + x_norm * (back_right[0] - back_left[0])
+                front_x = front_left[0] + x_norm * (front_right[0] - front_left[0])
+                x = back_x + depth_ratio * (front_x - back_x)
+                y = back_left[1] + depth_ratio * (front_left[1] - back_left[1])
+                return (x, y)
+
+            # Floor grid
+            grid_step = 500
+            major_step = 1000
+            if room_d > 0:
+                steps_d = max(1, int(room_d / grid_step))
+                for i in range(1, steps_d + 1):
+                    t = (i * grid_step) / float(room_d)
+                    color = (0, 0, 0, 140) if (i * grid_step) % major_step == 0 else (0, 0, 0, 80)
+                    p1 = _map_floor(0.0, t)
+                    p2 = _map_floor(1.0, t)
+                    draw.line([p1, p2], fill=color, width=2)
+            else:
+                for i in range(1, 7):
+                    t = i / 7.0
+                    p1 = _map_floor(0.0, t)
+                    p2 = _map_floor(1.0, t)
+                    draw.line([p1, p2], fill=(0, 0, 0, 80), width=2)
+
+            if room_w > 0:
+                steps_w = max(2, int(room_w / grid_step))
+                for i in range(0, steps_w + 1):
+                    x_norm = i / float(steps_w)
+                    color = (0, 0, 0, 140) if (i * grid_step) % major_step == 0 else (0, 0, 0, 80)
+                    p1 = _map_floor(x_norm, 1.0)
+                    draw.line([p1, vanish], fill=color, width=2)
+            else:
+                for i in range(0, 7):
+                    x_norm = i / 6.0
+                    p1 = _map_floor(x_norm, 1.0)
+                    draw.line([p1, vanish], fill=(0, 0, 0, 80), width=2)
+
+        # Primary item footprint (exact scale, no shrink)
+        primary = (furniture_specs_json or {}).get("primary") or {}
+        dm = primary.get("dims_mm") or {}
+        w_mm = int(dm.get("width_mm") or 0)
+        d_mm = int(dm.get("depth_mm") or 0)
+        h_mm = int(dm.get("height_mm") or 0)
+        if w_mm <= 0 or d_mm <= 0 or h_mm <= 0:
+            return None
+
+        w_ratio = min(0.98, w_mm / float(room_w))
+        d_ratio = min(0.98, d_mm / float(room_d))
+        h_ratio = min(0.98, h_mm / float(room_h))
+
+        x0 = 0.5 - (w_ratio / 2.0)
+        x1 = 0.5 + (w_ratio / 2.0)
+        x0 = max(0.01, x0)
+        x1 = min(0.99, x1)
+
+        t0 = 0.03
+        t1 = t0 + d_ratio
+        if t1 > 0.95:
+            t1 = 0.95
+            t0 = max(0.02, t1 - d_ratio)
+
+        p00 = _map_floor(x0, t0)
+        p10 = _map_floor(x1, t0)
+        p11 = _map_floor(x1, t1)
+        p01 = _map_floor(x0, t1)
+
+        # Strong red footprint (primary item size)
+        outline = (255, 20, 20, 220)
+        fill = (255, 20, 20, 60)
+        draw.polygon([p00, p10, p11, p01], outline=outline, fill=fill)
+
+        # Height box (3D translucent) with depth-aware scale
+        wall_h_px = max(1, int((yb - yt) * H))
+        base_height_px = max(1, int(h_ratio * wall_h_px))
+        vy_px = vy * H
+        yb_px = yb * H
+
+        def _top_point(p):
+            x, y = p
+            denom = max(1.0, (yb_px - vy_px))
+            scale = (y - vy_px) / denom
+            scale = max(0.4, min(2.5, scale))
+            y_top = max(0.0, y - base_height_px * scale)
+            return (x, y_top)
+
+        top_p00 = _top_point(p00)
+        top_p10 = _top_point(p10)
+        top_p11 = _top_point(p11)
+        top_p01 = _top_point(p01)
+
+        face_fill = (255, 214, 0, 35)
+        edge = (255, 214, 0, 180)
+        # Top face
+        draw.polygon([top_p00, top_p10, top_p11, top_p01], outline=edge, fill=face_fill)
+        # Side faces
+        draw.polygon([p00, p10, top_p10, top_p00], outline=edge, fill=(255, 214, 0, 25))
+        draw.polygon([p01, p11, top_p11, top_p01], outline=edge, fill=(255, 214, 0, 20))
+        # Vertical edges
+        for b, t in ((p00, top_p00), (p10, top_p10), (p11, top_p11), (p01, top_p01)):
+            draw.line([b, t], fill=edge, width=3)
+
+        composed = Image.alpha_composite(base, overlay).convert("RGB")
+        composed.save(out_path, "PNG")
+        return out_path
     except Exception:
         return None
 
@@ -3065,7 +3418,7 @@ def process_image_edit_logic(photo_paths, instructions, mode, unique_id, index, 
 # Generation Logic
 # -----------------------------------------------------------------------------
 
-def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1"):
+def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1", return_raw: bool = False):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return image_path
     log_step(f"[{stage_name}] Empty Room Generation ({MODEL_NAME})")
 
@@ -3124,6 +3477,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
                         except Exception:
                             pass
                         out = match_aspect_to_target(path, image_path)
+                        if return_raw:
+                            return (out, path)
                         return out
             else:
                 print(f"⚠️ [Blocked] 안전 필터 차단", flush=True)
@@ -3134,6 +3489,8 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1")
         img.close()
     except Exception:
         pass
+    if return_raw:
+        return (image_path, image_path)
     return image_path
 
 # [수정] 원본 프롬프트 유지 + 비율 자동 감지 + 텍스트/여백 금지 + 무드보드 비율 무시 + 공간 제약 사항 추가
@@ -3632,7 +3989,7 @@ def generate_furnished_room(
             if scale_guide_path and os.path.exists(scale_guide_path):
                 guide_img = Image.open(scale_guide_path)
                 extra_imgs.append(guide_img)
-                content += ["SCALE GUIDE IMAGE (W/D/H guide; do NOT render; use only for measurement):", guide_img]
+                content += ["SCALE GUIDE OVERLAY (grid + PRIMARY footprint in red, height box in yellow; DO NOT render; use only for measurement/placement):", guide_img]
         except Exception:
             pass
         # [INFO] Moodboard/style reference images are intentionally NOT sent to the model.
@@ -3980,13 +4337,21 @@ def render_room(
         with open(raw_path, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
 
         std_path = standardize_image(raw_path)
-        step1_img = generate_empty_room(std_path, unique_id, start_time, stage_name="Stage 1: Intermediate Clean")
+        step1_img, step1_raw = generate_empty_room(
+            std_path,
+            unique_id,
+            start_time,
+            stage_name="Stage 1: Intermediate Clean",
+            return_raw=True,
+        )
+        if not step1_raw:
+            step1_raw = step1_img
 
         # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
         room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
         room_planes = None
-        if SCALE_CHECK and step1_img:
-            room_planes = detect_room_planes_norm(step1_img)
+        if SCALE_CHECK and step1_raw:
+            room_planes = detect_room_planes_norm(step1_raw)
         if room_planes:
             wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
         else:
@@ -4267,8 +4632,33 @@ def render_room(
                             f"p_w={p_w}mm p_d={p_d}mm p_h={p_h}mm step1_img={step1_img}"
                         )
 
-                        # Scale guide disabled (no image generation).
-                        scale_guide_path = None
+                        if not _room_dims_valid(room_dims_parsed):
+                            est_dims = estimate_room_dimensions_from_image(step1_raw or step1_img)
+                            if _room_dims_valid(est_dims):
+                                room_dims_parsed = est_dims
+                                logger.info(f"[Scale] room_dims_estimated={room_dims_parsed}")
+
+                        if not room_planes and (step1_raw or step1_img):
+                            room_planes = detect_room_planes_norm(step1_raw or step1_img)
+                            if room_planes:
+                                wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
+
+                        if _room_dims_valid(room_dims_parsed) and room_planes:
+                            guide_path = os.path.join("outputs", f"scale_guide_{unique_id}.png")
+                            scale_guide_path = create_scale_guide_overlay(
+                                step1_raw or step1_img,
+                                room_planes,
+                                wall_span_norm,
+                                room_dims_parsed,
+                                furniture_specs_json,
+                                guide_path,
+                            )
+                            if scale_guide_path and step1_img:
+                                scale_guide_path = match_aspect_to_target(scale_guide_path, step1_img)
+                            if not scale_guide_path:
+                                summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
+                        else:
+                            summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
                     except Exception as e:
                         logger.exception(f"[Scale] scale guide exception: {e}")
 
@@ -4651,6 +5041,20 @@ def finalize_download_async(req: FinalizeRequest):
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
+@app.post("/async/generate-empty-room")
+@async_wrap
+def generate_empty_room_async(req: FinalizeRequest):
+    if not REDIS_URL:
+        return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+    job, err = _enqueue_job(
+        job_generate_empty_room,
+        {"image_url": req.image_url, "audience": "internal"},
+        queue_name=RQ_QUEUE_RENDER
+    )
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued"})
+
 @app.post("/api/internal/render")
 @async_wrap
 def api_internal_render(req: InternalRenderRequest, request: Request):
@@ -4835,7 +5239,7 @@ def finalize_download(req: FinalizeRequest):
         final_furnished_path = ""
 
         # 업스케일링도 5-worker로 병렬 처리 (동시 요청 처리 여유)
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             print(">> [Step 1] Upscaling Furnished in parallel...", flush=True)
             future_furnished = executor.submit(call_magnific_api, local_path, unique_id + "_upscale_furnished", start_time)
 
@@ -5173,7 +5577,7 @@ def generate_moodboard_options(
 
         generated_results = []
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=30) as executor:
             futures = [executor.submit(generate_moodboard_logic, raw_path, unique_id, i+1, furniture_specs_text) for i in range(3)]
             for future in futures:
                 res = future.result()

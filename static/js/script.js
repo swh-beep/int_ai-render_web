@@ -1040,59 +1040,100 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function downloadFile(url, prefix) {
         try {
+            if (!url) throw new Error("Missing URL");
+
+            // If already a blob/data URL, download directly.
+            if (url.startsWith("blob:") || url.startsWith("data:")) {
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `${prefix}_${Date.now()}.jpg`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                return;
+            }
+
+            const resolved = new URL(url, window.location.origin);
+            const isLocalAsset = resolved.origin === window.location.origin
+                && (resolved.pathname.startsWith("/outputs/") || resolved.pathname.startsWith("/assets/"));
+
+            const fetchUrl = isLocalAsset
+                ? resolved.toString()
+                : `/download?url=${encodeURIComponent(url)}`;
+
+            const res = await fetch(fetchUrl);
+            if (!res.ok) {
+                const msg = await res.text().catch(() => "");
+                throw new Error(msg || `Download failed (${res.status})`);
+            }
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = `/download?url=${encodeURIComponent(url)}`;
+            link.href = blobUrl;
             link.download = `${prefix}_${Date.now()}.jpg`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(blobUrl);
         } catch (e) {
             console.error(e);
+            showCustomAlert("Error", "다운로드 실패: " + e.message);
         }
+    }
+
+    async function generateEmptyRoom(imageUrl) {
+        const res = await fetch("/async/generate-empty-room", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_url: imageUrl })
+        });
+        const job = await res.json();
+        if (!res.ok) throw new Error(job.error || "Processing failed");
+        if (!job.job_id) throw new Error("Job queue failed");
+        const data = await pollJob(job.job_id);
+        if (data.empty_room_url) return data.empty_room_url;
+        throw new Error(data.error || "Empty room generation failed");
     }
 
     if (upscaleBtn) {
         upscaleBtn.onclick = async function () {
             const afterUrl = resultAfter ? resultAfter.src : null;
-            if (!afterUrl) { showCustomAlert("Warning", "이미지가 없습니다."); return; }
+            if (!afterUrl) { showCustomAlert("Warning", "???? ????."); return; }
+            const beforeUrl = resultBefore ? resultBefore.src : null;
+            const isDirect = comparisonContainer && comparisonContainer.classList.contains('direct-mode');
 
             upscaleBtn.disabled = true;
-            upscaleBtn.innerText = "PROCESSING (Empty Room Gen & Upscale)...";
+            const originalText = upscaleBtn.innerText;
+            upscaleBtn.innerText = "DOWNLOADING...";
             if (upscaleStatus) upscaleStatus.style.display = "block";
 
             try {
-                const res = await fetch("/async/finalize-download", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ image_url: afterUrl })
-                });
-                const job = await res.json();
-                if (!res.ok) throw new Error(job.error || "Processing failed");
-                if (!job.job_id) throw new Error('Job queue failed');
-
-                const data = await pollJob(job.job_id);
-
-                if (data.upscaled_furnished && data.upscaled_empty) {
-                    await downloadFile(data.upscaled_furnished, "Result_After_HighRes");
-                    setTimeout(() => {
-                        downloadFile(data.upscaled_empty, "Result_Before_Empty_HighRes");
-                    }, 1000);
-
-                    // Silent success: no modal for download completion.
+                if (isDirect) {
+                    const emptyUrl = await generateEmptyRoom(afterUrl);
+                    if (emptyUrl) resultBefore.src = emptyUrl;
+                    await downloadFile(afterUrl, "Result_Main");
+                    if (emptyUrl) {
+                        setTimeout(() => {
+                            downloadFile(emptyUrl, "Result_Empty");
+                        }, 500);
+                    }
                 } else {
-                    throw new Error(data.error || "Processing failed");
+                    await downloadFile(afterUrl, "Result_After");
+                    if (beforeUrl) {
+                        setTimeout(() => {
+                            downloadFile(beforeUrl, "Result_Before");
+                        }, 500);
+                    }
                 }
-
             } catch (err) {
                 showCustomAlert("Error", "Server Error: " + err.message);
             } finally {
                 upscaleBtn.disabled = false;
-                upscaleBtn.innerText = "UPSCALE & DOWNLOAD";
+                upscaleBtn.innerText = originalText;
                 if (upscaleStatus) upscaleStatus.style.display = "none";
             }
         };
     }
-
     // --- 디테일 뷰 ---
     function showLoading(msg) {
         loadingOverlay.classList.remove('hidden');
@@ -1213,7 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const upBtn = document.createElement('button');
         upBtn.className = 'glow-btn burgundy detail-upscale-btn';
-        upBtn.innerHTML = '<span class="material-symbols-outlined">file_download</span> UPSCALE & DOWNLOAD';
+        upBtn.textContent = 'DOWNLOAD';
 
         upBtn.onclick = async (e) => {
             e.stopPropagation();
@@ -1221,31 +1262,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (upBtn.disabled) return;
             upBtn.disabled = true;
 
-            const loader = document.createElement('div');
-            loader.className = 'detail-card-loader';
-            const spinner = document.createElement('div');
-            spinner.className = 'mini-spinner';
-            loader.appendChild(spinner);
-            card.appendChild(loader);
-
             const originalText = upBtn.textContent;
-            upBtn.textContent = "Processing...";
+            upBtn.textContent = "Downloading...";
 
             try {
-                const success = await upscaleAndDownload(img.src, `Detail_Shot_${styleIndex}`);
-
-                if (success) {
-                    // Silent success: no modal for download completion.
-                } else {
-                    showCustomAlert("Error", "업스케일링에 실패했습니다.\n(잠시 후 다시 시도하거나 서버 로그를 확인하세요)");
-                }
+                await downloadFile(img.src, `Detail_Shot_${styleIndex}`);
             } catch (err) {
                 console.error("Critical Error:", err);
-                showCustomAlert("Error", "알 수 없는 오류가 발생했습니다.");
+                showCustomAlert("Error", "??? ?? ??? ??????.");
             } finally {
-                if (loader && loader.parentNode) {
-                    loader.parentNode.removeChild(loader);
-                }
                 upBtn.textContent = originalText;
                 upBtn.disabled = false;
             }

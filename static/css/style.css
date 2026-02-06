@@ -1249,6 +1249,69 @@ body[data-page="home"] .action-btn.secondary,
     min-width: 100px;
 }
 
+#global-modal {
+    background: rgba(0, 0, 0, 0.65);
+}
+
+#global-modal .modal-content {
+    background: #ffffff;
+    color: #111111;
+    border-radius: 16px;
+    padding: 28px 32px;
+    max-width: 520px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+#global-modal .modal-content h3 {
+    background: transparent;
+    color: #111111;
+    font-size: 1.4rem;
+    margin: 0 0 10px 0;
+    padding: 0;
+}
+
+#global-modal .modal-content p {
+    color: #333333;
+    margin-bottom: 18px;
+}
+
+#global-modal .modal-buttons {
+    background: transparent;
+    border-top: none;
+    padding: 0;
+    justify-content: center;
+}
+
+#global-modal #modal-ok-btn {
+    background: #111111;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 10px 24px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: none;
+}
+
+#global-modal #modal-ok-btn:hover {
+    background: #000000;
+}
+
+#global-modal #modal-cancel-btn {
+    background: transparent;
+    color: #111111;
+    border: 1px solid #111111;
+    border-radius: 10px;
+    padding: 10px 24px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: none;
+}
+
+#global-modal #modal-cancel-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
 /* Floor Plan Modal Layout */
 .fp-modal-split {
     display: flex;
