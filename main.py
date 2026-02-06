@@ -46,6 +46,30 @@ LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
 SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
+
+def _calc_app_build_id() -> str:
+    env_val = os.getenv("APP_BUILD_ID", "").strip()
+    if env_val:
+        return env_val
+    candidates = []
+    try:
+        candidates.append(os.path.getmtime(__file__))
+    except Exception:
+        pass
+    try:
+        for root, _, files in os.walk("static"):
+            for fname in files:
+                if fname.lower().endswith((".html", ".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".json", ".svg")):
+                    try:
+                        candidates.append(os.path.getmtime(os.path.join(root, fname)))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    ts = max(candidates) if candidates else time.time()
+    return time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
+
+APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
 GEMINI_MAX_CONCURRENCY_GEN = int(os.getenv("GEMINI_MAX_CONCURRENCY_GEN", "4"))
 GEMINI_SEMAPHORE_ANALYSIS = threading.BoundedSemaphore(max(1, GEMINI_MAX_CONCURRENCY_ANALYSIS))
@@ -656,7 +680,8 @@ def _persist_job_result(result: dict, audience: Optional[str] = None):
         job = get_current_job()
         if not job:
             return
-        _save_job_result_s3(job.id, result, audience=audience)
+        aud = _normalize_audience(audience)
+        _save_job_result_s3(job.id, result, audience=aud)
     except Exception:
         pass
 
@@ -669,7 +694,7 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
     variant = payload.get("variant", "")
     dimensions = payload.get("dimensions", "")
     placement = payload.get("placement", "")
-    audience = payload.get("audience", "")
+    audience = _normalize_audience(payload.get("audience"))
 
     if not file_path or not os.path.exists(file_path):
         return {"error": "Input file not found"}
@@ -731,7 +756,8 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
 
 def job_render_with_details(payload: dict) -> dict:
     render_payload = payload.get("render") or {}
-    audience = render_payload.get("audience")
+    audience = _normalize_audience(render_payload.get("audience"))
+    render_payload["audience"] = audience
     # Always generate details (ignore include_details flag)
     include_details = True
     extra = payload.get("extra") or {}
@@ -759,7 +785,7 @@ def job_render_with_details(payload: dict) -> dict:
         "image_url": result_url,
         "moodboard_url": render_result.get("moodboard_url"),
         "furniture_data": render_result.get("furniture_data"),
-        "audience": render_payload.get("audience"),
+        "audience": audience,
     }
     details_result = job_generate_details(details_payload)
     result = {"render": render_result, "details": details_result, **extra}
@@ -3813,6 +3839,10 @@ def download_image(url, unique_id):
         return None
     except: return None
 
+@app.get("/version.json")
+async def version_json():
+    return JSONResponse({"version": APP_BUILD_ID}, headers={"Cache-Control": "no-store"})
+
 @app.get("/")
 async def read_index(): return FileResponse("static/index.html")
 
@@ -4498,7 +4528,7 @@ def render_room_async(
             shutil.copyfileobj(moodboard.file, buffer)
 
     try:
-        aud = _normalize_audience(audience)
+        aud = "internal"
         file_ref = resolve_image_url(raw_path, s3_prefix_override=_build_s3_prefix(aud, "mainrendered", "user-photos"))
         mood_ref = resolve_image_url(mood_path, s3_prefix_override=_build_s3_prefix(aud, "customize")) if mood_path else None
     except Exception as e:
@@ -4512,7 +4542,7 @@ def render_room_async(
         "variant": variant,
         "dimensions": dimensions,
         "placement": placement,
-        "audience": audience,
+        "audience": aud,
     }
     job, err = _enqueue_job(job_render, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -4526,7 +4556,6 @@ def generate_image_edit_async(
     instructions: str = Form(...),
     mode: str = Form(...),
     mask: UploadFile = File(None),
-    audience: str = Form("")
 ):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
@@ -4550,7 +4579,7 @@ def generate_image_edit_async(
 
 
     try:
-        aud = _normalize_audience(audience)
+        aud = "internal"
         category = "editrendered" if mode == "edit" else "decorrendered"
         prefix_user = _build_s3_prefix(aud, category, "user-photos")
         photo_refs = [resolve_image_url(p, s3_prefix_override=prefix_user) or p for p in saved_photo_paths]
@@ -4564,7 +4593,7 @@ def generate_image_edit_async(
         "mode": mode,
         "unique_id": unique_id,
         "mask_path": mask_ref or mask_path,
-        "audience": audience,
+        "audience": aud,
     }
     job, err = _enqueue_job(job_image_edit, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
@@ -4575,7 +4604,6 @@ def generate_image_edit_async(
 @async_wrap
 def generate_frontal_view_async(
     input_photos: List[UploadFile] = File(...),
-    audience: str = Form("")
 ):
     if not REDIS_URL:
         return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
@@ -4591,12 +4619,12 @@ def generate_frontal_view_async(
         saved_photo_paths.append(path)
 
     try:
-        aud = _normalize_audience(audience)
+        aud = "internal"
         prefix_user = _build_s3_prefix(aud, "realphotorendered", "user-photos")
         photo_refs = [resolve_image_url(p, s3_prefix_override=prefix_user) or p for p in saved_photo_paths]
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-    payload = {"photo_paths": photo_refs, "unique_id": unique_id, "audience": audience}
+    payload = {"photo_paths": photo_refs, "unique_id": unique_id, "audience": aud}
 
     job, err = _enqueue_job(job_frontal_view, payload, queue_name=RQ_QUEUE_RENDER)
     if err:
