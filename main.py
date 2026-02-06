@@ -45,6 +45,7 @@ load_dotenv()
 LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
 SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
+SCALE_GUIDE_GRID_ONLY = os.getenv("SCALE_GUIDE_GRID_ONLY", "1") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
 
 def _calc_app_build_id() -> str:
@@ -2126,7 +2127,7 @@ def create_scale_guide_overlay(
     try:
         if not room_planes or not _room_dims_valid(room_dims):
             return None
-        if not furniture_specs_json or not isinstance(furniture_specs_json, dict):
+        if (not SCALE_GUIDE_GRID_ONLY) and (not furniture_specs_json or not isinstance(furniture_specs_json, dict)):
             return None
 
         room_w = int(room_dims.get("width_mm") or 0)
@@ -2272,69 +2273,70 @@ def create_scale_guide_overlay(
                     p1 = _map_floor(x_norm, 1.0)
                     draw.line([p1, vanish], fill=(0, 0, 0, 80), width=2)
 
-        # Primary item footprint (exact scale, no shrink)
-        primary = (furniture_specs_json or {}).get("primary") or {}
-        dm = primary.get("dims_mm") or {}
-        w_mm = int(dm.get("width_mm") or 0)
-        d_mm = int(dm.get("depth_mm") or 0)
-        h_mm = int(dm.get("height_mm") or 0)
-        if w_mm <= 0 or d_mm <= 0 or h_mm <= 0:
-            return None
+        if not SCALE_GUIDE_GRID_ONLY:
+            # Primary item footprint (exact scale, no shrink)
+            primary = (furniture_specs_json or {}).get("primary") or {}
+            dm = primary.get("dims_mm") or {}
+            w_mm = int(dm.get("width_mm") or 0)
+            d_mm = int(dm.get("depth_mm") or 0)
+            h_mm = int(dm.get("height_mm") or 0)
+            if w_mm <= 0 or d_mm <= 0 or h_mm <= 0:
+                return None
 
-        w_ratio = min(0.98, w_mm / float(room_w))
-        d_ratio = min(0.98, d_mm / float(room_d))
-        h_ratio = min(0.98, h_mm / float(room_h))
+            w_ratio = min(0.98, w_mm / float(room_w))
+            d_ratio = min(0.98, d_mm / float(room_d))
+            h_ratio = min(0.98, h_mm / float(room_h))
 
-        x0 = 0.5 - (w_ratio / 2.0)
-        x1 = 0.5 + (w_ratio / 2.0)
-        x0 = max(0.01, x0)
-        x1 = min(0.99, x1)
+            x0 = 0.5 - (w_ratio / 2.0)
+            x1 = 0.5 + (w_ratio / 2.0)
+            x0 = max(0.01, x0)
+            x1 = min(0.99, x1)
 
-        t0 = 0.03
-        t1 = t0 + d_ratio
-        if t1 > 0.95:
-            t1 = 0.95
-            t0 = max(0.02, t1 - d_ratio)
+            t0 = 0.03
+            t1 = t0 + d_ratio
+            if t1 > 0.95:
+                t1 = 0.95
+                t0 = max(0.02, t1 - d_ratio)
 
-        p00 = _map_floor(x0, t0)
-        p10 = _map_floor(x1, t0)
-        p11 = _map_floor(x1, t1)
-        p01 = _map_floor(x0, t1)
+            p00 = _map_floor(x0, t0)
+            p10 = _map_floor(x1, t0)
+            p11 = _map_floor(x1, t1)
+            p01 = _map_floor(x0, t1)
 
-        # Strong red footprint (primary item size)
-        outline = (255, 20, 20, 220)
-        fill = (255, 20, 20, 60)
-        draw.polygon([p00, p10, p11, p01], outline=outline, fill=fill)
+            # Strong red footprint (primary item size)
+            outline = (255, 20, 20, 220)
+            fill = (255, 20, 20, 60)
+            draw.polygon([p00, p10, p11, p01], outline=outline, fill=fill)
 
-        # Height box (3D translucent) with depth-aware scale
-        wall_h_px = max(1, int((yb - yt) * H))
-        base_height_px = max(1, int(h_ratio * wall_h_px))
-        vy_px = vy * H
-        yb_px = yb * H
+            # Height box (3D translucent) with depth-aware scale
+            wall_h_px = max(1, int((yb - yt) * H))
+            base_height_px = max(1, int(h_ratio * wall_h_px))
+            vy_px = vy * H
+            yb_px = yb * H
 
-        def _top_point(p):
-            x, y = p
-            denom = max(1.0, (yb_px - vy_px))
-            scale = (y - vy_px) / denom
-            scale = max(0.4, min(2.5, scale))
-            y_top = max(0.0, y - base_height_px * scale)
-            return (x, y_top)
+            def _top_point(p):
+                x, y = p
+                denom = max(1.0, (yb_px - vy_px))
+                scale = (y - vy_px) / denom
+                scale = max(0.4, min(2.5, scale))
+                y_top = max(0.0, y - base_height_px * scale)
+                return (x, y_top)
 
-        top_p00 = _top_point(p00)
-        top_p10 = _top_point(p10)
-        top_p11 = _top_point(p11)
-        top_p01 = _top_point(p01)
+            top_p00 = _top_point(p00)
+            top_p10 = _top_point(p10)
+            top_p11 = _top_point(p11)
+            top_p01 = _top_point(p01)
 
-        face_fill = (255, 214, 0, 35)
-        edge = (255, 214, 0, 180)
-        # Top face
-        draw.polygon([top_p00, top_p10, top_p11, top_p01], outline=edge, fill=face_fill)
-        # Side faces
-        draw.polygon([p00, p10, top_p10, top_p00], outline=edge, fill=(255, 214, 0, 25))
-        draw.polygon([p01, p11, top_p11, top_p01], outline=edge, fill=(255, 214, 0, 20))
-        # Vertical edges
-        for b, t in ((p00, top_p00), (p10, top_p10), (p11, top_p11), (p01, top_p01)):
-            draw.line([b, t], fill=edge, width=3)
+            face_fill = (255, 214, 0, 35)
+            edge = (255, 214, 0, 180)
+            # Top face
+            draw.polygon([top_p00, top_p10, top_p11, top_p01], outline=edge, fill=face_fill)
+            # Side faces
+            draw.polygon([p00, p10, top_p10, top_p00], outline=edge, fill=(255, 214, 0, 25))
+            draw.polygon([p01, p11, top_p11, top_p01], outline=edge, fill=(255, 214, 0, 20))
+            # Vertical edges
+            for b, t in ((p00, top_p00), (p10, top_p10), (p11, top_p11), (p01, top_p01)):
+                draw.line([b, t], fill=edge, width=3)
 
         composed = Image.alpha_composite(base, overlay).convert("RGB")
         composed.save(out_path, "PNG")
