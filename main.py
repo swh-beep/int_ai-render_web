@@ -706,7 +706,19 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
                 label = it.get("label") or it.get("name") or it.get("category") or "Item"
                 lp = _materialize_input(p, "mood")
                 if lp and os.path.exists(lp):
-                    local_items.append({"label": label, "path": lp})
+                    try:
+                        qty_val = int(it.get("qty") or 1)
+                    except Exception:
+                        qty_val = 1
+                    if qty_val < 1:
+                        qty_val = 1
+                    local_items.append({
+                        "label": label,
+                        "path": lp,
+                        "dims_mm": it.get("dims_mm"),
+                        "options": it.get("options"),
+                        "qty": qty_val,
+                    })
                     if os.path.basename(lp).startswith("mood_"):
                         cleanup_paths.append(lp)
                 if isinstance(p, str) and p.startswith("/outputs/"):
@@ -2151,13 +2163,15 @@ def create_scale_guide_overlay(
             ff = float(room_planes.get("floor_front_y", 1.0))
             vx = float(room_planes.get("vanish_x", (xl + xr) / 2.0))
             vy = float(room_planes.get("vanish_y", yt))
+            yb_model = yb
 
             yt = max(0.0, min(1.0, yt))
             yb = max(0.0, min(1.0, yb))
             ff = max(0.0, min(1.0, ff))
             vx = max(0.0, min(1.0, vx))
             vy = max(0.0, min(1.0, vy))
-            # Refine back-wall baseline (yb): find the lowest strong horizontal edge in lower half.
+            # Refine back-wall baseline (yb): prefer strong edges close to model yb,
+            # then fallback to plausible floor-wall band.
             try:
                 gray = base_img.convert("L")
                 max_w = 640
@@ -2181,8 +2195,6 @@ def create_scale_guide_overlay(
                 y_end = min(gH - 2, int(0.90 * gH))
                 pix = gray.load()
 
-                best_score = -1.0
-                best_y = None
                 scores = []
                 for yy in range(y_start, y_end + 1):
                     s = 0
@@ -2190,15 +2202,28 @@ def create_scale_guide_overlay(
                         s += abs(pix[xx, yy] - pix[xx, yy - 1])
                     score = s / max(1, (x1 - x0))
                     scores.append((yy, score))
-                    if score > best_score:
-                        best_score = score
-                        best_y = yy
+                if scores:
+                    best_score = max(sc for _, sc in scores)
+                    pick_y = None
+                    if 0.0 <= yb_model <= 1.0 and best_score > 0:
+                        ym = int(yb_model * gH)
+                        band = int(max(10, 0.10 * gH))
+                        near = []
+                        for yy, sc in scores:
+                            dist = abs(yy - ym)
+                            if dist <= band and sc >= best_score * 0.45:
+                                w = (1.0 - (dist / float(band + 1)))
+                                near.append((yy, sc * max(0.0, w)))
+                        if near:
+                            pick_y = max(near, key=lambda t: t[1])[0]
 
-                if scores and best_score > 0:
-                    threshold = best_score * 0.80
-                    candidates = [yy for yy, sc in scores if sc >= threshold]
-                    # Prefer the lowest strong edge (closer to floor)
-                    pick_y = max(candidates) if candidates else best_y
+                    if pick_y is None and best_score > 0:
+                        threshold = best_score * 0.75
+                        candidates = [yy for yy, sc in scores if sc >= threshold and yy >= int(0.55 * gH)]
+                        if candidates:
+                            # Prefer upper candidate in plausible floor band (avoid near-camera floor seams).
+                            pick_y = min(candidates)
+
                     if pick_y is not None:
                         yb = max(0.0, min(1.0, pick_y / float(gH)))
             except Exception:
@@ -2213,7 +2238,13 @@ def create_scale_guide_overlay(
                 pass
 
             vx = max(xl, min(xr, vx))
-            vy = max(yt, min(yb, vy))
+            yb_min = max(yt + 0.12, 0.45)
+            yb_max = 0.92
+            yb = max(yb_min, min(yb_max, yb))
+            vy_max = yb - 0.03
+            if vy_max <= yt + 0.01:
+                vy_max = min(0.98, yt + 0.08)
+            vy = max(yt + 0.005, min(vy_max, vy))
 
             if ff < yb:
                 ff = yb
@@ -2233,45 +2264,71 @@ def create_scale_guide_overlay(
             front_left = _front_point(back_left[0])
             front_right = _front_point(back_right[0])
 
-            def _map_floor(x_norm: float, depth_ratio: float):
+            def _depth_param_projective(b: tuple, f: tuple, v: tuple, d_mm: float):
+                if room_d <= 0:
+                    return max(0.0, min(1.0, d_mm))
+                d = max(0.0, min(float(room_d), float(d_mm)))
+                fx = f[0] - b[0]
+                fy = f[1] - b[1]
+                den = fx * fx + fy * fy
+                if den < 1e-6:
+                    return d / float(room_d)
+                # V = B + u_v * (F - B)
+                uv = ((v[0] - b[0]) * fx + (v[1] - b[1]) * fy) / den
+                if abs(uv - 1.0) < 1e-6:
+                    return d / float(room_d)
+                # Projective depth mapping with fixed endpoints: u(0)=0, u(D)=1, u(inf)=u_v.
+                u = (uv * d) / (d + float(room_d) * (uv - 1.0))
+                if not math.isfinite(u):
+                    return d / float(room_d)
+                return u
+
+            def _map_floor(x_norm: float, depth_mm: float):
                 x_norm = max(0.0, min(1.0, x_norm))
-                depth_ratio = max(0.0, min(1.0, depth_ratio))
                 back_x = back_left[0] + x_norm * (back_right[0] - back_left[0])
                 front_x = front_left[0] + x_norm * (front_right[0] - front_left[0])
-                x = back_x + depth_ratio * (front_x - back_x)
-                y = back_left[1] + depth_ratio * (front_left[1] - back_left[1])
+                b = (back_x, back_left[1])
+                f = (front_x, front_left[1])
+                u = _depth_param_projective(b, f, vanish, depth_mm)
+                x = b[0] + u * (f[0] - b[0])
+                y = b[1] + u * (f[1] - b[1])
                 return (x, y)
 
             # Floor grid
             grid_step = 500
             major_step = 1000
             if room_d > 0:
-                steps_d = max(1, int(room_d / grid_step))
-                for i in range(1, steps_d + 1):
-                    t = (i * grid_step) / float(room_d)
-                    color = (0, 0, 0, 140) if (i * grid_step) % major_step == 0 else (0, 0, 0, 80)
-                    p1 = _map_floor(0.0, t)
-                    p2 = _map_floor(1.0, t)
+                depth_marks = list(range(0, room_d + 1, grid_step))
+                if depth_marks[-1] != room_d:
+                    depth_marks.append(room_d)
+                for d_mm in depth_marks:
+                    color = (0, 0, 0, 140) if (d_mm % major_step == 0) else (0, 0, 0, 80)
+                    p1 = _map_floor(0.0, d_mm)
+                    p2 = _map_floor(1.0, d_mm)
                     draw.line([p1, p2], fill=color, width=2)
             else:
                 for i in range(1, 7):
-                    t = i / 7.0
-                    p1 = _map_floor(0.0, t)
-                    p2 = _map_floor(1.0, t)
+                    d_mm = (i / 7.0)
+                    p1 = _map_floor(0.0, d_mm)
+                    p2 = _map_floor(1.0, d_mm)
                     draw.line([p1, p2], fill=(0, 0, 0, 80), width=2)
 
             if room_w > 0:
-                steps_w = max(2, int(room_w / grid_step))
-                for i in range(0, steps_w + 1):
-                    x_norm = i / float(steps_w)
-                    color = (0, 0, 0, 140) if (i * grid_step) % major_step == 0 else (0, 0, 0, 80)
-                    p1 = _map_floor(x_norm, 1.0)
-                    draw.line([p1, vanish], fill=color, width=2)
+                width_marks = list(range(0, room_w + 1, grid_step))
+                if width_marks[-1] != room_w:
+                    width_marks.append(room_w)
+                for w_mm in width_marks:
+                    x_norm = max(0.0, min(1.0, w_mm / float(room_w)))
+                    color = (0, 0, 0, 140) if (w_mm % major_step == 0) else (0, 0, 0, 80)
+                    p_back = _map_floor(x_norm, 0)
+                    p_front = _map_floor(x_norm, room_d)
+                    draw.line([p_back, p_front], fill=color, width=2)
             else:
                 for i in range(0, 7):
                     x_norm = i / 6.0
-                    p1 = _map_floor(x_norm, 1.0)
-                    draw.line([p1, vanish], fill=(0, 0, 0, 80), width=2)
+                    p_back = _map_floor(x_norm, 0)
+                    p_front = _map_floor(x_norm, 1.0)
+                    draw.line([p_back, p_front], fill=(0, 0, 0, 80), width=2)
 
         if not SCALE_GUIDE_GRID_ONLY:
             # Primary item footprint (exact scale, no shrink)
@@ -2298,10 +2355,10 @@ def create_scale_guide_overlay(
                 t1 = 0.95
                 t0 = max(0.02, t1 - d_ratio)
 
-            p00 = _map_floor(x0, t0)
-            p10 = _map_floor(x1, t0)
-            p11 = _map_floor(x1, t1)
-            p01 = _map_floor(x0, t1)
+            p00 = _map_floor(x0, t0 * room_d)
+            p10 = _map_floor(x1, t0 * room_d)
+            p11 = _map_floor(x1, t1 * room_d)
+            p01 = _map_floor(x0, t1 * room_d)
 
             # Strong red footprint (primary item size)
             outline = (255, 20, 20, 220)
@@ -4379,11 +4436,18 @@ def render_room(
                     src = it.get("path") or it.get("url")
                     lp = _materialize_input(src, "mb") if src else None
                     if lp and os.path.exists(lp):
+                        try:
+                            qty_val = int(it.get("qty") or 1)
+                        except Exception:
+                            qty_val = 1
+                        if qty_val < 1:
+                            qty_val = 1
                         item_refs.append({
                             "label": label,
                             "path": lp,
                             "dims_mm": it.get("dims_mm"),
                             "options": it.get("options"),
+                            "qty": qty_val,
                         })
                         ref_paths.append(lp)
                 except Exception:
@@ -4464,12 +4528,18 @@ def render_room(
                             src_path = meta.get("path")
                             if not src_path or not os.path.exists(src_path):
                                 continue
+                            try:
+                                qty_val = int(meta.get("qty") or 1)
+                            except Exception:
+                                qty_val = 1
+                            if qty_val < 1:
+                                qty_val = 1
                             item_metas.append({
                                 "label": meta.get("label") or "Item",
                                 "box_2d": [0, 0, 1000, 1000],
                                 "dims_mm": meta.get("dims_mm"),
                                 "options": meta.get("options"),
-                                "qty": meta.get("qty") or 1,
+                                "qty": qty_val,
                                 "source_path": src_path,
                             })
                         except Exception:
@@ -5183,11 +5253,18 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
             except Exception:
                 pass
             label = it.get("name") or it.get("category") or it.get("id") or "Item"
+            try:
+                qty_val = int(it.get("qty") or 1)
+            except Exception:
+                qty_val = 1
+            if qty_val < 1:
+                qty_val = 1
             item_refs.append({
                 "label": label,
                 "path": ref_url or norm_path,
                 "dims_mm": it.get("dims_mm"),
                 "options": it.get("options"),
+                "qty": qty_val,
             })
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
