@@ -773,6 +773,9 @@ def job_render_with_details(payload: dict) -> dict:
         result = {"error": render_result.get("error"), "render": render_result, **extra}
         _persist_job_result(result, audience=audience)
         return result
+    # Hide original_url for cart responses (external) to prevent leaking source photos.
+    if isinstance(render_result, dict) and ("cart_kept" in extra or "cart_dropped" in extra):
+        render_result.pop("original_url", None)
     if not include_details:
         result = {"render": render_result, **extra}
         _persist_job_result(result, audience=audience)
