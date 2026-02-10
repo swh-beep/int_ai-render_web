@@ -4388,6 +4388,7 @@ def render_room(
         summary_token = SUMMARY_REF.set(summary)
 
         aud = _normalize_audience(audience)
+        enable_scale_guidance = (aud == "internal") and SCALE_CHECK
         prefix_main_user = _build_s3_prefix(aud, "mainrendered", "user-photos")
         prefix_main_empty = _build_s3_prefix(aud, "mainrendered", "empty")
         prefix_main_rendered = _build_s3_prefix(aud, "mainrendered", "rendered")
@@ -4412,7 +4413,7 @@ def render_room(
         # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
         room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
         room_planes = None
-        if SCALE_CHECK and step1_raw:
+        if enable_scale_guidance and step1_raw:
             room_planes = detect_room_planes_norm(step1_raw)
         if room_planes:
             wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
@@ -4667,75 +4668,80 @@ def render_room(
                     primary_item = (furniture_specs_json or {}).get("primary")
                     size_hierarchy = (furniture_specs_json or {}).get("size_hierarchy")
 
-                    logger.info(f"[Scale] primary_item={ (primary_item or {}).get('label') }")
-                    logger.info(f"[Scale] room_dims_parsed={room_dims_parsed} wall_span_norm={wall_span_norm}")
+                    if enable_scale_guidance:
+                        logger.info(f"[Scale] primary_item={ (primary_item or {}).get('label') }")
+                        logger.info(f"[Scale] room_dims_parsed={room_dims_parsed} wall_span_norm={wall_span_norm}")
 
-                    try:
-                        room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
-                        room_d = int((room_dims_parsed or {}).get("depth_mm") or 0)
-                        room_h = int((room_dims_parsed or {}).get("height_mm") or 0)
+                        try:
+                            room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
+                            room_d = int((room_dims_parsed or {}).get("depth_mm") or 0)
+                            room_h = int((room_dims_parsed or {}).get("height_mm") or 0)
 
-                        p_w = int(((primary_item or {}).get("dims_mm") or {}).get("width_mm") or 0)
-                        p_d = int(((primary_item or {}).get("dims_mm") or {}).get("depth_mm") or 0)
-                        p_h = int(((primary_item or {}).get("dims_mm") or {}).get("height_mm") or 0)
+                            p_w = int(((primary_item or {}).get("dims_mm") or {}).get("width_mm") or 0)
+                            p_d = int(((primary_item or {}).get("dims_mm") or {}).get("depth_mm") or 0)
+                            p_h = int(((primary_item or {}).get("dims_mm") or {}).get("height_mm") or 0)
 
-                        if not p_w and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                            try:
-                                p_w = int(furniture_specs_json.get("max_width_mm") or 0)
-                            except Exception:
-                                pass
+                            if not p_w and furniture_specs_json and isinstance(furniture_specs_json, dict):
+                                try:
+                                    p_w = int(furniture_specs_json.get("max_width_mm") or 0)
+                                except Exception:
+                                    pass
 
-                        if (not p_w or not p_d or not p_h) and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                            best = None
-                            for it in (furniture_specs_json.get("items") or []):
-                                if it.get("is_rug"):
-                                    continue
-                                dm = it.get("dims_mm") or {}
-                                w = int(dm.get("width_mm") or 0)
-                                d = int(dm.get("depth_mm") or 0)
-                                h = int(dm.get("height_mm") or 0)
-                                if w and d and h:
-                                    vp = int(it.get("volume_proxy") or (w * d * h))
-                                    if (best is None) or (vp > best[0]):
-                                        best = (vp, it, w, d, h)
-                            if best:
-                                _, best_item, w, d, h = best
-                                p_w, p_d, p_h = w, d, h
+                            if (not p_w or not p_d or not p_h) and furniture_specs_json and isinstance(furniture_specs_json, dict):
+                                best = None
+                                for it in (furniture_specs_json.get("items") or []):
+                                    if it.get("is_rug"):
+                                        continue
+                                    dm = it.get("dims_mm") or {}
+                                    w = int(dm.get("width_mm") or 0)
+                                    d = int(dm.get("depth_mm") or 0)
+                                    h = int(dm.get("height_mm") or 0)
+                                    if w and d and h:
+                                        vp = int(it.get("volume_proxy") or (w * d * h))
+                                        if (best is None) or (vp > best[0]):
+                                            best = (vp, it, w, d, h)
+                                if best:
+                                    _, best_item, w, d, h = best
+                                    p_w, p_d, p_h = w, d, h
 
-                        logger.info(
-                            f"[Scale] room_w={room_w}mm room_d={room_d}mm room_h={room_h}mm "
-                            f"p_w={p_w}mm p_d={p_d}mm p_h={p_h}mm step1_img={step1_img}"
-                        )
-
-                        if not _room_dims_valid(room_dims_parsed):
-                            est_dims = estimate_room_dimensions_from_image(step1_raw or step1_img)
-                            if _room_dims_valid(est_dims):
-                                room_dims_parsed = est_dims
-                                logger.info(f"[Scale] room_dims_estimated={room_dims_parsed}")
-
-                        if not room_planes and (step1_raw or step1_img):
-                            room_planes = detect_room_planes_norm(step1_raw or step1_img)
-                            if room_planes:
-                                wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
-
-                        if _room_dims_valid(room_dims_parsed) and room_planes:
-                            guide_path = os.path.join("outputs", f"scale_guide_{unique_id}.png")
-                            scale_guide_path = create_scale_guide_overlay(
-                                step1_raw or step1_img,
-                                room_planes,
-                                wall_span_norm,
-                                room_dims_parsed,
-                                furniture_specs_json,
-                                guide_path,
+                            logger.info(
+                                f"[Scale] room_w={room_w}mm room_d={room_d}mm room_h={room_h}mm "
+                                f"p_w={p_w}mm p_d={p_d}mm p_h={p_h}mm step1_img={step1_img}"
                             )
-                            if scale_guide_path and step1_img:
-                                scale_guide_path = match_aspect_to_target(scale_guide_path, step1_img)
-                            if not scale_guide_path:
+
+                            if not _room_dims_valid(room_dims_parsed):
+                                est_dims = estimate_room_dimensions_from_image(step1_raw or step1_img)
+                                if _room_dims_valid(est_dims):
+                                    room_dims_parsed = est_dims
+                                    logger.info(f"[Scale] room_dims_estimated={room_dims_parsed}")
+
+                            if not room_planes and (step1_raw or step1_img):
+                                room_planes = detect_room_planes_norm(step1_raw or step1_img)
+                                if room_planes:
+                                    wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
+
+                            if _room_dims_valid(room_dims_parsed) and room_planes:
+                                guide_path = os.path.join("outputs", f"scale_guide_{unique_id}.png")
+                                scale_guide_path = create_scale_guide_overlay(
+                                    step1_raw or step1_img,
+                                    room_planes,
+                                    wall_span_norm,
+                                    room_dims_parsed,
+                                    furniture_specs_json,
+                                    guide_path,
+                                )
+                                if scale_guide_path and step1_img:
+                                    scale_guide_path = match_aspect_to_target(scale_guide_path, step1_img)
+                                if not scale_guide_path:
+                                    summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
+                            else:
                                 summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
-                        else:
-                            summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
-                    except Exception as e:
-                        logger.exception(f"[Scale] scale guide exception: {e}")
+                        except Exception as e:
+                            logger.exception(f"[Scale] scale guide exception: {e}")
+                    else:
+                        room_planes = None
+                        wall_span_norm = (0.0, 1.0)
+                        scale_guide_path = None
 
                 except Exception as e:
                     logger.exception(f"[Scale] furniture JSON build failed: {e}")
@@ -4817,8 +4823,6 @@ def render_room(
             else:
                 logger.info("OK: TextRead OK=%s FAIL=%s", ok, fail)
         final_before_url = resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)
-        if not generated_results:
-            generated_results.append(step1_img)
 
         scale_guide_url = None
         try:
