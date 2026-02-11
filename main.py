@@ -1611,9 +1611,18 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         label = it.get("label", "") or ""
         desc  = it.get("description", "") or ""
         box   = it.get("box_2d")
+        req_dims = _normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
 
         # 1. 치수 파싱 시도 (분석된 description에서)
         dims = parse_object_dimensions_mm(desc)
+        for k in ("width_mm", "depth_mm", "height_mm"):
+            if not (dims.get(k) or 0):
+                v = req_dims.get(k)
+                if v is not None:
+                    try:
+                        dims[k] = int(v)
+                    except Exception:
+                        pass
 
         # 2. 러그 판단
         is_rug = _is_rug_like(label)
@@ -1638,6 +1647,8 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
             "is_rug": is_rug,
             "category_score": cat_score, # [NEW]
             "qty": int(it.get("qty") or 1),
+            "options": it.get("options"),
+            "requested_dims_mm": req_dims or None,
             "dims_mm": {
                 "width_mm": dims.get("width_mm"),
                 "depth_mm": dims.get("depth_mm"),
@@ -2403,6 +2414,74 @@ def create_scale_guide_overlay(
         return out_path
     except Exception:
         return None
+
+def create_scale_guide_overlay_with_model(
+    empty_room_path: str,
+    out_path: str,
+    room_dims: Optional[Dict[str, Any]] = None,
+):
+    """
+    Internal-only scale guide generator using image-edit prompting.
+    Draw only a fluorescent yellow 500x500mm floor grid and keep architecture unchanged.
+    """
+    src_img = None
+    try:
+        if not empty_room_path or not os.path.exists(empty_room_path):
+            return None
+
+        with Image.open(empty_room_path) as _img:
+            src_img = _img.convert("RGB")
+
+        dims_text = "Room dimensions are not provided."
+        if _room_dims_valid(room_dims or {}):
+            rw = int((room_dims or {}).get("width_mm") or 0)
+            rd = int((room_dims or {}).get("depth_mm") or 0)
+            rh = int((room_dims or {}).get("height_mm") or 0)
+            dims_text = f"Room dimensions (W x D x H, mm): {rw} x {rd} x {rh}."
+
+        prompt = (
+            "IMAGE EDIT TASK: Floor Scale Guide Overlay.\n"
+            "Keep the original room photo exactly the same and only add a guide on visible floor surfaces.\n"
+            f"{dims_text}\n"
+            "Draw a 500mm x 500mm tile-like perspective grid in fluorescent yellow.\n"
+            "Requirements:\n"
+            "1) Draw the grid only on floor areas that are visible in the image.\n"
+            "2) Do not draw on walls, windows, ceiling, doors, or outside the room.\n"
+            "3) Preserve camera, perspective, lighting, and all architectural details.\n"
+            "4) Keep lines thin and clear; no text, labels, arrows, boxes, or extra graphics.\n"
+            "5) Output one clean image with this floor grid overlay only.\n"
+        )
+
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
+        response = call_gemini_with_failover(
+            MODEL_NAME,
+            [prompt, src_img],
+            {"timeout": 70},
+            safety_settings,
+            "You are an expert architectural image editor.",
+            log_tag="ScaleGuide.NLGrid",
+        )
+        if response and hasattr(response, "candidates") and response.candidates and hasattr(response, "parts"):
+            for part in response.parts:
+                if hasattr(part, "inline_data") and getattr(part.inline_data, "data", None):
+                    with open(out_path, "wb") as f:
+                        f.write(part.inline_data.data)
+                    return out_path
+    except Exception as e:
+        logger.exception(f"[ScaleGuide.NLGrid] generation failed: {e}")
+    finally:
+        try:
+            if src_img:
+                src_img.close()
+        except Exception:
+            pass
+    return None
 
 def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], primary_label: Optional[str]):
     try:
@@ -4033,17 +4112,42 @@ def generate_furnished_room(
                 items_for_cutout = items_for_cutout[:12]
                 for it in items_for_cutout:
                     cp = it.get("crop_path")
-                    lbl = (it.get("label") or "").strip()
                     if cp and os.path.exists(cp):
-                        cutouts.append((lbl, cp))
-                for lbl, cp in cutouts:
+                        cutouts.append(it)
+                for it in cutouts:
+                    cp = it.get("crop_path")
+                    lbl = (it.get("label") or "").strip() or "Item"
+                    qty = int(it.get("qty") or 1)
+                    if qty < 1:
+                        qty = 1
+                    dims = _normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
+                    w = dims.get("width_mm")
+                    d = dims.get("depth_mm")
+                    h = dims.get("height_mm")
+                    opts = it.get("options")
+                    opts_txt = "null"
+                    if isinstance(opts, (dict, list)):
+                        try:
+                            opts_txt = json.dumps(opts, ensure_ascii=False)
+                        except Exception:
+                            opts_txt = str(opts)
+                    elif isinstance(opts, str) and opts.strip():
+                        opts_txt = opts.strip()
                     cutout_img = Image.open(cp)
                     try:
                         cutout_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
                     except Exception:
                         pass
                     extra_imgs.append(cutout_img)
-                    content += [f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN). Label: {lbl}", cutout_img]
+                    content += [
+                        (
+                            "Furniture Cutout Reference (MUST MATCH EXACT DESIGN). "
+                            f"Label={lbl} | Qty={qty} | W={w if w is not None else 'null'}mm "
+                            f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
+                            f"| Options={opts_txt}"
+                        ),
+                        cutout_img
+                    ]
         except Exception:
             pass
 
@@ -4051,7 +4155,10 @@ def generate_furnished_room(
             if scale_guide_path and os.path.exists(scale_guide_path):
                 guide_img = Image.open(scale_guide_path)
                 extra_imgs.append(guide_img)
-                content += ["SCALE GUIDE OVERLAY (grid + PRIMARY footprint in red, height box in yellow; DO NOT render; use only for measurement/placement):", guide_img]
+                content += [
+                    "SCALE GUIDE OVERLAY (fluorescent yellow 500x500mm floor grid only; DO NOT render the grid itself):",
+                    guide_img,
+                ]
         except Exception:
             pass
         # [INFO] Moodboard/style reference images are intentionally NOT sent to the model.
@@ -4413,12 +4520,7 @@ def render_room(
         # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
         room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
         room_planes = None
-        if enable_scale_guidance and step1_raw:
-            room_planes = detect_room_planes_norm(step1_raw)
-        if room_planes:
-            wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
-        else:
-            wall_span_norm = (0.0, 1.0)
+        wall_span_norm = (0.0, 1.0)
         windows_present = None
         room_analysis_text = ""
         # Structure protection removed for rendering quality and performance.
@@ -4670,74 +4772,21 @@ def render_room(
 
                     if enable_scale_guidance:
                         logger.info(f"[Scale] primary_item={ (primary_item or {}).get('label') }")
-                        logger.info(f"[Scale] room_dims_parsed={room_dims_parsed} wall_span_norm={wall_span_norm}")
-
+                        logger.info(f"[Scale] room_dims_parsed={room_dims_parsed}")
                         try:
-                            room_w = int((room_dims_parsed or {}).get("width_mm") or 0)
-                            room_d = int((room_dims_parsed or {}).get("depth_mm") or 0)
-                            room_h = int((room_dims_parsed or {}).get("height_mm") or 0)
-
-                            p_w = int(((primary_item or {}).get("dims_mm") or {}).get("width_mm") or 0)
-                            p_d = int(((primary_item or {}).get("dims_mm") or {}).get("depth_mm") or 0)
-                            p_h = int(((primary_item or {}).get("dims_mm") or {}).get("height_mm") or 0)
-
-                            if not p_w and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                                try:
-                                    p_w = int(furniture_specs_json.get("max_width_mm") or 0)
-                                except Exception:
-                                    pass
-
-                            if (not p_w or not p_d or not p_h) and furniture_specs_json and isinstance(furniture_specs_json, dict):
-                                best = None
-                                for it in (furniture_specs_json.get("items") or []):
-                                    if it.get("is_rug"):
-                                        continue
-                                    dm = it.get("dims_mm") or {}
-                                    w = int(dm.get("width_mm") or 0)
-                                    d = int(dm.get("depth_mm") or 0)
-                                    h = int(dm.get("height_mm") or 0)
-                                    if w and d and h:
-                                        vp = int(it.get("volume_proxy") or (w * d * h))
-                                        if (best is None) or (vp > best[0]):
-                                            best = (vp, it, w, d, h)
-                                if best:
-                                    _, best_item, w, d, h = best
-                                    p_w, p_d, p_h = w, d, h
-
-                            logger.info(
-                                f"[Scale] room_w={room_w}mm room_d={room_d}mm room_h={room_h}mm "
-                                f"p_w={p_w}mm p_d={p_d}mm p_h={p_h}mm step1_img={step1_img}"
+                            guide_path = os.path.join("outputs", f"scale_guide_{unique_id}.png")
+                            scale_guide_path = create_scale_guide_overlay_with_model(
+                                step1_raw or step1_img,
+                                guide_path,
+                                room_dims=room_dims_parsed,
                             )
-
-                            if not _room_dims_valid(room_dims_parsed):
-                                est_dims = estimate_room_dimensions_from_image(step1_raw or step1_img)
-                                if _room_dims_valid(est_dims):
-                                    room_dims_parsed = est_dims
-                                    logger.info(f"[Scale] room_dims_estimated={room_dims_parsed}")
-
-                            if not room_planes and (step1_raw or step1_img):
-                                room_planes = detect_room_planes_norm(step1_raw or step1_img)
-                                if room_planes:
-                                    wall_span_norm = (room_planes.get("x_left", 0.0), room_planes.get("x_right", 1.0))
-
-                            if _room_dims_valid(room_dims_parsed) and room_planes:
-                                guide_path = os.path.join("outputs", f"scale_guide_{unique_id}.png")
-                                scale_guide_path = create_scale_guide_overlay(
-                                    step1_raw or step1_img,
-                                    room_planes,
-                                    wall_span_norm,
-                                    room_dims_parsed,
-                                    furniture_specs_json,
-                                    guide_path,
-                                )
-                                if scale_guide_path and step1_img:
-                                    scale_guide_path = match_aspect_to_target(scale_guide_path, step1_img)
-                                if not scale_guide_path:
-                                    summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
-                            else:
+                            if scale_guide_path and step1_img:
+                                scale_guide_path = match_aspect_to_target(scale_guide_path, step1_img)
+                            if not scale_guide_path:
                                 summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
                         except Exception as e:
                             logger.exception(f"[Scale] scale guide exception: {e}")
+                            summary["scale_guide_skipped"] = summary.get("scale_guide_skipped", 0) + 1
                     else:
                         room_planes = None
                         wall_span_norm = (0.0, 1.0)
