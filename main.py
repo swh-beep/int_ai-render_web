@@ -1470,7 +1470,7 @@ _DOUBLE_PATTERNS = [
 def parse_object_dimensions_mm(text: str) -> dict:
     t = (text or "")
     t_norm = t.replace("，", ",").replace("×", "x")
-    out = {"width_mm": None, "depth_mm": None, "height_mm": None, "raw": {}}
+    out = {"width_mm": None, "depth_mm": None, "height_mm": None, "radius_mm": None, "raw": {}}
 
     for pat in _TRIPLE_PATTERNS:
         m = re.search(pat, t_norm, flags=re.IGNORECASE)
@@ -1500,6 +1500,20 @@ def parse_object_dimensions_mm(text: str) -> dict:
         if mm:
             out[k] = mm
             out["raw"][k] = m.group(0)
+
+    # Radius notation support: R / radius / 반지름 / Ø / ⌀ / Φ
+    m = re.search(r"(?:\bR\b|radius|반지름|[Ø⌀Φ])\s*[:=]?\s*([0-9][0-9,\.]*)\s*(mm|cm|m)?", t_norm, flags=re.IGNORECASE)
+    if m:
+        num_str, unit = m.group(1), m.group(2)
+        try:
+            v = float(num_str.replace(",", ""))
+        except Exception:
+            v = None
+        if v is not None:
+            mm = _to_mm(v, unit)
+            if mm:
+                out["radius_mm"] = mm
+                out["raw"]["radius_mm"] = m.group(0)
 
     if not out["width_mm"]:
         m = re.search(_LENGTH_PAT, t_norm, flags=re.IGNORECASE)
@@ -1613,16 +1627,19 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         box   = it.get("box_2d")
         req_dims = _normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
 
-        # 1. 치수 파싱 시도 (분석된 description에서)
-        dims = parse_object_dimensions_mm(desc)
-        for k in ("width_mm", "depth_mm", "height_mm"):
-            if not (dims.get(k) or 0):
-                v = req_dims.get(k)
-                if v is not None:
-                    try:
-                        dims[k] = int(v)
-                    except Exception:
-                        pass
+        # 1. 치수 파싱
+        # - Cart mode(요청 치수 존재): 요청 데이터(requested_dims_mm)를 authoritative로 사용
+        # - 기타 모드: OCR/설명 파싱값 사용
+        if req_dims:
+            dims = {
+                "width_mm": req_dims.get("width_mm"),
+                "depth_mm": req_dims.get("depth_mm"),
+                "height_mm": req_dims.get("height_mm"),
+                "radius_mm": req_dims.get("radius_mm"),
+                "raw": {"source": "requested_dims_mm"},
+            }
+        else:
+            dims = parse_object_dimensions_mm(desc)
 
         # 2. 러그 판단
         is_rug = _is_rug_like(label)
@@ -1653,6 +1670,7 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
                 "width_mm": dims.get("width_mm"),
                 "depth_mm": dims.get("depth_mm"),
                 "height_mm": dims.get("height_mm"),
+                "radius_mm": dims.get("radius_mm"),
             },
             "volume_proxy": vp,
             "box_2d": box,
@@ -2753,20 +2771,67 @@ def detect_furniture_boxes(moodboard_path):
 def _normalize_dims_dict(raw: dict) -> dict:
     if not isinstance(raw, dict):
         return {}
-    w = raw.get("width_mm")
-    d = raw.get("depth_mm")
-    h = raw.get("height_mm")
-    if w is None:
-        w = raw.get("width") or raw.get("w")
-    if d is None:
-        d = raw.get("depth") or raw.get("d")
-    if h is None:
-        h = raw.get("height") or raw.get("h")
+
+    def _pick(*keys):
+        for k in keys:
+            if k in raw and raw.get(k) is not None:
+                return raw.get(k)
+        return None
+
+    w = _pick("width_mm", "width", "w")
+    d = _pick("depth_mm", "depth", "d")
+    h = _pick("height_mm", "height", "h")
+    r = _pick("radius_mm", "radius", "r")
+
     out = {}
-    if w is not None: out["width_mm"] = int(w)
-    if d is not None: out["depth_mm"] = int(d)
-    if h is not None: out["height_mm"] = int(h)
+    try:
+        if w is not None: out["width_mm"] = int(w)
+    except Exception:
+        pass
+    try:
+        if d is not None: out["depth_mm"] = int(d)
+    except Exception:
+        pass
+    try:
+        if h is not None: out["height_mm"] = int(h)
+    except Exception:
+        pass
+    try:
+        if r is not None: out["radius_mm"] = int(r)
+    except Exception:
+        pass
     return out
+
+_DIM_2D_OK_PAT = re.compile(
+    r"(tv|mirror|frame|art|painting|poster|picture|print|wall|wall\s*-?\s*mounted|wall\s*system|rug|carpet|mat|러그|카페트|카펫|액자|그림|포스터|벽걸이|월시스템)",
+    re.IGNORECASE,
+)
+
+def _is_two_dim_ok_label(label: str) -> bool:
+    try:
+        return bool(_DIM_2D_OK_PAT.search((label or "").strip()))
+    except Exception:
+        return False
+
+def _available_dim_axes(dm: dict) -> set:
+    axes = set()
+    try:
+        if int(dm.get("width_mm") or 0) > 0: axes.add("W")
+    except Exception:
+        pass
+    try:
+        if int(dm.get("depth_mm") or 0) > 0: axes.add("D")
+    except Exception:
+        pass
+    try:
+        if int(dm.get("height_mm") or 0) > 0: axes.add("H")
+    except Exception:
+        pass
+    try:
+        if int(dm.get("radius_mm") or 0) > 0: axes.add("R")
+    except Exception:
+        pass
+    return axes
 
 def _dims_to_str(dims: dict) -> str:
     if not isinstance(dims, dict):
@@ -2774,8 +2839,12 @@ def _dims_to_str(dims: dict) -> str:
     w = dims.get("width_mm")
     d = dims.get("depth_mm")
     h = dims.get("height_mm")
-    if w or d or h:
-        return f" Dimensions: W={w or 'null'}mm, D={d or 'null'}mm, H={h or 'null'}mm."
+    r = dims.get("radius_mm")
+    if w or d or h or r:
+        base = f" Dimensions: W={w or 'null'}mm, D={d or 'null'}mm, H={h or 'null'}mm."
+        if r:
+            base += f" R={r}mm."
+        return base
     return ""
 
 def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):
@@ -2989,7 +3058,7 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
                 except Exception: pass
     return {}
 
-def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):
+def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True, enable_text_read=True):
     """
     Crop detected item WITH PADDING to capture specification text below the item.
     """
@@ -3081,19 +3150,32 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
         except Exception:
             crop_path = None
 
-        prompt = (
-            f"Analyze this image cutout of a '{label}'.\n"
-            "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
-            "1. **READ EXTRACT DIMENSIONS:** If there is text like 'W: 2800', 'Width 2800mm', '2800*1450', extract these numbers EXACTLY in millimeters.\n"
-            "2. **LONG DESCRIPTION (50-70 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
-            "\n"
-            "Return STRICT JSON only:\n"
-            "{\n"
-            "  \"description\": \"Visual description...\",\n"
-            "  \"dimensions_mm\": {\"width\": int/null, \"depth\": int/null, \"height\": int/null},\n"
-            "  \"raw_text_found\": \"copy the text you read here\"\n"
-            "}\n"
-        )
+        if enable_text_read:
+            prompt = (
+                f"Analyze this image cutout of a '{label}'.\n"
+                "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
+                "1. **READ EXTRACT DIMENSIONS:** If there is text like 'W: 2800', 'Width 2800mm', '2800*1450', extract these numbers EXACTLY in millimeters.\n"
+                "   - Support radius notation too (R, 반지름, Ø, ⌀, Φ).\n"
+                "2. **LONG DESCRIPTION (50-70 words):** Describe material, color, shape, proportions, silhouette, and scale cues.\n"
+                "\n"
+                "Return STRICT JSON only:\n"
+                "{\n"
+                "  \"description\": \"Visual description...\",\n"
+                "  \"dimensions_mm\": {\"width\": int/null, \"depth\": int/null, \"height\": int/null, \"radius\": int/null},\n"
+                "  \"raw_text_found\": \"copy the text you read here\"\n"
+                "}\n"
+            )
+        else:
+            # Cart mode: OCR-based dimension read is unnecessary. Use only visual description.
+            prompt = (
+                f"Analyze this image cutout of a '{label}'.\n"
+                "Write a 50-70 word visual description (material, color, shape, proportions, silhouette, scale cues).\n"
+                "Do NOT estimate or infer dimensions from text.\n"
+                "Return STRICT JSON only:\n"
+                "{\n"
+                "  \"description\": \"Visual description...\"\n"
+                "}\n"
+            )
 
         response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 60}, {}, log_tag="Analysis.CropItem")
 
@@ -3104,34 +3186,32 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
             data = _safe_extract_json(response.text)
             if data:
                 desc = data.get("description", desc)
-                raw_dims = data.get("dimensions_mm", {})
+                if enable_text_read:
+                    raw_dims = data.get("dimensions_mm", {})
+                    # Description에 치수 정보를 삽입(파싱 로직이 읽을 수 있게)
+                    w = raw_dims.get("width")
+                    d = raw_dims.get("depth")
+                    h = raw_dims.get("height")
+                    r = raw_dims.get("radius")
 
-                # 강제로 description에 치수 정보를 텍스트로 박아넣음 (파싱 로직이 읽을 수 있게)
-                w = raw_dims.get("width")
-                d = raw_dims.get("depth")
-                h = raw_dims.get("height")
-
-                if w and d and h:
-                    dims_str = f" Dimensions: W={w}mm, D={d}mm, H={h}mm."
-                    if LOG_BRIEF:
-                        print(f"[Text Read] OK {label}", flush=True)
-                    try:
-                        _g = SUMMARY_REF.get()
-                        if isinstance(_g, dict):
-                            _g["text_ok"] = _g.get("text_ok", 0) + 1
-                    except Exception:
-                        pass
-                    if not LOG_BRIEF:
-                        print(f"   -> [Text Read] {label}: {dims_str} (Source: {data.get('raw_text_found')})", flush=True)
-                else:
-                    if LOG_BRIEF:
-                        print(f"[Text Read] FAIL {label}", flush=True)
-                    try:
-                        _g = SUMMARY_REF.get()
-                        if isinstance(_g, dict):
-                            _g["text_fail"] = _g.get("text_fail", 0) + 1
-                    except Exception:
-                        pass
+                    if w and d and h:
+                        dims_str = f" Dimensions: W={w}mm, D={d}mm, H={h}mm."
+                        if not LOG_BRIEF:
+                            print(f"   -> [Text Read] {label}: {dims_str} (Source: {data.get('raw_text_found')})", flush=True)
+                    elif r and (h or d or w):
+                        dims_str = f" Dimensions: R={r}mm"
+                        if h:
+                            dims_str += f", H={h}mm"
+                        elif d:
+                            dims_str += f", D={d}mm"
+                        elif w:
+                            dims_str += f", W={w}mm"
+                        dims_str += "."
+                        if not LOG_BRIEF:
+                            print(f"   -> [Text Read] {label}: {dims_str} (Source: {data.get('raw_text_found')})", flush=True)
+                    else:
+                        if LOG_BRIEF:
+                            print(f"[Text Read] FAIL {label}", flush=True)
 
         if cropped_img:
             try:
@@ -3766,15 +3846,19 @@ def generate_furnished_room(
                         w = int(dm.get("width_mm") or 0)
                         d = int(dm.get("depth_mm") or 0)
                         h = int(dm.get("height_mm") or 0)
+                        r = int(dm.get("radius_mm") or 0)
+
                         missing = []
                         if w <= 0: missing.append("W")
                         if d <= 0: missing.append("D")
                         if h <= 0: missing.append("H")
-                        # Allow 2D dims for certain flat items (tv, mirror, frame, art, painting, rug)
-                        allow_2d = bool(re.search(r"\b(tv|mirror|frame|art|painting|rug|carpet)\b", label.lower()))
-                        if allow_2d:
-                            if w > 0 and (d > 0 or h > 0):
-                                missing = []
+
+                        # 2D 예외 품목(러그/카페트/벽걸이/액자/그림 등): 유효 축 2개 이상이면 OK
+                        # 반지름(R) 표기 포함: R + (H|D|W) 조합도 2축으로 인정.
+                        allow_2d = _is_two_dim_ok_label(label)
+                        axes = _available_dim_axes(dm)
+                        if allow_2d and len(axes) >= 2:
+                            missing = []
                         if missing:
                             incomplete_items.append((label, missing))
                             if LOG_BRIEF:
@@ -4485,8 +4569,6 @@ def render_room(
         log_section(f"REQUEST START [{unique_id}] (Integrated Analysis Mode)")
         start_time = time.time()
         summary = {
-            'text_ok': 0,
-            'text_fail': 0,
             'dims_fail': 0,
             'dims_warn': 0,
             'scalecheck_fail': 0,
@@ -4684,6 +4766,8 @@ def render_room(
 
                 full_analyzed_data = []
                 if item_metas:
+                    # Cart mode(직접 item_refs)에서는 OCR 치수 판독 불필요: job 요청 치수를 기준으로만 처리.
+                    ocr_text_read_enabled = not bool(item_refs)
                     analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(item_metas)))
                     results = [None] * len(item_metas)
                     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
@@ -4697,6 +4781,7 @@ def render_room(
                                 unique_id,
                                 i + 1,
                                 True,
+                                ocr_text_read_enabled,
                             )))
                         for i, future in futures:
                             try:
@@ -4865,12 +4950,8 @@ def render_room(
                 reasons.append(f"ScaleCheck fail={summary.get('scalecheck_fail',0)}")
             if summary.get('scale_guide_skipped',0):
                 reasons.append(f"Scale guide skipped={summary.get('scale_guide_skipped',0)}")
-            ok = summary.get('text_ok',0)
-            fail = summary.get('text_fail',0)
             if reasons:
-                logger.warning("WARNING: %s | TextRead OK=%s FAIL=%s", '; '.join(reasons), ok, fail)
-            else:
-                logger.info("OK: TextRead OK=%s FAIL=%s", ok, fail)
+                logger.warning("WARNING: %s", '; '.join(reasons))
         final_before_url = resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)
 
         scale_guide_url = None
