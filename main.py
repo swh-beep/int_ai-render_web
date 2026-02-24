@@ -44,7 +44,7 @@ from rq.job import Job
 load_dotenv()
 LOG_BRIEF = os.getenv("LOG_BRIEF", "1") == "1"
 LOG_SUMMARY = os.getenv("LOG_SUMMARY", "1") == "1"
-SCALE_CHECK = os.getenv("SCALE_CHECK", "0") == "1"
+SCALE_CHECK = False  # deprecated: scale-check disabled by policy
 SCALE_GUIDE_GRID_ONLY = os.getenv("SCALE_GUIDE_GRID_ONLY", "1") == "1"
 SUMMARY_REF = ContextVar("SUMMARY_REF", default=None)
 
@@ -3762,6 +3762,7 @@ def generate_furnished_room(
     room_planes=None,
     windows_present=None,
     room_analysis_text=None,
+    enable_scale_check=False,
 ):
     if time.time() - start_time > TOTAL_TIMEOUT_LIMIT: return None
     room_img = None
@@ -4324,7 +4325,7 @@ def generate_furnished_room(
             if not last_path:
                 continue
 
-            if SCALE_CHECK and furniture_specs_json and room_dims_parsed and room_planes:
+            if enable_scale_check and furniture_specs_json and room_dims_parsed and room_planes:
                 ok, issues = validate_furnished_scale(
                     last_path,
                     furniture_specs_json,
@@ -4606,7 +4607,10 @@ def render_room(
         summary_token = SUMMARY_REF.set(summary)
 
         aud = _normalize_audience(audience)
-        enable_scale_guidance = (aud == "internal") and SCALE_CHECK
+        # Policy update (2026-02-24):
+        # - scale-check: globally disabled
+        # - scale-guide: internal-only
+        enable_scale_check = False
         prefix_main_user = _build_s3_prefix(aud, "mainrendered", "user-photos")
         prefix_main_empty = _build_s3_prefix(aud, "mainrendered", "empty")
         prefix_main_rendered = _build_s3_prefix(aud, "mainrendered", "rendered")
@@ -4628,8 +4632,22 @@ def render_room(
         if not step1_raw:
             step1_raw = step1_img
 
-        # [SCALE FIX vB] Precompute room dimensions + back wall span (for scale lock & auto-pick)
         room_dims_parsed = parse_room_dimensions_mm(dimensions or "")
+        room_dims_valid = _room_dims_valid(room_dims_parsed)
+
+        # Scale-guide is meaningful only with valid room dimensions.
+        enable_scale_guidance = (aud == "internal") and room_dims_valid
+        if aud == "external":
+            try:
+                logger.info("[Scale] external request -> guide/check disabled")
+            except Exception:
+                pass
+        elif not room_dims_valid:
+            try:
+                logger.info("[Scale] internal request without valid room dimensions -> guide skipped")
+            except Exception:
+                pass
+
         room_planes = None
         wall_span_norm = (0.0, 1.0)
         windows_present = None
@@ -4974,6 +4992,7 @@ def render_room(
                     room_planes=room_planes,
                     windows_present=windows_present,
                     room_analysis_text=room_analysis_text,
+                    enable_scale_check=enable_scale_check,
                 )
                 if res: return res
             except Exception as e: print(f"   ??[Variation {index+1}] ???: {e}", flush=True)
