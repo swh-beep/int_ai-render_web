@@ -76,6 +76,7 @@ GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
 RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
+
 API_KEY_POOL = []
 i = 1
 while True:
@@ -3058,7 +3059,15 @@ def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=
                 except Exception: pass
     return {}
 
-def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True, enable_text_read=True):
+def analyze_cropped_item(
+    moodboard_path,
+    item_data,
+    unique_id=None,
+    item_index=None,
+    save_crop=True,
+    enable_text_read=True,
+    provided_dims_mm=None,
+):
     """
     Crop detected item WITH PADDING to capture specification text below the item.
     """
@@ -3166,11 +3175,31 @@ def analyze_cropped_item(moodboard_path, item_data, unique_id=None, item_index=N
                 "}\n"
             )
         else:
-            # Cart mode: OCR-based dimension read is unnecessary. Use only visual description.
+            # Cart mode: use payload dimensions as authoritative hints, and blend them naturally into the description.
+            dims_hint = _normalize_dims_dict(provided_dims_mm or {})
+            w_hint = dims_hint.get("width_mm")
+            d_hint = dims_hint.get("depth_mm")
+            h_hint = dims_hint.get("height_mm")
+            r_hint = dims_hint.get("radius_mm")
+            has_dim_hint = any([(w_hint or 0) > 0, (d_hint or 0) > 0, (h_hint or 0) > 0, (r_hint or 0) > 0])
+
+            hint_line = ""
+            if has_dim_hint:
+                hint_line = (
+                    f"CATALOG DIMENSIONS (authoritative, mm): "
+                    f"W={w_hint if (w_hint or 0) > 0 else 'null'}, "
+                    f"D={d_hint if (d_hint or 0) > 0 else 'null'}, "
+                    f"H={h_hint if (h_hint or 0) > 0 else 'null'}, "
+                    f"R={r_hint if (r_hint or 0) > 0 else 'null'}.\n"
+                    "Use these exact numbers naturally in the description body (not as a metadata tail).\n"
+                    "Do NOT add template-like phrases such as 'Requested size'.\n"
+                )
+
             prompt = (
                 f"Analyze this image cutout of a '{label}'.\n"
                 "Write a 50-70 word visual description (material, color, shape, proportions, silhouette, scale cues).\n"
-                "Do NOT estimate or infer dimensions from text.\n"
+                f"{hint_line}"
+                "If dimensions are missing, do NOT invent them.\n"
                 "Return STRICT JSON only:\n"
                 "{\n"
                 "  \"description\": \"Visual description...\"\n"
@@ -4766,8 +4795,9 @@ def render_room(
 
                 full_analyzed_data = []
                 if item_metas:
-                    # Cart mode(직접 item_refs)에서는 OCR 치수 판독 불필요: job 요청 치수를 기준으로만 처리.
-                    ocr_text_read_enabled = not bool(item_refs)
+                    # Cart mode(직접 item_refs)에서는 OCR 대신 payload 치수를 authoritative 힌트로 사용.
+                    is_cart_mode = bool(item_refs)
+                    ocr_text_read_enabled = not is_cart_mode
                     analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(item_metas)))
                     results = [None] * len(item_metas)
                     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
@@ -4782,6 +4812,7 @@ def render_room(
                                 i + 1,
                                 True,
                                 ocr_text_read_enabled,
+                                meta.get("dims_mm"),
                             )))
                         for i, future in futures:
                             try:
@@ -4796,10 +4827,37 @@ def render_room(
                         req_dims = _normalize_dims_dict(meta.get("dims_mm") or {})
                         opts = meta.get("options")
                         qty = meta.get("qty") or 1
+
+                        # Cart mode: if model omitted payload dimensions, add one natural fallback sentence.
+                        if is_cart_mode and req_dims:
+                            dim_pairs = []
+                            w = req_dims.get("width_mm")
+                            d = req_dims.get("depth_mm")
+                            h = req_dims.get("height_mm")
+                            r = req_dims.get("radius_mm")
+                            if (w or 0) > 0:
+                                dim_pairs.append(f"W {w}mm")
+                            if (d or 0) > 0:
+                                dim_pairs.append(f"D {d}mm")
+                            if (h or 0) > 0:
+                                dim_pairs.append(f"H {h}mm")
+                            if (r or 0) > 0:
+                                dim_pairs.append(f"R {r}mm")
+                            if dim_pairs:
+                                desc_text = (desc or "").strip()
+                                has_payload_numbers = all(
+                                    re.search(rf"(?<!\\d){re.escape(str(v))}(?!\\d)", desc_text)
+                                    for v in [x for x in [w, d, h, r] if (x or 0) > 0]
+                                )
+                                if not has_payload_numbers:
+                                    if desc_text and not desc_text.endswith((".", "!", "?")):
+                                        desc_text += "."
+                                    desc = (desc_text + f" It measures {', '.join(dim_pairs)}.").strip()
+
                         extra_lines = []
                         if qty and qty > 1:
                             extra_lines.append(f"Quantity: {qty}")
-                        if req_dims:
+                        if req_dims and not is_cart_mode:
                             extra_lines.append(
                                 f"Requested size: W={req_dims.get('width_mm') or 'null'} "
                                 f"D={req_dims.get('depth_mm') or 'null'} "
