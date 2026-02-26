@@ -5375,15 +5375,32 @@ def render_room(
         except Exception:
             pass
 
-        # Main-render box remap for all API audiences (internal/external):
-        # detail targeting should always follow the final main render layout.
+        # Main-render box remap for detail targeting.
+        # - moodboard/preset flow: remap to main-render boxes.
+        # - direct cart item flow(item_refs): skip expensive re-detect and keep item-level full-frame refs.
         try:
             if full_analyzed_data and generated_results:
-                main_render_path = generated_results[0]
-                if main_render_path and os.path.exists(main_render_path):
-                    full_analyzed_data = _refresh_item_boxes_from_main_render(main_render_path, full_analyzed_data)
+                direct_item_mode = bool(item_refs)
+                if direct_item_mode:
+                    normalized_items = []
+                    for src in full_analyzed_data:
+                        if not isinstance(src, dict):
+                            continue
+                        it = dict(src)
+                        b = it.get("box_2d")
+                        if b is not None and it.get("source_box_2d") is None:
+                            it["source_box_2d"] = b
+                        it["box_source"] = it.get("box_source") or "item_image_full"
+                        normalized_items.append(it)
+                    full_analyzed_data = normalized_items
                     if not LOG_BRIEF:
-                        logger.info("[DetailBox] main-render remap applied (%s): %d items", aud, len(full_analyzed_data))
+                        logger.info("[DetailBox] remap skipped (%s, direct-item mode): %d items", aud, len(full_analyzed_data))
+                else:
+                    main_render_path = generated_results[0]
+                    if main_render_path and os.path.exists(main_render_path):
+                        full_analyzed_data = _refresh_item_boxes_from_main_render(main_render_path, full_analyzed_data)
+                        if not LOG_BRIEF:
+                            logger.info("[DetailBox] main-render remap applied (%s): %d items", aud, len(full_analyzed_data))
         except Exception as e:
             logger.exception(f"[DetailBox] main-render remap failed: {e}")
 
@@ -5999,6 +6016,26 @@ def construct_dynamic_styles(analyzed_items):
         label = item['label']
         desc = item.get('description', '')
         box = item.get('box_2d', [0,0,1000,1000])
+        box_source = str(item.get('box_source') or "")
+
+        use_coords = True
+        try:
+            if box_source == "item_image_full":
+                use_coords = False
+            elif isinstance(box, list) and len(box) == 4:
+                ymin, xmin, ymax, xmax = [float(v) for v in box]
+                if ymin <= 1 and xmin <= 1 and ymax >= 999 and xmax >= 999:
+                    use_coords = False
+        except Exception:
+            use_coords = True
+
+        if use_coords:
+            target_coordinates_line = f"TARGET COORDINATES: Focus on area {box} (Normalized 0-1000)."
+        else:
+            target_coordinates_line = (
+                "TARGET COORDINATES: Not available for this item (direct item image mode). "
+                "Identify the matching object by design/material and keep original in-room position."
+            )
 
         lens_type = "85mm Telephoto Lens"
         context_instruction = "Include parts of neighboring furniture to prove location."
@@ -6020,7 +6057,7 @@ def construct_dynamic_styles(analyzed_items):
                 f"TASK: Take a candid shot of the '{label}' strictly IN-SITU.\n\n"
 
                 f"TARGET VISUALS: {desc}\n"
-                f"TARGET COORDINATES: Focus on area {box} (Normalized 0-1000).\n\n"
+                f"{target_coordinates_line}\n\n"
 
                 f"<CRITICAL: ABSOLUTE LAYOUT FREEZE>\n"
                 f"1. {position_instruction}\n"
