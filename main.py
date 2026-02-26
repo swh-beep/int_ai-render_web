@@ -71,7 +71,7 @@ def _calc_app_build_id() -> str:
     return time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
 
 APP_BUILD_ID = _calc_app_build_id()
-GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
+GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
@@ -956,7 +956,7 @@ def job_generate_details(payload: dict) -> dict:
 
         generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-        with ThreadPoolExecutor(max_workers=30) as executor:
+        with ThreadPoolExecutor(max_workers=15) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
                 futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1, analyzed_items)))
@@ -5069,7 +5069,6 @@ def render_room(
                 if assets_dir and os.path.exists(assets_dir):
                     files = sorted(os.listdir(assets_dir))
                     found = False
-                    import re
                     pattern = rf"(?:^|[^0-9]){re.escape(variant)}(?:[^0-9]|$)"
                     valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
 
