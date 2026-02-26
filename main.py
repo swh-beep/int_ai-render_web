@@ -3289,7 +3289,7 @@ def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_inde
             except Exception: pass
     return cropped_img, crop_path
 
-def analyze_room_structure(room_path, room_dimensions=None, timeout=60):
+def analyze_room_structure(room_path, room_dimensions=None, timeout=120):
     """Room-only analysis (structure + windows)."""
     room_img = None
     try:
@@ -5157,7 +5157,7 @@ def render_room(
                         except Exception:
                             continue
 
-                room_result = analyze_room_structure(step1_img, room_dimensions=dimensions, timeout=60)
+                room_result = analyze_room_structure(step1_img, room_dimensions=dimensions, timeout=120)
                 room_analysis_text = (room_result.get("room_text") or "").strip()
                 wp = room_result.get("windows_present")
                 if isinstance(wp, bool):
