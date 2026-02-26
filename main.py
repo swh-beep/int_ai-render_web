@@ -74,8 +74,8 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3.1-pro-preview'
-RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3.1-pro-preview").strip() or "gemini-3.1-pro-preview"
+ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
+RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
 
 API_KEY_POOL = []
 i = 1
