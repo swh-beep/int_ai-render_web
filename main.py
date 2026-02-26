@@ -74,8 +74,8 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 50
 
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
-RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
+ANALYSIS_MODEL_NAME = 'gemini-3.1-pro-preview'
+RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3.1-pro-preview").strip() or "gemini-3.1-pro-preview"
 
 API_KEY_POOL = []
 i = 1
@@ -95,7 +95,7 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-TOTAL_TIMEOUT_LIMIT = 300
+TOTAL_TIMEOUT_LIMIT = 600
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
 def _split_queue_names(val: str) -> List[str]:
@@ -892,9 +892,13 @@ def job_generate_details(payload: dict) -> dict:
         prefix_detail_user = _build_s3_prefix(aud, "detailrendered", "user-photos")
         prefix_detail_rendered = _build_s3_prefix(aud, "detailrendered", "rendered")
 
+        def _ret(result: dict) -> dict:
+            _persist_job_result(result, audience=aud)
+            return result
+
         local_path = _materialize_input(image_url, "detail_src")
         if not local_path or not os.path.exists(local_path):
-            return {"error": "Original image not found"}
+            return _ret({"error": "Original image not found"})
         # Store source image under detail user-photos
         resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
@@ -934,6 +938,11 @@ def job_generate_details(payload: dict) -> dict:
         if not analyzed_items:
             analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
 
+        try:
+            analyzed_items = _attach_volume_ranks(analyzed_items)
+        except Exception:
+            pass
+
         dynamic_styles = construct_dynamic_styles(analyzed_items)
         if aud == "external":
             detail_only = []
@@ -943,36 +952,155 @@ def job_generate_details(payload: dict) -> dict:
                     detail_only.append(s)
             dynamic_styles = detail_only[:9]
         if not dynamic_styles:
-            return {"error": "No styles available"}
+            return _ret({"error": "No styles available"})
 
         generated_paths = []
         print(f"🚀 Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
         with ThreadPoolExecutor(max_workers=30) as executor:
             futures = []
             for i, style in enumerate(dynamic_styles):
-                futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1)))
+                futures.append((i, executor.submit(generate_detail_view, local_path, style, unique_id, i + 1, analyzed_items)))
             for i, future in futures:
                 res = future.result()
-                if res:
-                    generated_paths.append({"index": i, "path": res})
+                if not res:
+                    continue
+                if isinstance(res, dict):
+                    generated_paths.append({
+                        "index": i,
+                        "path": res.get("path"),
+                        "style_name": res.get("style_name") or (dynamic_styles[i].get("name") if i < len(dynamic_styles) else None),
+                        "cutout_ref_count": int(res.get("cutout_ref_count") or 0),
+                        "cutout_ref_labels": list(res.get("cutout_ref_labels") or []),
+                    })
+                else:
+                    generated_paths.append({
+                        "index": i,
+                        "path": res,
+                        "style_name": (dynamic_styles[i].get("name") if i < len(dynamic_styles) else None),
+                        "cutout_ref_count": 0,
+                        "cutout_ref_labels": [],
+                    })
 
         print(f"=== [Detail View] 완료: {len(generated_paths)}장 생성됨 ===", flush=True)
         if not generated_paths:
-            return {"error": "Failed to generate images"}
+            return _ret({"error": "Failed to generate images"})
+
+        def _norm_label(txt: str) -> str:
+            try:
+                t = (txt or "").strip().lower()
+                t = re.sub(r"[^0-9a-z가-힣]+", " ", t)
+                t = re.sub(r"\s+", " ", t).strip()
+                return t
+            except Exception:
+                return ""
+
+        analyzed_map = {}
+        furniture_boxes = []
+        for it in (analyzed_items or []):
+            if not isinstance(it, dict):
+                continue
+            lbl = str(it.get("label") or "").strip()
+            key = _norm_label(lbl)
+            if key and key not in analyzed_map:
+                analyzed_map[key] = it
+            furniture_boxes.append({
+                "label": lbl or None,
+                "box_2d": it.get("box_2d"),
+                "source_box_2d": it.get("source_box_2d"),
+                "box_source": it.get("box_source"),
+                "crop_path": it.get("crop_path"),
+                "volume_rank": it.get("volume_rank"),
+                "volume_proxy": it.get("volume_proxy"),
+                "volume_rank_basis": it.get("volume_rank_basis"),
+            })
+
+        used_cutout_references = []
+        temp_cutout_meta_paths = []
+        try:
+            for it in (analyzed_items or []):
+                if not isinstance(it, dict):
+                    continue
+                cp = it.get("crop_path")
+                if not cp:
+                    continue
+                item_meta = {
+                    "label": it.get("label"),
+                    "crop_path": cp,
+                    "box_2d": it.get("box_2d"),
+                    "source_box_2d": it.get("source_box_2d"),
+                    "box_source": it.get("box_source"),
+                    "volume_rank": it.get("volume_rank"),
+                    "volume_proxy": it.get("volume_proxy"),
+                    "volume_rank_basis": it.get("volume_rank_basis"),
+                }
+                try:
+                    local_cp = _materialize_input(cp, f"detail_meta_cutout_{len(used_cutout_references) + 1}") if isinstance(cp, str) else None
+                    if local_cp and os.path.exists(local_cp):
+                        if local_cp != cp:
+                            temp_cutout_meta_paths.append(local_cp)
+                        cp_url = resolve_image_url(local_cp, s3_prefix_override=prefix_detail_user)
+                        if cp_url:
+                            item_meta["crop_url"] = cp_url
+                except Exception:
+                    pass
+                used_cutout_references.append(item_meta)
+                if len(used_cutout_references) >= 12:
+                    break
+        finally:
+            for tp in temp_cutout_meta_paths:
+                try:
+                    if os.path.exists(tp):
+                        os.remove(tp)
+                except Exception:
+                    pass
 
         details = []
         for item in generated_paths:
-            url = resolve_image_url(item["path"], s3_prefix_override=prefix_detail_rendered)
+            p = item.get("path")
+            if not p:
+                continue
+            url = resolve_image_url(p, s3_prefix_override=prefix_detail_rendered)
             if url:
                 # Expose 1-based indices in API response (file names are already 1-based)
-                details.append({"index": item["index"] + 1, "url": url})
-        if not details:
-            return {"error": "Failed to generate images"}
+                detail_obj = {
+                    "index": item["index"] + 1,
+                    "url": url,
+                    "style_name": item.get("style_name"),
+                    "cutout_ref_count": int(item.get("cutout_ref_count") or 0),
+                }
+                labels = item.get("cutout_ref_labels") or []
+                if labels:
+                    detail_obj["cutout_ref_labels"] = labels
 
-        return {"details": details, "message": "Detail views generated successfully"}
+                style_name = str(item.get("style_name") or "")
+                if style_name.startswith("Detail:"):
+                    target_label = style_name.split("Detail:", 1)[1].strip()
+                    detail_obj["target_label"] = target_label
+                    hit = analyzed_map.get(_norm_label(target_label))
+                    if isinstance(hit, dict):
+                        detail_obj["target_box_2d"] = hit.get("box_2d")
+                        detail_obj["target_source_box_2d"] = hit.get("source_box_2d")
+                        detail_obj["target_box_source"] = hit.get("box_source")
+                        detail_obj["target_volume_rank"] = hit.get("volume_rank")
+                        detail_obj["target_volume_proxy"] = hit.get("volume_proxy")
+
+                details.append(detail_obj)
+        if not details:
+            return _ret({"error": "Failed to generate images"})
+
+        return _ret({
+            "details": details,
+            "furniture_boxes": furniture_boxes,
+            "used_cutout_references": used_cutout_references,
+            "volume_ranking": _volume_ranking_snapshot(analyzed_items),
+            "message": "Detail views generated successfully",
+        })
     except Exception as e:
         print(f"🔥🔥🔥 [Detail Error] {e}", flush=True)
-        return {"error": str(e)}
+        aud = _normalize_audience(payload.get("audience"))
+        result = {"error": str(e)}
+        _persist_job_result(result, audience=aud)
+        return result
 
 def job_regenerate_single_detail(payload: dict) -> dict:
     try:
@@ -998,6 +1126,11 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         else:
             analyzed_items = [{"label": "Main Furniture", "description": "High quality furniture matching the room style."}]
 
+        try:
+            analyzed_items = _attach_volume_ranks(analyzed_items)
+        except Exception:
+            pass
+
         dynamic_styles = construct_dynamic_styles(analyzed_items)
         if not dynamic_styles:
             return {"error": "No styles available"}
@@ -1010,10 +1143,36 @@ def job_regenerate_single_detail(payload: dict) -> dict:
 
         unique_id = uuid.uuid4().hex[:6]
         style = dynamic_styles[idx]
-        res = generate_detail_view(local_path, style, unique_id, idx + 1)
+        res = generate_detail_view(local_path, style, unique_id, idx + 1, analyzed_items)
         if res:
-            url = resolve_image_url(res, s3_prefix_override=prefix_detail_rendered)
-            return {"url": url, "message": "Success"} if url else {"error": "Generation failed"}
+            path = res.get("path") if isinstance(res, dict) else res
+            url = resolve_image_url(path, s3_prefix_override=prefix_detail_rendered) if path else None
+            if not url:
+                return {"error": "Generation failed"}
+            out = {"url": url, "message": "Success", "volume_ranking": _volume_ranking_snapshot(analyzed_items)}
+            if isinstance(res, dict):
+                out["style_name"] = res.get("style_name") or style.get("name")
+                out["cutout_ref_count"] = int(res.get("cutout_ref_count") or 0)
+                labels = list(res.get("cutout_ref_labels") or [])
+                if labels:
+                    out["cutout_ref_labels"] = labels
+
+            style_name = str(out.get("style_name") or style.get("name") or "")
+            if style_name.startswith("Detail:"):
+                target_label = style_name.split("Detail:", 1)[1].strip()
+                out["target_label"] = target_label
+                n_target = _normalize_label_for_match(target_label)
+                for it in analyzed_items:
+                    if not isinstance(it, dict):
+                        continue
+                    if _normalize_label_for_match(it.get("label") or "") == n_target:
+                        out["target_box_2d"] = it.get("box_2d")
+                        out["target_source_box_2d"] = it.get("source_box_2d")
+                        out["target_box_source"] = it.get("box_source")
+                        out["target_volume_rank"] = it.get("volume_rank")
+                        out["target_volume_proxy"] = it.get("volume_proxy")
+                        break
+            return out
         return {"error": "Generation failed"}
     except Exception as e:
         return {"error": str(e)}
@@ -1607,6 +1766,104 @@ def _volume_proxy(dims: dict) -> int:
     except Exception:
         pass
     return 0
+
+
+def _item_box_area_proxy(box_2d) -> int:
+    try:
+        if not isinstance(box_2d, list) or len(box_2d) != 4:
+            return 0
+        ymin, xmin, ymax, xmax = box_2d
+        h = max(0.0, float(ymax) - float(ymin))
+        w = max(0.0, float(xmax) - float(xmin))
+        return int(round(w * h))
+    except Exception:
+        return 0
+
+
+def _extract_item_dims_for_ranking(item: dict) -> dict:
+    req_dims = _normalize_dims_dict(item.get("requested_dims_mm") or item.get("dims_mm") or {}) if isinstance(item, dict) else {}
+    if req_dims:
+        return {
+            "width_mm": req_dims.get("width_mm"),
+            "depth_mm": req_dims.get("depth_mm"),
+            "height_mm": req_dims.get("height_mm"),
+            "radius_mm": req_dims.get("radius_mm"),
+        }
+
+    parsed = parse_object_dimensions_mm((item or {}).get("description", "") if isinstance(item, dict) else "")
+    return {
+        "width_mm": parsed.get("width_mm"),
+        "depth_mm": parsed.get("depth_mm"),
+        "height_mm": parsed.get("height_mm"),
+        "radius_mm": parsed.get("radius_mm"),
+    }
+
+
+def _attach_volume_ranks(analyzed_items: list) -> list:
+    if not isinstance(analyzed_items, list):
+        return analyzed_items
+
+    pairs = []
+    for idx, src in enumerate(analyzed_items):
+        item = dict(src or {})
+        dims = _extract_item_dims_for_ranking(item)
+        vp = _volume_proxy(dims)
+        basis = "dims_mm"
+
+        if vp <= 0:
+            area = _item_box_area_proxy(item.get("box_2d"))
+            if area > 0:
+                vp = area
+                basis = "box_area_2d"
+            else:
+                basis = "unknown"
+
+        item["volume_proxy"] = int(vp or 0)
+        item["volume_rank_basis"] = basis
+
+        # Keep explicit dimensions when available for downstream debugging/reporting.
+        if not item.get("dims_mm") and any([
+            dims.get("width_mm"),
+            dims.get("depth_mm"),
+            dims.get("height_mm"),
+            dims.get("radius_mm"),
+        ]):
+            item["dims_mm"] = {
+                "width_mm": dims.get("width_mm"),
+                "depth_mm": dims.get("depth_mm"),
+                "height_mm": dims.get("height_mm"),
+                "radius_mm": dims.get("radius_mm"),
+            }
+
+        pairs.append((idx, item))
+
+    ranked = sorted(
+        pairs,
+        key=lambda x: (-(int((x[1] or {}).get("volume_proxy") or 0)), x[0])
+    )
+
+    for rank, (_, item) in enumerate(ranked, start=1):
+        item["volume_rank"] = rank
+
+    return [item for _, item in sorted(pairs, key=lambda x: x[0])]
+
+
+def _volume_ranking_snapshot(analyzed_items: list) -> list:
+    rows = []
+    for it in analyzed_items or []:
+        if not isinstance(it, dict):
+            continue
+        rows.append({
+            "rank": int(it.get("volume_rank") or 0),
+            "label": it.get("label"),
+            "volume_proxy": int(it.get("volume_proxy") or 0),
+            "volume_rank_basis": it.get("volume_rank_basis"),
+            "qty": int(it.get("qty") or 1),
+            "box_source": it.get("box_source"),
+        })
+    rows.sort(key=lambda x: (x.get("rank") or 10**9, -(x.get("volume_proxy") or 0), str(x.get("label") or "")))
+    return rows
+
 
 def build_furniture_specs_json(analyzed_items: list) -> dict:
     items = []
@@ -2768,6 +3025,107 @@ def detect_furniture_boxes(moodboard_path):
         print(f"!! Detection Failed: {e}", flush=True)
 
     return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
+
+
+def _normalize_label_for_match(label: str) -> str:
+    try:
+        t = (label or "").strip().lower()
+        t = re.sub(r"[^0-9a-z가-힣]+", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+    except Exception:
+        return ""
+
+
+def _label_match_score(src_label: str, dst_label: str) -> float:
+    a = _normalize_label_for_match(src_label)
+    b = _normalize_label_for_match(dst_label)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+
+    score = 0.0
+    if a in b or b in a:
+        score = 0.92
+
+    a_tokens = {tok for tok in a.split(" ") if tok}
+    b_tokens = {tok for tok in b.split(" ") if tok}
+    if a_tokens and b_tokens:
+        inter = len(a_tokens & b_tokens)
+        union = len(a_tokens | b_tokens)
+        jaccard = (inter / union) if union else 0.0
+        score = max(score, jaccard)
+
+    return score
+
+
+def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list) -> list:
+    """
+    Re-detect item boxes on the final rendered main image and map them back to analyzed_items.
+    - Keep original/reference box in source_box_2d
+    - Update box_2d with main-render coordinates when matched
+    - Fallback to original box when matching/detection fails
+    """
+    if not isinstance(analyzed_items, list) or not analyzed_items:
+        return analyzed_items
+    if not render_path or not os.path.exists(render_path):
+        return analyzed_items
+
+    try:
+        detected = detect_furniture_boxes(render_path)
+    except Exception:
+        detected = []
+
+    detected = [d for d in (detected or []) if isinstance(d, dict)]
+    if not detected:
+        return analyzed_items
+
+    remaining = list(range(len(detected)))
+    remapped = []
+
+    for src_idx, src_item in enumerate(analyzed_items):
+        item = dict(src_item or {})
+        old_box = item.get("box_2d")
+        if old_box is not None and item.get("source_box_2d") is None:
+            item["source_box_2d"] = old_box
+
+        src_label = item.get("label") or ""
+        best_idx = None
+        best_score = 0.0
+
+        for det_idx in remaining:
+            det_label = (detected[det_idx] or {}).get("label") or ""
+            score = _label_match_score(src_label, det_label)
+            if score > best_score:
+                best_score = score
+                best_idx = det_idx
+
+        picked_idx = None
+        if best_idx is not None and best_score >= 0.45:
+            picked_idx = best_idx
+        elif remaining:
+            # Fallback by nearest rank index when labels are weak/noisy.
+            picked_idx = min(remaining, key=lambda x: abs(x - src_idx))
+
+        if picked_idx is not None:
+            det_item = detected[picked_idx] if picked_idx < len(detected) else {}
+            det_box = det_item.get("box_2d") if isinstance(det_item, dict) else None
+            if isinstance(det_box, list) and len(det_box) == 4:
+                item["box_2d"] = det_box
+                item["box_source"] = "main_render"
+                item["box_label_detected"] = det_item.get("label")
+            else:
+                item["box_source"] = item.get("box_source") or "source_reference"
+            if picked_idx in remaining:
+                remaining.remove(picked_idx)
+        else:
+            item["box_source"] = item.get("box_source") or "source_reference"
+
+        remapped.append(item)
+
+    return remapped
+
 
 def _normalize_dims_dict(raw: dict) -> dict:
     if not isinstance(raw, dict):
@@ -5017,6 +5375,25 @@ def render_room(
         except Exception:
             pass
 
+        # Main-render box remap for all API audiences (internal/external):
+        # detail targeting should always follow the final main render layout.
+        try:
+            if full_analyzed_data and generated_results:
+                main_render_path = generated_results[0]
+                if main_render_path and os.path.exists(main_render_path):
+                    full_analyzed_data = _refresh_item_boxes_from_main_render(main_render_path, full_analyzed_data)
+                    if not LOG_BRIEF:
+                        logger.info("[DetailBox] main-render remap applied (%s): %d items", aud, len(full_analyzed_data))
+        except Exception as e:
+            logger.exception(f"[DetailBox] main-render remap failed: {e}")
+
+        try:
+            full_analyzed_data = _attach_volume_ranks(full_analyzed_data or [])
+        except Exception as e:
+            logger.exception(f"[VolumeRank] attach failed: {e}")
+            full_analyzed_data = full_analyzed_data or []
+        volume_ranking = _volume_ranking_snapshot(full_analyzed_data)
+
         if LOG_SUMMARY:
             reasons = []
             if summary.get('dims_fail',0):
@@ -5052,6 +5429,7 @@ def render_room(
             "moodboard_url": mb_url,
             "scale_guide_url": scale_guide_url,   # ✅ 추가
             "furniture_data": full_analyzed_data,
+            "volume_ranking": volume_ranking,
             "message": "Complete"
         })
 
@@ -5605,8 +5983,17 @@ def construct_dynamic_styles(analyzed_items):
         "ratio": "16:9"
     })
 
+    ranked_items = list(analyzed_items or [])
+    try:
+        ranked_items = sorted(
+            ranked_items,
+            key=lambda it: int((it or {}).get("volume_rank") or 10**9)
+        )
+    except Exception:
+        ranked_items = list(analyzed_items or [])
+
     count = 0
-    for item in analyzed_items:
+    for item in ranked_items:
         if count >= 20: break
 
         label = item['label']
@@ -5647,8 +6034,12 @@ def construct_dynamic_styles(analyzed_items):
 
     return styles
 
-def generate_detail_view(original_image_path, style_config, unique_id, index):
+def generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None):
     img = None
+    extra_imgs = []
+    temp_cutout_paths = []
+    cutout_labels = []
+    cutout_ref_count = 0
     try:
         img = Image.open(original_image_path)
         target_ratio = style_config.get('ratio', '16:9')
@@ -5679,7 +6070,45 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
 
-        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 45}, safety_settings, log_tag="Detail.Generate")
+        # Reuse main-cut furniture cutouts for detail generation (max 12)
+        try:
+            cutout_items = []
+            for it in (furniture_data or []):
+                if not isinstance(it, dict):
+                    continue
+                cp = it.get("crop_path")
+                if not cp:
+                    continue
+                lp = _materialize_input(cp, f"detail_cutout_{len(cutout_items) + 1}") if isinstance(cp, str) else None
+                if not lp or not os.path.exists(lp):
+                    continue
+                if lp != cp:
+                    temp_cutout_paths.append(lp)
+                cutout_items.append({
+                    "label": (it.get("label") or "Item"),
+                    "path": lp,
+                })
+                if len(cutout_items) >= 12:
+                    break
+
+            cutout_labels = [str(x.get("label") or "Item") for x in cutout_items]
+            cutout_ref_count = len(cutout_labels)
+
+            for it in cutout_items:
+                cutout_img = Image.open(it["path"])
+                try:
+                    cutout_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                except Exception:
+                    pass
+                extra_imgs.append(cutout_img)
+                content += [
+                    f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN): {it['label']}",
+                    cutout_img,
+                ]
+        except Exception:
+            pass
+
+        response = call_gemini_with_failover(MODEL_NAME, content, {'timeout': 90}, safety_settings, log_tag="Detail.Generate")
         if response and hasattr(response, 'candidates') and response.candidates:
             for part in response.parts:
                 if hasattr(part, 'inline_data'):
@@ -5688,26 +6117,33 @@ def generate_detail_view(original_image_path, style_config, unique_id, index):
                     filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
                     path = os.path.join("outputs", filename)
                     with open(path, 'wb') as f: f.write(part.inline_data.data)
-                    try:
-                        if img:
-                            img.close()
-                    except Exception:
-                        pass
-                    return path
-        try:
-            if img:
-                img.close()
-        except Exception:
-            pass
+                    return {
+                        "path": path,
+                        "style_name": style_config.get("name"),
+                        "cutout_ref_count": cutout_ref_count,
+                        "cutout_ref_labels": cutout_labels,
+                    }
         return None
     except Exception as e:
         print(f"!! Detail Generation Error: {e}")
+        return None
+    finally:
         try:
             if img:
                 img.close()
         except Exception:
             pass
-        return None
+        for im in extra_imgs:
+            try:
+                im.close()
+            except Exception:
+                pass
+        for p in temp_cutout_paths:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
 class DetailRequest(BaseModel):
     image_url: str

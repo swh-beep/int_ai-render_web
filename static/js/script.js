@@ -1174,7 +1174,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const payload = {
                     image_url: currentImgUrl,
                     moodboard_url: currentMoodboardUrl,
-                    furniture_data: currentFurnitureData
+                    furniture_data: currentFurnitureData,
+                    audience: "internal"
                 };
 
                 const res = await fetch("/generate-details", {
@@ -1299,9 +1300,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
-                    style_index: styleIndex - 1,
+                    style_index: styleIndex,
                     moodboard_url: currentMoodboardUrl,
-                    furniture_data: currentFurnitureData
+                    furniture_data: currentFurnitureData,
+                    audience: "internal"
                 })
             });
             const job = await res.json();
