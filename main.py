@@ -3564,7 +3564,7 @@ def analyze_cropped_item(
                 "}\n"
             )
 
-        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 60}, {}, log_tag="Analysis.CropItem")
+        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 120}, {}, log_tag="Analysis.CropItem")
 
         desc = f"A high quality {label}."
         dims_str = ""
