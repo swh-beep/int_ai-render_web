@@ -1402,10 +1402,7 @@ class _SimpleTextResponse:
 def _is_analysis_log_tag(log_tag: Optional[str]) -> bool:
     try:
         t = str(log_tag or "").strip()
-        if t.startswith("Analysis."):
-            return True
-        # Additional analysis-like tags used in current pipeline.
-        return t in {"Frontal.Analysis", "RankBestVariant", "ScaleGuide.NLGrid"}
+        return t.startswith("Analysis.")
     except Exception:
         return False
 
@@ -1522,7 +1519,7 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
     max_attempts = 5
     tag = f" tag={log_tag}" if log_tag else ""
 
-    # Analysis-provider switch (test mode): route analysis-related calls to OpenAI when requested.
+    # Analysis-provider switch (test mode): route Analysis.* calls to OpenAI when requested.
     if ANALYSIS_PROVIDER == "openai" and _is_analysis_log_tag(log_tag):
         try:
             if not LOG_BRIEF:
