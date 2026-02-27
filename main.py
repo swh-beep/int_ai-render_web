@@ -76,6 +76,7 @@ GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
 RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
+REMAP_MODEL_NAME = os.getenv("REMAP_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 
 API_KEY_POOL = []
 i = 1
@@ -2990,7 +2991,7 @@ def validate_furnished_scale(
     except Exception:
         return True, []
 
-def detect_furniture_boxes(moodboard_path):
+def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None):
     if not LOG_BRIEF:
         print(f">> [Detection] Scanning furniture in {moodboard_path}...", flush=True)
     try:
@@ -3010,7 +3011,8 @@ def detect_furniture_boxes(moodboard_path):
                 "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
                 "Ignore walls, windows, and floors. Focus on movable objects."
             )
-            response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {'timeout': 120}, {}, log_tag="Analysis.DetectFurniture")
+            detect_model = (model_name or ANALYSIS_MODEL_NAME)
+            response = call_gemini_with_failover(detect_model, [prompt, img], {'timeout': 120}, {}, log_tag="Analysis.DetectFurniture")
             if response and response.text:
                 text = response.text.strip()
                 if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
@@ -3073,7 +3075,7 @@ def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list)
         return analyzed_items
 
     try:
-        detected = detect_furniture_boxes(render_path)
+        detected = detect_furniture_boxes(render_path, model_name=REMAP_MODEL_NAME)
     except Exception:
         detected = []
 
@@ -5375,31 +5377,14 @@ def render_room(
             pass
 
         # Main-render box remap for detail targeting.
-        # - moodboard/preset flow: remap to main-render boxes.
-        # - direct cart item flow(item_refs): skip expensive re-detect and keep item-level full-frame refs.
+        # Apply uniformly across internal/external flows (including cart item_refs).
         try:
             if full_analyzed_data and generated_results:
-                direct_item_mode = bool(item_refs)
-                if direct_item_mode:
-                    normalized_items = []
-                    for src in full_analyzed_data:
-                        if not isinstance(src, dict):
-                            continue
-                        it = dict(src)
-                        b = it.get("box_2d")
-                        if b is not None and it.get("source_box_2d") is None:
-                            it["source_box_2d"] = b
-                        it["box_source"] = it.get("box_source") or "item_image_full"
-                        normalized_items.append(it)
-                    full_analyzed_data = normalized_items
+                main_render_path = generated_results[0]
+                if main_render_path and os.path.exists(main_render_path):
+                    full_analyzed_data = _refresh_item_boxes_from_main_render(main_render_path, full_analyzed_data)
                     if not LOG_BRIEF:
-                        logger.info("[DetailBox] remap skipped (%s, direct-item mode): %d items", aud, len(full_analyzed_data))
-                else:
-                    main_render_path = generated_results[0]
-                    if main_render_path and os.path.exists(main_render_path):
-                        full_analyzed_data = _refresh_item_boxes_from_main_render(main_render_path, full_analyzed_data)
-                        if not LOG_BRIEF:
-                            logger.info("[DetailBox] main-render remap applied (%s): %d items", aud, len(full_analyzed_data))
+                        logger.info("[DetailBox] main-render remap applied (%s): %d items", aud, len(full_analyzed_data))
         except Exception as e:
             logger.exception(f"[DetailBox] main-render remap failed: {e}")
 
