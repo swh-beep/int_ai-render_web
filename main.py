@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import shutil
 import base64
 import uuid
+import io
 import requests
 import json
 import google.generativeai as genai
@@ -81,6 +82,12 @@ REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "45
 REMAP_DETECT_RETRY = max(0, int(os.getenv("REMAP_DETECT_RETRY", "1")))
 CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "12")))
 CART_MAX_ANALYSIS_WORKERS = max(1, int(os.getenv("CART_MAX_ANALYSIS_WORKERS", "10")))
+
+# Analysis provider switch (phase test)
+ANALYSIS_PROVIDER = (os.getenv("ANALYSIS_PROVIDER", "gemini") or "gemini").strip().lower()
+OPENAI_ANALYSIS_MODEL_NAME = (os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.2-pro") or "gpt-5.2-pro").strip()
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY", "") or "").strip()
+OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1") or "https://api.openai.com/v1").strip().rstrip("/")
 
 API_KEY_POOL = []
 i = 1
@@ -1385,10 +1392,147 @@ app.add_middleware(
 
 QUOTA_EXCEEDED_KEYS = set()
 
+
+class _SimpleTextResponse:
+    def __init__(self, text: str, raw: Optional[dict] = None):
+        self.text = text or ""
+        self.raw = raw or {}
+
+
+def _is_analysis_log_tag(log_tag: Optional[str]) -> bool:
+    try:
+        t = str(log_tag or "").strip()
+        return t.startswith("Analysis.")
+    except Exception:
+        return False
+
+
+def _extract_openai_output_text(payload: dict) -> str:
+    try:
+        txt = payload.get("output_text")
+        if isinstance(txt, str) and txt.strip():
+            return txt
+    except Exception:
+        pass
+
+    chunks = []
+    try:
+        for out in (payload.get("output") or []):
+            for c in (out.get("content") or []):
+                ctype = str(c.get("type") or "")
+                if ctype in {"output_text", "text"}:
+                    t = c.get("text")
+                    if isinstance(t, str) and t:
+                        chunks.append(t)
+    except Exception:
+        pass
+    return "\n".join(chunks).strip()
+
+
+def _to_openai_input_parts(contents: list) -> list:
+    parts = []
+    for c in (contents or []):
+        if isinstance(c, str):
+            if c:
+                parts.append({"type": "input_text", "text": c})
+            continue
+
+        if isinstance(c, Image.Image):
+            try:
+                img = c
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=90)
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                parts.append({
+                    "type": "input_image",
+                    "image_url": f"data:image/jpeg;base64,{b64}",
+                })
+            except Exception:
+                continue
+            continue
+
+        # Non-string/non-image payload fallback (best-effort text)
+        try:
+            parts.append({"type": "input_text", "text": str(c)})
+        except Exception:
+            pass
+
+    return parts
+
+
+def _call_openai_analysis_with_failover(contents, request_options, system_instruction=None, log_tag=None):
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is missing")
+
+    model_name = OPENAI_ANALYSIS_MODEL_NAME or "gpt-5.2-pro"
+    timeout_sec = int((request_options or {}).get("timeout") or 60)
+    tag = f" tag={log_tag}" if log_tag else ""
+
+    input_parts = _to_openai_input_parts(contents)
+    if not input_parts:
+        raise RuntimeError("OpenAI analysis payload is empty")
+
+    input_payload = []
+    if system_instruction:
+        input_payload.append({
+            "role": "system",
+            "content": [{"type": "input_text", "text": str(system_instruction)}],
+        })
+    input_payload.append({
+        "role": "user",
+        "content": input_parts,
+    })
+
+    payload = {
+        "model": model_name,
+        "input": input_payload,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    endpoint = f"{OPENAI_BASE_URL}/responses"
+
+    t0 = time.time()
+    resp = requests.post(endpoint, headers=headers, json=payload, timeout=timeout_sec)
+    dt = (time.time() - t0) * 1000
+
+    if resp.status_code >= 400:
+        body = (resp.text or "")[:300]
+        raise RuntimeError(f"OpenAI HTTP {resp.status_code}: {body}")
+
+    data = resp.json() if resp.text else {}
+    text = _extract_openai_output_text(data)
+    if not text:
+        raise RuntimeError("OpenAI empty text output")
+
+    if not LOG_BRIEF:
+        logger.info(f"[OpenAI] success model={model_name} ({dt:.0f}ms){tag}")
+    return _SimpleTextResponse(text=text, raw=data)
+
+
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
     global API_KEY_POOL, QUOTA_EXCEEDED_KEYS
     max_attempts = 5
     tag = f" tag={log_tag}" if log_tag else ""
+
+    # Analysis-provider switch (test mode): route Analysis.* calls to OpenAI when requested.
+    if ANALYSIS_PROVIDER == "openai" and _is_analysis_log_tag(log_tag):
+        try:
+            if not LOG_BRIEF:
+                logger.info(f"[OpenAI] route Analysis call -> model={OPENAI_ANALYSIS_MODEL_NAME}{tag}")
+            return _call_openai_analysis_with_failover(
+                contents,
+                request_options,
+                system_instruction=system_instruction,
+                log_tag=log_tag,
+            )
+        except Exception as e:
+            logger.warning(f"[OpenAI] analysis failed; fallback to Gemini{tag}: {str(e)[:220]}")
+
 
     # Log payload types only (skip image bytes)
     try:
