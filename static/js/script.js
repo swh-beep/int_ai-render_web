@@ -1196,7 +1196,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const detailUrls = data.details.map(d => d.url);
 
                     data.details.forEach(item => {
-                        createDetailCard(item.url, item.index, detailUrls);
+                        createDetailCard(item, detailUrls);
                     });
 
                     setTimeout(() => detailSection.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -1214,33 +1214,46 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function createDetailCard(url, styleIndex, fullList = null) {
+    function createDetailCard(detailItem, fullList = null) {
         const card = document.createElement('div');
         card.className = 'detail-card';
 
-        const img = document.createElement('img');
-        img.src = url;
-        const parsedIndex = Number(styleIndex);
+        const item = (detailItem && typeof detailItem === 'object')
+            ? detailItem
+            : { url: detailItem };
+
+        const url = item.url;
+        const parsedIndex = Number(item.index);
         const index = Number.isFinite(parsedIndex) && parsedIndex > 0
             ? parsedIndex
             : (fullList ? (fullList.indexOf(url) + 1) : 1);
 
+        const detailMeta = {
+            target_key: item.target_key || null,
+            target_label: item.target_label || null,
+            style_name: item.style_name || null,
+            target_box_source: item.target_box_source || null,
+        };
+
+        const img = document.createElement('img');
+        img.src = url;
+
         if (index <= 3) {
             img.style.aspectRatio = "16 / 9";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, index, fullList);
+            appendButtonsToCard(card, img, url, index, fullList, detailMeta);
             const landscapeGrid = document.getElementById('detail-grid-landscape');
             if (landscapeGrid) landscapeGrid.appendChild(card);
         } else {
             img.style.aspectRatio = "4 / 5";
             card.appendChild(img);
-            appendButtonsToCard(card, img, url, index, fullList);
+            appendButtonsToCard(card, img, url, index, fullList, detailMeta);
             const portraitGrid = document.getElementById('detail-grid-portrait');
             if (portraitGrid) portraitGrid.appendChild(card);
         }
     }
 
-    function appendButtonsToCard(card, img, url, styleIndex, fullList) {
+    function appendButtonsToCard(card, img, url, styleIndex, fullList, detailMeta = null) {
         img.onclick = () => openLightbox(url, fullList, styleIndex - 1);
 
         const retryBtn = document.createElement('button');
@@ -1250,7 +1263,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         retryBtn.onclick = (e) => {
             e.stopPropagation();
-            retrySingleDetail(card, styleIndex);
+            retrySingleDetail(card, styleIndex, detailMeta || {});
         };
 
         const upBtn = document.createElement('button');
@@ -1281,7 +1294,7 @@ document.addEventListener('DOMContentLoaded', () => {
         card.appendChild(upBtn);
     }
 
-    async function retrySingleDetail(cardElement, styleIndex) {
+    async function retrySingleDetail(cardElement, styleIndex, detailMeta = {}) {
         if (!currentDetailSourceUrl) return;
 
         const buttons = cardElement.querySelectorAll('button');
@@ -1294,6 +1307,9 @@ document.addEventListener('DOMContentLoaded', () => {
         loader.appendChild(spinner);
         cardElement.appendChild(loader);
 
+        const targetKey = (detailMeta && detailMeta.target_key) ? String(detailMeta.target_key).trim() : null;
+        const targetLabel = (detailMeta && detailMeta.target_label) ? String(detailMeta.target_label).trim() : null;
+
         try {
             const res = await fetch("/regenerate-single-detail", {
                 method: "POST",
@@ -1301,6 +1317,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
                     style_index: styleIndex,
+                    style_index_mode: "overall", // current UI uses server-returned overall index
+                    target_key: targetKey,
+                    target_label: targetLabel,
                     moodboard_url: currentMoodboardUrl,
                     furniture_data: currentFurnitureData,
                     audience: "internal"
