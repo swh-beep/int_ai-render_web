@@ -6419,7 +6419,26 @@ def generate_detail_view(original_image_path, style_config, unique_id, index, fu
             "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
         )
 
+        style_name = str(style_config.get("name") or "")
+        style_target_key = str(style_config.get("target_key") or "").strip()
+        style_target_label = str(style_config.get("target_label") or "").strip()
+        if not style_target_label and style_name.startswith("Detail:"):
+            style_target_label = style_name.split("Detail:", 1)[1].strip()
+
+        target_lock_block = ""
+        if style_target_key or style_target_label:
+            target_lock_block = (
+                "<PRIMARY TARGET LOCK>\n"
+                f"- TARGET LABEL: {style_target_label or 'N/A'}\n"
+                f"- TARGET KEY: {style_target_key or 'N/A'}\n"
+                "- This output MUST focus on the exact same target object identity from the main render.\n"
+                "- Keep this target item's geometry/design signature unchanged.\n"
+                "- Other objects are context only and must never replace the target.\n\n"
+            )
+
         final_prompt = (
+            f"{CROP_LOCK_BLOCK}\n"
+            f"{target_lock_block}"
             f"{style_config['prompt']}\n\n"
             "<CRITICAL: LAYOUT FREEZE (PRIORITY #0)>\n"
             "1. **DO NOT MOVE / REARRANGE ANYTHING:** Every existing furniture, lighting fixture, decor item, and their positions must remain EXACTLY the same as the input image.\n"
@@ -6437,26 +6456,111 @@ def generate_detail_view(original_image_path, style_config, unique_id, index, fu
         safety_settings = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
 
-        # Reuse main-cut furniture cutouts for detail generation (max 12)
+        # Reuse main-cut furniture cutouts for detail generation
+        # - Always prioritize target cutout (if target_key/label is available)
+        # - Keep only limited secondary references to reduce identity drift
         try:
-            cutout_items = []
+            MAX_CUTOUT_REFS = 12
+            MAX_AUX_CUTOUT_REFS = 12
+            target_label_norm = _normalize_label_for_match(style_target_label)
+            is_detail_target_mode = bool(style_name.startswith("Detail:"))
+
+            candidates = []
             for it in (furniture_data or []):
                 if not isinstance(it, dict):
                     continue
                 cp = it.get("crop_path")
                 if not cp:
                     continue
-                lp = _materialize_input(cp, f"detail_cutout_{len(cutout_items) + 1}") if isinstance(cp, str) else None
+                lp = _materialize_input(cp, f"detail_cutout_{len(candidates) + 1}") if isinstance(cp, str) else None
                 if not lp or not os.path.exists(lp):
                     continue
                 if lp != cp:
                     temp_cutout_paths.append(lp)
-                cutout_items.append({
-                    "label": (it.get("label") or "Item"),
+
+                try:
+                    source_index_val = int(it.get("source_index") or (len(candidates) + 1))
+                except Exception:
+                    source_index_val = len(candidates) + 1
+
+                candidates.append({
+                    "label": str(it.get("label") or "Item"),
                     "path": lp,
+                    "target_key": str(it.get("target_key") or "").strip(),
+                    "source_index": source_index_val,
                 })
-                if len(cutout_items) >= 12:
-                    break
+
+            target_items = []
+            other_items = []
+            for c in candidates:
+                c_key = str(c.get("target_key") or "").strip()
+                c_label_norm = _normalize_label_for_match(c.get("label") or "")
+                is_target = False
+                if style_target_key and c_key and c_key == style_target_key:
+                    is_target = True
+                elif target_label_norm and c_label_norm and c_label_norm == target_label_norm:
+                    is_target = True
+                elif target_label_norm and c_label_norm and (
+                    target_label_norm in c_label_norm or c_label_norm in target_label_norm
+                ):
+                    is_target = True
+
+                if is_target:
+                    target_items.append(c)
+                else:
+                    other_items.append(c)
+
+            def _cutout_sort_key(row: dict):
+                try:
+                    idx = int(row.get("source_index") or 10**9)
+                except Exception:
+                    idx = 10**9
+                return (idx, str(row.get("label") or ""))
+
+            target_items.sort(key=_cutout_sort_key)
+            other_items.sort(key=_cutout_sort_key)
+
+            ordered_items = []
+            seen_paths = set()
+
+            # 1) target cutout first (forced), if available
+            if target_items:
+                t0 = target_items[0]
+                if t0.get("path") not in seen_paths:
+                    t0 = dict(t0)
+                    t0["is_target"] = True
+                    ordered_items.append(t0)
+                    seen_paths.add(t0.get("path"))
+
+            # 2) then secondary references (dedup by path)
+            for c in other_items:
+                p = c.get("path")
+                if p in seen_paths:
+                    continue
+                x = dict(c)
+                x["is_target"] = False
+                ordered_items.append(x)
+                seen_paths.add(p)
+
+            # Fallback: if target couldn't be found, keep previous behavior
+            if not ordered_items:
+                for c in candidates:
+                    p = c.get("path")
+                    if p in seen_paths:
+                        continue
+                    x = dict(c)
+                    x["is_target"] = False
+                    ordered_items.append(x)
+                    seen_paths.add(p)
+
+            if is_detail_target_mode and ordered_items:
+                forced_target = [x for x in ordered_items if x.get("is_target")]
+                aux = [x for x in ordered_items if not x.get("is_target")]
+                forced_target = forced_target[:1]
+                aux_cap = max(0, min(MAX_AUX_CUTOUT_REFS, MAX_CUTOUT_REFS - len(forced_target)))
+                cutout_items = forced_target + aux[:aux_cap]
+            else:
+                cutout_items = ordered_items[:MAX_CUTOUT_REFS]
 
             cutout_labels = [str(x.get("label") or "Item") for x in cutout_items]
             cutout_ref_count = len(cutout_labels)
@@ -6468,10 +6572,16 @@ def generate_detail_view(original_image_path, style_config, unique_id, index, fu
                 except Exception:
                     pass
                 extra_imgs.append(cutout_img)
-                content += [
-                    f"Furniture Cutout Reference (MUST MATCH EXACT DESIGN): {it['label']}",
-                    cutout_img,
-                ]
+                if it.get("is_target"):
+                    content += [
+                        f"PRIMARY TARGET CUTOUT (ABSOLUTE PRIORITY — MUST MATCH EXACT DESIGN): {it['label']}",
+                        cutout_img,
+                    ]
+                else:
+                    content += [
+                        f"Secondary Furniture Cutout Reference (context only, do not override primary target): {it['label']}",
+                        cutout_img,
+                    ]
         except Exception:
             pass
 
