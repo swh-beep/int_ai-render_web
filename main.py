@@ -1405,8 +1405,7 @@ def _is_analysis_log_tag(log_tag: Optional[str]) -> bool:
         if t.startswith("Analysis."):
             return True
         # Additional analysis-like tags used in current pipeline.
-        # NOTE: ScaleGuide.NLGrid is image-generation task and must stay on image model path.
-        return t in {"Frontal.Analysis", "RankBestVariant"}
+        return t in {"Frontal.Analysis", "RankBestVariant", "ScaleGuide.NLGrid"}
     except Exception:
         return False
 
