@@ -77,6 +77,10 @@ MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
 RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
 REMAP_MODEL_NAME = os.getenv("REMAP_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "45")))
+REMAP_DETECT_RETRY = max(0, int(os.getenv("REMAP_DETECT_RETRY", "1")))
+CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "12")))
+CART_MAX_ANALYSIS_WORKERS = max(1, int(os.getenv("CART_MAX_ANALYSIS_WORKERS", "10")))
 
 API_KEY_POOL = []
 i = 1
@@ -446,8 +450,18 @@ def _load_preset_map() -> dict:
 
 
 def _apply_cart_limits(items: list[dict]) -> tuple[list[dict], list[dict]]:
-    # Cart-side already enforces item limits, so keep everything.
-    return list(items), []
+    src = list(items or [])
+    if len(src) <= CART_MAX_ITEMS:
+        return src, []
+
+    kept = src[:CART_MAX_ITEMS]
+    dropped = []
+    for idx, it in enumerate(src[CART_MAX_ITEMS:], start=CART_MAX_ITEMS + 1):
+        row = dict(it or {})
+        row["drop_reason"] = "max_items_exceeded"
+        row["drop_index"] = idx
+        dropped.append(row)
+    return kept, dropped
 
 
 def _build_cart_summary(items: list[dict]) -> str:
@@ -720,6 +734,10 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
                         "dims_mm": it.get("dims_mm"),
                         "options": it.get("options"),
                         "qty": qty_val,
+                        "category": it.get("category"),
+                        "item_id": it.get("item_id"),
+                        "payload_index": it.get("payload_index"),
+                        "target_key": it.get("target_key"),
                     })
                     if os.path.basename(lp).startswith("mood_"):
                         cleanup_paths.append(lp)
@@ -929,9 +947,20 @@ def job_generate_details(payload: dict) -> dict:
                     detected_items = detect_furniture_boxes(target_analysis_path)
                     print(f">> [Deep Analysis] Found {len(detected_items)} items in {target_analysis_path}...", flush=True)
 
-                    analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(detected_items)))
+                    enriched_items = []
+                    for i, item in enumerate(detected_items or [], start=1):
+                        if not isinstance(item, dict):
+                            continue
+                        label_val = item.get("label") or f"Item{i}"
+                        x = dict(item)
+                        x["source_index"] = i
+                        x["category_canonical"] = _canonical_category(label_val)
+                        x["target_key"] = _build_item_target_key("detail", i, label=label_val)
+                        enriched_items.append(x)
+
+                    analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(enriched_items)))
                     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
-                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in detected_items]
+                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in enriched_items]
                         analyzed_items = [f.result() for f in futures]
                 except Exception as e:
                     print(f"!! [Deep Analysis Failed] {e}", flush=True)
@@ -970,6 +999,8 @@ def job_generate_details(payload: dict) -> dict:
                         "index": i,
                         "path": res.get("path"),
                         "style_name": res.get("style_name") or (dynamic_styles[i].get("name") if i < len(dynamic_styles) else None),
+                        "style_target_key": (dynamic_styles[i].get("target_key") if i < len(dynamic_styles) else None),
+                        "style_target_label": (dynamic_styles[i].get("target_label") if i < len(dynamic_styles) else None),
                         "cutout_ref_count": int(res.get("cutout_ref_count") or 0),
                         "cutout_ref_labels": list(res.get("cutout_ref_labels") or []),
                     })
@@ -978,6 +1009,8 @@ def job_generate_details(payload: dict) -> dict:
                         "index": i,
                         "path": res,
                         "style_name": (dynamic_styles[i].get("name") if i < len(dynamic_styles) else None),
+                        "style_target_key": (dynamic_styles[i].get("target_key") if i < len(dynamic_styles) else None),
+                        "style_target_label": (dynamic_styles[i].get("target_label") if i < len(dynamic_styles) else None),
                         "cutout_ref_count": 0,
                         "cutout_ref_labels": [],
                     })
@@ -996,16 +1029,24 @@ def job_generate_details(payload: dict) -> dict:
                 return ""
 
         analyzed_map = {}
+        analyzed_key_map = {}
         furniture_boxes = []
         for it in (analyzed_items or []):
             if not isinstance(it, dict):
                 continue
             lbl = str(it.get("label") or "").strip()
             key = _norm_label(lbl)
+            target_key = str(it.get("target_key") or "").strip()
+            if target_key and target_key not in analyzed_key_map:
+                analyzed_key_map[target_key] = it
             if key and key not in analyzed_map:
                 analyzed_map[key] = it
             furniture_boxes.append({
                 "label": lbl or None,
+                "target_key": target_key or None,
+                "source_index": it.get("source_index"),
+                "category": it.get("category"),
+                "category_canonical": it.get("category_canonical"),
                 "box_2d": it.get("box_2d"),
                 "source_box_2d": it.get("source_box_2d"),
                 "box_source": it.get("box_source"),
@@ -1013,6 +1054,7 @@ def job_generate_details(payload: dict) -> dict:
                 "volume_rank": it.get("volume_rank"),
                 "volume_proxy": it.get("volume_proxy"),
                 "volume_rank_basis": it.get("volume_rank_basis"),
+                "category_score": it.get("category_score"),
             })
 
         used_cutout_references = []
@@ -1026,6 +1068,10 @@ def job_generate_details(payload: dict) -> dict:
                     continue
                 item_meta = {
                     "label": it.get("label"),
+                    "target_key": it.get("target_key"),
+                    "source_index": it.get("source_index"),
+                    "category": it.get("category"),
+                    "category_canonical": it.get("category_canonical"),
                     "crop_path": cp,
                     "box_2d": it.get("box_2d"),
                     "source_box_2d": it.get("source_box_2d"),
@@ -1074,11 +1120,23 @@ def job_generate_details(payload: dict) -> dict:
                     detail_obj["cutout_ref_labels"] = labels
 
                 style_name = str(item.get("style_name") or "")
+                style_target_key = str(item.get("style_target_key") or "").strip()
+                style_target_label = str(item.get("style_target_label") or "").strip()
                 if style_name.startswith("Detail:"):
-                    target_label = style_name.split("Detail:", 1)[1].strip()
-                    detail_obj["target_label"] = target_label
-                    hit = analyzed_map.get(_norm_label(target_label))
+                    target_label = style_target_label or style_name.split("Detail:", 1)[1].strip()
+                    if target_label:
+                        detail_obj["target_label"] = target_label
+                    if style_target_key:
+                        detail_obj["target_key"] = style_target_key
+
+                    hit = analyzed_key_map.get(style_target_key) if style_target_key else None
+                    if not isinstance(hit, dict) and target_label:
+                        hit = analyzed_map.get(_norm_label(target_label))
+
                     if isinstance(hit, dict):
+                        hit_key = str(hit.get("target_key") or "").strip()
+                        if hit_key and not detail_obj.get("target_key"):
+                            detail_obj["target_key"] = hit_key
                         detail_obj["target_box_2d"] = hit.get("box_2d")
                         detail_obj["target_source_box_2d"] = hit.get("source_box_2d")
                         detail_obj["target_box_source"] = hit.get("box_source")
@@ -1159,20 +1217,40 @@ def job_regenerate_single_detail(payload: dict) -> dict:
                     out["cutout_ref_labels"] = labels
 
             style_name = str(out.get("style_name") or style.get("name") or "")
+            style_target_key = str(style.get("target_key") or "").strip()
+            style_target_label = str(style.get("target_label") or "").strip()
+            analyzed_key_map = {
+                str(it.get("target_key") or "").strip(): it
+                for it in (analyzed_items or [])
+                if isinstance(it, dict) and str(it.get("target_key") or "").strip()
+            }
+
             if style_name.startswith("Detail:"):
-                target_label = style_name.split("Detail:", 1)[1].strip()
-                out["target_label"] = target_label
-                n_target = _normalize_label_for_match(target_label)
-                for it in analyzed_items:
-                    if not isinstance(it, dict):
-                        continue
-                    if _normalize_label_for_match(it.get("label") or "") == n_target:
-                        out["target_box_2d"] = it.get("box_2d")
-                        out["target_source_box_2d"] = it.get("source_box_2d")
-                        out["target_box_source"] = it.get("box_source")
-                        out["target_volume_rank"] = it.get("volume_rank")
-                        out["target_volume_proxy"] = it.get("volume_proxy")
-                        break
+                target_label = style_target_label or style_name.split("Detail:", 1)[1].strip()
+                if target_label:
+                    out["target_label"] = target_label
+                if style_target_key:
+                    out["target_key"] = style_target_key
+
+                hit = analyzed_key_map.get(style_target_key) if style_target_key else None
+                if not isinstance(hit, dict) and target_label:
+                    n_target = _normalize_label_for_match(target_label)
+                    for it in analyzed_items:
+                        if not isinstance(it, dict):
+                            continue
+                        if _normalize_label_for_match(it.get("label") or "") == n_target:
+                            hit = it
+                            break
+
+                if isinstance(hit, dict):
+                    hit_key = str(hit.get("target_key") or "").strip()
+                    if hit_key and not out.get("target_key"):
+                        out["target_key"] = hit_key
+                    out["target_box_2d"] = hit.get("box_2d")
+                    out["target_source_box_2d"] = hit.get("source_box_2d")
+                    out["target_box_source"] = hit.get("box_source")
+                    out["target_volume_rank"] = hit.get("volume_rank")
+                    out["target_volume_proxy"] = hit.get("volume_proxy")
             return out
         return {"error": "Generation failed"}
     except Exception as e:
@@ -1800,9 +1878,36 @@ def _extract_item_dims_for_ranking(item: dict) -> dict:
     }
 
 
+def _category_priority_score(item: dict) -> int:
+    try:
+        cat = (item or {}).get("category_canonical") or _canonical_category((item or {}).get("category") or (item or {}).get("label"))
+    except Exception:
+        cat = ""
+
+    table = {
+        "sofa": 100,
+        "bed": 90,
+        "table": 80,
+        "storage": 60,
+        "light": 50,
+        "chair": 40,
+        "rug": 25,
+        "tv": 20,
+        "mirror": 15,
+        "plant": 10,
+        "decor": 5,
+    }
+    return int(table.get(cat or "", 0))
+
+
 def _attach_volume_ranks(analyzed_items: list) -> list:
     if not isinstance(analyzed_items, list):
         return analyzed_items
+
+    has_explicit_category = any(
+        isinstance(it, dict) and str((it or {}).get("category") or "").strip()
+        for it in analyzed_items
+    )
 
     pairs = []
     for idx, src in enumerate(analyzed_items):
@@ -1822,6 +1927,10 @@ def _attach_volume_ranks(analyzed_items: list) -> list:
         item["volume_proxy"] = int(vp or 0)
         item["volume_rank_basis"] = basis
 
+        if not item.get("category_canonical"):
+            item["category_canonical"] = _canonical_category(item.get("category") or item.get("label"))
+        item["category_score"] = _category_priority_score(item)
+
         # Keep explicit dimensions when available for downstream debugging/reporting.
         if not item.get("dims_mm") and any([
             dims.get("width_mm"),
@@ -1838,10 +1947,20 @@ def _attach_volume_ranks(analyzed_items: list) -> list:
 
         pairs.append((idx, item))
 
-    ranked = sorted(
-        pairs,
-        key=lambda x: (-(int((x[1] or {}).get("volume_proxy") or 0)), x[0])
-    )
+    if has_explicit_category:
+        ranked = sorted(
+            pairs,
+            key=lambda x: (
+                -(int((x[1] or {}).get("category_score") or 0)),
+                -(int((x[1] or {}).get("volume_proxy") or 0)),
+                x[0],
+            )
+        )
+    else:
+        ranked = sorted(
+            pairs,
+            key=lambda x: (-(int((x[1] or {}).get("volume_proxy") or 0)), x[0])
+        )
 
     for rank, (_, item) in enumerate(ranked, start=1):
         item["volume_rank"] = rank
@@ -1857,6 +1976,10 @@ def _volume_ranking_snapshot(analyzed_items: list) -> list:
         rows.append({
             "rank": int(it.get("volume_rank") or 0),
             "label": it.get("label"),
+            "target_key": it.get("target_key"),
+            "category": it.get("category"),
+            "category_canonical": it.get("category_canonical"),
+            "category_score": int(it.get("category_score") or 0),
             "volume_proxy": int(it.get("volume_proxy") or 0),
             "volume_rank_basis": it.get("volume_rank_basis"),
             "qty": int(it.get("qty") or 1),
@@ -1912,6 +2035,23 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
 
         # 4. 카테고리 점수 계산
         cat_score = 0
+        canonical = _canonical_category(it.get("category") or it.get("category_canonical") or label)
+        cat_score_map = {
+            "sofa": 100,
+            "bed": 90,
+            "table": 80,
+            "storage": 60,
+            "light": 50,
+            "chair": 40,
+            "rug": 25,
+            "tv": 20,
+            "mirror": 15,
+            "plant": 10,
+            "decor": 5,
+        }
+        if canonical:
+            cat_score = int(cat_score_map.get(canonical, 0))
+
         norm_label = label.lower()
         for key, score in PRIORITY_KEYWORDS.items():
             if key in norm_label:
@@ -1920,6 +2060,10 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         items.append({
             "index": i,
             "label": label,
+            "target_key": it.get("target_key"),
+            "source_index": it.get("source_index"),
+            "category": it.get("category"),
+            "category_canonical": canonical,
             "is_rug": is_rug,
             "category_score": cat_score, # [NEW]
             "qty": int(it.get("qty") or 1),
@@ -2991,7 +3135,7 @@ def validate_furnished_scale(
     except Exception:
         return True, []
 
-def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None):
+def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None, timeout_sec: Optional[int] = None):
     if not LOG_BRIEF:
         print(f">> [Detection] Scanning furniture in {moodboard_path}...", flush=True)
     try:
@@ -3012,7 +3156,8 @@ def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None):
                 "Ignore walls, windows, and floors. Focus on movable objects."
             )
             detect_model = (model_name or ANALYSIS_MODEL_NAME)
-            response = call_gemini_with_failover(detect_model, [prompt, img], {'timeout': 120}, {}, log_tag="Analysis.DetectFurniture")
+            detect_timeout = max(10, int(timeout_sec or 120))
+            response = call_gemini_with_failover(detect_model, [prompt, img], {'timeout': detect_timeout}, {}, log_tag="Analysis.DetectFurniture")
             if response and response.text:
                 text = response.text.strip()
                 if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
@@ -3039,6 +3184,57 @@ def _normalize_label_for_match(label: str) -> str:
         return ""
 
 
+def _canonical_category(raw: Optional[str]) -> str:
+    t = _normalize_label_for_match(raw or "")
+    if not t:
+        return ""
+
+    rules = [
+        ("sofa", ["sectional", "sofa", "couch", "loveseat", "소파"]),
+        ("bed", ["bed", "침대"]),
+        ("table", ["table", "desk", "console", "dining", "티 테이블", "테이블", "책상", "식탁", "콘솔"]),
+        ("chair", ["chair", "armchair", "stool", "의자", "암체어", "스툴"]),
+        ("storage", ["cabinet", "shelf", "storage", "wardrobe", "서랍", "수납", "장", "캐비닛", "선반"]),
+        ("light", ["lamp", "light", "chandelier", "pendant", "sconce", "조명", "램프", "샹들리에", "펜던트"]),
+        ("rug", ["rug", "carpet", "mat", "러그", "카펫", "카페트", "매트"]),
+        ("tv", ["tv", "television", "티비", "텔레비전"]),
+        ("mirror", ["mirror", "거울"]),
+        ("plant", ["plant", "tree", "화분", "식물"]),
+        ("decor", ["vase", "art", "frame", "decor", "장식", "액자", "화병"]),
+    ]
+
+    for cname, kws in rules:
+        for kw in kws:
+            if kw in t:
+                return cname
+    return ""
+
+
+def _safe_key_token(raw: Optional[str], fallback: str = "na", max_len: int = 24) -> str:
+    t = _normalize_label_for_match(raw or "")
+    if not t:
+        return fallback
+    t = t.replace(" ", "-")
+    return (t[:max_len] or fallback)
+
+
+def _build_item_target_key(source: str, index: int, label: Optional[str] = None, category: Optional[str] = None, item_id: Optional[str] = None) -> str:
+    src = _safe_key_token(source or "item", fallback="item", max_len=12)
+    idx = max(1, int(index or 1))
+    iid = _safe_key_token(item_id, fallback="", max_len=24)
+    cat = _safe_key_token(_canonical_category(category) or category, fallback="", max_len=16)
+    lbl = _safe_key_token(label, fallback="item", max_len=24)
+
+    parts = [src]
+    if iid:
+        parts.append(iid)
+    elif cat:
+        parts.append(cat)
+    parts.append(lbl)
+    parts.append(f"{idx:03d}")
+    return "_".join([p for p in parts if p])
+
+
 def _label_match_score(src_label: str, dst_label: str) -> float:
     a = _normalize_label_for_match(src_label)
     b = _normalize_label_for_match(dst_label)
@@ -3062,6 +3258,26 @@ def _label_match_score(src_label: str, dst_label: str) -> float:
     return score
 
 
+def _remap_match_score(src_item: dict, det_item: dict, src_idx: int, det_idx: int) -> float:
+    src_label = (src_item or {}).get("label") or ""
+    det_label = (det_item or {}).get("label") or ""
+    base = _label_match_score(src_label, det_label)
+
+    src_cat = (src_item or {}).get("category_canonical") or _canonical_category((src_item or {}).get("category") or src_label)
+    det_cat = (det_item or {}).get("category_canonical") or _canonical_category(det_label)
+
+    cat_bonus = 0.0
+    if src_cat and det_cat:
+        if src_cat == det_cat:
+            cat_bonus = 0.22
+        elif base < 0.60:
+            cat_bonus = -0.12
+
+    proximity = 1.0 / (1.0 + abs(int(src_idx) - int(det_idx)))
+    score = (base + cat_bonus) * 0.86 + proximity * 0.14
+    return max(0.0, min(1.0, score))
+
+
 def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list) -> list:
     """
     Re-detect item boxes on the final rendered main image and map them back to analyzed_items.
@@ -3074,12 +3290,31 @@ def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list)
     if not render_path or not os.path.exists(render_path):
         return analyzed_items
 
-    try:
-        detected = detect_furniture_boxes(render_path, model_name=REMAP_MODEL_NAME)
-    except Exception:
-        detected = []
+    detected = []
+    max_attempts = max(1, REMAP_DETECT_RETRY + 1)
+    for attempt in range(max_attempts):
+        try:
+            raw_detected = detect_furniture_boxes(
+                render_path,
+                model_name=REMAP_MODEL_NAME,
+                timeout_sec=REMAP_DETECT_TIMEOUT_SEC,
+            )
+        except Exception:
+            raw_detected = []
 
-    detected = [d for d in (detected or []) if isinstance(d, dict)]
+        detected = [
+            d for d in (raw_detected or [])
+            if isinstance(d, dict) and isinstance(d.get("box_2d"), list) and len(d.get("box_2d")) == 4
+        ]
+        if detected:
+            break
+
+        if attempt + 1 < max_attempts:
+            try:
+                time.sleep(0.35 * (attempt + 1))
+            except Exception:
+                pass
+
     if not detected:
         return analyzed_items
 
@@ -3092,13 +3327,12 @@ def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list)
         if old_box is not None and item.get("source_box_2d") is None:
             item["source_box_2d"] = old_box
 
-        src_label = item.get("label") or ""
         best_idx = None
         best_score = 0.0
 
         for det_idx in remaining:
-            det_label = (detected[det_idx] or {}).get("label") or ""
-            score = _label_match_score(src_label, det_label)
+            det_item = detected[det_idx] if det_idx < len(detected) else {}
+            score = _remap_match_score(item, det_item, src_idx, det_idx)
             if score > best_score:
                 best_score = score
                 best_idx = det_idx
@@ -3617,6 +3851,11 @@ def analyze_cropped_item(
             "description": desc + dims_str, # 치수 정보를 설명에 병합
             "box_2d": box,
             "crop_path": crop_path,
+            "target_key": item_data.get("target_key"),
+            "source_index": item_data.get("source_index"),
+            "category": item_data.get("category"),
+            "category_canonical": item_data.get("category_canonical"),
+            "item_id": item_data.get("item_id"),
         }
 
     except Exception as e:
@@ -3637,6 +3876,11 @@ def analyze_cropped_item(
         "description": f"A high quality {item_data.get('label','Furniture')}.",
         "box_2d": item_data.get('box_2d'),
         "crop_path": None,
+        "target_key": item_data.get("target_key"),
+        "source_index": item_data.get("source_index"),
+        "category": item_data.get("category"),
+        "category_canonical": item_data.get("category_canonical"),
+        "item_id": item_data.get("item_id"),
     }
 
 # [최종 복구 및 업그레이드] 분석(Flash) -> 생성(Pro-Image) 2단계 파이프라인
@@ -5022,7 +5266,7 @@ def render_room(
         ref_path = None
         mb_url = None
         ref_paths: List[str] = []
-        item_refs: List[Dict[str, str]] = []
+        item_refs: List[Dict[str, Any]] = []
 
         if moodboard_items:
             for it in moodboard_items:
@@ -5037,12 +5281,26 @@ def render_room(
                             qty_val = 1
                         if qty_val < 1:
                             qty_val = 1
+                        payload_index = int(it.get("payload_index") or (len(item_refs) + 1))
+                        category = it.get("category")
+                        item_id = it.get("item_id")
+                        target_key = it.get("target_key") or _build_item_target_key(
+                            "cart",
+                            payload_index,
+                            label=label,
+                            category=category,
+                            item_id=item_id,
+                        )
                         item_refs.append({
                             "label": label,
                             "path": lp,
                             "dims_mm": it.get("dims_mm"),
                             "options": it.get("options"),
                             "qty": qty_val,
+                            "category": category,
+                            "item_id": item_id,
+                            "payload_index": payload_index,
+                            "target_key": target_key,
                         })
                         ref_paths.append(lp)
                 except Exception:
@@ -5117,7 +5375,7 @@ def render_room(
                 if item_refs:
                     if not LOG_BRIEF:
                         print(f">> [Item Analysis] Using direct item references: {len(item_refs)}", flush=True)
-                    for meta in item_refs:
+                    for ridx, meta in enumerate(item_refs, start=1):
                         try:
                             src_path = meta.get("path")
                             if not src_path or not os.path.exists(src_path):
@@ -5128,13 +5386,31 @@ def render_room(
                                 qty_val = 1
                             if qty_val < 1:
                                 qty_val = 1
+
+                            label_val = meta.get("label") or "Item"
+                            category_val = meta.get("category")
+                            item_id_val = meta.get("item_id")
+                            source_index = int(meta.get("payload_index") or ridx)
+                            target_key = meta.get("target_key") or _build_item_target_key(
+                                "cart",
+                                source_index,
+                                label=label_val,
+                                category=category_val,
+                                item_id=item_id_val,
+                            )
+
                             item_metas.append({
-                                "label": meta.get("label") or "Item",
+                                "label": label_val,
                                 "box_2d": [0, 0, 1000, 1000],
                                 "dims_mm": meta.get("dims_mm"),
                                 "options": meta.get("options"),
                                 "qty": qty_val,
                                 "source_path": src_path,
+                                "category": category_val,
+                                "category_canonical": _canonical_category(category_val or label_val),
+                                "item_id": item_id_val,
+                                "source_index": source_index,
+                                "target_key": target_key,
                             })
                         except Exception:
                             continue
@@ -5147,13 +5423,20 @@ def render_room(
                     for idx, item in enumerate(detected):
                         try:
                             rp = ref_paths[min(idx, len(ref_paths) - 1)]
+                            label_val = item.get("label") or "Item"
+                            source_index = idx + 1
                             item_metas.append({
-                                "label": item.get("label") or "Item",
+                                "label": label_val,
                                 "box_2d": item.get("box_2d"),
                                 "dims_mm": None,
                                 "options": None,
                                 "qty": 1,
                                 "source_path": rp,
+                                "category": None,
+                                "category_canonical": _canonical_category(label_val),
+                                "item_id": None,
+                                "source_index": source_index,
+                                "target_key": _build_item_target_key("ref", source_index, label=label_val),
                             })
                         except Exception:
                             continue
@@ -5175,12 +5458,27 @@ def render_room(
                     # Cart mode(직접 item_refs)에서는 OCR 대신 payload 치수를 authoritative 힌트로 사용.
                     is_cart_mode = bool(item_refs)
                     ocr_text_read_enabled = not is_cart_mode
-                    analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(item_metas)))
+                    if is_cart_mode:
+                        analysis_workers = min(
+                            GEMINI_MAX_CONCURRENCY_ANALYSIS,
+                            CART_MAX_ANALYSIS_WORKERS,
+                            max(1, len(item_metas)),
+                        )
+                    else:
+                        analysis_workers = min(GEMINI_MAX_CONCURRENCY_ANALYSIS, max(1, len(item_metas)))
                     results = [None] * len(item_metas)
                     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
                         futures = []
                         for i, meta in enumerate(item_metas):
-                            item_data = {"label": meta.get("label"), "box_2d": meta.get("box_2d")}
+                            item_data = {
+                                "label": meta.get("label"),
+                                "box_2d": meta.get("box_2d"),
+                                "target_key": meta.get("target_key"),
+                                "source_index": meta.get("source_index"),
+                                "category": meta.get("category"),
+                                "category_canonical": meta.get("category_canonical"),
+                                "item_id": meta.get("item_id"),
+                            }
                             futures.append((i, executor.submit(
                                 analyze_cropped_item,
                                 meta.get("source_path"),
@@ -5254,6 +5552,25 @@ def render_room(
                             extra_lines.append("Options: " + opts.strip())
 
                         full_desc = (desc + (" " + " ".join(extra_lines) if extra_lines else "")).strip()
+                        source_index = int(meta.get("source_index") or (idx + 1))
+                        category_val = meta.get("category") or res_item.get("category")
+                        category_canonical_val = (
+                            meta.get("category_canonical")
+                            or res_item.get("category_canonical")
+                            or _canonical_category(category_val or label)
+                        )
+                        target_key = (
+                            meta.get("target_key")
+                            or res_item.get("target_key")
+                            or _build_item_target_key(
+                                "item",
+                                source_index,
+                                label=label,
+                                category=category_val,
+                                item_id=(meta.get("item_id") or res_item.get("item_id")),
+                            )
+                        )
+
                         full_analyzed_data.append({
                             "label": label,
                             "description": full_desc,
@@ -5262,6 +5579,11 @@ def render_room(
                             "options": opts,
                             "qty": qty,
                             "requested_dims_mm": req_dims or None,
+                            "source_index": source_index,
+                            "target_key": target_key,
+                            "category": category_val,
+                            "category_canonical": category_canonical_val,
+                            "item_id": meta.get("item_id") or res_item.get("item_id"),
                         })
 
                 try:
@@ -5858,6 +6180,16 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
                 "dims_mm": it.get("dims_mm"),
                 "options": it.get("options"),
                 "qty": qty_val,
+                "category": it.get("category"),
+                "item_id": it.get("id"),
+                "payload_index": idx + 1,
+                "target_key": _build_item_target_key(
+                    "cart",
+                    idx + 1,
+                    label=label,
+                    category=it.get("category"),
+                    item_id=it.get("id"),
+                ),
             })
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -6036,6 +6368,9 @@ def construct_dynamic_styles(analyzed_items):
 
         styles.append({
             "name": f"Detail: {label}",
+            "target_label": label,
+            "target_key": item.get("target_key"),
+            "source_index": item.get("source_index"),
             "prompt": (
                 f"ACT AS: Documentary Interior Photographer.\n"
                 f"TASK: Take a candid shot of the '{label}' strictly IN-SITU.\n\n"
