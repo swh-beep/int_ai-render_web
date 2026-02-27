@@ -1960,7 +1960,7 @@ def _item_box_area_proxy(box_2d) -> int:
 
 def _extract_item_dims_for_ranking(item: dict) -> dict:
     req_dims = _normalize_dims_dict(item.get("requested_dims_mm") or item.get("dims_mm") or {}) if isinstance(item, dict) else {}
-    if req_dims:
+    if _dims_has_positive_values(req_dims):
         return {
             "width_mm": req_dims.get("width_mm"),
             "depth_mm": req_dims.get("depth_mm"),
@@ -2107,11 +2107,13 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         desc  = it.get("description", "") or ""
         box   = it.get("box_2d")
         req_dims = _normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
+        req_dims_authoritative = _dims_has_positive_values(req_dims)
 
         # 1. 치수 파싱
-        # - Cart mode(요청 치수 존재): 요청 데이터(requested_dims_mm)를 authoritative로 사용
-        # - 기타 모드: OCR/설명 파싱값 사용
-        if req_dims:
+        # - requested dims가 모두 0/null이면 authoritative로 취급하지 않음
+        # - authoritative requested dims가 있으면 우선 사용
+        # - 그 외에는 OCR/설명 파싱값 사용
+        if req_dims_authoritative:
             dims = {
                 "width_mm": req_dims.get("width_mm"),
                 "depth_mm": req_dims.get("depth_mm"),
@@ -2167,7 +2169,7 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
             "category_score": cat_score, # [NEW]
             "qty": int(it.get("qty") or 1),
             "options": it.get("options"),
-            "requested_dims_mm": req_dims or None,
+            "requested_dims_mm": req_dims if req_dims_authoritative else None,
             "dims_mm": {
                 "width_mm": dims.get("width_mm"),
                 "depth_mm": dims.get("depth_mm"),
@@ -2181,12 +2183,52 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         })
 
     primary = None
-    # [FIX] 기준점 선정 로직 강화: (카테고리 점수 > 부피 > 인덱스)
+    # Render priority(기존 정책): 카테고리 > 부피 > 인덱스
     candidates = [x for x in items if not x["is_rug"]]
     if candidates:
-        # Sort key: 1. Category Score (desc), 2. Volume (desc), 3. Index (asc)
         candidates_sorted = sorted(candidates, key=lambda x: (x["category_score"], x["volume_proxy"], -x["index"]), reverse=True)
         primary = candidates_sorted[0]
+
+    def _scale_sort_key(row: dict):
+        dm = row.get("dims_mm") or {}
+        try:
+            w = int(dm.get("width_mm") or 0)
+        except Exception:
+            w = 0
+        try:
+            d = int(dm.get("depth_mm") or 0)
+        except Exception:
+            d = 0
+        try:
+            h = int(dm.get("height_mm") or 0)
+        except Exception:
+            h = 0
+        try:
+            r = int(dm.get("radius_mm") or 0)
+        except Exception:
+            r = 0
+
+        has_dims = 1 if (w > 0 or d > 0 or h > 0 or r > 0) else 0
+        try:
+            vol = int(row.get("volume_proxy") or 0)
+        except Exception:
+            vol = 0
+        try:
+            idx = int(row.get("index") or 0)
+        except Exception:
+            idx = 0
+
+        # Scale priority(신규): 치수 기반(카테고리 영향 배제)
+        return (has_dims, vol, w, d, h, r, -idx)
+
+    # Scale anchor(신규): 물리치수 기준 primary
+    primary_scale = None
+    scale_candidates = [x for x in candidates if _dims_has_positive_values(x.get("dims_mm") or {})]
+    if scale_candidates:
+        scale_sorted = sorted(scale_candidates, key=_scale_sort_key, reverse=True)
+        primary_scale = scale_sorted[0]
+    else:
+        primary_scale = primary
 
     # Max width fallback
     max_width_mm = 0
@@ -2194,15 +2236,35 @@ def build_furniture_specs_json(analyzed_items: list) -> dict:
         w = x.get("dims_mm", {}).get("width_mm") or 0
         try:
             max_width_mm = max(max_width_mm, int(w))
-        except Exception: pass
+        except Exception:
+            pass
+
+    try:
+        if primary_scale and max_width_mm and not (primary_scale.get("dims_mm", {}) or {}).get("width_mm"):
+            primary_scale.setdefault("dims_mm", {})["width_mm"] = int(max_width_mm)
+    except Exception:
+        pass
 
     try:
         if primary and max_width_mm and not (primary.get("dims_mm", {}) or {}).get("width_mm"):
             primary.setdefault("dims_mm", {})["width_mm"] = int(max_width_mm)
-    except Exception: pass
+    except Exception:
+        pass
 
-    hierarchy = [x.get("label","") for x in (analyzed_items or []) if not _is_rug_like(x.get("label",""))]
-    return {"items": items, "primary": primary, "max_width_mm": max_width_mm, "size_hierarchy": hierarchy}
+    hierarchy = [x.get("label", "") for x in (analyzed_items or []) if not _is_rug_like(x.get("label", ""))]
+
+    scale_hierarchy = [x.get("label", "") for x in sorted(candidates, key=_scale_sort_key, reverse=True) if x.get("label")]
+    if not scale_hierarchy:
+        scale_hierarchy = list(hierarchy)
+
+    return {
+        "items": items,
+        "primary": primary,
+        "primary_scale": primary_scale,
+        "max_width_mm": max_width_mm,
+        "size_hierarchy": hierarchy,
+        "size_hierarchy_scale": scale_hierarchy,
+    }
 
 def _safe_json_from_model_text(txt: str):
     if not txt: return None
@@ -3507,6 +3569,19 @@ def _normalize_dims_dict(raw: dict) -> dict:
         pass
     return out
 
+
+def _dims_has_positive_values(dm: dict) -> bool:
+    if not isinstance(dm, dict):
+        return False
+    for k in ("width_mm", "depth_mm", "height_mm", "radius_mm"):
+        try:
+            if int(dm.get(k) or 0) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 _DIM_2D_OK_PAT = re.compile(
     r"(tv|mirror|frame|art|painting|poster|picture|print|wall|wall\s*-?\s*mounted|wall\s*system|rug|carpet|mat|러그|카페트|카펫|액자|그림|포스터|벽걸이|월시스템)",
     re.IGNORECASE,
@@ -4563,7 +4638,12 @@ def generate_furnished_room(
             room_d = int(_room_dims.get("depth_mm") or 0)
             room_h = int(_room_dims.get("height_mm") or 0)
 
-            _primary = primary_item or (furniture_specs_json or {}).get("primary") or {}
+            _primary = (
+                primary_item
+                or (furniture_specs_json or {}).get("primary_scale")
+                or (furniture_specs_json or {}).get("primary")
+                or {}
+            )
             _p_dims = _primary.get("dims_mm") or {}
             p_w = int(_p_dims.get("width_mm") or 0)
             p_d = int(_p_dims.get("depth_mm") or 0)
@@ -4810,13 +4890,17 @@ def generate_furnished_room(
                 "--------------------------------------------------\n"
             )
 
-        # [NEW] hierarchy hint string
+        # [NEW] hierarchy hint string (prefer scale-specific hierarchy)
         size_hierarchy_hint = ""
         try:
             if size_hierarchy and isinstance(size_hierarchy, list):
                 size_hierarchy_hint = " > ".join([str(x) for x in size_hierarchy if x])
             elif furniture_specs_json and isinstance(furniture_specs_json, dict):
-                h = furniture_specs_json.get("size_hierarchy") or []
+                h = (
+                    furniture_specs_json.get("size_hierarchy_scale")
+                    or furniture_specs_json.get("size_hierarchy")
+                    or []
+                )
                 if isinstance(h, list):
                     size_hierarchy_hint = " > ".join([str(x) for x in h if x])
         except Exception:
@@ -4936,7 +5020,38 @@ def generate_furnished_room(
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
-                items_for_cutout.sort(key=lambda x: (-(x.get("category_score") or 0), x.get("index") or 0))
+
+                def _cutout_scale_priority(row: dict):
+                    dm = (row or {}).get("dims_mm") or {}
+                    try:
+                        w = int(dm.get("width_mm") or 0)
+                    except Exception:
+                        w = 0
+                    try:
+                        d = int(dm.get("depth_mm") or 0)
+                    except Exception:
+                        d = 0
+                    try:
+                        h = int(dm.get("height_mm") or 0)
+                    except Exception:
+                        h = 0
+                    has_dims = 1 if (w > 0 or d > 0 or h > 0) else 0
+                    try:
+                        vol = int((row or {}).get("volume_proxy") or 0)
+                    except Exception:
+                        vol = 0
+                    try:
+                        cat = int((row or {}).get("category_score") or 0)
+                    except Exception:
+                        cat = 0
+                    try:
+                        idx = int((row or {}).get("index") or 0)
+                    except Exception:
+                        idx = 0
+                    # Scale anchoring first, category as secondary tiebreaker.
+                    return (has_dims, vol, w, d, h, cat, -idx)
+
+                items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
                 items_for_cutout = items_for_cutout[:12]
                 for it in items_for_cutout:
                     cp = it.get("crop_path")
@@ -5719,8 +5834,14 @@ def render_room(
 
                 try:
                     furniture_specs_json = build_furniture_specs_json(full_analyzed_data)
-                    primary_item = (furniture_specs_json or {}).get("primary")
-                    size_hierarchy = (furniture_specs_json or {}).get("size_hierarchy")
+                    primary_item = (
+                        (furniture_specs_json or {}).get("primary_scale")
+                        or (furniture_specs_json or {}).get("primary")
+                    )
+                    size_hierarchy = (
+                        (furniture_specs_json or {}).get("size_hierarchy_scale")
+                        or (furniture_specs_json or {}).get("size_hierarchy")
+                    )
 
                     if enable_scale_guidance:
                         logger.info(f"[Scale] primary_item={ (primary_item or {}).get('label') }")
