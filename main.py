@@ -1164,8 +1164,13 @@ def job_generate_details(payload: dict) -> dict:
 def job_regenerate_single_detail(payload: dict) -> dict:
     try:
         original_image_url = payload.get("original_image_url")
-        # Accept both 0-based and 1-based indices from callers.
         raw_style_index = int(payload.get("style_index") or 1)
+        req_target_key = str(payload.get("target_key") or "").strip()
+        req_target_label = str(payload.get("target_label") or "").strip()
+        style_index_mode = str(payload.get("style_index_mode") or "auto").strip().lower()
+        if style_index_mode not in {"auto", "detail", "overall"}:
+            style_index_mode = "auto"
+
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
 
@@ -1194,21 +1199,111 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         if not dynamic_styles:
             return {"error": "No styles available"}
 
-        idx = raw_style_index - 1 if raw_style_index >= 1 else raw_style_index
-        if idx < 0:
-            idx = 0
-        elif idx >= len(dynamic_styles):
-            idx = len(dynamic_styles) - 1
+        detail_styles = [
+            s for s in dynamic_styles
+            if str((s or {}).get("name") or "").startswith("Detail:")
+        ]
+
+        def _to_zero_based(v: int) -> int:
+            # Legacy compatibility: accept callers that may send 1-based indices.
+            return v - 1 if v >= 1 else v
+
+        style = None
+        resolved_by = None
+        resolved_style_index = None
+
+        # 1) Strongest resolver: explicit target_key
+        if req_target_key:
+            for i, s in enumerate(dynamic_styles):
+                if str((s or {}).get("target_key") or "").strip() == req_target_key:
+                    style = s
+                    resolved_by = "target_key"
+                    resolved_style_index = i + 1
+                    break
+
+        # 2) Fallback resolver: explicit target_label
+        if style is None and req_target_label:
+            n_target = _normalize_label_for_match(req_target_label)
+            for i, s in enumerate(dynamic_styles):
+                name = str((s or {}).get("name") or "")
+                if not name.startswith("Detail:"):
+                    continue
+                s_label = str((s or {}).get("target_label") or "").strip()
+                if not s_label:
+                    s_label = name.split("Detail:", 1)[1].strip()
+                n_s_label = _normalize_label_for_match(s_label)
+                if n_target and n_s_label and n_target == n_s_label:
+                    style = s
+                    resolved_by = "target_label"
+                    resolved_style_index = i + 1
+                    break
+
+        # 3) Legacy resolver: style_index
+        if style is None:
+            idx = _to_zero_based(raw_style_index)
+
+            if style_index_mode == "overall":
+                if idx < 0:
+                    idx = 0
+                elif idx >= len(dynamic_styles):
+                    idx = len(dynamic_styles) - 1
+                style = dynamic_styles[idx]
+                resolved_by = "style_index_overall"
+                resolved_style_index = idx + 1
+
+            elif style_index_mode == "detail":
+                if detail_styles:
+                    if idx < 0:
+                        idx = 0
+                    elif idx >= len(detail_styles):
+                        idx = len(detail_styles) - 1
+                    style = detail_styles[idx]
+                    resolved_by = "style_index_detail"
+                    # keep detail-relative index for easier UI debugging
+                    resolved_style_index = idx + 1
+                else:
+                    if idx < 0:
+                        idx = 0
+                    elif idx >= len(dynamic_styles):
+                        idx = len(dynamic_styles) - 1
+                    style = dynamic_styles[idx]
+                    resolved_by = "style_index_overall_fallback"
+                    resolved_style_index = idx + 1
+
+            else:  # auto
+                if detail_styles and 0 <= idx < len(detail_styles):
+                    style = detail_styles[idx]
+                    resolved_by = "style_index_detail_auto"
+                    resolved_style_index = idx + 1
+                else:
+                    if idx < 0:
+                        idx = 0
+                    elif idx >= len(dynamic_styles):
+                        idx = len(dynamic_styles) - 1
+                    style = dynamic_styles[idx]
+                    resolved_by = "style_index_overall_auto"
+                    resolved_style_index = idx + 1
+
+        if style is None:
+            return {"error": "No matching style for regeneration"}
 
         unique_id = uuid.uuid4().hex[:6]
-        style = dynamic_styles[idx]
-        res = generate_detail_view(local_path, style, unique_id, idx + 1, analyzed_items)
+        res = generate_detail_view(local_path, style, unique_id, int(resolved_style_index or 1), analyzed_items)
         if res:
             path = res.get("path") if isinstance(res, dict) else res
             url = resolve_image_url(path, s3_prefix_override=prefix_detail_rendered) if path else None
             if not url:
                 return {"error": "Generation failed"}
-            out = {"url": url, "message": "Success", "volume_ranking": _volume_ranking_snapshot(analyzed_items)}
+            out = {
+                "url": url,
+                "message": "Success",
+                "volume_ranking": _volume_ranking_snapshot(analyzed_items),
+                "resolved_by": resolved_by,
+                "resolved_style_index": int(resolved_style_index or 1),
+                "requested_style_index": raw_style_index,
+                "requested_target_key": req_target_key or None,
+                "requested_target_label": req_target_label or None,
+            }
             if isinstance(res, dict):
                 out["style_name"] = res.get("style_name") or style.get("name")
                 out["cutout_ref_count"] = int(res.get("cutout_ref_count") or 0)
@@ -1251,6 +1346,10 @@ def job_regenerate_single_detail(payload: dict) -> dict:
                     out["target_box_source"] = hit.get("box_source")
                     out["target_volume_rank"] = hit.get("volume_rank")
                     out["target_volume_proxy"] = hit.get("volume_proxy")
+
+                out["resolved_target_key"] = out.get("target_key")
+                out["resolved_target_label"] = out.get("target_label")
+
             return out
         return {"error": "Generation failed"}
     except Exception as e:
@@ -6630,7 +6729,10 @@ class DetailRequest(BaseModel):
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
-    style_index: int
+    style_index: int = 1
+    target_key: Optional[str] = None
+    target_label: Optional[str] = None
+    style_index_mode: Optional[str] = "auto"  # auto|detail|overall
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None
     audience: Optional[str] = None
@@ -6643,6 +6745,9 @@ def regenerate_single_detail(req: RegenerateDetailRequest):
     payload = {
         "original_image_url": req.original_image_url,
         "style_index": req.style_index,
+        "target_key": req.target_key,
+        "target_label": req.target_label,
+        "style_index_mode": req.style_index_mode,
         "furniture_data": req.furniture_data,
         "moodboard_url": req.moodboard_url,
         "audience": req.audience,
