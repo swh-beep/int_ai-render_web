@@ -3338,10 +3338,21 @@ def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list)
                 best_idx = det_idx
 
         picked_idx = None
-        if best_idx is not None and best_score >= 0.45:
-            picked_idx = best_idx
-        elif remaining:
-            # Fallback by nearest rank index when labels are weak/noisy.
+        if best_idx is not None:
+            det_best = detected[best_idx] if best_idx < len(detected) else {}
+            src_cat = item.get("category_canonical") or _canonical_category(item.get("category") or item.get("label") or "")
+            det_cat = (det_best or {}).get("category_canonical") or _canonical_category((det_best or {}).get("label") or "")
+
+            # 기본 임계치(0.45)를 유지하되,
+            # 라벨 언어/표기 차이로 base score가 낮은 경우를 위해
+            # category 일치 + 중간 점수(>=0.24)도 허용.
+            if best_score >= 0.45 or (
+                best_score >= 0.24 and src_cat and det_cat and src_cat == det_cat
+            ):
+                picked_idx = best_idx
+
+        if picked_idx is None and remaining:
+            # Last-resort fallback by nearest rank index.
             picked_idx = min(remaining, key=lambda x: abs(x - src_idx))
 
         if picked_idx is not None:
