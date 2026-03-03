@@ -74,7 +74,7 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
 MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = os.getenv("ANALYSIS_MODEL_NAME", "gemini-3.1-pro-preview").strip() or "gemini-3.1-pro-preview"
+ANALYSIS_MODEL_NAME = os.getenv("ANALYSIS_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
 DETECT_FURNITURE_MODEL_NAME = os.getenv("DETECT_FURNITURE_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 ROOM_ONLY_MODEL_NAME = os.getenv("ROOM_ONLY_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
@@ -2444,7 +2444,7 @@ def detect_back_wall_span_norm(empty_room_path: str) -> tuple:
                 "Return STRICT JSON ONLY: {\\\"x_left\\\":0.0, \\\"x_right\\\":1.0} using normalized [0..1].\\n"
                 "Use the floor-wall boundary; ignore doors/windows if they reduce usable span. Approximate if unsure."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 40}, {}, log_tag="Analysis.BackWallSpan")
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 70}, {}, log_tag="Analysis.BackWallSpan")
             obj = _safe_json_from_model_text(res.text if res and hasattr(res, "text") else "")
             if isinstance(obj, dict):
                 xl = float(obj.get("x_left", 0.0)); xr = float(obj.get("x_right", 1.0))
@@ -2469,7 +2469,7 @@ def detect_windows_present(room_path: str) -> bool:
                 "Question: Are any windows or glass exterior openings clearly visible in this room image?\n"
                 "If uncertain, answer NO."
             )
-            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 30}, {}, log_tag="Analysis.WindowsPresent")
+            res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, img], {"timeout": 60}, {}, log_tag="Analysis.WindowsPresent")
             txt = (res.text if res and hasattr(res, "text") else "").strip().lower()
             if txt.startswith("yes"):
                 return True
@@ -2632,7 +2632,7 @@ def estimate_room_dimensions_from_image(room_path: str) -> dict:
             res = call_gemini_with_failover(
                 ANALYSIS_MODEL_NAME,
                 [prompt, img],
-                {"timeout": 50},
+                {"timeout": 80},
                 {},
                 log_tag="Analysis.RoomDimsEstimate",
             )
@@ -3084,7 +3084,7 @@ def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str]
                 if ref_item_crop_path and os.path.exists(ref_item_crop_path):
                     ref_img = Image.open(ref_item_crop_path)
                     content += ["Reference item crop:", ref_img]
-                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {}, log_tag="Analysis.PrimaryBBox")
+                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 70}, {}, log_tag="Analysis.PrimaryBBox")
             finally:
                 if ref_img:
                     ref_img.close()
@@ -3117,7 +3117,7 @@ def detect_item_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], i
                 if ref_item_crop_path and os.path.exists(ref_item_crop_path):
                     ref_img = Image.open(ref_item_crop_path)
                     content += ["Reference item crop:", ref_img]
-                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 40}, {}, log_tag="Analysis.ItemBBox")
+                res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, content, {"timeout": 70}, {}, log_tag="Analysis.ItemBBox")
             finally:
                 if ref_img:
                     ref_img.close()
@@ -3757,7 +3757,7 @@ def analyze_room_structure(room_path, room_dimensions=None, timeout=120):
     return {}
 
 
-def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=120):
+def analyze_room_and_items_long(room_path, items, room_dimensions=None, timeout=150):
     """
     Single long analysis for room structure + all items.
     items: list of dicts with keys: label, image (PIL), dims_mm(optional), options(optional)
@@ -3987,7 +3987,7 @@ def analyze_cropped_item(
                 "}\n"
             )
 
-        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 120}, {}, log_tag="Analysis.CropItem")
+        response = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [prompt, cropped_img], {'timeout': 150}, {}, log_tag="Analysis.CropItem")
 
         desc = f"A high quality {label}."
         dims_str = ""
@@ -4103,7 +4103,7 @@ def generate_frontal_room_from_photos(photo_paths, unique_id, index):
         )
 
         # 분석 모델 호출
-        analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 90}, {}, log_tag="Frontal.Analysis")
+        analysis_res = call_gemini_with_failover(ANALYSIS_MODEL_NAME, [analysis_prompt] + input_images, {'timeout': 120}, {}, log_tag="Frontal.Analysis")
         spatial_blueprint = analysis_res.text if (analysis_res and analysis_res.text) else "A modern living room with large windows and tiled floor."
 
         print(f"   [Frontal Gen] Step 2: Synthesizing Frontal View based on Spatial Blueprint...", flush=True)
