@@ -76,6 +76,7 @@ GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
 ANALYSIS_MODEL_NAME = os.getenv("ANALYSIS_MODEL_NAME", "gemini-3.1-pro-preview").strip() or "gemini-3.1-pro-preview"
 DETECT_FURNITURE_MODEL_NAME = os.getenv("DETECT_FURNITURE_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+ROOM_ONLY_MODEL_NAME = os.getenv("ROOM_ONLY_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 REMAP_MODEL_NAME = os.getenv("REMAP_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "60")))
@@ -3738,7 +3739,7 @@ def analyze_room_structure(room_path, room_dimensions=None, timeout=120):
         if room_img:
             content.append(room_img)
         res = call_gemini_with_failover(
-            ANALYSIS_MODEL_NAME,
+            ROOM_ONLY_MODEL_NAME,
             content,
             {'timeout': timeout},
             {},
