@@ -1,5 +1,5 @@
 const JOB_POLL_INTERVAL = 2000;
-const JOB_TIMEOUT_MS = 15 * 60 * 1000;
+const JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

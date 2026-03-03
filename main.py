@@ -73,11 +73,12 @@ def _calc_app_build_id() -> str:
 APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
-MODEL_NAME = 'gemini-3-pro-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = 'gemini-3-pro-preview'
-RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
+MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
+ANALYSIS_MODEL_NAME = os.getenv("ANALYSIS_MODEL_NAME", "gemini-3.1-pro-preview").strip() or "gemini-3.1-pro-preview"
+DETECT_FURNITURE_MODEL_NAME = os.getenv("DETECT_FURNITURE_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
 REMAP_MODEL_NAME = os.getenv("REMAP_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
-REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "45")))
+REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "60")))
 REMAP_DETECT_RETRY = max(0, int(os.getenv("REMAP_DETECT_RETRY", "1")))
 CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "12")))
 CART_MAX_ANALYSIS_WORKERS = max(1, int(os.getenv("CART_MAX_ANALYSIS_WORKERS", "10")))
@@ -121,7 +122,7 @@ if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
 
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
-RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "3600"))
+RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
 RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
 RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
@@ -3316,7 +3317,7 @@ def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None, tim
                 "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
                 "Ignore walls, windows, and floors. Focus on movable objects."
             )
-            detect_model = (model_name or ANALYSIS_MODEL_NAME)
+            detect_model = (model_name or DETECT_FURNITURE_MODEL_NAME)
             detect_timeout = max(10, int(timeout_sec or 120))
             response = call_gemini_with_failover(detect_model, [prompt, img], {'timeout': detect_timeout}, {}, log_tag="Analysis.DetectFurniture")
             if response and response.text:
