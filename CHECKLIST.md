@@ -14,11 +14,14 @@
   - [x] `volume_ranking` 포함
 - [x] regenerate 단건 응답에도 `volume_ranking` + target 메타 확장
 - [x] 정적 검증: `python3 -m py_compile main.py` 통과
+- [x] 로컬 route validation 보강: external preset/cart에서 remap 증거 필드와 detail 메타를 직접 assert
+- [x] 로컬 external preset 1건 검증: `render.furniture_data`에 `box_source=main_render` 확인
+- [x] 로컬 external cart 1건 검증: `details.used_cutout_references`가 cart item 기반 target key로 채워짐 확인
+- [x] external detail 개수 정책 고정: 최대 9장 유지
+- [x] 로컬 validation 리포트 갱신: `live_validation_report.json`
 
 ## Next
-- [ ] 실제 외부 preset 1건 검증: render.furniture_data의 `box_source=main_render` 확인
-- [ ] 실제 외부 cart 1건 검증: details.used_cutout_references가 item 이미지 기반으로 채워지는지 확인
-- [ ] 필요 시 external detail 개수 정책(현재 9장 제한) 유지/변경 최종 결정
+- [ ] 다음 리팩토링 후보 검토: `render_room` 주변의 남은 고결합 render analysis/preparation 단계 분해
 
 ## Blocked
-- [ ] 실데이터 외부 호출 job_id(검증용) 필요
+- [ ] 없음

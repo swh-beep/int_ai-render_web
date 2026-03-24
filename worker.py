@@ -1,9 +1,13 @@
 import os
 import multiprocessing
+from pathlib import Path
 from redis import Redis
 from rq import Connection
 from rq.worker import Worker, SimpleWorker
 from rq.timeouts import BaseDeathPenalty
+
+BASE_DIR = Path(__file__).resolve().parent
+os.chdir(BASE_DIR)
 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
