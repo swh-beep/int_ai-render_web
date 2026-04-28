@@ -1,6 +1,7 @@
 import os
 import shutil
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -153,5 +154,59 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
             self.assertEqual(state.get("status"), "FAILED")
             self.assertIn("All clips failed", state.get("error") or "")
             self.assertEqual(len(state.get("errors") or []), 1)
+        finally:
+            os.chdir(prev_cwd)
+
+    def test_run_source_generation_job_parallelizes_multiple_dynamic_clips(self):
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp_root)
+        try:
+            items = [
+                SourceItem(url=f"https://example.com/image-{idx}.png", motion="orbit_r_slow", effect="sunlight")
+                for idx in range(3)
+            ]
+            counters = {"active": 0, "max_active": 0, "task_index": 0}
+            counter_lock = threading.Lock()
+
+            def create_task(*args, **kwargs):
+                with counter_lock:
+                    counters["active"] += 1
+                    counters["max_active"] = max(counters["max_active"], counters["active"])
+                    counters["task_index"] += 1
+                    task_id = f"task-{counters['task_index']}"
+                try:
+                    time.sleep(0.05)
+                    return task_id
+                finally:
+                    with counter_lock:
+                        counters["active"] -= 1
+
+            with patch.object(source_generation_workflow, "image_url_to_b64", return_value="img-b64"), patch.object(
+                source_generation_workflow,
+                "download_to_path",
+                side_effect=lambda url, out_path: Path(out_path).write_bytes(b"fake-mp4"),
+            ):
+                source_generation_workflow.run_source_generation_job(
+                    "job-parallel",
+                    items,
+                    0.5,
+                    video_target_fps=12,
+                    video_max_concurrency=3,
+                    create_kling_task=create_task,
+                    poll_kling_task=lambda *args, **kwargs: "https://example.com/generated.mp4",
+                )
+
+            state = get_video_job("job-parallel")
+            self.assertIsNotNone(state)
+            self.assertEqual(state.get("status"), "COMPLETED")
+            self.assertEqual(
+                state.get("results"),
+                [
+                    "/outputs/source_job-parallel_0.mp4",
+                    "/outputs/source_job-parallel_1.mp4",
+                    "/outputs/source_job-parallel_2.mp4",
+                ],
+            )
+            self.assertGreaterEqual(counters["max_active"], 2)
         finally:
             os.chdir(prev_cwd)

@@ -8,9 +8,11 @@ from typing import Callable
 
 from fastapi import UploadFile
 
+from application.render.direct_item_image_prep import prepare_direct_item_image
 from api_models import (
     CartRenderRequest,
     DetailRequest,
+    ExternalRenderVideoRequest,
     FinalizeRequest,
     InternalRenderRequest,
     PresetRenderRequest,
@@ -18,20 +20,6 @@ from api_models import (
     UpscaleRequest,
 )
 from preset_helpers import resolve_preset_request
-
-
-def build_internal_render_job_payload(req: InternalRenderRequest) -> dict:
-    payload = {
-        "file_path": req.image_url,
-        "moodboard_path": req.moodboard_url,
-        "room": req.room,
-        "style": req.style,
-        "variant": req.variant,
-        "dimensions": req.dimensions or "",
-        "placement": req.placement or "",
-        "audience": "internal",
-    }
-    return {"render": payload}
 
 
 def _safe_upload_name(upload: UploadFile | None, fallback: str) -> str:
@@ -42,19 +30,72 @@ def _safe_upload_name(upload: UploadFile | None, fallback: str) -> str:
     return safe or fallback
 
 
+def _persist_upload_to_outputs(upload: UploadFile, *, prefix: str, fallback_name: str, unique_id: str, timestamp: int) -> str:
+    path = os.path.join("outputs", f"{prefix}_{timestamp}_{unique_id}_{_safe_upload_name(upload, fallback_name)}")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer)
+    return path
+
+
+def persist_internal_room_upload(file: UploadFile) -> str:
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    return _persist_upload_to_outputs(file, prefix="raw", fallback_name="input.png", unique_id=unique_id, timestamp=timestamp)
+
+
+def persist_internal_item_uploads(item_images: list[UploadFile]) -> list[str]:
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    saved_paths: list[str] = []
+    for idx, upload in enumerate(item_images, start=1):
+        raw_path = _persist_upload_to_outputs(
+            upload,
+            prefix=f"cart_item_src_{idx}",
+            fallback_name=f"cart_item_{idx}.png",
+            unique_id=unique_id,
+            timestamp=timestamp,
+        )
+        final_path = os.path.join(
+            "outputs",
+            f"cart_item_{timestamp}_{unique_id}_{_safe_upload_name(upload, f'cart_item_{idx}.png')}",
+        )
+        prepared_path = prepare_direct_item_image(raw_path, output_path=final_path, max_size=1024)
+        if prepared_path:
+            try:
+                os.remove(raw_path)
+            except Exception:
+                pass
+            saved_paths.append(prepared_path)
+            continue
+
+        try:
+            os.replace(raw_path, final_path)
+            saved_paths.append(final_path)
+        except Exception:
+            saved_paths.append(raw_path)
+    return saved_paths
+
+
 def persist_internal_render_uploads(file: UploadFile, moodboard: UploadFile | None) -> tuple[str, str | None]:
     unique_id = uuid.uuid4().hex[:8]
     timestamp = int(time.time())
-
-    raw_path = os.path.join("outputs", f"raw_{timestamp}_{unique_id}_{_safe_upload_name(file, 'input.png')}")
-    with open(raw_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+    raw_path = _persist_upload_to_outputs(
+        file,
+        prefix="raw",
+        fallback_name="input.png",
+        unique_id=unique_id,
+        timestamp=timestamp,
+    )
     mood_path = None
     if moodboard is not None:
-        mood_path = os.path.join("outputs", f"mb_{timestamp}_{unique_id}_{_safe_upload_name(moodboard, 'moodboard.png')}")
-        with open(mood_path, "wb") as buffer:
-            shutil.copyfileobj(moodboard.file, buffer)
+        mood_path = _persist_upload_to_outputs(
+            moodboard,
+            prefix="mb",
+            fallback_name="moodboard.png",
+            unique_id=unique_id,
+            timestamp=timestamp,
+        )
 
     return raw_path, mood_path
 
@@ -118,6 +159,97 @@ def build_internal_async_render_job_payload(
     }
 
 
+def build_internal_itemized_async_render_job_payload(
+    *,
+    raw_path: str,
+    item_specs: list[dict],
+    item_paths: list[str],
+    room: str,
+    style: str,
+    variant: str,
+    dimensions: str,
+    placement: str,
+    resolve_image_url: Callable[[str | None, str | None], str | None],
+    build_s3_prefix: Callable[[str, str, str | None], str],
+    build_item_target_key: Callable[..., str],
+) -> dict:
+    audience = "internal"
+    validated_specs: list[dict] = []
+    for payload_index, spec in enumerate(item_specs, start=1):
+        upload_index = spec.get("upload_index")
+        if isinstance(upload_index, bool) or not isinstance(upload_index, int):
+            raise ValueError(f"Item {payload_index} has invalid upload_index")
+        if upload_index < 0 or upload_index >= len(item_paths):
+            raise ValueError(f"Item {payload_index} has invalid upload_index")
+
+        name = spec.get("name")
+        if isinstance(name, str) and name.strip():
+            label = name.strip()
+        else:
+            category = spec.get("category")
+            if isinstance(category, str) and category.strip():
+                label = category.strip()
+            else:
+                raise ValueError(f"Item {payload_index} has invalid label")
+
+        qty = spec.get("qty")
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty < 1:
+            raise ValueError(f"Item {payload_index} has invalid qty")
+
+        validated_specs.append(
+            {
+                "payload_index": payload_index,
+                "upload_index": upload_index,
+                "label": label,
+                "qty": qty,
+                "dims_mm": spec.get("dims_mm"),
+                "category": spec.get("category"),
+                "client_id": spec.get("client_id"),
+            }
+        )
+
+    file_ref = resolve_image_url(raw_path, build_s3_prefix(audience, "mainrendered", "user-photos"))
+
+    moodboard_items = []
+    item_prefix = build_s3_prefix(audience, "customize", "item-images")
+    for spec in validated_specs:
+        item_path = item_paths[spec["upload_index"]]
+        if not item_path:
+            raise ValueError(f"Item {spec['payload_index']} has invalid upload_index")
+
+        item_ref = resolve_image_url(item_path, item_prefix)
+
+        moodboard_items.append(
+            {
+                "label": spec["label"],
+                "path": item_ref or item_path,
+                "dims_mm": spec["dims_mm"],
+                "qty": spec["qty"],
+                "category": spec["category"],
+                "item_id": spec["client_id"],
+                "payload_index": spec["payload_index"],
+                "target_key": build_item_target_key(
+                    "internal",
+                    spec["payload_index"],
+                    label=spec["label"],
+                    category=spec["category"],
+                    item_id=spec["client_id"],
+                ),
+            }
+        )
+
+    return {
+        "file_path": file_ref or raw_path,
+        "moodboard_items": moodboard_items,
+        "room": room,
+        "style": style,
+        "variant": variant,
+        "dimensions": dimensions,
+        "placement": placement,
+        "audience": audience,
+    }
+
+
 def build_image_edit_job_payload(
     *,
     saved_photo_paths: list[str],
@@ -154,6 +286,20 @@ def build_frontal_view_job_payload(
     prefix_user = build_s3_prefix(audience, "realphotorendered", "user-photos")
     photo_refs = [resolve_image_url(path, prefix_user) or path for path in saved_photo_paths]
     return {"photo_paths": photo_refs, "unique_id": unique_id, "audience": audience}
+
+
+def build_internal_render_job_payload(req: InternalRenderRequest) -> dict:
+    payload = {
+        "file_path": req.image_url,
+        "moodboard_path": req.moodboard_url,
+        "room": req.room,
+        "style": req.style,
+        "variant": req.variant,
+        "dimensions": req.dimensions or "",
+        "placement": req.placement or "",
+        "audience": "internal",
+    }
+    return {"render": payload}
 
 
 def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tuple[dict, dict]:
@@ -289,6 +435,27 @@ def build_external_cart_job(
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }
     return job_payload, kept, dropped
+
+
+def build_external_render_video_job(req: ExternalRenderVideoRequest) -> dict:
+    render_job_id = (req.render_job_id or "").strip()
+    if not render_job_id:
+        raise ValueError("render_job_id is required")
+
+    clip_count = int(req.clip_count or 4)
+    if clip_count < 4 or clip_count > 6:
+        raise ValueError("clip_count must be between 4 and 6")
+
+    cfg_scale = float(req.cfg_scale or 0.5)
+    if cfg_scale <= 0:
+        raise ValueError("cfg_scale must be greater than 0")
+
+    return {
+        "render_job_id": render_job_id,
+        "clip_count": clip_count,
+        "cfg_scale": cfg_scale,
+        "audience": "external",
+    }
 
 
 def build_detail_generation_job_payload(req: DetailRequest) -> dict:

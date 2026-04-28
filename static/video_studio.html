@@ -5,24 +5,56 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Studio - AI Interior</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260415_1341">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700&display=swap" />
     <link rel="icon" href="/static/favicon-light.png">
     
     <style>
+        :root {
+            --vs-ink: #2b2b2b;
+            --vs-ink-strong: #333333;
+        }
+
         /* Video Studio Layout - Full Width */
         * {
             box-sizing: border-box;
         }
 
         body {
-            background-color: var(--bg-color);
-            color: #fff;
+            background: #ffffff;
+            color: var(--vs-ink);
             margin: 0;
             padding: 0;
-            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-family: 'Pretendard', sans-serif !important;
             min-height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Syne', sans-serif !important;
+            font-weight: 400;
+            color: var(--vs-ink);
+            letter-spacing: 0;
+        }
+
+        p, label, button, input, select, textarea, a {
+            font-family: 'Pretendard', sans-serif !important;
+            font-weight: 400;
+            letter-spacing: 0;
+        }
+
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined' !important;
+            font-weight: normal !important;
+            font-style: normal !important;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .hidden {
@@ -32,12 +64,14 @@
         /* Main Layout - Side by Side (REVERSED for Video Studio) */
         .is-main-layout {
             display: flex;
-            flex-direction: row-reverse; /* Reversed as requested */
+            flex-direction: row;
             justify-content: center;
             align-items: flex-start;
             gap: 200px;
             padding: 100px 5% 5rem 5%;
             min-height: 100vh;
+            width: min(1600px, calc(100vw - 48px));
+            margin: 0 auto;
         }
 
         /* 1. Branding (Now on Right due to flex-reverse) */
@@ -45,17 +79,19 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             gap: 30px;
-            padding-top: 250px;
+            padding-top: 0;
             position: sticky;
-            top: 100px;
+            top: 0;
+            min-height: 80vh;
         }
 
         .is-branding-logo {
             height: 40px;
             width: auto;
             object-fit: contain;
-            filter: invert(1);
+            filter: brightness(0);
         }
         .is-branding-wordmark {
             height: 26.25px;
@@ -64,11 +100,11 @@
         }
 
         .is-branding h1 {
-            font-size: 3rem;
+            font-size: 50px;
             font-weight: 600;
             margin: 0;
-            letter-spacing: -0.5px;
-            color: #111;
+            letter-spacing: 0;
+            color: var(--vs-ink);
         }
 
         /* 2. Menu Grid (Now on Left due to flex-reverse) */
@@ -92,7 +128,7 @@
             box-shadow: none;
             -webkit-transform: translateZ(0);
             transform: translateZ(0);
-            background-color: #111;
+            background-color: var(--vs-ink-strong);
             display: flex;
             flex-direction: column;
             justify-content: flex-end;
@@ -133,28 +169,31 @@
         }
 
         .card-sub-1 {
-            background-image: url('/static/video_card_2.jpg');
+            background-image: url('/static/video_card_1.jpg');
             background-size: cover;
-            background-position: center;
+            background-position: left center;
         }
 
         .card-sub-2 {
-            background-image: url('/static/video_card_3.jpg');
+            background-image: url('/static/video_card_1.jpg');
             background-size: cover;
-            background-position: center;
+            background-position: right center;
         }
 
         .card-content h2 {
-            font-size: 2rem;
+            font-size: 32px;
             margin: 0 0 0.5rem 0;
-            font-weight: 500;
+            font-weight: 400;
+            color: #ffffff;
+            letter-spacing: 0;
         }
 
         .card-content p {
-            font-size: 1rem;
-            opacity: 0.8;
+            font-size: 16px;
+            opacity: 0.92;
             margin: 0 0 1.5rem 0;
             max-width: 80%;
+            color: #ffffff;
         }
 
         .card-action {
@@ -167,13 +206,42 @@
             justify-content: center;
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(5px);
+            color: #ffffff;
+        }
+
+        .card-action .material-symbols-outlined {
+            color: #ffffff;
+        }
+
+        body[data-page="video-studio"] .side-nav {
+            border-color: #d2d2d2;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+        }
+
+        body[data-page="video-studio"] .nav-item,
+        body[data-page="video-studio"] .nav-item .material-symbols-outlined {
+            color: #707070;
+        }
+
+        body[data-page="video-studio"] .nav-item:hover,
+        body[data-page="video-studio"] .nav-item:hover .material-symbols-outlined,
+        body[data-page="video-studio"] .nav-item.active,
+        body[data-page="video-studio"] .nav-item.active .material-symbols-outlined {
+            color: var(--vs-ink);
+        }
+
+        body[data-page="video-studio"] .nav-label {
+            font-family: 'Syne', sans-serif !important;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0;
         }
 
         /* Workspace Styles */
         .is-workspace {
-            display: none;
-            width: 95%;
-            max-width: 2000px;
+            display: flex;
+            width: min(1200px, calc(100vw - 32px));
+            max-width: 1200px;
             margin: 0 auto;
             padding-top: 50px;
             padding-bottom: 100px;
@@ -252,6 +320,456 @@
 
         .is-panel-right::-webkit-scrollbar { display: none; }
 
+        .clip-workspace-shell {
+            display: grid;
+            grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+            gap: 24px;
+            width: 100%;
+            min-height: 760px;
+            padding: 24px;
+            border-radius: 28px;
+            border: 1px solid rgba(20, 20, 20, 0.08);
+            background: linear-gradient(180deg, #ffffff 0%, #f6f1e8 100%);
+            box-shadow: 0 24px 80px rgba(19, 22, 29, 0.08);
+        }
+
+        .clip-surface {
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(17, 17, 17, 0.08);
+            border-radius: 24px;
+            box-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(16px);
+        }
+
+        .clip-form-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            padding: 28px;
+        }
+
+        .clip-output-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            padding: 28px;
+            min-width: 0;
+        }
+
+        .clip-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #6a6a6a;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+
+        .clip-heading {
+            margin: 0;
+            color: #141414;
+            font-size: 2.25rem;
+            line-height: 1;
+            letter-spacing: -0.04em;
+            font-weight: 700;
+        }
+
+        .clip-copy {
+            margin: 0;
+            color: #222222;
+            font-size: 18px;
+            line-height: 1.65;
+        }
+
+        .clip-upload-box {
+            position: relative;
+            display: grid;
+            place-items: center;
+            min-height: 220px;
+            padding: 26px;
+            border-radius: 24px;
+            border: 1.5px dashed rgba(17, 17, 17, 0.16);
+            background: #fafafa;
+            cursor: pointer;
+            transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            text-align: center;
+        }
+
+        .clip-upload-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .clip-upload-preview {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            background: #ffffff;
+            overflow: hidden;
+        }
+
+        .clip-upload-preview img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: contain;
+            background: #ffffff;
+        }
+
+        .clip-upload-box:hover,
+        .clip-upload-box.dragover {
+            border-color: rgba(17, 17, 17, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+        }
+
+        .clip-upload-box .material-symbols-outlined {
+            font-size: 38px;
+            color: #151515;
+        }
+
+        .clip-upload-title {
+            display: block;
+            margin-top: 12px;
+            color: #151515;
+            font-size: 18px;
+            font-weight: 400;
+        }
+
+        .clip-upload-subtitle {
+            display: block;
+            margin-top: 6px;
+            color: #5a5a5a;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .clip-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .clip-section-title {
+            margin: 0;
+            color: #161616;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .clip-helper-note {
+            margin: 0;
+            color: #6c6c6c;
+            font-size: 0.9rem;
+            line-height: 1.55;
+        }
+
+        .clip-source-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
+            gap: 14px;
+        }
+
+        .clip-source-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 20px;
+            border: 1px solid rgba(17, 17, 17, 0.08);
+            background: #f2ede6;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        .clip-source-card img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            background: #eee9e2;
+        }
+
+        .clip-source-card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 12px 12px;
+        }
+
+        .clip-source-name {
+            color: #191919;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .clip-source-badge-light {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(17, 17, 17, 0.06);
+            color: #4d4d4d;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+
+        .clip-remove-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(17, 17, 17, 0.72);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .clip-remove-btn:hover {
+            background: #111;
+        }
+
+        .clip-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .clip-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .clip-field label {
+            color: #343434;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .clip-select,
+        .clip-textarea {
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid rgba(17, 17, 17, 0.12);
+            background: #fffdf9;
+            color: #181818;
+            font: inherit;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+        }
+
+        .clip-select {
+            min-height: 52px;
+            padding: 0 14px;
+        }
+
+        .clip-textarea {
+            min-height: 104px;
+            resize: vertical;
+            padding: 14px 16px;
+            line-height: 1.55;
+        }
+
+        .clip-generate-btn {
+            width: 100%;
+            min-height: 58px;
+            border: 0;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #131313 0%, #3d3428 100%);
+            color: #fff;
+            font: inherit;
+            font-size: 0.96rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+        }
+
+        .clip-generate-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 16px 30px rgba(17, 17, 17, 0.18);
+        }
+
+        .clip-generate-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .clip-status {
+            min-height: 22px;
+            color: #6b5c49;
+            font-size: 0.92rem;
+            line-height: 1.4;
+        }
+
+        .clip-output-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .clip-output-title {
+            margin: 6px 0 0;
+            color: #151515;
+            font-size: 1.35rem;
+            letter-spacing: -0.03em;
+        }
+
+        .clip-output-placeholder {
+            display: grid;
+            place-items: center;
+            flex: 1;
+            min-height: 320px;
+            border-radius: 24px;
+            border: 1px dashed rgba(17, 17, 17, 0.12);
+            background:
+                radial-gradient(circle at top right, rgba(214, 185, 147, 0.18), transparent 38%),
+                linear-gradient(180deg, #fffdf9 0%, #f4eee5 100%);
+            text-align: center;
+            padding: 24px;
+        }
+
+        .clip-placeholder-stack {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+
+        .clip-placeholder-card {
+            width: 120px;
+            aspect-ratio: 4 / 3;
+            border-radius: 18px;
+            border: 1px solid rgba(17, 17, 17, 0.08);
+            background: rgba(255,255,255,0.92);
+            display: grid;
+            place-items: center;
+            color: #bba88c;
+        }
+
+        .clip-placeholder-card .material-symbols-outlined {
+            font-size: 34px;
+        }
+
+        .clip-placeholder-arrow {
+            color: #a28f76;
+            font-size: 28px;
+        }
+
+        .clip-output-placeholder .preview-arrow,
+        .clip-output-placeholder .preview-arrow::before {
+            display: none !important;
+        }
+
+        .clip-placeholder-title {
+            margin: 0 0 8px 0;
+            color: #171717;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+        }
+
+        .clip-placeholder-desc {
+            margin: 0;
+            color: #6f6f6f;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .clip-loading-copy {
+            color: #5e5e5e;
+            font-size: 0.92rem;
+            margin-top: 6px;
+        }
+
+        .clip-results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px;
+            width: 100%;
+        }
+
+        .clip-generated-card {
+            overflow: hidden;
+            border-radius: 22px;
+            background: #fffdf9;
+            border: 1px solid rgba(17, 17, 17, 0.08);
+            box-shadow: 0 14px 40px rgba(15, 23, 42, 0.1);
+            cursor: pointer;
+        }
+
+        .clip-generated-card video {
+            display: block;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            background: #ebe5db;
+        }
+
+        .clip-result-actions-light {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px 16px;
+        }
+
+        .clip-result-label {
+            color: #191919;
+            font-size: 16px;
+            font-weight: 400;
+        }
+
+        .clip-result-link-light {
+            color: #5a5a5a;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 400;
+        }
+
+        .clip-result-link-light:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 1180px) {
+            .clip-workspace-shell {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .clip-workspace-shell {
+                padding: 16px;
+                border-radius: 22px;
+            }
+
+            .clip-form-panel,
+            .clip-output-panel {
+                padding: 20px;
+            }
+
+            .clip-form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .is-section-title {
             font-size: 1.8rem;
             font-weight: 600;
@@ -315,6 +833,128 @@
         }
 
         .is-file-item img { width: 100%; height: 100%; object-fit: cover; }
+
+        .is-file-item .remove-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.68);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 4;
+        }
+
+        .clip-source-badge {
+            position: absolute;
+            left: 8px;
+            bottom: 8px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            color: #fff;
+            font-size: 11px;
+            line-height: 1;
+            z-index: 3;
+        }
+
+        .clip-control-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 0 0 1rem 0;
+        }
+
+        .clip-control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .clip-control-label {
+            color: #bbb;
+            font-size: 0.8rem;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+
+        .clip-control-select {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.16);
+            background: #0f1012;
+            color: #fff;
+            font: inherit;
+        }
+
+        .clip-section-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .clip-section-row .is-section-title {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+
+        .clip-empty-note {
+            color: #777;
+            font-size: 0.92rem;
+            margin: 0 0 1.5rem 0;
+        }
+
+        .clip-refresh-btn {
+            padding: 7px 12px;
+            font-size: 0.8rem;
+        }
+
+        .clip-result-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px 16px;
+        }
+
+        .clip-result-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #fff;
+            text-decoration: none;
+            font-size: 0.82rem;
+        }
+
+        .clip-result-card {
+            cursor: pointer;
+        }
+
+        .clip-result-card video {
+            cursor: pointer;
+        }
+
+        .preview-arrow {
+            font-size: 0;
+            color: transparent;
+        }
+
+        .preview-arrow::before {
+            content: "→";
+            font-size: 28px;
+            color: #666;
+        }
 
         .is-generate-btn {
             width: 100%; padding: 14px 24px; border-radius: 10px;
@@ -447,7 +1087,464 @@
         .modal-content.preview-wide { max-width: 1000px; width: min(95vw, 1000px); }
         .modal-content.preview-wide #modal-msg { margin: 0 0 1.25rem 0; }
         .modal-buttons button { padding: 6px 30px; background: #333; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: #fff; cursor: pointer; }
+
+        /* Workspace 1 final overrides */
+        #workspace-feature-1 .workspace-breadcrumb {
+            padding: 0 0 14px 4px;
+            gap: 10px;
+        }
+
+        #workspace-feature-1 {
+            min-height: 0;
+            height: auto;
+            padding-left: 0;
+            padding-top: 40px;
+            padding-bottom: 56px;
+            margin-bottom: 0;
+            overflow: visible;
+        }
+
+        #workspace-feature-1 .breadcrumb-btn {
+            background: #ffffff;
+            border: 1px solid #b6b6b6;
+            color: #363636;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        #workspace-feature-1 .breadcrumb-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            min-height: auto;
+            border: 1px solid #b6b6b6;
+            background: #ffffff;
+            box-shadow: none;
+            color: #363636;
+        }
+
+        #workspace-feature-1 .breadcrumb-back:hover {
+            background: #ffffff;
+            border-color: #363636;
+        }
+
+        #workspace-feature-1 .breadcrumb-divider,
+        #workspace-feature-1 .breadcrumb-current {
+            color: #707070;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        #workspace-feature-1 .clip-workspace-shell {
+            grid-template-columns: 410px minmax(0, 1fr);
+            gap: 0;
+            height: min(780px, calc(100vh - 180px));
+            min-height: min(780px, calc(100vh - 180px));
+            padding: 0;
+            background: #ffffff;
+            border: 1px solid #d6d6d6;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+            align-items: stretch;
+        }
+
+        #workspace-feature-1 .clip-surface {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #workspace-feature-1 .clip-form-panel,
+        #workspace-feature-1 .clip-output-panel {
+            padding: 28px;
+            gap: 16px;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        #workspace-feature-1 .clip-form-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #workspace-feature-1 .clip-form-top {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #workspace-feature-1 h1 {
+            font-size: 40px;
+            line-height: 1.08;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-1 h2 {
+            font-size: 32px;
+            line-height: 1.12;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-1 h3 {
+            font-size: 24px;
+            line-height: 1.2;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-1 h4 {
+            font-size: 18px;
+            line-height: 1.25;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-1 .clip-eyebrow {
+            color: #a0a0a0;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+            letter-spacing: 0;
+            display: none;
+        }
+
+        #workspace-feature-1 .clip-heading,
+        #workspace-feature-1 .clip-output-title,
+        #workspace-feature-1 .clip-placeholder-title,
+        #workspace-feature-1 .clip-section-title {
+            color: var(--vs-ink);
+        }
+
+        #workspace-feature-1 .clip-heading {
+            font-size: 27px;
+            line-height: 1.12;
+            font-weight: 400;
+        }
+
+        #workspace-feature-1 .clip-output-title,
+        #workspace-feature-1 .clip-section-title {
+            font-size: 24px;
+            line-height: 1.2;
+            font-weight: 400;
+        }
+
+        #workspace-feature-1 .clip-placeholder-title {
+            color: var(--vs-ink);
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 20px;
+            line-height: 1.35;
+            font-weight: 500;
+        }
+
+        #workspace-feature-1 .clip-copy,
+        #workspace-feature-1 .clip-helper-note,
+        #workspace-feature-1 .clip-placeholder-desc,
+        #workspace-feature-1 .clip-loading-copy,
+        #workspace-feature-1 .clip-status,
+        #workspace-feature-1 .clip-upload-subtitle {
+            color: #989898;
+        }
+
+        #workspace-feature-1 .clip-copy {
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        #workspace-feature-1 .clip-helper-note,
+        #workspace-feature-1 .clip-placeholder-desc,
+        #workspace-feature-1 .clip-loading-copy,
+        #workspace-feature-1 .clip-upload-subtitle,
+        #workspace-feature-1 .clip-status {
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        #workspace-feature-1 .clip-upload-box .material-symbols-outlined {
+            color: #7c7c7c;
+        }
+
+        #workspace-feature-1 .clip-upload-title {
+            color: var(--vs-ink);
+        }
+
+        #workspace-feature-1 .clip-upload-title {
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        #workspace-feature-1 .clip-upload-subtitle {
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+        }
+
+        #workspace-feature-1 .clip-upload-browse {
+            color: var(--vs-ink);
+            font-weight: 600;
+        }
+
+        #workspace-feature-1 .clip-upload-preview {
+            border-radius: 10px;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+
+        #workspace-feature-1 .clip-upload-box .breadcrumb-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 3;
+            min-height: unset;
+            height: auto;
+            padding: 3px 6px !important;
+            line-height: 1;
+            font-size: 12px;
+            gap: 0;
+            background: rgba(233, 233, 233, 0.96);
+            border-color: rgba(17, 17, 17, 0.12);
+            color: #6f6f6f;
+        }
+
+        #workspace-feature-1 .clip-surface,
+        #workspace-feature-1 .clip-upload-box,
+        #workspace-feature-1 .clip-source-card,
+        #workspace-feature-1 .clip-generated-card,
+        #workspace-feature-1 .clip-output-placeholder,
+        #workspace-feature-1 .loading-container,
+        #workspace-feature-1 .clip-placeholder-card,
+        #workspace-feature-1 .clip-select,
+        #workspace-feature-1 .clip-textarea,
+        #workspace-feature-1 .clip-generate-btn,
+        #workspace-feature-1 .breadcrumb-btn,
+        #workspace-feature-1 .clip-remove-btn,
+        #workspace-feature-1 .clip-source-badge-light {
+            border-radius: 10px;
+        }
+
+        #workspace-feature-1 .clip-source-grid {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0;
+            min-height: 0;
+            max-height: none;
+            overflow: visible;
+        }
+
+        #workspace-feature-1 .clip-source-card {
+            border: 1px solid #e4e4e4;
+            background: #ffffff;
+            box-shadow: none;
+            min-height: 208px;
+            height: 208px;
+            overflow: hidden;
+        }
+
+        #workspace-feature-1 .clip-source-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #f7f7f7;
+            padding: 12px;
+        }
+
+        #workspace-feature-1 .clip-result-label {
+            color: var(--vs-ink);
+            font-size: 16px;
+        }
+
+        #workspace-feature-1 .clip-field label {
+            color: #707070;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        #workspace-feature-1 .clip-select,
+        #workspace-feature-1 .clip-textarea {
+            border: 1px solid #b6b6b6;
+            background: #ffffff;
+            color: #363636;
+            box-shadow: none;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            font-weight: 400;
+        }
+
+        #workspace-feature-1 .clip-select {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            min-height: 40px;
+            padding: 8px 34px 8px 12px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236a6a6a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: calc(100% - 18px) center;
+            background-size: 12px 8px;
+        }
+
+        #workspace-feature-1 .clip-generate-btn {
+            min-height: 56px;
+            background: var(--vs-ink-strong);
+            color: #ffffff;
+            box-shadow: none;
+            font-size: 16px;
+            font-weight: 400;
+            letter-spacing: 0;
+            border: 1px solid transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+
+        #workspace-feature-1 .clip-generate-btn::before {
+            content: none;
+        }
+
+        #workspace-feature-1 .clip-generate-btn::after {
+            content: none;
+        }
+
+        #workspace-feature-1 .clip-generate-btn:hover:not(:disabled) {
+            background: #414141;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #workspace-feature-1 .clip-generate-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+            color: #ffffff;
+            background: var(--vs-ink-strong);
+            box-shadow: none;
+        }
+
+        #workspace-feature-1 .breadcrumb-btn,
+        #workspace-feature-1 .clip-remove-btn {
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.14), 0 8px 18px rgba(43, 43, 43, 0.08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        #workspace-feature-1 .breadcrumb-btn {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 246, 246, 0.78));
+            border-color: rgba(205, 205, 205, 0.8);
+        }
+
+        #workspace-feature-1 .clip-remove-btn {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        #workspace-feature-1 .loading-container .clip-placeholder-title,
+        #workspace-feature-1 .loading-container .clip-loading-copy {
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+        }
+
+        #workspace-feature-1 .spinner {
+            border: 3px solid #dedede;
+            border-top-color: #111111;
+        }
+
+        #workspace-feature-1 .clip-generated-card video {
+            width: auto;
+            height: auto;
+            max-width: 100%;
+            max-height: calc(100% - 40px);
+            aspect-ratio: auto;
+            object-fit: contain;
+            background: #f0f0f0;
+            margin: 0 auto;
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+        }
+
+        #workspace-feature-1 .clip-result-actions-light {
+            justify-content: flex-end;
+            padding: 0;
+            border-top: 0;
+        }
+
+        #workspace-feature-1 .clip-result-link-light {
+            color: #5f5f5f;
+            font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            font-weight: 400;
+        }
+
+        #workspace-feature-1 .clip-result-link-light:hover {
+            color: #111111;
+        }
+
+        @media (max-width: 1180px) {
+            #workspace-feature-1 {
+                padding-left: 0;
+                height: auto;
+                overflow: visible;
+            }
+
+            #workspace-feature-1 .workspace-breadcrumb {
+                padding-left: 6px;
+            }
+
+            #workspace-feature-1 .clip-workspace-shell {
+                grid-template-columns: 1fr;
+                height: auto;
+                min-height: 0;
+            }
+
+            .is-main-layout,
+            .is-workspace {
+                width: calc(100vw - 24px);
+            }
+        }
+
+        /* Video Studio radius standard: rectangular UI defaults to 10px */
+        body[data-page="video-studio"] .is-card-btn,
+        body[data-page="video-studio"] .is-workspace-card,
+        body[data-page="video-studio"] .is-panel-left,
+        body[data-page="video-studio"] .is-panel-right,
+        body[data-page="video-studio"] .clip-workspace-shell,
+        body[data-page="video-studio"] .clip-surface,
+        body[data-page="video-studio"] .clip-upload-box,
+        body[data-page="video-studio"] .clip-upload-preview,
+        body[data-page="video-studio"] .clip-output-placeholder,
+        body[data-page="video-studio"] .loading-container,
+        body[data-page="video-studio"] .clip-placeholder-card,
+        body[data-page="video-studio"] .clip-generated-card,
+        body[data-page="video-studio"] .clip-generate-btn,
+        body[data-page="video-studio"] .clip-select,
+        body[data-page="video-studio"] .clip-textarea,
+        body[data-page="video-studio"] .clip-control-select,
+        body[data-page="video-studio"] .result-card,
+        body[data-page="video-studio"] .is-upload-box,
+        body[data-page="video-studio"] .is-file-item,
+        body[data-page="video-studio"] .is-instruction-box,
+        body[data-page="video-studio"] .timeline-properties,
+        body[data-page="video-studio"] .vs-select-small,
+        body[data-page="video-studio"] .vs-input-small,
+        body[data-page="video-studio"] .modal-content,
+        body[data-page="video-studio"] .modal-buttons button,
+        body[data-page="video-studio"] .breadcrumb-btn {
+            border-radius: 10px;
+        }
+
+        body[data-page="video-studio"] .card-image,
+        body[data-page="video-studio"] .image-overlay,
+        body[data-page="video-studio"] .clip-upload-preview img,
+        body[data-page="video-studio"] .clip-generated-card video,
+        body[data-page="video-studio"] .result-card video,
+        body[data-page="video-studio"] .is-file-item img {
+            border-radius: 10px;
+        }
+
+        #workspace-feature-1 .clip-upload-preview img {
+            background: transparent;
+        }
     </style>
+    <link rel="stylesheet" href="/static/css/studio-unified.css?v=20260415_1341">
 </head>
 
 <body data-page="video-studio">
@@ -498,7 +1595,7 @@
     <!-- Workspace 1: Create Video Clips -->
     <div id="workspace-feature-1" class="is-workspace hidden">
         <div class="workspace-breadcrumb">
-            <button id="back-to-menu-1" class="breadcrumb-btn">
+            <button id="back-to-menu-1" class="breadcrumb-btn breadcrumb-back" type="button">
                 <span class="material-symbols-outlined">arrow_back</span> Back
             </button>
             <span class="breadcrumb-divider">/</span>
@@ -507,61 +1604,98 @@
             <span class="breadcrumb-current">Create Clips</span>
         </div>
 
-        <div class="is-workspace-card">
+        <div class="clip-workspace-shell">
 
-            <div class="is-panel-left">
-                <h2 class="is-section-title">Create Video Clips</h2>
-                <p class="is-section-desc">
-                    Create a perfect video clips from room images with AI precision and accuracy.
-                </p>
-
-                <div class="is-upload-box" id="clip-ref-drop-zone">
-                    <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
-                    <span class="is-upload-label">Upload Source Photos *</span>
-                    <span class="is-upload-sub">png, jpg, jpeg & webp (up to 30mb)</span>
-                    <input type="file" id="clip-ref-input" accept="image/*" multiple class="hidden">
+            <section class="clip-form-panel clip-surface">
+                <div class="clip-form-top">
+                    <span class="clip-eyebrow">Step 1</span>
+                    <h2 class="clip-heading">Create Video Clips</h2>
+                    <p class="clip-copy">Upload source image and turn it into a short video clip.</p>
                 </div>
 
-                <div id="clip-ref-preview-container" class="is-file-list"></div>
-
-                <button id="clip-ref-remove-all" class="clear-all-btn hidden">
-                    Clear All Files
-                </button>
-
-                <button id="clip-generate-btn" class="is-generate-btn" disabled>
-                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
-                    GENERATE CLIPS
-                </button>
-                <div id="statusSource-1" class="vs-status-text" style="margin-top: 10px;"></div>
-            </div>
-
-            <div class="is-panel-right">
-
-                <div id="clip-placeholder-text" class="is-placeholder-modern">
-                    <div class="placeholder-preview-box">
-                        <div class="preview-image-slot">
-                            <span class="material-symbols-outlined">image</span>
+                <div class="clip-upload-stage">
+                    <div id="clip-ref-drop-zone" class="clip-upload-box">
+                        <button id="clip-ref-remove-all" class="breadcrumb-btn hidden" type="button">Clear</button>
+                        <div id="clip-upload-empty-state" class="clip-upload-empty">
+                            <span class="material-symbols-outlined">cloud_upload</span>
+                            <span class="clip-upload-title">Upload Image</span>
+                            <span class="clip-upload-subtitle">Drag &amp; Drop your room photo here or <span class="clip-upload-browse">Browse</span></span>
+                            <span class="clip-upload-subtitle">png, jpg, jpeg &amp; webp (up to 25mb)</span>
                         </div>
-                        <span class="preview-arrow">→</span>
-                        <div class="preview-image-slot">
-                            <span class="material-symbols-outlined">image</span>
+                        <div id="clip-upload-preview" class="clip-upload-preview hidden"></div>
+                        <input type="file" id="clip-ref-input" accept=".png,.jpg,.jpeg,.webp" class="hidden">
+                    </div>
+                </div>
+
+                <div class="clip-form-bottom">
+                    <div class="clip-form-grid">
+                        <div class="clip-field">
+                            <label for="clip-motion">Motion</label>
+                            <select id="clip-motion" class="clip-select">
+                                <option value="static">Static</option>
+                                <option value="orbit_r_slow">Orbit Right Slow</option>
+                                <option value="orbit_l_slow">Orbit Left Slow</option>
+                                <option value="orbit_r_fast">Orbit Right Fast</option>
+                                <option value="orbit_l_fast">Orbit Left Fast</option>
+                                <option value="zoom_in_slow">Zoom In Slow</option>
+                                <option value="zoom_out_slow">Zoom Out Slow</option>
+                                <option value="zoom_in_fast">Zoom In Fast</option>
+                                <option value="zoom_out_fast">Zoom Out Fast</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div class="clip-field">
+                            <label for="clip-effect">Effect</label>
+                            <select id="clip-effect" class="clip-select">
+                                <option value="none">No effect</option>
+                                <option value="sunlight">Sunlight shift</option>
+                                <option value="lights_on">Lights on</option>
+                                <option value="blinds">Blinds motion</option>
+                                <option value="plants">Plant motion</option>
+                                <option value="door_open">Door open</option>
+                                <option value="custom">Custom</option>
+                            </select>
                         </div>
                     </div>
-                    <h3 class="placeholder-title">Ready to Create Clips</h3>
-                    <p class="placeholder-desc">Upload Source Photos to Create Video Clips</p>
+
+                    <div id="clip-custom-motion-wrap" class="clip-field hidden">
+                        <label for="clip-custom-motion">Custom Motion Prompt</label>
+                        <textarea id="clip-custom-motion" class="clip-textarea" placeholder="Describe the camera movement you want. Example: slow cinematic orbit around the sofa, smooth movement, no shake."></textarea>
+                    </div>
+
+                    <div id="clip-custom-effect-wrap" class="clip-field hidden">
+                        <label for="clip-custom-effect">Custom Effect Prompt</label>
+                        <textarea id="clip-custom-effect" class="clip-textarea" placeholder="Describe the environmental effect you want. Example: soft curtains moving with warm morning sunlight."></textarea>
+                    </div>
+
+                    <button id="clip-generate-btn" class="clip-generate-btn" disabled>Generate Clips</button>
+                    <div id="statusSource-1" class="clip-status"></div>
+                </div>
+            </section>
+
+            <section class="clip-output-panel clip-surface">
+
+                <div id="clip-placeholder-text" class="clip-output-placeholder">
+                    <div class="clip-placeholder-stack">
+                        <div class="clip-placeholder-card"><span class="material-symbols-outlined">image</span></div>
+                        <div class="clip-placeholder-arrow"><span class="material-symbols-outlined">arrow_forward</span></div>
+                        <div class="clip-placeholder-card"><span class="material-symbols-outlined">movie</span></div>
+                    </div>
+                    <h3 class="clip-placeholder-title">Preview</h3>
+                    <p class="clip-placeholder-desc">Upload one image, choose motion and effect, then generate its clip directly.</p>
                 </div>
 
                 <div id="clip-loading" class="loading-container hidden">
                     <div class="spinner"></div>
-                    <p style="color: #ccc; font-size: 1.1rem;">Generating video clips...</p>
-                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
+                    <h3 class="clip-placeholder-title" style="margin-bottom: 0;">Generating video clips...</h3>
+                    <p class="clip-loading-copy">The output card will appear here when the clip finishes.</p>
                 </div>
 
                 <div id="clip-result-container" class="result-container hidden">
-                    <div id="clip-gen-grid" class="result-grid"></div>
+                    <div id="clip-gen-grid" class="clip-results-grid"></div>
                 </div>
 
-            </div>
+            </section>
         </div>
     </div>
 
@@ -761,7 +1895,7 @@
             <span class="nav-label">VIDEO STUDIO</span>
         </a>
     </nav>
-    <script src="/static/js/video_studio.js?v=20260129_1"></script>
+    <script src="/static/js/video_studio.js?v=20260415_1341"></script>
     <script src="/static/js/version_check.js?v=20260206_1"></script>
 </body>
 

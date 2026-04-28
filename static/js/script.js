@@ -85,6 +85,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const roomGrid = document.getElementById('room-grid');
     const styleGrid = document.getElementById('style-grid');
     const variantGrid = document.getElementById('variant-grid');
+    const furnitureItemsContainer = document.getElementById('furniture-items-container');
+    const furnitureItemTemplate = document.getElementById('furniture-item-template');
+    const addFurnitureItemBtn = document.getElementById('add-furniture-item-btn');
 
     const moodboardUploadContainer = document.getElementById('moodboard-upload-container');
     const moodboardDropZone = document.getElementById('moodboard-drop-zone');
@@ -191,15 +194,43 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentLightboxIndex = 0;
 
     const THEME_COLOR = "#ffffff";
+    const MAX_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024;
+    const ALLOWED_IMAGE_UPLOAD_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
+    const INITIAL_FURNITURE_CARD_COUNT = 5;
+    const FURNITURE_BATCH_SIZE = 5;
     let persistedSliderValue = 50;
 
     let selectedFile = null;
     let selectedRoom = null;
     let selectedStyle = null;
     let selectedVariant = null;
-    let selectedMoodboardFile = null;
+    let customMoodboardFile = null;
     let currentDetailSourceUrl = null;
     let currentMoodboardUrl = null;
+    let furnitureClientCounter = 0;
+    let roomSelectionRequestToken = 0;
+    let styleSelectionRequestToken = 0;
+
+    function validateHomeImageUpload(file, contextLabel) {
+        if (!file) return false;
+
+        const fileName = String(file.name || '').trim();
+        const extension = fileName.includes('.')
+            ? fileName.split('.').pop().toLowerCase()
+            : '';
+
+        if (!ALLOWED_IMAGE_UPLOAD_EXTENSIONS.has(extension)) {
+            showCustomAlert("Error", `${contextLabel} must be a PNG, JPG, JPEG, or WEBP image.`);
+            return false;
+        }
+
+        if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+            showCustomAlert("Error", `${contextLabel} must be 25MB or smaller.`);
+            return false;
+        }
+
+        return true;
+    }
 
     // --- 데이터 로드 ---
     fetch('/room-types')
@@ -218,10 +249,12 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(err => console.error(err));
 
     function selectRoom(room, btn) {
+        const requestToken = ++roomSelectionRequestToken;
+        styleSelectionRequestToken += 1;
         selectedRoom = room;
         selectedStyle = null;
         selectedVariant = null;
-        selectedMoodboardFile = null;
+        customMoodboardFile = null;
         currentMoodboardUrl = null;
 
         if (moodboardPreviewContainer) moodboardPreviewContainer.classList.add('hidden');
@@ -245,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch(`/styles/${room}`)
             .then(res => res.json())
             .then(styles => {
+                if (requestToken !== roomSelectionRequestToken) return;
                 styleGrid.innerHTML = '';
                 styles.forEach(style => {
                     if (style === 'Customize') return;
@@ -261,17 +295,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function selectStyle(style, btn) {
+        const requestToken = ++styleSelectionRequestToken;
         selectedStyle = style;
         selectedVariant = null;
         updateActiveButton(styleGrid, btn);
 
         if (style === 'Customize') {
             variantGrid.classList.add('hidden');
-            moodboardUploadContainer.classList.remove('hidden');
+            if (moodboardUploadContainer) moodboardUploadContainer.classList.remove('hidden');
         } else {
             variantGrid.classList.remove('hidden');
-            moodboardUploadContainer.classList.add('hidden');
-            selectedMoodboardFile = null;
+            if (moodboardUploadContainer) moodboardUploadContainer.classList.add('hidden');
+            customMoodboardFile = null;
         }
 
         variantGrid.innerHTML = '';
@@ -279,10 +314,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (style !== 'Customize') {
             try {
                 const res = await fetch(`/api/thumbnails/${selectedRoom}/${style}`);
+                if (requestToken !== styleSelectionRequestToken) return;
                 if (!res.ok) throw new Error("Thumbnail list fetch failed");
 
                 // [변경] 서버에서 {index, file} 형태의 리스트를 받음
                 const validItems = await res.json();
+                if (requestToken !== styleSelectionRequestToken) return;
                 const thumbUrls = validItems.map(item => `/static/thumbnails/${item.file}`);
 
                 validItems.forEach((item, idx) => {
@@ -344,6 +381,326 @@ document.addEventListener('DOMContentLoaded', () => {
         activeBtn.classList.add('active');
     }
 
+    function generateFurnitureClientId() {
+        furnitureClientCounter += 1;
+        return `item_${furnitureClientCounter}`;
+    }
+
+    function getFurnitureCards() {
+        if (!furnitureItemsContainer) return [];
+        return Array.from(furnitureItemsContainer.querySelectorAll('.furniture-item-card'));
+    }
+
+    function getFurnitureFields(card) {
+        return {
+            card,
+            heading: card.querySelector('.furniture-item-card__header h4'),
+            eyebrow: card.querySelector('.furniture-item-card__eyebrow'),
+            removeBtn: card.querySelector('.furniture-item-remove-btn'),
+            dropZone: card.querySelector('.furniture-item-drop-zone'),
+            input: card.querySelector('.furniture-item-input'),
+            preview: card.querySelector('.furniture-item-preview'),
+            previewImage: card.querySelector('.furniture-item-preview-image'),
+            previewRemove: card.querySelector('.furniture-item-preview-remove'),
+            nameInput: card.querySelector('.furniture-item-name'),
+            categorySelect: card.querySelector('.furniture-category-select'),
+            qtyInput: card.querySelector('.furniture-item-qty'),
+            widthInput: card.querySelector('.furniture-item-width'),
+            depthInput: card.querySelector('.furniture-item-depth'),
+            heightInput: card.querySelector('.furniture-item-height'),
+        };
+    }
+
+    function setFurnitureCardNumber(card, index) {
+        const fields = getFurnitureFields(card);
+        if (fields.heading) fields.heading.textContent = `Item ${index}`;
+        if (fields.eyebrow) fields.eyebrow.textContent = `Furniture Item ${index}`;
+        card.dataset.cardIndex = String(index);
+    }
+
+    function resetFurnitureCardImage(card) {
+        const fields = getFurnitureFields(card);
+        card._previewToken = (card._previewToken || 0) + 1;
+        card._itemFile = null;
+        card.dataset.hasImage = 'false';
+        if (fields.input) fields.input.value = '';
+        if (fields.previewImage) fields.previewImage.src = '';
+        if (fields.preview) fields.preview.classList.add('hidden');
+        if (fields.dropZone) fields.dropZone.classList.remove('hidden');
+        checkReady();
+    }
+
+    function applyFurnitureCardImage(card, file) {
+        if (!file || !file.type || !file.type.startsWith('image/')) {
+            showCustomAlert("Error", "이미지 파일만 가능합니다.");
+            return;
+        }
+
+        const fields = getFurnitureFields(card);
+        const previewToken = (card._previewToken || 0) + 1;
+        card._previewToken = previewToken;
+        card._itemFile = file;
+        card.dataset.hasImage = 'true';
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            if (card._previewToken !== previewToken || card._itemFile !== file) {
+                return;
+            }
+            if (fields.previewImage) fields.previewImage.src = e.target.result;
+            if (fields.preview) fields.preview.classList.remove('hidden');
+            if (fields.dropZone) fields.dropZone.classList.add('hidden');
+            checkReady();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function isFurnitureCardComplete(card) {
+        const fields = getFurnitureFields(card);
+        const qty = Number(fields.qtyInput?.value);
+        const width = Number(fields.widthInput?.value);
+        const depth = Number(fields.depthInput?.value);
+        const height = Number(fields.heightInput?.value);
+
+        return !!card._itemFile &&
+            !!fields.categorySelect?.value &&
+            Number.isInteger(qty) && qty >= 1 &&
+            Number.isInteger(width) && width > 0 &&
+            Number.isInteger(depth) && depth > 0 &&
+            Number.isInteger(height) && height > 0;
+    }
+
+    function hasCompleteFurnitureItems() {
+        const cards = getFurnitureCards();
+        return cards.length > 0 && cards.every(isFurnitureCardComplete);
+    }
+
+    function getFurnitureValidationError() {
+        const cards = getFurnitureCards();
+        if (!cards.length) {
+            return {
+                title: "Missing Furniture Items",
+                message: "Add at least one furniture item before rendering.",
+            };
+        }
+
+        const missingImages = [];
+        const missingCategories = [];
+        const invalidQuantities = [];
+        const missingDimensions = [];
+
+        cards.forEach((card, index) => {
+            const fields = getFurnitureFields(card);
+            const itemLabel = `Item ${index + 1}`;
+            const qty = Number(fields.qtyInput?.value);
+            const width = Number(fields.widthInput?.value);
+            const depth = Number(fields.depthInput?.value);
+            const height = Number(fields.heightInput?.value);
+
+            if (!card._itemFile) {
+                missingImages.push(itemLabel);
+            }
+            if (!fields.categorySelect?.value) {
+                missingCategories.push(itemLabel);
+            }
+            if (!Number.isInteger(qty) || qty < 1) {
+                invalidQuantities.push(itemLabel);
+            }
+            if (
+                !Number.isInteger(width) || width <= 0 ||
+                !Number.isInteger(depth) || depth <= 0 ||
+                !Number.isInteger(height) || height <= 0
+            ) {
+                missingDimensions.push(`Item ${index + 1}`);
+            }
+        });
+
+        if (missingImages.length) {
+            return {
+                title: "Missing Item Images",
+                message: `Upload reference images for ${missingImages.join(', ')}.`,
+            };
+        }
+
+        if (missingCategories.length) {
+            return {
+                title: "Missing Categories",
+                message: `Select a category for ${missingCategories.join(', ')}.`,
+            };
+        }
+
+        if (invalidQuantities.length) {
+            return {
+                title: "Invalid Quantity",
+                message: `Enter a quantity of 1 or more for ${invalidQuantities.join(', ')}.`,
+            };
+        }
+
+        if (missingDimensions.length) {
+            return {
+                title: "Missing Dimensions",
+                message: `Enter width, depth, and height for ${missingDimensions.join(', ')}.`,
+            };
+        }
+
+        return null;
+    }
+
+    function collectFurnitureItems() {
+        return getFurnitureCards()
+            .filter(isFurnitureCardComplete)
+            .map((card) => {
+                const fields = getFurnitureFields(card);
+                const qty = Number(fields.qtyInput.value);
+                const width = Number(fields.widthInput.value);
+                const depth = Number(fields.depthInput.value);
+                const height = Number(fields.heightInput.value);
+                const name = fields.nameInput?.value.trim();
+
+                return {
+                    client_id: card.dataset.clientId || generateFurnitureClientId(),
+                    name: name || undefined,
+                    category: fields.categorySelect.value,
+                    qty,
+                    dims_mm: {
+                        width_mm: width,
+                        depth_mm: depth,
+                        height_mm: height,
+                    },
+                    file: card._itemFile,
+                };
+            });
+    }
+
+    function renumberFurnitureItems() {
+        getFurnitureCards().forEach((card, index) => {
+            if (!card.dataset.clientId) {
+                card.dataset.clientId = generateFurnitureClientId();
+            }
+            setFurnitureCardNumber(card, index + 1);
+        });
+    }
+
+    function appendFurnitureItemCards(count) {
+        if (!furnitureItemsContainer || !furnitureItemTemplate) return;
+
+        for (let i = 0; i < count; i += 1) {
+            const fragment = furnitureItemTemplate.content.cloneNode(true);
+            const card = fragment.querySelector('.furniture-item-card');
+            if (!card) continue;
+            furnitureItemsContainer.appendChild(fragment);
+            ensureFurnitureItemWiring(card);
+        }
+    }
+
+    function ensureFurnitureItemWiring(card) {
+        if (!card || card.dataset.furnitureBound === 'true') return;
+        card.dataset.furnitureBound = 'true';
+        if (!card.dataset.clientId) {
+            card.dataset.clientId = generateFurnitureClientId();
+        }
+
+        const fields = getFurnitureFields(card);
+        const syncAndValidate = () => checkReady();
+
+        if (fields.categorySelect && fields.categorySelect.dataset.categoryInitialized !== 'true') {
+            fields.categorySelect.selectedIndex = -1;
+            fields.categorySelect.dataset.categoryInitialized = 'true';
+        }
+
+        fields.input?.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length) {
+                if (validateHomeImageUpload(e.target.files[0], "Furniture item reference")) {
+                    applyFurnitureCardImage(card, e.target.files[0]);
+                }
+            }
+        });
+
+        fields.previewRemove?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            resetFurnitureCardImage(card);
+        });
+
+        fields.removeBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const cards = getFurnitureCards();
+            if (cards.length <= INITIAL_FURNITURE_CARD_COUNT) {
+                card.querySelectorAll('input, select').forEach((field) => {
+                    if (field.type === 'file') {
+                        field.value = '';
+                    } else if (field.tagName === 'SELECT') {
+                        field.selectedIndex = -1;
+                    } else if (field.type === 'number') {
+                        field.value = field.classList.contains('furniture-item-qty') ? '1' : '';
+                    } else {
+                        field.value = '';
+                    }
+                });
+                resetFurnitureCardImage(card);
+                renumberFurnitureItems();
+                syncAndValidate();
+                return;
+            }
+
+            card.remove();
+            renumberFurnitureItems();
+            syncAndValidate();
+        });
+
+        fields.dropZone?.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fields.dropZone.classList.add('is-dragover');
+        });
+
+        fields.dropZone?.addEventListener('dragleave', () => {
+            fields.dropZone.classList.remove('is-dragover');
+        });
+
+        fields.dropZone?.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fields.dropZone.classList.remove('is-dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files.length) {
+                if (validateHomeImageUpload(e.dataTransfer.files[0], "Furniture item reference")) {
+                    applyFurnitureCardImage(card, e.dataTransfer.files[0]);
+                }
+            }
+        });
+
+        [
+            fields.nameInput,
+            fields.categorySelect,
+            fields.qtyInput,
+            fields.widthInput,
+            fields.depthInput,
+            fields.heightInput,
+        ].forEach((field) => field?.addEventListener('input', syncAndValidate));
+
+        fields.categorySelect?.addEventListener('change', syncAndValidate);
+        fields.qtyInput?.addEventListener('change', syncAndValidate);
+        fields.widthInput?.addEventListener('change', syncAndValidate);
+        fields.depthInput?.addEventListener('change', syncAndValidate);
+        fields.heightInput?.addEventListener('change', syncAndValidate);
+    }
+
+    function initializeFurnitureItems() {
+        if (!furnitureItemsContainer) return;
+        getFurnitureCards().forEach((card) => ensureFurnitureItemWiring(card));
+        while (getFurnitureCards().length < INITIAL_FURNITURE_CARD_COUNT) {
+            appendFurnitureItemCards(1);
+        }
+        renumberFurnitureItems();
+        addFurnitureItemBtn?.addEventListener('click', () => {
+            appendFurnitureItemCards(FURNITURE_BATCH_SIZE);
+            renumberFurnitureItems();
+            checkReady();
+        });
+    }
+
+    initializeFurnitureItems();
+
     // --- 파일 처리 ---
     if (dropZone) {
         dropZone.addEventListener('click', () => fileInput.click());
@@ -351,9 +708,21 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.addEventListener('dragleave', () => dropZone.style.borderColor = '#ccc');
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault(); dropZone.style.borderColor = '#ccc';
-            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files.length) {
+                const file = e.dataTransfer.files[0];
+                if (validateHomeImageUpload(file, "Main room upload")) {
+                    handleFile(file);
+                }
+            }
         });
-        fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                const file = e.target.files[0];
+                if (validateHomeImageUpload(file, "Main room upload")) {
+                    handleFile(file);
+                }
+            }
+        });
     }
 
     function handleFile(file) {
@@ -383,14 +752,26 @@ document.addEventListener('DOMContentLoaded', () => {
         moodboardDropZone.addEventListener('dragleave', () => moodboardDropZone.style.borderColor = '#ccc');
         moodboardDropZone.addEventListener('drop', (e) => {
             e.preventDefault(); moodboardDropZone.style.borderColor = '#ccc';
-            if (e.dataTransfer.files.length) handleMoodboardFile(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files.length) {
+                const file = e.dataTransfer.files[0];
+                if (validateHomeImageUpload(file, "Moodboard upload")) {
+                    handleMoodboardFile(file);
+                }
+            }
         });
-        moodboardInput.addEventListener('change', (e) => { if (e.target.files.length) handleMoodboardFile(e.target.files[0]); });
+        moodboardInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                const file = e.target.files[0];
+                if (validateHomeImageUpload(file, "Moodboard upload")) {
+                    handleMoodboardFile(file);
+                }
+            }
+        });
     }
 
     function handleMoodboardFile(file) {
         if (!file.type.startsWith('image/')) { showCustomAlert("Error", "이미지 파일만 가능합니다."); return; }
-        selectedMoodboardFile = file;
+        customMoodboardFile = file;
         const reader = new FileReader();
         reader.onload = (e) => {
             moodboardPreview.src = e.target.result;
@@ -403,7 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (removeMoodboardBtn) {
         removeMoodboardBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); selectedMoodboardFile = null; moodboardInput.value = '';
+            e.stopPropagation(); customMoodboardFile = null; moodboardInput.value = '';
             moodboardPreviewContainer.classList.add('hidden'); moodboardDropZone.classList.remove('hidden'); checkReady();
         });
     }
@@ -789,16 +1170,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function checkReady() {
         if (!renderBtn) return;
-        let ready = false;
-        if (selectedFile && selectedRoom) {
-            if (selectedRoom === 'Customize') {
-                ready = !!selectedMoodboardFile;
-            } else if (selectedStyle) {
-                if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
-                else ready = !!selectedVariant;
-            }
-        }
-        renderBtn.disabled = !ready;
+        const hasBaseInputs = !!selectedFile && !!selectedRoom;
+        const needsVariant = selectedRoom !== 'Customize' && selectedStyle !== 'Customize';
+        const hasVariant = !needsVariant || !!selectedVariant;
+        const hasFurnitureItems = getFurnitureCards().length > 0;
+        renderBtn.disabled = !(hasBaseInputs && hasVariant && hasFurnitureItems);
     }
     // [추가] script.js: 메인 렌더링 로직(renderBtn) 근처에 추가
 
@@ -823,11 +1199,21 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             directUploadZone.style.borderColor = '#444';
             directUploadZone.style.backgroundColor = '';
-            if (e.dataTransfer.files.length) handleDirectUpload(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files.length) {
+                const file = e.dataTransfer.files[0];
+                if (validateHomeImageUpload(file, "Main cut upload")) {
+                    handleDirectUpload(file);
+                }
+            }
         });
 
         directUploadInput.addEventListener('change', (e) => {
-            if (e.target.files.length) handleDirectUpload(e.target.files[0]);
+            if (e.target.files.length) {
+                const file = e.target.files[0];
+                if (validateHomeImageUpload(file, "Main cut upload")) {
+                    handleDirectUpload(file);
+                }
+            }
         });
     }
 
@@ -892,16 +1278,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 메인 렌더링 ---
     if (renderBtn) {
         renderBtn.addEventListener('click', async () => {
-            let ready = false;
-            if (selectedFile && selectedRoom) {
-                if (selectedRoom === 'Customize') {
-                    ready = !!selectedMoodboardFile;
-                } else if (selectedStyle) {
-                    if (selectedStyle === 'Customize') ready = !!selectedMoodboardFile;
-                    else ready = !!selectedVariant;
-                }
-            }
+            const ready = !!selectedFile &&
+                !!selectedRoom &&
+                (selectedRoom === 'Customize' || selectedStyle === 'Customize' || !!selectedVariant) &&
+                getFurnitureCards().length > 0;
             if (!ready) return;
+
+            const furnitureValidationError = getFurnitureValidationError();
+            if (furnitureValidationError) {
+                if (furnitureValidationError.title === "Missing Dimensions") {
+                    showCustomAlert("Missing Dimensions", furnitureValidationError.message);
+                } else {
+                    showCustomAlert(furnitureValidationError.title, furnitureValidationError.message);
+                }
+                return;
+            }
 
             renderBtn.disabled = true;
             loadingOverlay.classList.remove('hidden');
@@ -926,7 +1317,11 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('room', selectedRoom);
             formData.append('style', selectedStyle);
             formData.append('variant', selectedVariant || "1");
-            if (selectedMoodboardFile) formData.append('moodboard', selectedMoodboardFile);
+            const furnitureItems = collectFurnitureItems();
+            formData.append('items_json', JSON.stringify(furnitureItems.map(({ file, ...item }) => item)));
+            furnitureItems.forEach(({ file }) => {
+                formData.append('item_images', file, file.name || 'item-image.jpg');
+            });
 
             // [추가] 공간 수치 및 배치 지시사항 수집
             const dimensions = document.getElementById('room-dimensions')?.value || "";

@@ -34,6 +34,22 @@ class FakeJob:
         self.id = job_id
 
 
+class CapturedJob:
+    def __init__(self, job_id: str, captured: dict):
+        self.id = job_id
+        self.enqueued_at = None
+        self.started_at = None
+        self.ended_at = None
+        self.result = captured.get("result")
+        self.exc_info = captured.get("error")
+        self.is_finished = captured.get("status") == "finished"
+        self.is_failed = captured.get("status") == "failed"
+        self._status = captured.get("status") or "queued"
+
+    def get_status(self):
+        return self._status
+
+
 def _assert(condition: bool, message: str):
     if not condition:
         raise ValidationError(message)
@@ -66,6 +82,16 @@ def _make_sync_enqueue(fake_results: dict):
         return FakeJob(job_id), None
 
     return _sync_enqueue
+
+
+def _make_sync_fetch(fake_results: dict):
+    def _sync_fetch(job_id: str):
+        captured = fake_results.get(job_id)
+        if captured is None:
+            return None
+        return CapturedJob(job_id, captured)
+
+    return _sync_fetch
 
 
 def _queue_job_and_capture(client: TestClient, fake_results: dict, method: str, path: str, **kwargs) -> tuple[dict, dict]:
@@ -113,8 +139,10 @@ def main_validation():
 
     fake_results = {}
     original_enqueue = main._enqueue_job
+    original_fetch = main._fetch_job
     original_redis_url = main.REDIS_URL
     main._enqueue_job = _make_sync_enqueue(fake_results)
+    main._fetch_job = _make_sync_fetch(fake_results)
     main.REDIS_URL = "sync-validation"
 
     report = {
@@ -133,7 +161,7 @@ def main_validation():
     try:
         client = TestClient(main.app)
 
-        with open(room_photo, "rb") as room_fp, open(customize_moodboard, "rb") as mood_fp:
+        with open(room_photo, "rb") as room_fp, open(preset_product_1, "rb") as item1_fp, open(preset_product_2, "rb") as item2_fp:
             internal_main_response, internal_main_job = _queue_job_and_capture(
                 client,
                 fake_results,
@@ -143,14 +171,32 @@ def main_validation():
                     "room": "livingroom",
                     "style": "Customize",
                     "variant": "1",
+                    "items_json": json.dumps(
+                        [
+                            {
+                                "client_id": "internal-item-1",
+                                "name": "Accent Chair",
+                                "category": "chair",
+                                "qty": 1,
+                                "dims_mm": {"width_mm": 600, "depth_mm": 660, "height_mm": 660},
+                            },
+                            {
+                                "client_id": "internal-item-2",
+                                "name": "Accent Sofa",
+                                "category": "sofa",
+                                "qty": 1,
+                                "dims_mm": {"width_mm": 1800, "depth_mm": 900, "height_mm": 780},
+                            },
+                        ]
+                    ),
                     "dimensions": "",
-                    "placement": "Preserve architecture and use the provided customized moodboard.",
-                    "audience": "internal",
+                    "placement": "Preserve architecture and place the uploaded items naturally.",
                 },
-                files={
-                    "file": ("room_photo.png", room_fp, "image/png"),
-                    "moodboard": ("customize_moodboard.png", mood_fp, "image/png"),
-                },
+                files=[
+                    ("file", ("room_photo.png", room_fp, "image/png")),
+                    ("item_images", ("preset_product_1.png", item1_fp, "image/png")),
+                    ("item_images", ("preset_product_2.png", item2_fp, "image/png")),
+                ],
             )
 
         internal_main_result = internal_main_job.get("result") or {}
@@ -521,10 +567,44 @@ def main_validation():
             "volume_ranking_count": len(cart_volume_ranking),
         }
 
+        original_create_kling = main._freepik_kling_create_task
+        original_poll_kling = main._freepik_kling_poll
+        try:
+            main._freepik_kling_create_task = lambda image_b64, prompt, negative_prompt, duration, cfg_scale: "external-video-task"
+            main._freepik_kling_poll = (
+                lambda task_id, *, clip_index, total_clips, update_job_status, status_callback=None, timeout_sec=600: source_results[0]
+            )
+            external_video_response, external_video_job = _queue_job_and_capture(
+                client,
+                fake_results,
+                "POST",
+                "/api/external/render/video",
+                headers=external_headers,
+                json={
+                    "render_job_id": external_cart_response.get("job_id"),
+                    "clip_count": 4,
+                },
+            )
+            external_video_result = external_video_job.get("result") or {}
+            external_clip_urls = external_video_result.get("clip_urls") or []
+            _assert(external_video_result.get("video_url"), "External video render missing video_url")
+            _assert(external_clip_urls, "External video render missing clip_urls")
+            report["results"]["external_video"] = {
+                "enqueue_response": external_video_response,
+                "video_url": external_video_result.get("video_url"),
+                "clip_count": external_video_result.get("clip_count"),
+                "first_clip_url": external_clip_urls[0],
+                "render_job_id": external_video_result.get("render_job_id"),
+            }
+        finally:
+            main._freepik_kling_create_task = original_create_kling
+            main._freepik_kling_poll = original_poll_kling
+
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
     finally:
         main._enqueue_job = original_enqueue
+        main._fetch_job = original_fetch
         main.REDIS_URL = original_redis_url
 
 

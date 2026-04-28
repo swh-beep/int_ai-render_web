@@ -2,6 +2,37 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
+def _noop_explicit_room_dims_contract(*args, **kwargs):
+    return None
+
+
+def _noop_estimate_room_dims_contract(*args, **kwargs):
+    return None
+
+
+def _noop_scene_contract(*args, **kwargs):
+    return {}
+
+
+def _noop_product_identity_bundle(items, *args, **kwargs):
+    rows = list(items or [])
+    return rows, [dict((row or {}).get("product_identity") or {}) for row in rows if isinstance(row, dict)]
+
+
+def _noop_placement_plan(*, analyzed_items=None, **kwargs):
+    rows = list(analyzed_items or [])
+    return {}, rows
+
+
+def _noop_geometry_contract(*args, **kwargs):
+    return {}
+
+
+def _noop_archetype_strategies(items, *args, **kwargs):
+    rows = list(items or [])
+    return rows, [dict((row or {}).get("archetype_strategy") or {}) for row in rows if isinstance(row, dict)]
+
+
 @dataclass
 class RenderWorkflowRequest:
     file: Any
@@ -29,6 +60,7 @@ class RenderWorkflowRuntime:
     use_s3_moodboard: bool
     max_concurrency_analysis: int
     cart_max_analysis_workers: int
+    total_timeout_limit_sec: float
 
 
 @dataclass
@@ -56,18 +88,25 @@ class RenderWorkflowAnalysisServices:
     build_furniture_specs_json: Callable[[list], dict]
     create_scale_guide_overlay_with_model: Callable[..., str | None]
     match_aspect_to_target: Callable[[str, str], str | None]
+    build_explicit_room_dims_contract: Callable[..., Any] = _noop_explicit_room_dims_contract
+    estimate_room_dims_contract: Callable[..., Any] = _noop_estimate_room_dims_contract
+    build_scene_contract: Callable[..., Any] = _noop_scene_contract
+    build_product_identity_bundle: Callable[..., Any] = _noop_product_identity_bundle
+    build_placement_plan: Callable[..., Any] = _noop_placement_plan
+    build_geometry_contract: Callable[..., Any] = _noop_geometry_contract
+    build_archetype_strategies: Callable[..., Any] = _noop_archetype_strategies
 
 
 @dataclass
 class RenderWorkflowGenerationServices:
     generate_empty_room: Callable[..., tuple[str, str | None]]
-    generate_furnished_room: Callable[..., str | None]
+    generate_furnished_room: Callable[..., str | dict[str, Any] | None]
 
 
 @dataclass
 class RenderWorkflowPostprocessServices:
-    rank_best_variant: Callable[[list, list], int | None]
-    refresh_item_boxes_from_main_render: Callable[[str, list], list]
+    rank_best_variant: Callable[..., int | None]
+    refresh_item_boxes_from_main_render: Callable[..., list]
     attach_volume_ranks: Callable[[list], list]
     volume_ranking_snapshot: Callable[[list], list]
 

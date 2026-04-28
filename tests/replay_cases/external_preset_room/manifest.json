@@ -1,0 +1,15 @@
+{
+  "case_id": "external_preset_room",
+  "description": "External preset replay using the same room image with no explicit dimensions.",
+  "mode": "external_preset_render",
+  "entrypoint": "/api/external/render/preset",
+  "output_dir": "outputs/replay_matrix/external_preset_room",
+  "report_filename": "report.json",
+  "request": {
+    "image_url": "outputs/job_9ffde1c0_artifacts/raw_1776063916_d6c594db_input_de0d4bc5_raw_1776063898_0e34b3e5_room.png",
+    "room": "livingroom",
+    "style": "luxury",
+    "variant": "1",
+    "placement": ""
+  }
+}

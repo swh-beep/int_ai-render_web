@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import time
 import shutil
 import subprocess
 import uuid
@@ -20,6 +21,24 @@ def safe_filename_from_url(url: str) -> str:
         return f"clip_{uuid.uuid4().hex}.png"
 
 
+def _http_get_bytes(url: str, *, timeout: int = 120, max_attempts: int = 3) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code >= 500 and attempt < max_attempts:
+                time.sleep(min(2 * attempt, 6))
+                continue
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            time.sleep(min(2 * attempt, 6))
+    raise RuntimeError(f"Download failed for {url}: {last_error}") from last_error
+
+
 def download_to_path(url: str, out_path: Path) -> None:
     """
     URL이 http로 시작하면 다운로드하고,
@@ -33,10 +52,8 @@ def download_to_path(url: str, out_path: Path) -> None:
             shutil.copyfileobj(src, dst)
         return
 
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
     with open(out_path, "wb") as file_obj:
-        file_obj.write(response.content)
+        file_obj.write(_http_get_bytes(url))
 
 
 def run_ffmpeg(cmd: List[str]) -> None:
@@ -137,9 +154,7 @@ def clip_url_to_image_bytes(url: str) -> bytes:
         if not os.path.exists(local_path):
             raise FileNotFoundError(f"Image not found on server: {local_path}")
         return Path(local_path).read_bytes()
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
-    return response.content
+    return _http_get_bytes(url)
 
 
 def find_static_image(prefix: str) -> Optional[Path]:
@@ -193,7 +208,13 @@ def ffmpeg_image_to_video(
     run_ffmpeg(cmd)
 
 
-def kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
+def kling_prompts_dynamic(
+    motion: str,
+    effect: str,
+    *,
+    custom_motion_prompt: str | None = None,
+    custom_effect_prompt: str | None = None,
+) -> Dict[str, str]:
     base_keep = (
         "High quality interior video, photorealistic, 8k. "
         "Keep ALL furniture and layout exactly the same as the input image. "
@@ -221,8 +242,8 @@ def kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
         "door_open": "A door, cabinet door, or glass door in the scene slowly opens.",
     }
 
-    prompt_motion = motion_map.get(motion, motion_map["static"])
-    prompt_effect = effect_map.get(effect, effect_map["none"])
+    prompt_motion = custom_motion_prompt.strip() if custom_motion_prompt else motion_map.get(motion, motion_map["static"])
+    prompt_effect = custom_effect_prompt.strip() if custom_effect_prompt else effect_map.get(effect, effect_map["none"])
     final_prompt = f"{base_keep} {prompt_motion} {prompt_effect}"
     negative_prompt = (
         "human, person, walking, shaking camera, shaky footage, "
@@ -233,14 +254,5 @@ def kling_prompts_dynamic(motion: str, effect: str) -> Dict[str, str]:
 
 
 def image_url_to_b64(url: str) -> str:
-    if url.startswith("/"):
-        local_path = url.lstrip("/")
-        if not os.path.exists(local_path):
-            raise FileNotFoundError(f"Local file not found for b64 conversion: {local_path}")
-        with open(local_path, "rb") as file_obj:
-            return base64.b64encode(file_obj.read()).decode("utf-8")
-
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
-    return base64.b64encode(response.content).decode("utf-8")
+    return base64.b64encode(clip_url_to_image_bytes(url)).decode("utf-8")
 

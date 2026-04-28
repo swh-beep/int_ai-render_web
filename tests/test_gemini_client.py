@@ -1,0 +1,118 @@
+from types import SimpleNamespace
+
+from infrastructure.ai.gemini_client import call_gemini_with_failover
+
+
+def _install_fake_genai_client(monkeypatch, captured: dict):
+    class DummyModels:
+        def generate_content(self, *, model, contents, config=None):
+            captured["model"] = model
+            captured["contents"] = contents
+            captured["config"] = dict(config or {})
+            return SimpleNamespace(parts=[], candidates=[SimpleNamespace()])
+
+    class DummyClient:
+        def __init__(self, *, api_key):
+            captured["api_key"] = api_key
+            self.models = DummyModels()
+
+    monkeypatch.setattr("infrastructure.ai.gemini_client.genai.Client", DummyClient)
+
+
+def test_call_gemini_with_failover_consumes_max_attempts_without_forwarding_it_to_sdk(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    response = call_gemini_with_failover(
+        "gemini-3.1-flash-image-preview",
+        ["prompt"],
+        {"timeout": 12, "max_attempts": 1},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="unit",
+    )
+
+    assert response is not None
+    assert captured["api_key"] == "test-key-1234"
+    assert captured["config"]["http_options"] == {"timeout": 12000}
+    assert "max_attempts" not in captured["config"]
+
+
+def test_call_gemini_with_failover_applies_2k_image_defaults_for_flash_image_models(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    call_gemini_with_failover(
+        "gemini-3.1-flash-image-preview",
+        ["prompt"],
+        {"timeout": 12},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="Stage2.Furnish",
+    )
+
+    assert captured["config"]["response_modalities"] == ["IMAGE"]
+    assert captured["config"]["image_config"]["image_size"] == "2K"
+
+
+def test_call_gemini_with_failover_uses_high_thinking_for_furniture_analysis(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    call_gemini_with_failover(
+        "gemini-3.1-pro-preview",
+        ["prompt"],
+        {"timeout": 12},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="Analysis.CropItem",
+    )
+
+    assert captured["config"]["thinking_config"]["thinking_level"] == "high"
+
+
+def test_call_gemini_with_failover_uses_high_thinking_for_detect_furniture(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    call_gemini_with_failover(
+        "gemini-3.1-pro-preview",
+        ["prompt"],
+        {"timeout": 12},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="Analysis.DetectFurniture",
+    )
+
+    assert captured["config"]["thinking_config"]["thinking_level"] == "high"
+
+
+def test_call_gemini_with_failover_uses_medium_thinking_for_non_furniture_analysis(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    call_gemini_with_failover(
+        "gemini-3.1-pro-preview",
+        ["prompt"],
+        {"timeout": 12},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="Analysis.RoomOnly",
+    )
+
+    assert captured["config"]["thinking_config"]["thinking_level"] == "medium"

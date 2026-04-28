@@ -47,17 +47,29 @@ document.addEventListener('DOMContentLoaded', () => {
         'feature-3': document.getElementById('workspace-feature-3')
     };
 
+    function setWorkspaceParam(workspaceId) {
+        const url = new URL(window.location.href);
+        if (workspaceId) {
+            url.searchParams.set('workspace', workspaceId);
+        } else {
+            url.searchParams.delete('workspace');
+        }
+        window.history.replaceState(history.state, '', url);
+    }
+
     function showMenu() {
-        Object.values(workspaces).forEach(ws => ws.style.display = 'none');
+        Object.values(workspaces).forEach(ws => ws.classList.add('hidden'));
         menuScreen.style.display = 'flex';
+        setWorkspaceParam('');
         window.scrollTo(0, 0);
     }
 
     function showWorkspace(id) {
         menuScreen.style.display = 'none';
         Object.keys(workspaces).forEach(key => {
-            workspaces[key].style.display = (key === id) ? 'flex' : 'none';
+            workspaces[key].classList.toggle('hidden', key !== id);
         });
+        setWorkspaceParam(id);
         window.scrollTo(0, 0);
     }
 
@@ -666,4 +678,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     });
+
+    const requestedWorkspace = new URL(window.location.href).searchParams.get('workspace');
+    if (requestedWorkspace && workspaces[requestedWorkspace]) {
+        showWorkspace(requestedWorkspace);
+    }
 });

@@ -1,0 +1,96 @@
+{
+  "case_id": "external_cart_9ffde1c0",
+  "description": "External cart no-dims exactness replay using the 9ffde1c0 room and product set.",
+  "mode": "external_cart_render",
+  "entrypoint": "/api/external/render/cart",
+  "output_dir": "outputs/replay_matrix/external_cart_9ffde1c0",
+  "report_filename": "report.json",
+  "request": {
+    "image_url": "tests/replay_cases/9ffde1c0_compare/assets/room.png",
+    "items": [
+      {
+        "id": "item-1",
+        "name": "Arc Floor Lamp",
+        "category": "floor_lamp",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-1_arc-floor-lamp.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 1600, "depth_mm": 400, "height_mm": 2400 }
+      },
+      {
+        "id": "item-2",
+        "name": "De Sede DS-787",
+        "category": "sofa",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-2_de-sede-ds-787.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 2400, "depth_mm": 1100, "height_mm": 800 }
+      },
+      {
+        "id": "item-3",
+        "name": "De Sede DS-676",
+        "category": "lounge_chair",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-3_de-sede-ds-676.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 1100, "depth_mm": 1100, "height_mm": 1100 }
+      },
+      {
+        "id": "item-4",
+        "name": "Black Wall Mirror",
+        "category": "mirror",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-4_black-wall-mirror.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 400, "depth_mm": 10, "height_mm": 800 }
+      },
+      {
+        "id": "item-5",
+        "name": "Gubbi Titone Pouf",
+        "category": "stool",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-5_gubbi-titone-pouf.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 700, "depth_mm": 700, "height_mm": 500 }
+      },
+      {
+        "id": "item-6",
+        "name": "Glass Sofa Table",
+        "category": "table",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-6_glass-sofa-table.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 1000, "depth_mm": 1000, "height_mm": 500 }
+      },
+      {
+        "id": "item-7",
+        "name": "Akari Mini Floor Lamp",
+        "category": "floor_lamp",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-7_akari-mini-floor-lamp.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 100, "depth_mm": 100, "height_mm": 100 }
+      },
+      {
+        "id": "item-8",
+        "name": "Round Rug",
+        "category": "rug",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-8_round-rug.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 1100, "depth_mm": 1100, "height_mm": 12 }
+      },
+      {
+        "id": "item-9",
+        "name": "Black Triangle Side Table",
+        "category": "table",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-9_black-triangle-side-table.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 500, "depth_mm": 500, "height_mm": 500 }
+      },
+      {
+        "id": "item-10",
+        "name": "Four Door Cabinet",
+        "category": "storage",
+        "image_url": "tests/replay_cases/9ffde1c0_compare/assets/item-10_four-door-cabinet.png",
+        "qty": 1,
+        "dims_mm": { "width_mm": 1600, "depth_mm": 600, "height_mm": 700 }
+      }
+    ],
+    "room": "livingroom",
+    "variant": "1",
+    "placement": ""
+  }
+}

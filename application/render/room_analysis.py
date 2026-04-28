@@ -7,6 +7,7 @@ def analyze_room_structure(
     room_path,
     room_dimensions=None,
     timeout=120,
+    max_attempts: int | None = None,
     *,
     call_gemini_with_failover: Callable[..., object],
     model_name: str,
@@ -27,10 +28,16 @@ def analyze_room_structure(
             "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
             "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
             f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
+            "Also return numeric room geometry bounds that can be used directly by scale math.\n"
+            'Use "room_planes" only for normalized numeric bounds, not wall labels.\n'
+            'Example: "room_planes": {"y_top": 0.08, "y_bottom": 0.92}\n'
+            'If uncertain, use default numeric bounds and keep the keys present.\n\n'
             "Return STRICT JSON ONLY:\n"
             "{\n"
             '  "room_text": "...",\n'
-            '  "windows_present": true/false\n'
+            '  "windows_present": true/false,\n'
+            '  "room_planes": {"y_top": 0.0, "y_bottom": 1.0},\n'
+            '  "wall_span_norm": [0.0, 1.0]\n'
             "}\n"
         )
         content = [prompt]
@@ -39,7 +46,7 @@ def analyze_room_structure(
         res = call_gemini_with_failover(
             model_name,
             content,
-            {"timeout": timeout},
+            {"timeout": timeout, "max_attempts": max(1, int(max_attempts or 1))},
             {},
             log_tag="Analysis.RoomOnly",
         )

@@ -1,5 +1,12 @@
 from typing import Callable
 
+from application.render.two_pass_strategy_stage import (
+    apply_two_pass_strategy,
+    compute_strategy_priority,
+    is_anchor_eligible,
+    select_anchor_candidate,
+)
+
 
 def volume_proxy(dims: dict) -> int:
     try:
@@ -208,7 +215,8 @@ def build_furniture_specs_json(
         "plant": 5,
     }
 
-    for idx, it in enumerate(analyzed_items or []):
+    strategy_items, two_pass_summary = apply_two_pass_strategy(analyzed_items or [])
+    for idx, it in enumerate(strategy_items or []):
         label = it.get("label", "") or ""
         desc = it.get("description", "") or ""
         box = it.get("box_2d")
@@ -281,6 +289,15 @@ def build_furniture_specs_json(
                 "box_2d": box,
                 "description": desc,
                 "crop_path": (it.get("crop_path") if isinstance(it, dict) else None),
+                "identity_profile": ((it.get("identity_profile") if isinstance(it, dict) else None) or None),
+                "layout_envelope": (
+                    (it.get("layout_envelope") if isinstance(it, dict) else None)
+                    or ((it.get("identity_profile") or {}).get("layout_envelope") if isinstance(it, dict) else None)
+                ),
+                "two_pass_strategy": ((it.get("two_pass_strategy") if isinstance(it, dict) else None) or None),
+                "anchor_eligible": bool((it.get("anchor_eligible") if isinstance(it, dict) else False)),
+                "pass_role": (it.get("pass_role") if isinstance(it, dict) else None),
+                "strategy_priority": int((it.get("strategy_priority") if isinstance(it, dict) else 0) or 0),
             }
         )
 
@@ -320,13 +337,19 @@ def build_furniture_specs_json(
             idx = 0
         return (has_dims, vol, width_mm, depth_mm, height_mm, radius_mm, -idx)
 
-    primary_scale = None
-    scale_candidates = [x for x in candidates if dims_has_positive_values(x.get("dims_mm") or {})]
-    if scale_candidates:
-        scale_sorted = sorted(scale_candidates, key=_scale_sort_key, reverse=True)
-        primary_scale = scale_sorted[0]
-    else:
-        primary_scale = primary
+    primary_scale = select_anchor_candidate(items, primary_item=primary)
+    if not primary_scale:
+        scale_candidates = [
+            x
+            for x in candidates
+            if dims_has_positive_values(x.get("dims_mm") or {})
+            and bool(((x.get("two_pass_strategy") or {}).get("fallback_anchor_candidate")))
+        ]
+        if scale_candidates:
+            scale_sorted = sorted(scale_candidates, key=_scale_sort_key, reverse=True)
+            primary_scale = scale_sorted[0]
+        else:
+            primary_scale = primary
 
     max_width_mm = 0
     for x in candidates:
@@ -349,7 +372,19 @@ def build_furniture_specs_json(
         pass
 
     hierarchy = [x.get("label", "") for x in (analyzed_items or []) if not is_rug_like(x.get("label", ""))]
-    scale_hierarchy = [x.get("label", "") for x in sorted(candidates, key=_scale_sort_key, reverse=True) if x.get("label")]
+    scale_hierarchy = [
+        x.get("label", "")
+        for x in sorted(
+            candidates,
+            key=lambda row: (
+                int(is_anchor_eligible(row)),
+                int(row.get("strategy_priority") or compute_strategy_priority(row)),
+                *_scale_sort_key(row),
+            ),
+            reverse=True,
+        )
+        if x.get("label")
+    ]
     if not scale_hierarchy:
         scale_hierarchy = list(hierarchy)
 
@@ -360,4 +395,5 @@ def build_furniture_specs_json(
         "max_width_mm": max_width_mm,
         "size_hierarchy": hierarchy,
         "size_hierarchy_scale": scale_hierarchy,
+        "two_pass_strategy": two_pass_summary,
     }

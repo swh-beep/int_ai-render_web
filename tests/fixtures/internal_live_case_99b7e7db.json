@@ -1,0 +1,90 @@
+{
+  "request_id": "99b7e7db",
+  "job_id": "36da5f1f-9c5a-4829-88cb-00005ef4bb94",
+  "room_dimensions": "4000*4000*2400",
+  "items": [
+    {
+      "target_key": "internal_item-1_sofa_001",
+      "label": "sofa",
+      "category": "sofa",
+      "requested_dims_mm": { "width_mm": 2400, "depth_mm": 1100, "height_mm": 900 },
+      "observed_box_2d": [537, 323, 728, 688],
+      "detected_label": "Sofa"
+    },
+    {
+      "target_key": "internal_item-2_lounge-chair_002",
+      "label": "lounge_chair",
+      "category": "lounge_chair",
+      "requested_dims_mm": { "width_mm": 1000, "depth_mm": 1000, "height_mm": 1000 },
+      "observed_box_2d": [545, 796, 808, 987],
+      "detected_label": "Cabinet"
+    },
+    {
+      "target_key": "internal_item-3_table_003",
+      "label": "table",
+      "category": "table",
+      "requested_dims_mm": { "width_mm": 900, "depth_mm": 900, "height_mm": 400 },
+      "observed_box_2d": [678, 412, 824, 587],
+      "detected_label": "Coffee Table"
+    },
+    {
+      "target_key": "internal_item-4_rug_004",
+      "label": "rug",
+      "category": "rug",
+      "requested_dims_mm": { "width_mm": 1000, "depth_mm": 1000, "height_mm": 10 },
+      "observed_box_2d": [742, 334, 887, 658],
+      "detected_label": "Rug"
+    },
+    {
+      "target_key": "internal_item-5_table_005",
+      "label": "table",
+      "category": "table",
+      "requested_dims_mm": { "width_mm": 1700, "depth_mm": 400, "height_mm": 700 },
+      "observed_box_2d": [662, 706, 905, 819],
+      "detected_label": "Side Table"
+    },
+    {
+      "target_key": "internal_item-6_table_006",
+      "label": "table",
+      "category": "table",
+      "requested_dims_mm": { "width_mm": 500, "depth_mm": 500, "height_mm": 500 },
+      "observed_box_2d": [699, 934, 842, 992],
+      "detected_label": "Table Lamp"
+    },
+    {
+      "target_key": "internal_item-7_decor_007",
+      "label": "decor",
+      "category": "decor",
+      "requested_dims_mm": { "width_mm": 600, "depth_mm": 10, "height_mm": 600 },
+      "observed_box_2d": [136, 49, 881, 416],
+      "detected_label": "Arc Floor Lamp"
+    },
+    {
+      "target_key": "internal_item-8_floor-lamp_008",
+      "label": "floor_lamp",
+      "category": "floor_lamp",
+      "requested_dims_mm": { "width_mm": 1000, "depth_mm": 400, "height_mm": 2400 },
+      "observed_box_2d": [249, 874, 510, 947],
+      "detected_label": "Artwork"
+    },
+    {
+      "target_key": "internal_item-9_floor-lamp_009",
+      "label": "floor_lamp",
+      "category": "floor_lamp",
+      "requested_dims_mm": { "width_mm": 100, "depth_mm": 100, "height_mm": 100 },
+      "observed_box_2d": [570, 666, 843, 822],
+      "detected_label": "Armchair"
+    }
+  ],
+  "volume_ranking": [
+    { "rank": 1, "target_key": "internal_item-1_sofa_001" },
+    { "rank": 2, "target_key": "internal_item-5_table_005" },
+    { "rank": 3, "target_key": "internal_item-3_table_003" },
+    { "rank": 4, "target_key": "internal_item-6_table_006" },
+    { "rank": 5, "target_key": "internal_item-8_floor-lamp_008" },
+    { "rank": 6, "target_key": "internal_item-9_floor-lamp_009" },
+    { "rank": 7, "target_key": "internal_item-2_lounge-chair_002" },
+    { "rank": 8, "target_key": "internal_item-4_rug_004" },
+    { "rank": 9, "target_key": "internal_item-7_decor_007" }
+  ]
+}

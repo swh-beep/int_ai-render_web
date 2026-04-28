@@ -17,6 +17,7 @@ from application.render.empty_room_workflow import run_generate_empty_room_job
 from application.render.finalize_workflow import run_finalize_job
 from application.render.render_workflow import run_render_job, run_render_with_details_job
 from application.render.upscale_workflow import run_upscale_job
+from application.video.external_render_video_workflow import run_external_render_video_job
 
 
 @dataclass
@@ -45,6 +46,15 @@ class JobEntrypointServices:
     finalize_request_factory: Callable[..., Any]
     upscale_request_factory: Callable[..., Any]
     max_concurrency_analysis: int
+    fetch_job: Callable[[str], Any]
+    load_job_result: Callable[[str], dict | None]
+    queue_source_generation_job: Callable[..., str]
+    queue_final_compile_job: Callable[..., str]
+    get_video_job: Callable[[str], dict | None]
+    create_kling_task: Callable[..., str]
+    poll_kling_task: Callable[..., str]
+    video_target_fps: int
+    video_max_concurrency: int
 
 
 _SERVICES: JobEntrypointServices | None = None
@@ -222,6 +232,27 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         generate_detail_view=services.generate_detail_view,
         volume_ranking_snapshot=services.volume_ranking_snapshot,
     )
+
+
+def job_generate_render_video(payload: dict) -> dict:
+    services = _services()
+    result = run_external_render_video_job(
+        payload,
+        fetch_job=services.fetch_job,
+        load_job_result=services.load_job_result,
+        queue_source_generation_job=services.queue_source_generation_job,
+        queue_final_compile_job=services.queue_final_compile_job,
+        get_video_job=services.get_video_job,
+        resolve_image_url=services.resolve_image_url,
+        build_s3_prefix=services.build_s3_prefix,
+        normalize_audience=services.normalize_audience,
+        create_kling_task=services.create_kling_task,
+        poll_kling_task=services.poll_kling_task,
+        video_target_fps=services.video_target_fps,
+        video_max_concurrency=services.video_max_concurrency,
+    )
+    _persist_job_result(result, audience=payload.get("audience"))
+    return result
 
 
 def finalize_download(req: Any) -> JSONResponse:

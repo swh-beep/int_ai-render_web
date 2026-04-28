@@ -51,6 +51,12 @@ class CartRenderRequest(BaseModel):
     placement: Optional[str] = ""
 
 
+class ExternalRenderVideoRequest(BaseModel):
+    render_job_id: str
+    clip_count: int = 4
+    cfg_scale: float = 0.5
+
+
 class DetailRequest(BaseModel):
     image_url: str
     moodboard_url: Optional[str] = None
@@ -91,6 +97,8 @@ class SourceItem(BaseModel):
     url: str
     motion: str = "static"
     effect: str = "none"
+    custom_motion_prompt: Optional[str] = None
+    custom_effect_prompt: Optional[str] = None
 
 
 class SourceGenRequest(BaseModel):

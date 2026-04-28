@@ -21,7 +21,7 @@ def run_render_audience_stage(
     aud = normalize_audience(audience)
     return RenderAudienceStageResult(
         audience=aud,
-        enable_scale_check=False,
+        enable_scale_check=aud == "internal",
         prefix_main_user=build_s3_prefix(aud, "mainrendered", "user-photos"),
         prefix_main_empty=build_s3_prefix(aud, "mainrendered", "empty"),
         prefix_main_rendered=build_s3_prefix(aud, "mainrendered", "rendered"),

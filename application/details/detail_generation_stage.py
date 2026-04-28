@@ -196,10 +196,17 @@ def generate_detail_view(
         except Exception:
             pass
 
+        requested_timeout_sec = style_config.get("timeout_sec")
+        try:
+            request_timeout_sec = float(requested_timeout_sec) if requested_timeout_sec is not None else 90.0
+        except Exception:
+            request_timeout_sec = 90.0
+        if request_timeout_sec <= 0.0:
+            return None
         response = call_gemini_with_failover(
             model_name,
             content,
-            {"timeout": 90},
+            {"timeout": max(1.0, min(90.0, request_timeout_sec))},
             safety_settings,
             log_tag="Detail.Generate",
         )

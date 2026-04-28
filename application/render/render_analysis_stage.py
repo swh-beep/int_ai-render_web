@@ -1,21 +1,228 @@
 import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from application.render.postprocess_support import category_match_family
+from application.render.scale_plan_support import build_scale_plan
 
 
 @dataclass
 class RenderAnalysisStageResult:
     windows_present: bool | None = None
     room_analysis_text: str = ""
+    room_planes: dict | None = None
+    wall_span_norm: tuple[float, float] = (0.0, 1.0)
     furniture_specs_text: str | None = None
     furniture_specs_json: dict | None = None
     full_analyzed_data: list[dict] | None = None
     primary_item: dict | None = None
     scale_guide_path: str | None = None
     size_hierarchy: Any = None
+    strict_scale_requested: bool = False
+    strict_scale_ready: bool = False
+    scale_plan: dict | None = None
+
+
+_MATERIAL_CUE_KEYWORDS = (
+    "wood",
+    "walnut",
+    "oak",
+    "marble",
+    "stone",
+    "glass",
+    "metal",
+    "chrome",
+    "steel",
+    "fabric",
+    "linen",
+    "boucle",
+    "leather",
+    "rattan",
+    "mirror",
+    "reflective",
+    "wooden",
+    "유리",
+    "금속",
+    "패브릭",
+    "가죽",
+    "원목",
+    "거울",
+)
+
+_SHAPE_CUE_KEYWORDS = (
+    "round",
+    "circular",
+    "oval",
+    "square",
+    "rectangular",
+    "triangular",
+    "arched",
+    "curved",
+    "modular",
+    "low-profile",
+    "floor-grazing",
+    "wall-mounted",
+    "teardrop",
+    "biomorphic",
+    "pedestal",
+    "spindle",
+    "flaring",
+    "blocky",
+    "slim",
+    "thin",
+    "라운드",
+    "원형",
+    "사각",
+    "삼각",
+    "곡선",
+    "벽걸이",
+)
+
+
+def _extract_keyword_cues(text: str, keywords: tuple[str, ...], limit: int = 4) -> list[str]:
+    normalized = str(text or "").lower()
+    cues: list[str] = []
+    for keyword in keywords:
+        if keyword in normalized and keyword not in cues:
+            cues.append(keyword)
+        if len(cues) >= limit:
+            break
+    return cues
+
+
+def _merge_unique_str_lists(*values: list[str], limit: int = 6) -> list[str]:
+    merged: list[str] = []
+    for value in values:
+        if not isinstance(value, list):
+            continue
+        for raw in value:
+            text = str(raw or "").strip()
+            if not text or text in merged:
+                continue
+            merged.append(text)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def _expected_placement_family(family: str) -> str:
+    normalized = str(family or "").strip().lower()
+    if normalized in {"mirror"}:
+        return "wall_attached"
+    if normalized == "rug":
+        return "rug"
+    if normalized in {"table_lamp", "decor"}:
+        return "surface_placed"
+    return "floor_placed"
+
+
+def _build_layout_envelope(*, dims_mm: dict, room_dims_parsed: dict, family: str) -> dict | None:
+    if not isinstance(dims_mm, dict):
+        return None
+    try:
+        width_mm = int(dims_mm.get("width_mm") or 0)
+        depth_mm = int(dims_mm.get("depth_mm") or 0)
+        height_mm = int(dims_mm.get("height_mm") or 0)
+    except Exception:
+        return None
+
+    if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
+        return None
+
+    try:
+        room_width_mm = int((room_dims_parsed or {}).get("width_mm") or 0)
+        room_depth_mm = int((room_dims_parsed or {}).get("depth_mm") or 0)
+        room_height_mm = int((room_dims_parsed or {}).get("height_mm") or 0)
+    except Exception:
+        room_width_mm = 0
+        room_depth_mm = 0
+        room_height_mm = 0
+
+    return {
+        "room_width_ratio": round(width_mm / room_width_mm, 4) if room_width_mm > 0 else None,
+        "room_depth_ratio": round(depth_mm / room_depth_mm, 4) if room_depth_mm > 0 else None,
+        "room_height_ratio": round(height_mm / room_height_mm, 4) if room_height_mm > 0 else None,
+        "footprint_ratio": round((width_mm * depth_mm) / max(1, room_width_mm * room_depth_mm), 4)
+        if room_width_mm > 0 and room_depth_mm > 0
+        else None,
+        "placement_family": _expected_placement_family(family),
+    }
+
+
+def _build_identity_profile(
+    *,
+    label: str,
+    description: str,
+    category: str | None,
+    category_canonical: str,
+    dims_mm: dict,
+    crop_path: str | None,
+    target_key: str,
+    source_index: int,
+    room_dims_parsed: dict,
+    reference_features: dict | None = None,
+) -> dict:
+    family = category_match_family(category or label) or category_canonical or ""
+    text_blob = " ".join([str(label or ""), str(category or ""), str(description or "")]).strip()
+    ref = reference_features if isinstance(reference_features, dict) else {}
+    material_cues = _merge_unique_str_lists(
+        ref.get("material_cues") or [],
+        _extract_keyword_cues(text_blob, _MATERIAL_CUE_KEYWORDS),
+    )
+    shape_cues = _merge_unique_str_lists(
+        ref.get("silhouette_cues") or [],
+        _extract_keyword_cues(text_blob, _SHAPE_CUE_KEYWORDS),
+    )
+    distinctive_parts = _merge_unique_str_lists(ref.get("distinctive_parts") or [])
+    preserve_rules = _merge_unique_str_lists(ref.get("preserve_rules") or [], distinctive_parts)
+    reflective_surface = family == "mirror" or any(token in material_cues for token in ("mirror", "reflective", "glass", "chrome", "거울", "유리"))
+    reflective_flag = ref.get("reflective_surface")
+    if isinstance(reflective_flag, str):
+        normalized_flag = reflective_flag.strip().lower()
+        if normalized_flag in {"true", "1", "yes"}:
+            reflective_flag = True
+        elif normalized_flag in {"false", "0", "no"}:
+            reflective_flag = False
+        else:
+            reflective_flag = False
+    elif not isinstance(reflective_flag, bool):
+        reflective_flag = False
+    reflective_surface = bool(reflective_flag) or family == "mirror" or any(
+        token in material_cues for token in ("mirror", "reflective", "glass", "chrome")
+    )
+    wall_attached = _expected_placement_family(family) == "wall_attached"
+    floor_contact = _expected_placement_family(family) in {"floor_placed", "rug"}
+
+    silhouette_summary = ", ".join(shape_cues[:3]) if shape_cues else (family or category_canonical or "generic")
+    layout_envelope = _build_layout_envelope(
+        dims_mm=dims_mm or {},
+        room_dims_parsed=room_dims_parsed or {},
+        family=family,
+    )
+
+    return {
+        "target_key": target_key,
+        "source_index": source_index,
+        "name": label,
+        "category": category,
+        "category_canonical": category_canonical,
+        "family": family,
+        "dims_mm": dict(dims_mm or {}),
+        "crop_path": crop_path,
+        "shape_cues": shape_cues,
+        "material_cues": material_cues,
+        "distinctive_parts": distinctive_parts,
+        "preserve_rules": preserve_rules,
+        "silhouette_summary": silhouette_summary,
+        "reflective_surface": reflective_surface,
+        "wall_attached_expected": wall_attached,
+        "floor_contact_expected": floor_contact,
+        "layout_envelope": layout_envelope,
+    }
 
 
 def _build_item_metas(
@@ -154,8 +361,10 @@ def _analyze_items(
     normalize_dims_dict: Callable[[dict], dict],
     canonical_category: Callable[[str | None], str],
     build_item_target_key: Callable[..., str],
+    room_dims_parsed: dict,
     max_concurrency_analysis: int,
     cart_max_analysis_workers: int,
+    absolute_deadline_ts: float | None = None,
 ) -> list[dict]:
     full_analyzed_data: list[dict] = []
     if not item_metas:
@@ -197,6 +406,7 @@ def _analyze_items(
                         True,
                         ocr_text_read_enabled,
                         meta.get("dims_mm"),
+                        absolute_deadline_ts,
                     ),
                 )
             )
@@ -258,6 +468,21 @@ def _analyze_items(
                 item_id=(meta.get("item_id") or res_item.get("item_id")),
             )
         )
+        reference_features = res_item.get("reference_features")
+        if not isinstance(reference_features, dict):
+            reference_features = {}
+        identity_profile = _build_identity_profile(
+            label=label,
+            description=full_desc,
+            category=category_val,
+            category_canonical=category_canonical_val,
+            dims_mm=req_dims or {},
+            crop_path=res_item.get("crop_path"),
+            target_key=target_key,
+            source_index=source_index,
+            room_dims_parsed=room_dims_parsed or {},
+            reference_features=reference_features,
+        )
 
         full_analyzed_data.append(
             {
@@ -273,6 +498,9 @@ def _analyze_items(
                 "category": category_val,
                 "category_canonical": category_canonical_val,
                 "item_id": meta.get("item_id") or res_item.get("item_id"),
+                "reference_features": reference_features,
+                "identity_profile": identity_profile,
+                "layout_envelope": identity_profile.get("layout_envelope"),
             }
         )
 
@@ -387,12 +615,14 @@ def run_render_analysis_stage(
     create_scale_guide_overlay_with_model: Callable[..., str | None],
     match_aspect_to_target: Callable[[str, str], str | None],
     enable_scale_guidance: bool,
+    strict_scale_requested: bool,
     room_dims_parsed: dict,
     summary: dict,
     logger,
     log_brief: bool,
     max_concurrency_analysis: int,
     cart_max_analysis_workers: int,
+    absolute_deadline_ts: float | None = None,
 ) -> RenderAnalysisStageResult:
     result = RenderAnalysisStageResult(full_analyzed_data=[])
     if not (ref_paths or item_refs):
@@ -402,6 +632,18 @@ def run_render_analysis_stage(
         print(">> [Split Analysis] Room + Items (separate calls)...", flush=True)
 
     try:
+        def _bounded_timeout(requested_sec: float, *, minimum_sec: float) -> int | None:
+            if absolute_deadline_ts is None:
+                return int(requested_sec)
+            try:
+                remaining = max(0.0, float(absolute_deadline_ts) - float(time.time()))
+            except Exception:
+                remaining = 0.0
+            timeout_sec = min(float(requested_sec), remaining)
+            if timeout_sec <= minimum_sec:
+                return None
+            return int(max(float(minimum_sec), timeout_sec))
+
         item_metas = _build_item_metas(
             ref_paths=ref_paths,
             item_refs=item_refs,
@@ -411,9 +653,26 @@ def run_render_analysis_stage(
             log_brief=log_brief,
         )
 
-        room_result = analyze_room_structure(step1_img, room_dimensions=dimensions, timeout=120)
+        room_timeout = _bounded_timeout(45.0, minimum_sec=12.0)
+        room_result = {}
+        if room_timeout is not None:
+            room_result = analyze_room_structure(
+                step1_img,
+                room_dimensions=dimensions,
+                timeout=room_timeout,
+                max_attempts=1,
+            )
         result.room_analysis_text = (room_result.get("room_text") or "").strip()
         result.windows_present = _normalize_windows_present(room_result.get("windows_present"))
+        room_planes = room_result.get("room_planes")
+        if isinstance(room_planes, dict):
+            result.room_planes = dict(room_planes)
+        wall_span_norm = room_result.get("wall_span_norm")
+        if isinstance(wall_span_norm, (tuple, list)) and len(wall_span_norm) >= 2:
+            try:
+                result.wall_span_norm = (float(wall_span_norm[0]), float(wall_span_norm[1]))
+            except Exception:
+                pass
 
         result.full_analyzed_data = _analyze_items(
             item_metas=item_metas,
@@ -423,8 +682,10 @@ def run_render_analysis_stage(
             normalize_dims_dict=normalize_dims_dict,
             canonical_category=canonical_category,
             build_item_target_key=build_item_target_key,
+            room_dims_parsed=room_dims_parsed,
             max_concurrency_analysis=max_concurrency_analysis,
             cart_max_analysis_workers=cart_max_analysis_workers,
+            absolute_deadline_ts=absolute_deadline_ts,
         )
 
         _log_analyzed_items(
@@ -453,6 +714,17 @@ def run_render_analysis_stage(
             step1_img=step1_img,
             unique_id=unique_id,
         )
+
+        result.strict_scale_requested = bool(strict_scale_requested)
+        result.scale_plan = build_scale_plan(
+            items=result.full_analyzed_data,
+            room_dims_parsed=room_dims_parsed,
+            room_planes=result.room_planes,
+            wall_span_norm=result.wall_span_norm,
+            primary_item=result.primary_item,
+            strict_scale_requested=bool(strict_scale_requested),
+        )
+        result.strict_scale_ready = bool((result.scale_plan or {}).get("strict_scale_ready"))
 
         print(">> [Split Analysis] Complete. Specs injected.", flush=True)
     except Exception as exc:

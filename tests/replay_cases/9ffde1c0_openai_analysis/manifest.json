@@ -1,0 +1,145 @@
+{
+  "case_id": "9ffde1c0",
+  "description": "Localized replay harness input for the internal web regression case.",
+  "mode": "internal_itemized_job_render",
+  "entrypoint": "/async/render",
+  "output_dir": "outputs/job_9ffde1c0_artifacts/current_replay_results_localized",
+  "report_filename": "replay_after_localized_repair.json",
+  "form_data": {
+    "room": "livingroom",
+    "style": "Customize",
+    "variant": "1",
+    "dimensions": "4000*4000*2400",
+    "placement": ""
+  },
+  "room_file": {
+    "field": "file",
+    "path": "outputs/job_9ffde1c0_artifacts/raw_1776063916_d6c594db_input_de0d4bc5_raw_1776063898_0e34b3e5_room.png",
+    "content_type": "image/png"
+  },
+  "item_files_field": "item_images",
+  "item_files": {
+    "item-1": "outputs/cart_item_1_1776227292_7a856ab4_Dds_D_ark_lamp.png",
+    "item-2": "outputs/cart_item_2_1776227292_7a856ab4_de-sede_ds-686.png",
+    "item-3": "outputs/cart_item_3_1776227292_7a856ab4_de-sede_ds-787.png",
+    "item-4": "outputs/cart_item_4_1776227292_7a856ab4_gubbi_asd_mirror.png",
+    "item-5": "outputs/cart_item_5_1776227292_7a856ab4_gubbi_titone_puf.png",
+    "item-6": "outputs/cart_item_6_1776227292_7a856ab4_KKK_AASDtable.png",
+    "item-7": "outputs/cart_item_7_1776227292_7a856ab4_nasedition_5151-ad.png",
+    "item-8": "outputs/cart_item_8_1776227292_7a856ab4_nas_edition_A_rug_seri.png",
+    "item-9": "outputs/cart_item_9_1776227292_7a856ab4_nas_edition_tete77.png",
+    "item-10": "outputs/cart_item_10_1776227292_7a856ab4_test_test_storage.png"
+  },
+  "items_json": [
+    {
+      "client_id": "item-1",
+      "name": "Arc Floor Lamp",
+      "category": "floor_lamp",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 1600,
+        "depth_mm": 400,
+        "height_mm": 2400
+      }
+    },
+    {
+      "client_id": "item-2",
+      "name": "De Sede DS-787",
+      "category": "sofa",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 2400,
+        "depth_mm": 1100,
+        "height_mm": 800
+      }
+    },
+    {
+      "client_id": "item-3",
+      "name": "De Sede DS-676",
+      "category": "lounge_chair",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 1100,
+        "depth_mm": 1100,
+        "height_mm": 1100
+      }
+    },
+    {
+      "client_id": "item-4",
+      "name": "Black Wall Mirror",
+      "category": "mirror",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 400,
+        "depth_mm": 10,
+        "height_mm": 800
+      }
+    },
+    {
+      "client_id": "item-5",
+      "name": "Gubbi Titone Pouf",
+      "category": "stool",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 700,
+        "depth_mm": 700,
+        "height_mm": 500
+      }
+    },
+    {
+      "client_id": "item-6",
+      "name": "Glass Sofa Table",
+      "category": "table",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 1000,
+        "depth_mm": 1000,
+        "height_mm": 500
+      }
+    },
+    {
+      "client_id": "item-7",
+      "name": "Akari Mini Floor Lamp",
+      "category": "floor_lamp",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 100,
+        "depth_mm": 100,
+        "height_mm": 100
+      }
+    },
+    {
+      "client_id": "item-8",
+      "name": "Round Rug",
+      "category": "rug",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 1100,
+        "depth_mm": 1100,
+        "height_mm": 12
+      }
+    },
+    {
+      "client_id": "item-9",
+      "name": "Black Triangle Side Table",
+      "category": "table",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 500,
+        "depth_mm": 500,
+        "height_mm": 500
+      }
+    },
+    {
+      "client_id": "item-10",
+      "name": "Four Door Cabinet",
+      "category": "storage",
+      "qty": 1,
+      "dims_mm": {
+        "width_mm": 1600,
+        "depth_mm": 1600,
+        "height_mm": 700
+      }
+    }
+  ]
+}

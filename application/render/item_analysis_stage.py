@@ -1,9 +1,14 @@
 import json
 import os
 import re
+import time
 from typing import Any, Callable, Optional
 
 from PIL import Image
+from application.render.reference_features_stage import (
+    extract_reference_features,
+    should_extract_reference_features,
+)
 
 
 def detect_furniture_boxes(
@@ -14,6 +19,7 @@ def detect_furniture_boxes(
     default_model_name: str,
     model_name: Optional[str] = None,
     timeout_sec: Optional[int] = None,
+    max_attempts: Optional[int] = None,
 ):
     if not log_brief:
         print(f">> [Detection] Scanning furniture in {moodboard_path}...", flush=True)
@@ -39,7 +45,10 @@ def detect_furniture_boxes(
             response = call_gemini_with_failover(
                 detect_model,
                 [prompt, img],
-                {"timeout": detect_timeout},
+                {
+                    "timeout": detect_timeout,
+                    "max_attempts": max(1, int(max_attempts or 1)),
+                },
                 {},
                 log_tag="Analysis.DetectFurniture",
             )
@@ -160,6 +169,7 @@ def analyze_cropped_item(
     save_crop=True,
     enable_text_read=True,
     provided_dims_mm=None,
+    absolute_deadline_ts: float | None = None,
 ):
     cropped_img = None
     cutout_img = None
@@ -287,16 +297,37 @@ def analyze_cropped_item(
                 "}\n"
             )
 
-        response = call_gemini_with_failover(
-            analysis_model_name,
-            [prompt, cropped_img],
-            {"timeout": 150},
-            {},
-            log_tag="Analysis.CropItem",
-        )
+        crop_timeout_sec = 150
+        crop_max_attempts = None
+        if absolute_deadline_ts is not None:
+            try:
+                remaining_deadline_sec = max(0.0, float(absolute_deadline_ts) - float(time.time()))
+            except Exception:
+                remaining_deadline_sec = 0.0
+            if remaining_deadline_sec <= 10.0:
+                response = None
+            else:
+                crop_timeout_sec = int(max(10.0, min(45.0, remaining_deadline_sec)))
+                crop_max_attempts = 1
+                response = call_gemini_with_failover(
+                    analysis_model_name,
+                    [prompt, cropped_img],
+                    {"timeout": crop_timeout_sec, "max_attempts": crop_max_attempts},
+                    {},
+                    log_tag="Analysis.CropItem",
+                )
+        else:
+            response = call_gemini_with_failover(
+                analysis_model_name,
+                [prompt, cropped_img],
+                {"timeout": crop_timeout_sec},
+                {},
+                log_tag="Analysis.CropItem",
+            )
 
         desc = f"A high quality {label}."
         dims_str = ""
+        resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
 
         if response and response.text:
             data = safe_extract_json(response.text)
@@ -308,6 +339,20 @@ def analyze_cropped_item(
                     depth_mm = raw_dims.get("depth")
                     height_mm = raw_dims.get("height")
                     radius_mm = raw_dims.get("radius")
+                    extracted_dims_mm = normalize_dims_dict(
+                        {
+                            "width_mm": width_mm,
+                            "depth_mm": depth_mm,
+                            "height_mm": height_mm,
+                            "radius_mm": radius_mm,
+                        }
+                    )
+                    if extracted_dims_mm:
+                        merged_dims_mm = dict(extracted_dims_mm)
+                        for dim_key, dim_value in (resolved_dims_mm or {}).items():
+                            if dim_value:
+                                merged_dims_mm[dim_key] = dim_value
+                        resolved_dims_mm = normalize_dims_dict(merged_dims_mm)
 
                     if width_mm and depth_mm and height_mm:
                         dims_str = f" Dimensions: W={width_mm}mm, D={depth_mm}mm, H={height_mm}mm."
@@ -337,11 +382,36 @@ def analyze_cropped_item(
                 cutout_img.close()
             except Exception:
                 pass
+        extract_ref_features, extraction_reason = should_extract_reference_features(
+            label=label,
+            category=item_data.get("category"),
+            category_canonical=item_data.get("category_canonical"),
+            dims_mm=resolved_dims_mm,
+        )
+        reference_features = extract_reference_features(
+            crop_path=crop_path,
+            label=label,
+            category=item_data.get("category"),
+            description=desc,
+            dims_mm=resolved_dims_mm,
+            call_gemini_with_failover=call_gemini_with_failover,
+            analysis_model_name=analysis_model_name,
+            safe_json_from_model_text=safe_extract_json,
+            log_brief=log_brief,
+            allow_model_call=extract_ref_features,
+            extraction_reason=extraction_reason,
+            absolute_deadline_ts=absolute_deadline_ts,
+        )
+        if isinstance(reference_features, dict):
+            reference_features["extraction_mode"] = "model" if extract_ref_features else "fallback"
+            reference_features["extraction_reason"] = extraction_reason
+
         return {
             "label": label,
             "description": desc + dims_str,
             "box_2d": box,
             "crop_path": crop_path,
+            "reference_features": reference_features,
             "target_key": item_data.get("target_key"),
             "source_index": item_data.get("source_index"),
             "category": item_data.get("category"),
@@ -362,11 +432,28 @@ def analyze_cropped_item(
             except Exception:
                 pass
 
+    fallback_reference_features = extract_reference_features(
+        crop_path=None,
+        label=item_data.get("label", "Furniture"),
+        category=item_data.get("category"),
+        description=f"A high quality {item_data.get('label','Furniture')}.",
+        dims_mm=normalize_dims_dict(provided_dims_mm or {}),
+        call_gemini_with_failover=call_gemini_with_failover,
+        analysis_model_name=analysis_model_name,
+        safe_json_from_model_text=safe_extract_json,
+        log_brief=log_brief,
+        allow_model_call=False,
+    )
+    if isinstance(fallback_reference_features, dict):
+        fallback_reference_features["extraction_mode"] = "fallback"
+        fallback_reference_features["extraction_reason"] = "analysis_exception"
+
     return {
         "label": item_data.get("label", "Furniture"),
         "description": f"A high quality {item_data.get('label','Furniture')}.",
         "box_2d": item_data.get("box_2d"),
         "crop_path": None,
+        "reference_features": fallback_reference_features,
         "target_key": item_data.get("target_key"),
         "source_index": item_data.get("source_index"),
         "category": item_data.get("category"),

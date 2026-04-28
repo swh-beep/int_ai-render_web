@@ -1,0 +1,184 @@
+import json
+from types import SimpleNamespace
+
+from PIL import Image
+
+from application.render import item_analysis_stage
+from application.render.reference_features_stage import (
+    extract_reference_features,
+    should_extract_reference_features,
+)
+
+
+def _write_png(path, size=(96, 96)):
+    Image.new("RGB", size, color=(255, 255, 255)).save(path, format="PNG")
+
+
+def test_should_extract_reference_features_marks_critical_archetypes():
+    should_extract, reason = should_extract_reference_features(
+        label="Black Wall Mirror",
+        category="mirror",
+        category_canonical="mirror",
+        dims_mm={"width_mm": 400, "depth_mm": 10, "height_mm": 800},
+    )
+
+    assert should_extract is True
+    assert reason == "reflective_wall_object"
+
+
+def test_should_extract_reference_features_skips_generic_decor():
+    should_extract, reason = should_extract_reference_features(
+        label="Decor Vase",
+        category="decor",
+        category_canonical="decor",
+        dims_mm={"width_mm": 400, "depth_mm": 400, "height_mm": 400},
+    )
+
+    assert should_extract is False
+    assert reason == "fallback_only"
+
+
+def test_extract_reference_features_can_force_fallback_without_model_call(tmp_path):
+    crop_path = tmp_path / "crop.png"
+    _write_png(crop_path)
+    call_count = {"count": 0}
+
+    def _call_model(*args, **kwargs):
+        call_count["count"] += 1
+        raise AssertionError("model call should not happen")
+
+    result = extract_reference_features(
+        crop_path=str(crop_path),
+        label="Decor Vase",
+        category="decor",
+        description="Decorative ceramic vase with smooth surface.",
+        dims_mm={"width_mm": 400, "depth_mm": 400, "height_mm": 400},
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_json_from_model_text=lambda text: {},
+        log_brief=True,
+        allow_model_call=False,
+    )
+
+    assert call_count["count"] == 0
+    assert result["reflective_surface"] is False
+
+
+def test_analyze_cropped_item_uses_fallback_reference_features_for_noncritical_item(monkeypatch, tmp_path):
+    image_path = tmp_path / "item.png"
+    _write_png(image_path)
+    allow_flags = []
+
+    def _fake_extract_reference_features(**kwargs):
+        allow_flags.append(kwargs.get("allow_model_call"))
+        return {}
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Decor Vase",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "decor",
+            "category_canonical": "decor",
+            "target_key": "decor_vase",
+            "source_index": 1,
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(text=json.dumps({"description": "Decor vase"})),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        provided_dims_mm={"width_mm": 400, "depth_mm": 400, "height_mm": 400},
+    )
+
+    assert allow_flags == [False]
+    assert result["reference_features"]["extraction_mode"] == "fallback"
+
+
+def test_analyze_cropped_item_keeps_model_reference_features_for_critical_item(monkeypatch, tmp_path):
+    image_path = tmp_path / "item.png"
+    _write_png(image_path)
+    allow_flags = []
+
+    def _fake_extract_reference_features(**kwargs):
+        allow_flags.append(kwargs.get("allow_model_call"))
+        return {}
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Black Wall Mirror",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "mirror",
+            "category_canonical": "mirror",
+            "target_key": "mirror_1",
+            "source_index": 1,
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(text=json.dumps({"description": "Wall mirror"})),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        provided_dims_mm={"width_mm": 400, "depth_mm": 10, "height_mm": 800},
+    )
+
+    assert allow_flags == [True]
+    assert result["reference_features"]["extraction_mode"] == "model"
+
+
+def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeypatch, tmp_path):
+    image_path = tmp_path / "item.png"
+    _write_png(image_path)
+    allow_flags = []
+
+    def _fake_extract_reference_features(**kwargs):
+        allow_flags.append(kwargs.get("allow_model_call"))
+        return {}
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Main Furniture",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": None,
+            "category_canonical": None,
+            "target_key": "main_furniture",
+            "source_index": 1,
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(
+            text=json.dumps(
+                {
+                    "description": "Low-profile upholstered main furniture.",
+                    "dimensions_mm": {"width": 2400, "depth": 1100, "height": 800, "radius": None},
+                    "raw_text_found": "2400*1100*800",
+                }
+            )
+        ),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: {k: v for k, v in dims.items() if v},
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=True,
+        provided_dims_mm=None,
+    )
+
+    assert allow_flags == [True]
+    assert "2400mm" in result["description"]
+    assert result["reference_features"]["extraction_mode"] == "model"

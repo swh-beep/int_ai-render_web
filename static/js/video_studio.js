@@ -1,454 +1,479 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
     const $ = (id) => document.getElementById(id);
+    const CLIP_ALLOWED_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
-
-    // --- Global State ---
-    let sourceClips = []; // Generated video clips available for timeline
-    let timelineClips = []; // Clips actually in the timeline
-    
-    // --- Navigation Logic ---
-    const menuScreen = $('menu-screen');
+    const menuScreen = $("menu-screen");
     const workspaces = {
-        'create-clips': $('workspace-feature-1'),
-        'assemble-video': $('workspace-feature-2'),
-        'post-production': $('workspace-feature-3')
+        "create-clips": $("workspace-feature-1"),
+        "assemble-video": $("workspace-feature-2"),
+        "post-production": $("workspace-feature-3"),
     };
 
+    const selectedSources = [];
+
+    const clipDropZone = $("clip-ref-drop-zone");
+    const clipInput = $("clip-ref-input");
+    const clipUploadEmptyState = $("clip-upload-empty-state");
+    const clipUploadPreview = $("clip-upload-preview");
+    const clipRemoveAllBtn = $("clip-ref-remove-all");
+    const clipMotionSelect = $("clip-motion");
+    const clipEffectSelect = $("clip-effect");
+    const clipCustomMotionWrap = $("clip-custom-motion-wrap");
+    const clipCustomEffectWrap = $("clip-custom-effect-wrap");
+    const clipCustomMotion = $("clip-custom-motion");
+    const clipCustomEffect = $("clip-custom-effect");
+    const clipGenerateBtn = $("clip-generate-btn");
+    const clipStatus = $("statusSource-1");
+    const clipLoading = $("clip-loading");
+    const clipPlaceholder = $("clip-placeholder-text");
+    const clipResultContainer = $("clip-result-container");
+    const clipResultGrid = $("clip-gen-grid");
+
+    function setWorkspaceParam(workspaceId) {
+        const url = new URL(window.location.href);
+        if (workspaceId) {
+            url.searchParams.set("workspace", workspaceId);
+        } else {
+            url.searchParams.delete("workspace");
+        }
+        window.history.replaceState({}, "", url);
+    }
+
     function showWorkspace(id) {
-        menuScreen.classList.add('hidden');
-        Object.values(workspaces).forEach(ws => ws.classList.add('hidden'));
-        workspaces[id].classList.remove('hidden');
-        window.scrollTo(0, 0);
+        menuScreen?.classList.add("hidden");
+        Object.values(workspaces).forEach((workspace) => workspace?.classList.add("hidden"));
+        workspaces[id]?.classList.remove("hidden");
+        setWorkspaceParam(id);
+        window.scrollTo({ top: 0, behavior: "auto" });
     }
 
     function showMenu() {
-        Object.values(workspaces).forEach(ws => ws.classList.add('hidden'));
-        menuScreen.classList.remove('hidden');
-        window.scrollTo(0, 0);
+        Object.values(workspaces).forEach((workspace) => workspace?.classList.add("hidden"));
+        menuScreen?.classList.remove("hidden");
+        setWorkspaceParam("");
+        window.scrollTo({ top: 0, behavior: "auto" });
     }
 
-    function showPreview(title, html) {
-        const globalModal = $('global-modal');
-        const modalMsg = $('modal-msg');
-        const modalContent = globalModal?.querySelector('.modal-content');
-        if (!globalModal || !modalMsg) return;
-        modalContent?.classList.add('preview-wide');
-        $('modal-title').textContent = title;
-        modalMsg.innerHTML = html;
-        $('modal-ok-btn').onclick = () => globalModal.classList.add('hidden');
-        globalModal.classList.remove('hidden');
-    }
-
-    document.addEventListener('keydown', (e) => {
-        const globalModal = $('global-modal');
-        if (e.key === 'Escape' && globalModal && !globalModal.classList.contains('hidden')) {
-            globalModal.classList.add('hidden');
-        }
-    });
-
-    // Menu Bindings
-    $('btn-feature-1').onclick = () => showWorkspace('create-clips');
-    $('btn-feature-2').onclick = () => showWorkspace('assemble-video');
-    $('btn-feature-3').onclick = () => showWorkspace('post-production');
-
-    // Breadcrumb Bindings
-    $('back-to-menu-1').onclick = showMenu;
-    $('back-to-menu-2').onclick = showMenu;
-    $('back-to-menu-3').onclick = showMenu;
-
-
-    // --- Workspace Logic Management ---
-    class VideoWorkspaceManager {
-        constructor(id, options = {}) {
-            this.id = id;
-            this.prefix = options.prefix || '';
-            this.refFiles = [];
-            
-            // Elements
-            this.dropZone = $(`${this.prefix}ref-drop-zone`);
-            this.fileInput = $(`${this.prefix}ref-input`);
-            this.previewContainer = $(`${this.prefix}ref-preview-container`);
-            this.removeAllBtn = $(`${this.prefix}ref-remove-all`);
-            this.generateBtn = $(`${this.prefix}generate-btn`);
-            
-            this.internalPreview = this.dropZone?.querySelector('.is-internal-preview');
-            this.uploadContent = this.dropZone?.querySelector('.is-upload-content');
-            
-            this.loadingEl = $(`${this.prefix}loading`);
-            this.placeholderEl = $(`${this.prefix}placeholder-text`);
-            this.resultContainer = $(`${this.prefix}result-container`);
-            this.gridEl = $(`${this.prefix}gen-grid`);
-            
-            this.init();
-        }
-
-        init() {
-            if (this.dropZone) {
-                this.dropZone.onclick = (e) => {
-                    if (e.target.closest('.remove-btn')) return;
-                    this.fileInput.click();
-                };
-                this.dropZone.ondragover = (e) => { e.preventDefault(); this.dropZone.classList.add('dragover'); };
-                this.dropZone.ondragleave = () => this.dropZone.classList.remove('dragover');
-                this.dropZone.ondrop = (e) => {
-                    e.preventDefault();
-                    this.dropZone.classList.remove('dragover');
-                    if (e.dataTransfer.files.length) this.handleFiles(e.dataTransfer.files);
-                };
-                this.fileInput.onchange = (e) => this.handleFiles(e.target.files);
-            }
-
-            if (this.removeAllBtn) {
-                this.removeAllBtn.onclick = (e) => { e.stopPropagation(); this.clearFiles(); };
-            }
-
-            const internalRemoveBtn = this.internalPreview?.querySelector('.remove-btn');
-            if (internalRemoveBtn) {
-                internalRemoveBtn.onclick = (e) => { e.stopPropagation(); this.clearFiles(); };
-            }
-
-            if (this.generateBtn) {
-                this.generateBtn.onclick = () => this.generate();
-            }
-        }
-
-        clearFiles() {
-            this.refFiles = [];
-            if (this.fileInput) this.fileInput.value = '';
-            this.updatePreviews();
-        }
-
-        handleFiles(files) {
-            Array.from(files).forEach(f => {
-                if (f.type.startsWith('image/')) this.refFiles.push(f);
-            });
-            this.updatePreviews();
-        }
-
-        updatePreviews() {
-            if (this.internalPreview) {
-                const img = this.internalPreview.querySelector('img');
-                if (this.refFiles.length > 0) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        img.src = e.target.result;
-                        this.internalPreview.classList.remove('hidden');
-                        this.uploadContent?.classList.add('hidden');
-                    };
-                    reader.readAsDataURL(this.refFiles[this.refFiles.length - 1]);
-                    this.generateBtn.disabled = false;
-                } else {
-                    img.src = '';
-                    this.internalPreview.classList.add('hidden');
-                    this.uploadContent?.classList.remove('hidden');
-                    this.generateBtn.disabled = true;
-                }
-                return;
-            }
-
-            if (!this.previewContainer) return;
-            this.previewContainer.innerHTML = '';
-            if (this.refFiles.length > 0) {
-                this.previewContainer.style.display = 'grid';
-                this.removeAllBtn?.classList.remove('hidden');
-                this.generateBtn.disabled = false;
-                this.refFiles.forEach((file, index) => {
-                    const reader = new FileReader();
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'is-file-item';
-                    reader.onload = (e) => {
-                        itemDiv.innerHTML = `
-                            <img src="${e.target.result}">
-                            <button class="remove-btn">×</button>
-                        `;
-                        itemDiv.querySelector('.remove-btn').onclick = (ev) => {
-                            ev.stopPropagation();
-                            this.refFiles.splice(index, 1);
-                            this.updatePreviews();
-                        };
-                        this.previewContainer.appendChild(itemDiv);
-                    };
-                    reader.readAsDataURL(file);
-                });
-            } else {
-                this.previewContainer.style.display = 'none';
-                this.removeAllBtn?.classList.add('hidden');
-                this.generateBtn.disabled = true;
-            }
-        }
-
-        async generate() {
-            if (this.refFiles.length === 0) return;
-            
-            // Logic for Step 1: Create Video Clips
-            if (this.id === 'create-clips') {
-                this.placeholderEl?.classList.add('hidden');
-                this.loadingEl?.classList.remove('hidden');
-                this.resultContainer?.classList.add('hidden');
-                this.generateBtn.disabled = true;
-
-                const motionValue = $('clip-motion').value;
-                const statusText = $('statusSource-1');
-                
-                try {
-                    // Upload files first
-                    let processed = 0;
-                    const items_to_gen = [];
-                    
-                    for (const file of this.refFiles) {
-                        const fd = new FormData(); fd.append("file", file);
-                        const uploadRes = await fetch("/api/outputs/upload", { method: "POST", body: fd });
-                        const uploadData = await uploadRes.json();
-                        items_to_gen.push({ url: uploadData.url, motion: motionValue, effect: 'none' });
-                        processed++;
-                        statusText.textContent = `Uploading... (${processed}/${this.refFiles.length})`;
-                    }
-
-                    statusText.textContent = "Starting generation...";
-                    const genRes = await fetch("/video-mvp/generate-sources", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ items: items_to_gen, cfg_scale: 0.5 })
-                    });
-                    const genData = await genRes.json();
-                    
-                    const results = await this.pollJob(genData.job_id, (p) => {
-                        statusText.textContent = `Generating... (${p}%)`;
-                    });
-
-                    this.loadingEl?.classList.add('hidden');
-                    this.resultContainer?.classList.remove('hidden');
-                    this.gridEl.innerHTML = '';
-
-                    results.forEach((vidUrl, idx) => {
-                        const sourceItem = {
-                            id: Math.random().toString(36).substr(2, 9),
-                            url: items_to_gen[idx].url,
-                            videoUrl: vidUrl,
-                            status: 'ready'
-                        };
-                        sourceClips.push(sourceItem);
-                        
-                        const card = document.createElement('div');
-                        card.className = 'result-card';
-                        card.innerHTML = `
-                            <video src="${vidUrl}" loop muted onmouseover="this.play()" onmouseout="this.pause()"></video>
-                            <button class="glow-btn burgundy detail-upscale-btn" onclick="addToTimelineFromGlobal('${sourceItem.id}')">
-                                <span class="material-symbols-outlined">add_circle</span> ADD TO TIMELINE
-                            </button>
-                        `;
-                        card.addEventListener('click', (e) => {
-                            if (e.target.closest('.detail-upscale-btn')) return;
-                            showPreview("Result Preview", `<video src="${vidUrl}" controls style="width:100%; max-height:80vh; border-radius:12px; display:block; margin:0 auto;"></video>`);
-                        });
-
-                        this.gridEl.appendChild(card);
-                    });
-                    
-                    statusText.textContent = "Done.";
-                    // Sync to Workspace 2 list
-                    syncTimelineSourceList();
-
-                } catch (e) {
-                    console.error(e);
-                    statusText.textContent = "Error: " + e.message;
-                    this.placeholderEl?.classList.remove('hidden');
-                } finally {
-                    this.generateBtn.disabled = false;
-                    this.loadingEl?.classList.add('hidden');
-                }
-            }
-        }
-
-        async pollJob(jobId, onProgress) {
-            while (true) {
-                const res = await fetch(`/video-mvp/status/${jobId}`, { cache: "no-store" });
-                const st = await res.json();
-                if (onProgress) onProgress(st.progress || 0);
-                if (st.status === "COMPLETED") return st.results || st.result_url;
-                if (st.status === "FAILED") throw new Error(st.error);
-                await new Promise(r => setTimeout(r, 1500));
-            }
+    function setClipStatus(message) {
+        if (clipStatus) {
+            clipStatus.textContent = message || "";
         }
     }
 
-    // --- Timeline Logic (Workspace 2) ---
-    const previewVid = $('previewVideo');
-    const previewPlaceholder = $('previewPlaceholder');
-    const timelineTrack = $('timelineTrack');
-    const timelineRuler = $('timelineRuler');
-    const playhead = $('playhead');
-    const tlPropsDiv = $('timelineProperties');
-    const inpTlSpeed = $('tlSpeed');
-    const inpTlStart = $('tlTrimStart');
-    const inpTlEnd = $('tlTrimEnd');
+    function createSourceId() {
+        if (window.crypto?.randomUUID) {
+            return window.crypto.randomUUID();
+        }
+        return `source-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
 
-    let selectedTimelineIndex = -1;
-    let pxPerSec = 40;
-    let isPlaying = false;
-    let currentPlayTime = 0;
-    let animationFrameId = null;
+    function showModal(title, bodyHtml) {
+        const modal = $("global-modal");
+        const modalTitle = $("modal-title");
+        const modalMsg = $("modal-msg");
+        const modalOkBtn = $("modal-ok-btn");
+        if (!modal || !modalTitle || !modalMsg || !modalOkBtn) {
+            return;
+        }
+        modalTitle.textContent = title;
+        modalMsg.innerHTML = bodyHtml;
+        modalOkBtn.onclick = () => modal.classList.add("hidden");
+        modal.classList.remove("hidden");
+    }
 
-    function syncTimelineSourceList() {
-        const listContainer = $('full-ref-preview-container');
-        if (!listContainer) return;
-        listContainer.innerHTML = '';
-        
-        sourceClips.forEach(clip => {
-            const item = document.createElement('div');
-            item.className = 'is-file-item';
-            item.innerHTML = `
-                <img src="${clip.url}">
-                <button class="remove-btn" style="background:rgba(0,180,0,0.8);"><span class="material-symbols-outlined">add</span></button>
-            `;
-            item.onclick = () => addToTimeline(clip);
-            listContainer.appendChild(item);
+    function sourceIdentity(source) {
+        const file = source.file;
+        return [file.name, file.size, file.lastModified].join(":");
+    }
+
+    function loadSourceDimensions(previewUrl) {
+        return new Promise((resolve) => {
+            const probe = new Image();
+            probe.onload = () => resolve({ width: probe.naturalWidth, height: probe.naturalHeight });
+            probe.onerror = () => resolve({ width: 0, height: 0 });
+            probe.src = previewUrl;
         });
     }
 
-    function addToTimeline(sourceItem) {
-        timelineClips.push({
-            sourceId: sourceItem.id, videoUrl: sourceItem.videoUrl, thumbUrl: sourceItem.url,
-            speed: 1.0, trimStart: 0.0, trimEnd: 5.0
-        });
-        renderTimeline();
+    function revokeSourcePreview(source) {
+        if (source?.previewUrl) {
+            URL.revokeObjectURL(source.previewUrl);
+        }
     }
 
-    window.addToTimelineFromGlobal = (id) => {
-        const item = sourceClips.find(s => s.id === id);
-        if (item) addToTimeline(item);
-    };
+    function syncCustomPromptFields() {
+        clipCustomMotionWrap?.classList.toggle("hidden", clipMotionSelect?.value !== "custom");
+        clipCustomEffectWrap?.classList.toggle("hidden", clipEffectSelect?.value !== "custom");
+    }
 
-    function renderTimeline() {
-        if (!timelineTrack) return;
-        timelineTrack.innerHTML = "";
-        timelineRuler.innerHTML = "";
-        let totalDuration = 0;
-
-        if (timelineClips.length === 0) {
-            timelineTrack.innerHTML = `<div class="placeholder-desc" style="padding:20px;">Add clips to start building.</div>`;
+    function syncClipDropZoneSize(source) {
+        if (!clipDropZone) {
             return;
         }
 
-        timelineClips.forEach((clip, idx) => {
-            const dur = (clip.trimEnd - clip.trimStart) / clip.speed;
-            const widthPx = dur * pxPerSec;
-            const block = document.createElement("div");
-            block.className = `timeline-block ${idx === selectedTimelineIndex ? 'selected' : ''}`;
-            block.style.width = `${widthPx}px`;
-            block.onclick = (e) => { e.stopPropagation(); selectTimelineClip(idx); };
+        if (!source?.width || !source?.height) {
+            clipDropZone.style.removeProperty("width");
+            clipDropZone.style.removeProperty("height");
+            return;
+        }
 
-            const thumbCount = Math.max(1, Math.ceil(widthPx / 60));
-            let thumbs = "";
-            for (let i = 0; i < thumbCount; i++) thumbs += `<img src="${clip.thumbUrl}" draggable="false">`;
+        const stage = clipDropZone.parentElement;
+        if (!stage) {
+            return;
+        }
 
-            block.innerHTML = `<div class="timeline-block-thumbs">${thumbs}</div><div class="timeline-block-info">${dur.toFixed(1)}s</div>`;
-            timelineTrack.appendChild(block);
-            totalDuration += dur;
+        const maxWidth = stage.clientWidth;
+        const maxHeight = stage.clientHeight;
+        if (!maxWidth || !maxHeight) {
+            return;
+        }
+
+        const ratio = source.width / source.height;
+        let nextWidth = maxWidth;
+        let nextHeight = nextWidth / ratio;
+
+        if (nextHeight > maxHeight) {
+            nextHeight = maxHeight;
+            nextWidth = nextHeight * ratio;
+        }
+
+        clipDropZone.style.width = `${nextWidth}px`;
+        clipDropZone.style.height = `${nextHeight}px`;
+    }
+
+    function normalizeClipPlaceholder() {
+        if (!clipPlaceholder) {
+            return;
+        }
+        clipPlaceholder.innerHTML = `
+            <div class="clip-placeholder-stack">
+                <div class="clip-placeholder-card"><span class="material-symbols-outlined">image</span></div>
+                <div class="clip-placeholder-arrow"><span class="material-symbols-outlined">arrow_forward</span></div>
+                <div class="clip-placeholder-card"><span class="material-symbols-outlined">movie</span></div>
+            </div>
+            <h3 class="clip-placeholder-title">Preview</h3>
+            <p class="clip-placeholder-desc">Upload one image, choose motion and effect, then generate its clip directly.</p>
+        `;
+    }
+
+    function renderSelectedSources() {
+        if (!clipUploadPreview || !clipGenerateBtn || !clipRemoveAllBtn || !clipDropZone) {
+            return;
+        }
+
+        clipUploadPreview.innerHTML = "";
+
+        const hasSources = selectedSources.length > 0;
+        clipGenerateBtn.disabled = !hasSources;
+        clipRemoveAllBtn.classList.toggle("hidden", !hasSources);
+        clipUploadEmptyState?.classList.toggle("hidden", hasSources);
+        clipUploadPreview.classList.toggle("hidden", !hasSources);
+        clipDropZone.classList.toggle("has-preview", hasSources);
+
+        if (!hasSources) {
+            syncClipDropZoneSize(null);
+            return;
+        }
+
+        const source = selectedSources[0];
+        const img = document.createElement("img");
+        img.src = source.previewUrl;
+        img.alt = source.file.name;
+        clipUploadPreview.appendChild(img);
+        syncClipDropZoneSize(source);
+    }
+
+    async function addFileSources(fileList) {
+        const files = Array.from(fileList || []).filter((file) => file.type.startsWith("image/"));
+        const nextFile = files[0];
+        if (!nextFile) {
+            return;
+        }
+
+        const lowerName = (nextFile.name || "").toLowerCase();
+        const ext = lowerName.includes(".") ? lowerName.slice(lowerName.lastIndexOf(".")) : "";
+        if (!CLIP_ALLOWED_EXTS.has(ext)) {
+            setClipStatus("Only png, jpg, jpeg, and webp files are supported.");
+            if (clipInput) {
+                clipInput.value = "";
+            }
+            return;
+        }
+
+        const next = {
+            id: createSourceId(),
+            file: nextFile,
+            previewUrl: URL.createObjectURL(nextFile),
+            width: 0,
+            height: 0,
+        };
+
+        if (selectedSources[0] && sourceIdentity(selectedSources[0]) === sourceIdentity(next)) {
+            revokeSourcePreview(next);
+            return;
+        }
+
+        const dims = await loadSourceDimensions(next.previewUrl);
+        next.width = dims.width;
+        next.height = dims.height;
+
+        clearSelectedSources();
+        selectedSources.push(next);
+        renderSelectedSources();
+    }
+
+    function clearSelectedSources() {
+        while (selectedSources.length) {
+            revokeSourcePreview(selectedSources.pop());
+        }
+        if (clipInput) {
+            clipInput.value = "";
+        }
+        renderSelectedSources();
+    }
+
+    function validateClipRequest() {
+        if (!selectedSources.length) {
+            setClipStatus("Upload at least one source image.");
+            return false;
+        }
+        if (clipMotionSelect?.value === "custom" && !clipCustomMotion?.value.trim()) {
+            setClipStatus("Custom motion prompt is required when Motion is set to Custom.");
+            clipCustomMotion?.focus();
+            return false;
+        }
+        if (clipEffectSelect?.value === "custom" && !clipCustomEffect?.value.trim()) {
+            setClipStatus("Custom effect prompt is required when Effect is set to Custom.");
+            clipCustomEffect?.focus();
+            return false;
+        }
+        return true;
+    }
+
+    async function uploadSourceFile(file, index, total) {
+        const formData = new FormData();
+        formData.append("file", file);
+        setClipStatus(`Uploading ${index}/${total}...`);
+        const response = await fetch("/api/outputs/upload", { method: "POST", body: formData });
+        if (!response.ok) {
+            let detail = "";
+            try {
+                const payload = await response.json();
+                detail = payload?.error || payload?.detail || "";
+            } catch {
+                detail = await response.text();
+            }
+            throw new Error(detail || `Upload failed (${response.status})`);
+        }
+        const payload = await response.json();
+        if (!payload?.url) {
+            throw new Error("Upload completed but no output URL was returned.");
+        }
+        return payload.url;
+    }
+
+    async function materializeSourceUrls() {
+        const urls = [];
+        for (let index = 0; index < selectedSources.length; index += 1) {
+            urls.push(await uploadSourceFile(selectedSources[index].file, index + 1, selectedSources.length));
+        }
+        return urls;
+    }
+
+    async function pollVideoJob(jobId) {
+        while (true) {
+            const response = await fetch(`/video-mvp/status/${jobId}`, { cache: "no-store" });
+            if (!response.ok) {
+                throw new Error(`Status check failed (${response.status})`);
+            }
+            const state = await response.json();
+            const progress = typeof state.progress === "number" ? ` (${state.progress}%)` : "";
+            setClipStatus(`${state.message || state.status || "Working"}${progress}`);
+
+            if (state.status === "COMPLETED") {
+                return state;
+            }
+            if (state.status === "FAILED") {
+                throw new Error(state.error || "Video generation failed.");
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+    }
+
+    function renderGeneratedResults(results, errors) {
+        if (!clipResultContainer || !clipResultGrid || !clipPlaceholder) {
+            return;
+        }
+
+        clipResultGrid.innerHTML = "";
+        const validResults = (results || []).filter(Boolean);
+
+        if (!validResults.length) {
+            const empty = document.createElement("p");
+            empty.className = "clip-helper-note";
+            empty.textContent = "No clips were generated.";
+            clipResultGrid.appendChild(empty);
+        }
+
+        validResults.forEach((videoUrl) => {
+            const card = document.createElement("article");
+            card.className = "clip-generated-card";
+
+            const video = document.createElement("video");
+            video.src = videoUrl;
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.preload = "metadata";
+
+            const footer = document.createElement("div");
+            footer.className = "clip-result-actions-light";
+
+            const download = document.createElement("a");
+            download.href = `/download?url=${encodeURIComponent(videoUrl)}`;
+            download.className = "clip-result-link-light";
+            download.textContent = "Download";
+            download.addEventListener("click", (event) => event.stopPropagation());
+
+            footer.appendChild(download);
+            card.appendChild(video);
+            card.appendChild(footer);
+
+            card.addEventListener("click", () => {
+                showModal("Clip Preview", `<video src="${videoUrl}" controls style="width:100%;max-height:80vh;border-radius:12px;"></video>`);
+            });
+            card.addEventListener("mouseenter", () => video.play().catch(() => {}));
+            card.addEventListener("mouseleave", () => {
+                video.pause();
+                video.currentTime = 0;
+            });
+
+            clipResultGrid.appendChild(card);
         });
 
-        // Ruler
-        for (let i = 0; i < totalDuration + 5; i++) {
-            const tick = document.createElement("div");
-            tick.style.position = "absolute"; tick.style.left = `${i * pxPerSec}px`;
-            tick.style.bottom = "0"; tick.style.borderLeft = "1px solid #555";
-            tick.style.height = "40%"; tick.style.fontSize = "10px"; tick.style.color = "#777";
-            if (i % 5 === 0) { tick.style.height = "100%"; tick.textContent = i + "s"; }
-            timelineRuler.appendChild(tick);
+        clipPlaceholder.classList.add("hidden");
+        clipResultContainer.classList.remove("hidden");
+        setClipStatus(errors?.length ? `Completed with ${errors.length} failed clip(s).` : "Done.");
+    }
+
+    async function handleGenerateClips() {
+        if (!validateClipRequest()) {
+            return;
         }
-    }
 
-    function selectTimelineClip(idx) {
-        selectedTimelineIndex = idx;
-        const clip = timelineClips[idx];
-        tlPropsDiv.classList.remove("hidden");
-        inpTlSpeed.value = clip.speed;
-        inpTlStart.value = clip.trimStart;
-        inpTlEnd.value = clip.trimEnd;
-
-        previewPlaceholder.classList.add("hidden");
-        previewVid.classList.remove("hidden");
-        if (!previewVid.src.includes(clip.videoUrl)) previewVid.src = clip.videoUrl;
-        previewVid.playbackRate = clip.speed;
-        previewVid.currentTime = clip.trimStart;
-
-        renderTimeline();
-    }
-
-    $('full-generate-btn').onclick = async () => {
-        if (timelineClips.length === 0) return alert("Empty timeline.");
-        const btn = $('full-generate-btn');
-        const loading = $('full-loading');
-        const status = $('statusSource-2');
-
-        btn.disabled = true;
-        loading.classList.remove('hidden');
-        status.textContent = "Rendering final video...";
+        clipGenerateBtn.disabled = true;
+        clipLoading?.classList.remove("hidden");
+        clipPlaceholder?.classList.add("hidden");
+        clipResultContainer?.classList.add("hidden");
+        clipResultGrid.innerHTML = "";
 
         try {
+            const urls = await materializeSourceUrls();
             const payload = {
-                clips: timelineClips.map(c => ({
-                    video_url: c.videoUrl, speed: c.speed, trim_start: c.trimStart, trim_end: c.trimEnd
+                items: urls.map((url) => ({
+                    url,
+                    motion: clipMotionSelect?.value || "static",
+                    effect: clipEffectSelect?.value || "none",
+                    custom_motion_prompt: clipMotionSelect?.value === "custom" ? clipCustomMotion?.value.trim() : null,
+                    custom_effect_prompt: clipEffectSelect?.value === "custom" ? clipCustomEffect?.value.trim() : null,
                 })),
-                include_intro_outro: true
+                cfg_scale: 0.5,
             };
-            const res = await fetch("/video-mvp/compile", {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+
+            setClipStatus("Starting generation...");
+            const response = await fetch("/video-mvp/generate-sources", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
             });
-            const data = await res.json();
-            
-            const poll = async (jobId) => {
-                while (true) {
-                    const r = await fetch(`/video-mvp/status/${jobId}`);
-                    const s = await r.json();
-                    status.textContent = `Rendering... (${s.progress || 0}%)`;
-                    if (s.status === "COMPLETED") return s.results || s.result_url;
-                    if (s.status === "FAILED") throw new Error(s.error);
-                    await new Promise(x => setTimeout(x, 1500));
-                }
-            };
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || `Generation failed (${response.status})`);
+            }
 
-            const finalUrl = await poll(data.job_id);
-            status.textContent = "Done!";
-            
-            // Show result modal
-            const globalModal = $('global-modal');
-            const modalContent = globalModal?.querySelector('.modal-content');
-            const modalMsg = $('modal-msg');
-            modalContent?.classList.remove('preview-wide');
-            modalMsg.innerHTML = `<video src="${finalUrl}" controls style="width:100%; border-radius:8px;"></video>
-                                  <a href="/download?url=${encodeURIComponent(finalUrl)}" download class="glow-btn burgundy" style="display:block; margin-top:15px; text-decoration:none;">DOWNLOAD FINAL VIDEO</a>`;
-            $('modal-title').textContent = "Video Exported Successfully";
-            $('modal-ok-btn').onclick = () => globalModal.classList.add('hidden');
-            globalModal.classList.remove('hidden');
+            const { job_id: jobId } = await response.json();
+            if (!jobId) {
+                throw new Error("Video job did not return a job id.");
+            }
 
-        } catch (e) {
-            console.error(e);
-            status.textContent = "Failed: " + e.message;
+            const finalState = await pollVideoJob(jobId);
+            renderGeneratedResults(finalState.results || [], finalState.errors || []);
+        } catch (error) {
+            console.error(error);
+            clipPlaceholder?.classList.remove("hidden");
+            setClipStatus(`Failed: ${error.message}`);
         } finally {
-            btn.disabled = false;
-            loading.classList.add('hidden');
+            clipLoading?.classList.add("hidden");
+            clipGenerateBtn.disabled = selectedSources.length === 0;
         }
-    };
+    }
 
-    // --- Initialization ---
-    new VideoWorkspaceManager('create-clips', { prefix: 'clip-' });
-    new VideoWorkspaceManager('assemble-video', { prefix: 'full-' });
-    new VideoWorkspaceManager('post-production', { prefix: 'post-' });
-    // Note: Specialized logic for timeline in workspace 2
-    
-    // Scrubber
-    const container = document.querySelector('.timeline-container');
-    if (container) {
-        container.onmousedown = (e) => {
-            const rect = container.getBoundingClientRect();
-            const seek = (ev) => {
-                const x = ev.clientX - rect.left + container.scrollLeft;
-                currentPlayTime = x / pxPerSec;
-                playhead.style.left = `${x}px`;
-            };
-            seek(e);
-            window.onmousemove = seek;
-            window.onmouseup = () => window.onmousemove = null;
-        };
+    function bindCreateClipWorkspace() {
+        normalizeClipPlaceholder();
+
+        if (clipDropZone && clipInput) {
+            clipDropZone.addEventListener("click", () => clipInput.click());
+            clipDropZone.addEventListener("dragover", (event) => {
+                event.preventDefault();
+                clipDropZone.classList.add("dragover");
+            });
+            clipDropZone.addEventListener("dragleave", () => {
+                clipDropZone.classList.remove("dragover");
+            });
+            clipDropZone.addEventListener("drop", (event) => {
+                event.preventDefault();
+                clipDropZone.classList.remove("dragover");
+                addFileSources(event.dataTransfer?.files || []);
+            });
+            clipInput.addEventListener("change", (event) => {
+                addFileSources(event.target.files || []);
+                clipInput.value = "";
+            });
+        }
+
+        clipRemoveAllBtn?.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            clearSelectedSources();
+        });
+        clipMotionSelect?.addEventListener("change", syncCustomPromptFields);
+        clipEffectSelect?.addEventListener("change", syncCustomPromptFields);
+        clipGenerateBtn?.addEventListener("click", handleGenerateClips);
+        window.addEventListener("resize", () => {
+            if (selectedSources[0]) {
+                syncClipDropZoneSize(selectedSources[0]);
+            }
+        });
+        syncCustomPromptFields();
+        renderSelectedSources();
+    }
+
+    $("btn-feature-1")?.addEventListener("click", () => showWorkspace("create-clips"));
+    $("btn-feature-2")?.addEventListener("click", () => showWorkspace("assemble-video"));
+    $("btn-feature-3")?.addEventListener("click", () => showWorkspace("post-production"));
+
+    $("back-to-menu-1")?.addEventListener("click", showMenu);
+    $("back-to-menu-2")?.addEventListener("click", showMenu);
+    $("back-to-menu-3")?.addEventListener("click", showMenu);
+
+    const globalModal = $("global-modal");
+    globalModal?.addEventListener("click", (event) => {
+        if (event.target === globalModal) {
+            globalModal.classList.add("hidden");
+        }
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            globalModal?.classList.add("hidden");
+        }
+    });
+
+    bindCreateClipWorkspace();
+
+    const requestedWorkspace = new URL(window.location.href).searchParams.get("workspace");
+    if (requestedWorkspace && workspaces[requestedWorkspace]) {
+        showWorkspace(requestedWorkspace);
     }
 });

@@ -1,0 +1,651 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap");
+
+:root {
+    --studio-ink: #363636;
+    --studio-ink-muted: #707070;
+    --studio-border: #d6d6d6;
+    --studio-border-strong: #b6b6b6;
+    --studio-panel: #ffffff;
+    --studio-panel-alt: #f5f5f5;
+    --studio-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+body[data-page="image-studio"],
+body[data-page="video-studio"] {
+    background: #ffffff !important;
+    color: var(--studio-ink) !important;
+}
+
+body[data-page="image-studio"],
+body[data-page="image-studio"] h1,
+body[data-page="image-studio"] h2,
+body[data-page="image-studio"] h3,
+body[data-page="image-studio"] h4,
+body[data-page="image-studio"] p,
+body[data-page="image-studio"] label,
+body[data-page="image-studio"] button,
+body[data-page="image-studio"] input,
+body[data-page="image-studio"] select,
+body[data-page="image-studio"] textarea,
+body[data-page="image-studio"] a,
+body[data-page="video-studio"],
+body[data-page="video-studio"] h1,
+body[data-page="video-studio"] h2,
+body[data-page="video-studio"] h3,
+body[data-page="video-studio"] h4,
+body[data-page="video-studio"] p,
+body[data-page="video-studio"] label,
+body[data-page="video-studio"] button,
+body[data-page="video-studio"] input,
+body[data-page="video-studio"] select,
+body[data-page="video-studio"] textarea,
+body[data-page="video-studio"] a {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    color: var(--studio-ink);
+}
+
+body[data-page="image-studio"] .is-main-layout,
+body[data-page="video-studio"] .is-main-layout {
+    width: min(1600px, calc(100vw - 48px)) !important;
+    margin: 0 auto !important;
+}
+
+body[data-page="video-studio"] .is-main-layout {
+    flex-direction: row-reverse !important;
+}
+
+body[data-page="image-studio"] .is-branding h1,
+body[data-page="video-studio"] .is-branding h1 {
+    font-size: 3rem !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.5px !important;
+    color: #111111 !important;
+}
+
+body[data-page="video-studio"] .is-branding-logo,
+body[data-page="video-studio"] .is-branding-wordmark {
+    filter: brightness(0) !important;
+}
+
+body[data-page="video-studio"] .is-card-btn {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+    padding: 2rem !important;
+}
+
+body[data-page="video-studio"] .card-content h2 {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    font-size: 2rem !important;
+    font-weight: 500 !important;
+    color: #ffffff !important;
+}
+
+body[data-page="video-studio"] .card-content p {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    font-size: 1rem !important;
+    opacity: 0.8 !important;
+    color: #ffffff !important;
+}
+
+body[data-page="image-studio"] .card-content h2,
+body[data-page="image-studio"] .card-content p {
+    color: #ffffff !important;
+}
+
+body[data-page="image-studio"] .card-content p {
+    opacity: 0.88 !important;
+}
+
+body[data-page="video-studio"] .card-action {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    color: #ffffff !important;
+    backdrop-filter: blur(5px) !important;
+}
+
+body[data-page="video-studio"] .card-action .material-symbols-outlined {
+    color: #ffffff !important;
+}
+
+body[data-page="video-studio"] .side-nav {
+    border-color: #d2d2d2 !important;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08) !important;
+}
+
+body[data-page="video-studio"] .nav-item,
+body[data-page="video-studio"] .nav-item .material-symbols-outlined {
+    color: #707070 !important;
+}
+
+body[data-page="image-studio"] .nav-label,
+body[data-page="video-studio"] .nav-label {
+    font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    color: inherit !important;
+}
+
+body[data-page="video-studio"] .nav-item:hover,
+body[data-page="video-studio"] .nav-item:hover .material-symbols-outlined,
+body[data-page="video-studio"] .nav-item.active,
+body[data-page="video-studio"] .nav-item.active .material-symbols-outlined {
+    color: #363636 !important;
+}
+
+body[data-page="image-studio"] .is-workspace,
+body[data-page="video-studio"] .is-workspace {
+    width: min(1200px, calc(100vw - 40px)) !important;
+    max-width: 1200px !important;
+    margin: 0 auto !important;
+    align-items: stretch !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    padding-top: 40px !important;
+    padding-bottom: 56px !important;
+    margin-bottom: 0 !important;
+    box-sizing: border-box !important;
+}
+
+body[data-page="image-studio"] .workspace-breadcrumb,
+body[data-page="video-studio"] .workspace-breadcrumb {
+    padding: 0 0 14px 4px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    background: transparent !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    transform: none !important;
+}
+
+body[data-page="image-studio"] .breadcrumb-btn,
+body[data-page="video-studio"] .breadcrumb-btn {
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border-strong) !important;
+    color: var(--studio-ink) !important;
+    padding: 8px 12px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    line-height: 1 !important;
+    box-shadow: none !important;
+}
+
+body[data-page="image-studio"] .breadcrumb-btn:hover,
+body[data-page="video-studio"] .breadcrumb-btn:hover {
+    background: #ffffff !important;
+    border-color: var(--studio-ink) !important;
+}
+
+body[data-page="image-studio"] .breadcrumb-divider,
+body[data-page="image-studio"] .breadcrumb-current,
+body[data-page="video-studio"] .breadcrumb-divider,
+body[data-page="video-studio"] .breadcrumb-current {
+    color: var(--studio-ink-muted) !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+}
+
+body[data-page="image-studio"] .is-workspace-card,
+body[data-page="video-studio"] .is-workspace-card,
+body[data-page="video-studio"] .clip-workspace-shell {
+    width: 100% !important;
+    min-width: 100% !important;
+    align-self: stretch !important;
+    flex: none !important;
+    margin: 0 !important;
+    transform: none !important;
+    background: var(--studio-panel) !important;
+    border: 1px solid var(--studio-border) !important;
+    box-shadow: var(--studio-shadow) !important;
+    overflow: hidden !important;
+    height: min(780px, calc(100vh - 180px)) !important;
+    min-height: min(780px, calc(100vh - 180px)) !important;
+    max-height: min(780px, calc(100vh - 180px)) !important;
+}
+
+body[data-page="image-studio"] .is-workspace-card {
+    width: min(1200px, calc(100vw - 40px)) !important;
+    min-width: min(1200px, calc(100vw - 40px)) !important;
+    max-width: min(1200px, calc(100vw - 40px)) !important;
+}
+
+body[data-page="video-studio"] .clip-workspace-shell {
+    display: grid !important;
+    grid-template-columns: 410px minmax(0, 1fr) !important;
+    gap: 0 !important;
+    padding: 0 !important;
+}
+
+body[data-page="image-studio"] .is-panel-left,
+body[data-page="video-studio"] .is-panel-left,
+body[data-page="video-studio"] .clip-form-panel {
+    width: 410px !important;
+    min-width: 410px !important;
+    max-width: 410px !important;
+    flex: 0 0 410px !important;
+    padding: 28px !important;
+    border-right: 1px solid #e4e4e4 !important;
+    background: var(--studio-panel) !important;
+    overflow-y: auto !important;
+    scrollbar-width: none !important;
+}
+
+body[data-page="image-studio"] .is-panel-left::-webkit-scrollbar,
+body[data-page="video-studio"] .is-panel-left::-webkit-scrollbar,
+body[data-page="video-studio"] .clip-form-panel::-webkit-scrollbar,
+body[data-page="image-studio"] .is-panel-right::-webkit-scrollbar,
+body[data-page="video-studio"] .is-panel-right::-webkit-scrollbar,
+body[data-page="video-studio"] .clip-output-panel::-webkit-scrollbar {
+    display: none !important;
+}
+
+body[data-page="image-studio"] .is-panel-right,
+body[data-page="video-studio"] .is-panel-right,
+body[data-page="video-studio"] .clip-output-panel {
+    width: auto !important;
+    flex: 1 1 auto !important;
+    background: var(--studio-panel-alt) !important;
+    padding: 32px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow-y: auto !important;
+    min-width: 0 !important;
+}
+
+body[data-page="video-studio"] .clip-surface {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+body[data-page="image-studio"] .is-section-title,
+body[data-page="video-studio"] .is-section-title,
+body[data-page="video-studio"] .clip-heading {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    color: #111111 !important;
+    font-size: 2rem !important;
+    font-weight: 500 !important;
+    line-height: 1.15 !important;
+    margin: 0 0 12px 0 !important;
+    text-transform: none !important;
+}
+
+body[data-page="image-studio"] .is-section-desc,
+body[data-page="video-studio"] .is-section-desc,
+body[data-page="video-studio"] .clip-copy,
+body[data-page="video-studio"] .clip-loading-copy {
+    color: var(--studio-ink-muted) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.55 !important;
+}
+
+body[data-page="video-studio"] .clip-eyebrow,
+body[data-page="image-studio"] .input-label,
+body[data-page="video-studio"] .input-label,
+body[data-page="video-studio"] .clip-field label,
+body[data-page="video-studio"] .clip-status,
+body[data-page="image-studio"] .clear-all-btn,
+body[data-page="video-studio"] .clear-all-btn {
+    color: var(--studio-ink-muted) !important;
+}
+
+body[data-page="video-studio"] .clip-form-top,
+body[data-page="video-studio"] .clip-form-bottom {
+    gap: 16px !important;
+}
+
+body[data-page="video-studio"] .clip-upload-stage {
+    flex: 1 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+body[data-page="video-studio"] .clip-form-bottom {
+    margin-top: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+body[data-page="video-studio"] .clip-field {
+    gap: 8px !important;
+}
+
+body[data-page="image-studio"] .is-upload-box,
+body[data-page="video-studio"] .is-upload-box,
+body[data-page="video-studio"] .clip-upload-box,
+body[data-page="video-studio"] .vs-dropzone-compact {
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border-strong) !important;
+    border-style: solid !important;
+    box-shadow: none !important;
+}
+
+body[data-page="video-studio"] .clip-upload-box {
+    min-height: 286px !important;
+    height: 286px !important;
+    width: 100% !important;
+    padding: 18px !important;
+}
+
+body[data-page="video-studio"] .clip-upload-box.has-preview {
+    padding: 0 !important;
+    min-height: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-color: transparent !important;
+    background: transparent !important;
+}
+
+body[data-page="image-studio"] .is-upload-box:hover,
+body[data-page="video-studio"] .is-upload-box:hover,
+body[data-page="video-studio"] .clip-upload-box:hover,
+body[data-page="video-studio"] .vs-dropzone-compact:hover,
+body[data-page="image-studio"] .is-upload-box.dragover,
+body[data-page="video-studio"] .is-upload-box.dragover,
+body[data-page="video-studio"] .clip-upload-box.dragover {
+    background: #ffffff !important;
+    border-color: var(--studio-ink) !important;
+}
+
+body[data-page="image-studio"] .is-upload-icon,
+body[data-page="video-studio"] .is-upload-icon,
+body[data-page="video-studio"] .clip-upload-empty .material-symbols-outlined,
+body[data-page="video-studio"] .vs-dropzone-compact .material-symbols-outlined,
+body[data-page="image-studio"] .is-panel-right .material-symbols-outlined,
+body[data-page="video-studio"] .clip-placeholder-card .material-symbols-outlined,
+body[data-page="video-studio"] .clip-placeholder-arrow .material-symbols-outlined {
+    color: var(--studio-ink) !important;
+    opacity: 0.8 !important;
+    filter: none !important;
+}
+
+body[data-page="image-studio"] .is-upload-label,
+body[data-page="image-studio"] .is-instruction-upload .upload-title,
+body[data-page="video-studio"] .clip-upload-title,
+body[data-page="video-studio"] .is-upload-label {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    color: var(--studio-ink) !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+}
+
+body[data-page="image-studio"] .is-upload-sub,
+body[data-page="image-studio"] .is-instruction-upload small,
+body[data-page="video-studio"] .clip-upload-subtitle,
+body[data-page="video-studio"] .is-upload-sub {
+    color: var(--studio-ink) !important;
+    opacity: 0.7 !important;
+    font-size: 0.8rem !important;
+    font-weight: 400 !important;
+}
+
+body[data-page="image-studio"] .placeholder-title,
+body[data-page="video-studio"] .placeholder-title,
+body[data-page="video-studio"] .clip-placeholder-title {
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+    color: var(--studio-ink) !important;
+    font-size: 1.25rem !important;
+    font-weight: 500 !important;
+    text-transform: none !important;
+}
+
+body[data-page="image-studio"] .placeholder-desc,
+body[data-page="video-studio"] .placeholder-desc,
+body[data-page="video-studio"] .clip-placeholder-desc {
+    color: var(--studio-ink-muted) !important;
+    font-size: 0.85rem !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    opacity: 1 !important;
+}
+
+body[data-page="video-studio"] .clip-upload-browse {
+    color: var(--studio-ink) !important;
+    font-weight: 700 !important;
+}
+
+body[data-page="image-studio"] .dark-input,
+body[data-page="video-studio"] .dark-input,
+body[data-page="video-studio"] .clip-select,
+body[data-page="video-studio"] .clip-textarea,
+body[data-page="video-studio"] .clip-control-select,
+body[data-page="video-studio"] .vs-select-small,
+body[data-page="video-studio"] .vs-input-small {
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border-strong) !important;
+    color: var(--studio-ink) !important;
+    box-shadow: none !important;
+}
+
+body[data-page="image-studio"] .dark-input:hover,
+body[data-page="video-studio"] .dark-input:hover,
+body[data-page="video-studio"] .clip-select:hover,
+body[data-page="video-studio"] .clip-textarea:hover,
+body[data-page="video-studio"] .clip-control-select:hover,
+body[data-page="video-studio"] .vs-select-small:hover,
+body[data-page="video-studio"] .vs-input-small:hover,
+body[data-page="image-studio"] .dark-input:focus,
+body[data-page="video-studio"] .dark-input:focus,
+body[data-page="video-studio"] .clip-select:focus,
+body[data-page="video-studio"] .clip-textarea:focus,
+body[data-page="video-studio"] .clip-control-select:focus,
+body[data-page="video-studio"] .vs-select-small:focus,
+body[data-page="video-studio"] .vs-input-small:focus {
+    background: #ffffff !important;
+    border-color: var(--studio-ink) !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+body[data-page="image-studio"] .dark-input::placeholder,
+body[data-page="video-studio"] .dark-input::placeholder,
+body[data-page="video-studio"] .clip-textarea::placeholder {
+    color: var(--studio-ink) !important;
+    opacity: 0.45 !important;
+}
+
+body[data-page="image-studio"] .is-generate-btn,
+body[data-page="video-studio"] .is-generate-btn,
+body[data-page="video-studio"] .clip-generate-btn {
+    background: #383633 !important;
+    color: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+body[data-page="image-studio"] .is-generate-btn:hover:not(:disabled),
+body[data-page="video-studio"] .is-generate-btn:hover:not(:disabled),
+body[data-page="video-studio"] .clip-generate-btn:hover:not(:disabled) {
+    background: #414141 !important;
+    color: #ffffff !important;
+}
+
+body[data-page="image-studio"] .is-generate-btn:disabled,
+body[data-page="video-studio"] .is-generate-btn:disabled,
+body[data-page="video-studio"] .clip-generate-btn:disabled {
+    opacity: 0.42 !important;
+}
+
+body[data-page="image-studio"] .is-generate-btn .material-symbols-outlined,
+body[data-page="video-studio"] .is-generate-btn .material-symbols-outlined,
+body[data-page="video-studio"] .clip-generate-btn .material-symbols-outlined {
+    color: #ffffff !important;
+}
+
+body[data-page="image-studio"] .result-container,
+body[data-page="video-studio"] .result-container {
+    width: 100% !important;
+    min-width: 0 !important;
+}
+
+body[data-page="image-studio"] .is-placeholder-modern,
+body[data-page="video-studio"] .clip-output-placeholder {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--studio-ink) !important;
+    text-align: center !important;
+}
+
+body[data-page="video-studio"] .clip-output-placeholder {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+body[data-page="image-studio"] .loading-container:not(.hidden),
+body[data-page="video-studio"] .loading-container:not(.hidden) {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--studio-ink) !important;
+    text-align: center !important;
+}
+
+body[data-page="image-studio"] .loading-container.hidden,
+body[data-page="video-studio"] .loading-container.hidden {
+    display: none !important;
+}
+
+body[data-page="image-studio"] .loading-container p,
+body[data-page="video-studio"] .loading-container p,
+body[data-page="video-studio"] #clip-loading h3 {
+    color: var(--studio-ink-muted) !important;
+    font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+}
+
+body[data-page="video-studio"] .clip-output-placeholder,
+body[data-page="video-studio"] .loading-container,
+body[data-page="video-studio"] .result-container {
+    flex: 1 !important;
+    min-height: 0 !important;
+}
+
+body[data-page="image-studio"] .placeholder-preview-box,
+body[data-page="video-studio"] .placeholder-preview-box,
+body[data-page="video-studio"] .clip-placeholder-stack {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 14px !important;
+    margin-bottom: 18px !important;
+}
+
+body[data-page="image-studio"] .preview-image-slot,
+body[data-page="video-studio"] .preview-image-slot,
+body[data-page="video-studio"] .clip-placeholder-card {
+    width: 120px !important;
+    height: 90px !important;
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border) !important;
+}
+
+body[data-page="video-studio"] .clip-placeholder-card {
+    color: var(--studio-ink-muted) !important;
+}
+
+body[data-page="image-studio"] .preview-arrow,
+body[data-page="video-studio"] .preview-arrow,
+body[data-page="video-studio"] .clip-placeholder-arrow {
+    color: var(--studio-ink-muted) !important;
+}
+
+body[data-page="image-studio"] .is-file-item,
+body[data-page="video-studio"] .is-file-item,
+body[data-page="video-studio"] .result-card,
+body[data-page="video-studio"] .clip-generated-card {
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border) !important;
+    box-shadow: none !important;
+}
+
+body[data-page="image-studio"] .clear-all-btn,
+body[data-page="video-studio"] .clear-all-btn {
+    background: #ffffff !important;
+    border: 1px solid var(--studio-border-strong) !important;
+    color: var(--studio-ink) !important;
+    box-shadow: none !important;
+}
+
+body[data-page="video-studio"] .clip-results-grid,
+body[data-page="video-studio"] #clip-gen-grid,
+body[data-page="video-studio"] #full-gen-grid,
+body[data-page="video-studio"] #post-gen-grid,
+body[data-page="image-studio"] .result-grid {
+    width: 100% !important;
+}
+
+body[data-page="video-studio"] .clip-results-grid {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 16px !important;
+    height: 100% !important;
+    align-content: start !important;
+    overflow: auto !important;
+}
+
+body[data-page="video-studio"] .clip-generated-card {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 12px !important;
+}
+
+@media (max-width: 1280px) {
+    body[data-page="image-studio"] .is-workspace,
+    body[data-page="video-studio"] .is-workspace {
+        width: calc(100vw - 32px) !important;
+    }
+
+    body[data-page="image-studio"] .is-workspace-card,
+    body[data-page="video-studio"] .is-workspace-card,
+    body[data-page="video-studio"] .clip-workspace-shell {
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+    }
+
+    body[data-page="video-studio"] .clip-workspace-shell,
+    body[data-page="image-studio"] .is-workspace-card,
+    body[data-page="video-studio"] .is-workspace-card {
+        grid-template-columns: 1fr !important;
+        flex-direction: column !important;
+    }
+
+    body[data-page="image-studio"] .is-panel-left,
+    body[data-page="video-studio"] .is-panel-left,
+    body[data-page="video-studio"] .clip-form-panel {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        flex: 1 1 auto !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid #e4e4e4 !important;
+    }
+}

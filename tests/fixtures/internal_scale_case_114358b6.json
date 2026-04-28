@@ -1,0 +1,84 @@
+{
+  "job_id": "114358b6-3d75-4cb9-bfa2-fc9b938e1655",
+  "room_dims_mm": {
+    "width_mm": 8000,
+    "depth_mm": 8000,
+    "height_mm": 12000
+  },
+  "room_planes": {
+    "y_top": 0.08,
+    "y_bottom": 0.86
+  },
+  "primary_item": {
+    "label": "Sofa",
+    "category": "sofa",
+    "dims_mm": {
+      "width_mm": 2400,
+      "depth_mm": 1000,
+      "height_mm": 850
+    }
+  },
+  "rug_item": {
+    "label": "Rug",
+    "category": "rug",
+    "dims_mm": {
+      "width_mm": 1000,
+      "depth_mm": 1000,
+      "height_mm": 10
+    }
+  },
+  "items": [
+    {
+      "label": "Sofa",
+      "category": "sofa",
+      "dims_mm": {
+        "width_mm": 2400,
+        "depth_mm": 1000,
+        "height_mm": 850
+      }
+    },
+    {
+      "label": "Sofa 2",
+      "category": "sofa",
+      "dims_mm": {
+        "width_mm": 1100,
+        "depth_mm": 1100,
+        "height_mm": 1100
+      }
+    },
+    {
+      "label": "Table",
+      "category": "table",
+      "dims_mm": {
+        "width_mm": 950,
+        "depth_mm": 950,
+        "height_mm": 600
+      }
+    },
+    {
+      "label": "Rug",
+      "category": "rug",
+      "dims_mm": {
+        "width_mm": 1000,
+        "depth_mm": 1000,
+        "height_mm": 10
+      }
+    },
+    {
+      "label": "Lounge Chair",
+      "category": "lounge_chair",
+      "dims_mm": {
+        "width_mm": 1100,
+        "depth_mm": 1100,
+        "height_mm": 1100
+      }
+    }
+  ],
+  "detected_boxes_norm": {
+    "Sofa": [0.06, 0.46, 0.57, 0.84],
+    "Sofa 2": [0.60, 0.46, 0.78, 0.82],
+    "Table": [0.37, 0.66, 0.56, 0.84],
+    "Rug": [0.22, 0.70, 0.72, 0.97],
+    "Lounge Chair": [0.74, 0.49, 0.93, 0.84]
+  }
+}

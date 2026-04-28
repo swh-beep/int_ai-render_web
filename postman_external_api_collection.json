@@ -103,6 +103,47 @@
       ]
     },
     {
+      "name": "Render - Video (External)",
+      "description": "### Video ///// 외부 사이트\n### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nPOST {{BASE_URL}}/api/external/render/video\n\n**Required**\n- render_job_id (string): job_id returned by /api/external/render/preset or /api/external/render/cart after the image render has finished\n\n**Optional**\n- clip_count (int): 4 to 6, default 4\n- cfg_scale (number): Kling cfg scale, default 0.5\n\n### Response (Queued)\n- job_id (string)\n- status = \"queued\"\n- render_job_id (string)\n- clip_count (int)\n\n### Notes\n- This endpoint must be called after the source image render job has finished.\n- All video generation is async. Poll /jobs/{job_id} to get the final video payload.\n- The finished result returns source_images, clip_urls, clip_count, and video_url.\n\n### Error Codes\n- 400: Missing render_job_id or invalid clip_count/cfg_scale.\n- 404: render_job_id was not found.\n- 409: render_job_id is not finished yet.\n- 401/403: Invalid or missing x-api-key.\n- 500: Server error (queue/redis/video generation).\n",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{EXTERNAL_API_KEY}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"render_job_id\": \"{{JOB_ID}}\",\n  \"clip_count\": 4,\n  \"cfg_scale\": 0.5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{BASE_URL}}/api/external/render/video"
+      },
+      "response": [
+        {
+          "name": "Queued",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"job_id\": \"c1b2c3d4-1111-2222-3333-444455556777\",\n  \"status\": \"queued\",\n  \"render_job_id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"clip_count\": 4\n}"
+        },
+        {
+          "name": "Error - Source Render Still Running",
+          "status": "Conflict",
+          "code": 409,
+          "body": "{\n  \"detail\": \"render_job_id is not finished yet\"\n}"
+        }
+      ]
+    },
+    {
       "name": "Job Status (Polling)",
       "description": "### 공통 ///// 결과 조회\n### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nGET {{BASE_URL}}/jobs/{{JOB_ID}}\n\n### Response\n- status: queued | started | finished | failed\n- result: present only when finished\n- error: present only when failed\n\n### Result payloads (finished)\n- result.render + result.details\n- render.result_url / render.result_urls\n- details.details[] (list of detail view URLs)\n\n\n### Field Rules\n- job_id: UUID returned by render endpoint.\n- status: queued | started | finished | failed.\n- result: included only when finished.\n- error: included only when failed.\n\n### Error Codes\n- 404: Job not found.\n- 401/403: Invalid or missing x-api-key.\n- 500: REDIS_URL not configured or server error.\n",
       "request": {

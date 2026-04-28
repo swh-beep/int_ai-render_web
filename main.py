@@ -26,6 +26,7 @@ from application.http.queue_route_handlers import (
     QueueRouteDependencies,
     handle_api_external_render_cart,
     handle_api_external_render_preset,
+    handle_api_external_render_video,
     handle_api_internal_render,
     handle_finalize_async,
     handle_generate_details,
@@ -37,6 +38,7 @@ from application.http.queue_route_handlers import (
     handle_render_room_async,
     handle_upscale_async,
 )
+from application.http.local_job_store import enqueue_local_job, get_local_job
 from application.media.frontal_generation_stage import (
     generate_frontal_room_from_photos as generate_frontal_room_from_photos_stage,
 )
@@ -79,6 +81,10 @@ from application.render.postprocess_support import (
     summarize_items_for_ranking as summarize_items_for_ranking_support,
 )
 from application.render.moodboard_workflow import run_generate_moodboard_options
+from application.render.render_contracts import (
+    build_explicit_room_dims_contract as build_explicit_room_dims_contract_stage,
+)
+from application.render.direct_item_image_prep import prepare_direct_item_image
 from application.render.render_room_workflow import run_render_room_workflow
 from application.render.render_workflow_contracts import (
     RenderWorkflowAnalysisServices,
@@ -89,8 +95,22 @@ from application.render.render_workflow_contracts import (
     RenderWorkflowRuntime,
     RenderWorkflowStorageServices,
 )
+from application.render.room_dimension_estimation_stage import (
+    estimate_room_dims_contract as estimate_room_dims_contract_stage,
+)
 from application.render.room_analysis import analyze_room_and_items_long as analyze_room_and_items_long_stage
 from application.render.room_analysis import analyze_room_structure as analyze_room_structure_stage
+from application.render.scene_contract_stage import build_scene_contract as build_scene_contract_stage
+from application.render.geometry_contract_stage import build_geometry_contract as build_geometry_contract_stage
+from application.render.product_identity_stage import (
+    build_product_identity_bundle as build_product_identity_bundle_stage,
+)
+from application.render.archetype_strategy_stage import (
+    build_archetype_strategies as build_archetype_strategies_stage,
+)
+from application.render.placement_plan_stage import (
+    build_placement_plan as build_placement_plan_stage,
+)
 from application.render.scale_validation_support import (
     crop_ref_item_image as crop_ref_item_image_support,
     detect_back_wall_span_norm as detect_back_wall_span_norm_support,
@@ -106,11 +126,23 @@ from application.render.scale_guide_support import (
     room_dims_valid as room_dims_valid_support,
 )
 from application.video.compile_workflow import queue_final_compile_job
-from application.video.job_store import get_video_job, video_jobs, video_jobs_lock
+from application.video.job_store import get_video_job, prune_video_jobs
 from application.video.source_generation_workflow import queue_source_generation_job
 from application.video.video_support import download_to_path as _download_to_path
 from dotenv import load_dotenv
+from infrastructure.ai.analysis_provider_dispatch import (
+    build_analysis_model_set,
+    build_analysis_provider_dispatch,
+)
+from infrastructure.ai.image_provider_dispatch import build_image_provider_dispatch
 from infrastructure.ai.gemini_client import call_gemini_with_failover as call_gemini_with_failover_impl
+from infrastructure.ai.openai_analysis_client import call_openai_analysis as call_openai_analysis_impl
+from infrastructure.ai.openai_image_client import call_openai_image as call_openai_image_impl
+from infrastructure.ai.provider_defaults import (
+    resolve_provider_defaults,
+    resolve_runtime_image_provider,
+    resolve_runtime_model_name,
+)
 from infrastructure.ai.freepik_kling_client import (
     build_kling_endpoint,
     create_kling_task as create_kling_task_impl,
@@ -145,6 +177,7 @@ from api_models import (
     CompileClip,
     CompileRequest,
     DetailRequest,
+    ExternalRenderVideoRequest,
     FinalizeRequest,
     InternalRenderRequest,
     PresetRenderRequest,
@@ -156,20 +189,23 @@ from api_models import (
     VideoCreateRequest,
 )
 from preset_helpers import load_preset_map
+from application.http.internal_render_form_parser import parse_internal_render_items_form
 from render_route_services import (
     build_detail_generation_job_payload,
     build_empty_room_job_payload,
     build_external_cart_job,
     build_external_preset_job,
+    build_external_render_video_job,
     build_finalize_download_job_payload,
     build_frontal_view_job_payload,
     build_image_edit_job_payload,
-    build_internal_async_render_job_payload,
     build_internal_render_job_payload,
+    build_internal_itemized_async_render_job_payload,
     build_regenerate_detail_job_payload,
     build_upscale_job_payload,
     persist_internal_media_uploads,
-    persist_internal_render_uploads,
+    persist_internal_item_uploads,
+    persist_internal_room_upload,
 )
 from request_helpers import apply_cart_limits, build_cart_summary, require_role
 from storage_helpers import (
@@ -245,15 +281,80 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
 MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
-ANALYSIS_MODEL_NAME = os.getenv("ANALYSIS_MODEL_NAME", "gemini-3-pro-preview").strip() or "gemini-3-pro-preview"
-DETECT_FURNITURE_MODEL_NAME = os.getenv("DETECT_FURNITURE_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
-ROOM_ONLY_MODEL_NAME = os.getenv("ROOM_ONLY_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
-RANK_MODEL_NAME = os.getenv("RANK_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
-REMAP_MODEL_NAME = os.getenv("REMAP_MODEL_NAME", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+PROVIDER_DEFAULTS = resolve_provider_defaults(os.environ)
+FORCE_GEMINI_ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.force_gemini_analysis_provider
+FORCE_GEMINI_IMAGE_PROVIDERS = PROVIDER_DEFAULTS.force_gemini_image_providers
+CONFIGURED_ANALYSIS_PROVIDER = os.getenv("ANALYSIS_PROVIDER", "gemini").strip().lower() or "gemini"
+OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").strip() or "gpt-5.4"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
+CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
+CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", CONFIGURED_MAIN_IMAGE_PROVIDER).strip().lower() or CONFIGURED_MAIN_IMAGE_PROVIDER
+ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.analysis_provider
+MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_API_KEY)
+REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_API_KEY)
+OPENAI_IMAGE_MODEL_NAME = PROVIDER_DEFAULTS.openai_image_model_name
+
+
+def _resolve_openai_analysis_reasoning_effort(raw_value: str | None) -> str:
+    normalized = str(raw_value or "").strip().lower()
+    if normalized == "high":
+        return "high"
+    return "xhigh"
+
+
+OPENAI_ANALYSIS_REASONING_EFFORT = _resolve_openai_analysis_reasoning_effort(
+    os.getenv("OPENAI_ANALYSIS_REASONING_EFFORT", "xhigh")
+)
+
+
+def _default_main_image_model_name() -> str:
+    return resolve_runtime_model_name(
+        provider=MAIN_IMAGE_PROVIDER,
+        configured_model_name=os.getenv("MAIN_IMAGE_MODEL_NAME"),
+        default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
+        default_gemini_model_name=MODEL_NAME,
+    )
+
+
+def _default_repair_image_model_name() -> str:
+    return resolve_runtime_model_name(
+        provider=REPAIR_IMAGE_PROVIDER,
+        configured_model_name=os.getenv("REPAIR_IMAGE_MODEL_NAME"),
+        default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
+        default_gemini_model_name=MODEL_NAME,
+    )
+
+
+MAIN_IMAGE_MODEL_NAME = _default_main_image_model_name()
+REPAIR_IMAGE_MODEL_NAME = _default_repair_image_model_name()
+
+
+def _default_analysis_model_name(configured_model_name: str | None) -> str:
+    return resolve_runtime_model_name(
+        provider=ANALYSIS_PROVIDER,
+        configured_model_name=configured_model_name,
+        default_openai_model_name=OPENAI_ANALYSIS_MODEL_NAME,
+        default_gemini_model_name="gemini-3.1-pro-preview",
+    )
+
+
+ANALYSIS_MODEL_NAME = _default_analysis_model_name(os.getenv("ANALYSIS_MODEL_NAME"))
+DETECT_FURNITURE_MODEL_NAME = _default_analysis_model_name(os.getenv("DETECT_FURNITURE_MODEL_NAME"))
+ROOM_ONLY_MODEL_NAME = _default_analysis_model_name(os.getenv("ROOM_ONLY_MODEL_NAME"))
+RANK_MODEL_NAME = _default_analysis_model_name(os.getenv("RANK_MODEL_NAME"))
+REMAP_MODEL_NAME = _default_analysis_model_name(os.getenv("REMAP_MODEL_NAME"))
 REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "60")))
 REMAP_DETECT_RETRY = max(0, int(os.getenv("REMAP_DETECT_RETRY", "1")))
 CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "12")))
 CART_MAX_ANALYSIS_WORKERS = max(1, int(os.getenv("CART_MAX_ANALYSIS_WORKERS", "10")))
+OPENAI_ANALYSIS_MODEL_SET = build_analysis_model_set(
+    ANALYSIS_MODEL_NAME,
+    DETECT_FURNITURE_MODEL_NAME,
+    ROOM_ONLY_MODEL_NAME,
+    RANK_MODEL_NAME,
+    REMAP_MODEL_NAME,
+)
 
 API_KEY_POOL = []
 i = 1
@@ -273,8 +374,9 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-TOTAL_TIMEOUT_LIMIT = 600
+TOTAL_TIMEOUT_LIMIT = max(60, int(os.getenv("TOTAL_TIMEOUT_LIMIT", "600")))
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
+LOCAL_INLINE_QUEUE_ENABLED = os.getenv("LOCAL_INLINE_QUEUE", "0").strip().lower() in ("1", "true", "yes", "y")
 
 def _split_queue_names(val: str) -> List[str]:
     return [p.strip() for p in val.replace(";", ",").split(",") if p.strip()]
@@ -295,6 +397,7 @@ if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "600"))
+RQ_VIDEO_JOB_TIMEOUT = int(os.getenv("RQ_VIDEO_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
 RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
 RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
@@ -573,22 +676,9 @@ def _build_cart_moodboard(items: list[dict], unique_id: str) -> str:
 def _normalize_item_image(local_path: str, unique_id: str, index: int, max_size: int = 1024) -> Optional[str]:
     if not local_path or not os.path.exists(local_path):
         return None
-    try:
-        with Image.open(local_path) as im:
-            im = ImageOps.exif_transpose(im)
-            if im.mode in ("RGBA", "LA"):
-                bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
-                bg.paste(im, mask=im.split()[-1])
-                im = bg.convert("RGB")
-            else:
-                im = im.convert("RGB")
-            im.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            filename = f"cart_item_{unique_id}_{index}.png"
-            out_path = os.path.join("outputs", filename)
-            im.save(out_path)
-            return out_path
-    except Exception:
-        return None
+    filename = f"cart_item_{unique_id}_{index}.png"
+    out_path = os.path.join("outputs", filename)
+    return prepare_direct_item_image(local_path, output_path=out_path, max_size=max_size)
 
 def _get_rq_queue(queue_name: str | None = None):
     conn = _get_redis_conn()
@@ -599,38 +689,53 @@ def _get_rq_queue(queue_name: str | None = None):
 
 def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
     q = _get_rq_queue(queue_name)
-    if not q:
-        return None, "REDIS_URL not configured"
     retry = None
-    try:
-        if RQ_RETRY_MAX > 0:
-            intervals = []
-            if RQ_RETRY_INTERVALS:
-                for part in RQ_RETRY_INTERVALS.split(","):
-                    part = part.strip()
-                    if not part:
-                        continue
-                    try:
-                        intervals.append(int(part))
-                    except Exception:
-                        continue
-            if intervals:
-                retry = Retry(max=RQ_RETRY_MAX, interval=intervals)
-            else:
-                retry = Retry(max=RQ_RETRY_MAX)
-    except Exception:
-        retry = None
-    job = q.enqueue(
-        func,
-        *args,
-        **kwargs,
-        job_timeout=RQ_JOB_TIMEOUT,
-        result_ttl=RQ_RESULT_TTL,
-        retry=retry,
-    )
-    return job, None
+    job_timeout = kwargs.pop("job_timeout", RQ_JOB_TIMEOUT)
+    result_ttl = kwargs.pop("result_ttl", RQ_RESULT_TTL)
+    if q:
+        try:
+            if RQ_RETRY_MAX > 0:
+                intervals = []
+                if RQ_RETRY_INTERVALS:
+                    for part in RQ_RETRY_INTERVALS.split(","):
+                        part = part.strip()
+                        if not part:
+                            continue
+                        try:
+                            intervals.append(int(part))
+                        except Exception:
+                            continue
+                if intervals:
+                    retry = Retry(max=RQ_RETRY_MAX, interval=intervals)
+                else:
+                    retry = Retry(max=RQ_RETRY_MAX)
+        except Exception:
+            retry = None
+        try:
+            job = q.enqueue(
+                func,
+                *args,
+                **kwargs,
+                job_timeout=job_timeout,
+                result_ttl=result_ttl,
+                retry=retry,
+            )
+            return job, None
+        except Exception as exc:
+            if not LOCAL_INLINE_QUEUE_ENABLED:
+                return None, str(exc)
+    if LOCAL_INLINE_QUEUE_ENABLED:
+        try:
+            return enqueue_local_job(func, *args, **kwargs), None
+        except Exception as exc:
+            return None, str(exc)
+    return None, "REDIS_URL not configured"
 
 def _fetch_job(job_id: str):
+    if LOCAL_INLINE_QUEUE_ENABLED:
+        local_job = get_local_job(job_id)
+        if local_job is not None:
+            return local_job
     conn = _get_redis_conn()
     if not conn:
         return None
@@ -663,12 +768,7 @@ def _cleanup_outputs_once():
 
 def _cleanup_video_job_cache_once() -> None:
     try:
-        with video_jobs_lock:
-            if len(video_jobs) <= VIDEO_JOB_CACHE_LIMIT:
-                return
-            overflow = len(video_jobs) - VIDEO_JOB_CACHE_LIMIT
-            for jid in list(video_jobs.keys())[:overflow]:
-                video_jobs.pop(jid, None)
+        prune_video_jobs(VIDEO_JOB_CACHE_LIMIT)
     except Exception:
         pass
 
@@ -731,6 +831,9 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
 def job_render_with_details(payload: dict) -> dict:
     return job_entrypoints_module.job_render_with_details(payload)
 
+def job_generate_render_video(payload: dict) -> dict:
+    return job_entrypoints_module.job_generate_render_video(payload)
+
 def job_image_edit(payload: dict) -> dict:
     return job_entrypoints_module.job_image_edit(payload)
 
@@ -781,8 +884,10 @@ app.add_middleware(
 )
 
 QUOTA_EXCEEDED_KEYS = set()
+_analysis_dispatch_logger = logging.getLogger("app")
 
-def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
+
+def _call_gemini_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
     return call_gemini_with_failover_impl(
         model_name,
         contents,
@@ -792,6 +897,57 @@ def call_gemini_with_failover(model_name, contents, request_options, safety_sett
         quota_exceeded_keys=QUOTA_EXCEEDED_KEYS,
         logger=logger,
         log_brief=LOG_BRIEF,
+        system_instruction=system_instruction,
+        log_tag=log_tag,
+    )
+
+
+def _call_openai_image_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
+    return call_openai_image_impl(
+        model_name,
+        contents,
+        request_options,
+        safety_settings,
+        api_key=OPENAI_API_KEY,
+        logger=logger,
+        log_brief=LOG_BRIEF,
+        system_instruction=system_instruction,
+        log_tag=log_tag,
+        fallback_model_name=OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME,
+    )
+
+
+CALL_ANALYSIS_WITH_PROVIDER = build_analysis_provider_dispatch(
+    provider=ANALYSIS_PROVIDER,
+    gemini_caller=_call_gemini_generation,
+    openai_caller=call_openai_analysis_impl,
+    openai_model_set=OPENAI_ANALYSIS_MODEL_SET,
+    openai_api_key=OPENAI_API_KEY,
+    openai_reasoning_effort=OPENAI_ANALYSIS_REASONING_EFFORT,
+    logger=_analysis_dispatch_logger,
+    log_brief=LOG_BRIEF,
+)
+
+CALL_MAIN_IMAGE_WITH_PROVIDER = build_image_provider_dispatch(
+    provider=MAIN_IMAGE_PROVIDER,
+    gemini_caller=_call_gemini_generation,
+    openai_image_caller=_call_openai_image_generation,
+    openai_api_key=OPENAI_API_KEY,
+)
+
+CALL_REPAIR_IMAGE_WITH_PROVIDER = build_image_provider_dispatch(
+    provider=REPAIR_IMAGE_PROVIDER,
+    gemini_caller=_call_gemini_generation,
+    openai_image_caller=_call_openai_image_generation,
+    openai_api_key=OPENAI_API_KEY,
+)
+
+def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
+    return CALL_ANALYSIS_WITH_PROVIDER(
+        model_name,
+        contents,
+        request_options,
+        safety_settings,
         system_instruction=system_instruction,
         log_tag=log_tag,
     )
@@ -978,13 +1134,21 @@ def _extract_qty_from_text(text: str) -> Optional[int]:
 def _summarize_items_for_ranking(items: list, max_items: int = 30) -> str:
     return summarize_items_for_ranking_support(items, max_items=max_items)
 
-def _rank_best_variant_flash(candidate_paths: list, analyzed_items: list) -> Optional[int]:
+def _rank_best_variant_flash(
+    candidate_paths: list,
+    analyzed_items: list,
+    *,
+    timeout_sec: Optional[int] = None,
+    max_attempts: Optional[int] = None,
+) -> Optional[int]:
     return rank_best_variant_flash_support(
         candidate_paths,
         analyzed_items,
         call_gemini_with_failover=call_gemini_with_failover,
         rank_model_name=RANK_MODEL_NAME,
         safe_json_from_model_text=_safe_json_from_model_text,
+        timeout_sec=timeout_sec,
+        max_attempts=max_attempts,
     )
 
 
@@ -1067,6 +1231,14 @@ def validate_furnished_scale(
     room_dims: dict,
     room_planes: Optional[dict],
     primary_label: Optional[str] = None,
+    include_diagnostics: bool = False,
+    scale_plan: Optional[dict] = None,
+    geometry_contract: Optional[dict] = None,
+    focus_item_keys: Optional[list[str]] = None,
+    skip_reference_review: bool = False,
+    absolute_deadline_ts: Optional[float] = None,
+    remap_detect_timeout_sec: Optional[int] = None,
+    remap_detect_retry: Optional[int] = None,
 ):
     return validate_furnished_scale_support(
         staged_path,
@@ -1074,14 +1246,29 @@ def validate_furnished_scale(
         room_dims,
         room_planes,
         primary_label=primary_label,
+        include_diagnostics=include_diagnostics,
+        scale_plan=scale_plan,
+        geometry_contract=geometry_contract,
+        focus_item_keys=focus_item_keys,
+        skip_reference_review=skip_reference_review,
+        detect_furniture_boxes=detect_furniture_boxes,
+        remap_model_name=REMAP_MODEL_NAME,
+        remap_detect_timeout_sec=int(remap_detect_timeout_sec or REMAP_DETECT_TIMEOUT_SEC),
+        remap_detect_retry=int(REMAP_DETECT_RETRY if remap_detect_retry is None else remap_detect_retry),
         call_gemini_with_failover=call_gemini_with_failover,
         analysis_model_name=ANALYSIS_MODEL_NAME,
         safe_json_from_model_text=_safe_json_from_model_text,
         log_brief=LOG_BRIEF,
         logger=logger,
+        absolute_deadline_ts=absolute_deadline_ts,
     )
 
-def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None, timeout_sec: Optional[int] = None):
+def detect_furniture_boxes(
+    moodboard_path,
+    model_name: Optional[str] = None,
+    timeout_sec: Optional[int] = None,
+    max_attempts: Optional[int] = None,
+):
     return detect_furniture_boxes_stage(
         moodboard_path,
         log_brief=LOG_BRIEF,
@@ -1089,6 +1276,7 @@ def detect_furniture_boxes(moodboard_path, model_name: Optional[str] = None, tim
         default_model_name=DETECT_FURNITURE_MODEL_NAME,
         model_name=model_name,
         timeout_sec=timeout_sec,
+        max_attempts=max_attempts,
     )
 
 
@@ -1122,14 +1310,22 @@ def _remap_match_score(src_item: dict, det_item: dict, src_idx: int, det_idx: in
     return remap_match_score_support(src_item, det_item, src_idx, det_idx)
 
 
-def _refresh_item_boxes_from_main_render(render_path: str, analyzed_items: list) -> list:
+def _refresh_item_boxes_from_main_render(
+    render_path: str,
+    analyzed_items: list,
+    *,
+    remap_detect_timeout_sec: Optional[int] = None,
+    remap_detect_retry: Optional[int] = None,
+    remap_detect_max_attempts: Optional[int] = None,
+) -> list:
     return refresh_item_boxes_from_main_render_support(
         render_path,
         analyzed_items,
         detect_furniture_boxes=detect_furniture_boxes,
         remap_model_name=REMAP_MODEL_NAME,
-        remap_detect_timeout_sec=REMAP_DETECT_TIMEOUT_SEC,
-        remap_detect_retry=REMAP_DETECT_RETRY,
+        remap_detect_timeout_sec=int(remap_detect_timeout_sec or REMAP_DETECT_TIMEOUT_SEC),
+        remap_detect_retry=int(REMAP_DETECT_RETRY if remap_detect_retry is None else remap_detect_retry),
+        remap_detect_max_attempts=remap_detect_max_attempts,
     )
 
 
@@ -1158,11 +1354,12 @@ def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_inde
         save_crop=save_crop,
     )
 
-def analyze_room_structure(room_path, room_dimensions=None, timeout=120):
+def analyze_room_structure(room_path, room_dimensions=None, timeout=120, max_attempts: Optional[int] = None):
     return analyze_room_structure_stage(
         room_path,
         room_dimensions=room_dimensions,
         timeout=timeout,
+        max_attempts=max_attempts,
         call_gemini_with_failover=call_gemini_with_failover,
         model_name=ROOM_ONLY_MODEL_NAME,
         safe_json_from_model_text=_safe_json_from_model_text,
@@ -1188,6 +1385,7 @@ def analyze_cropped_item(
     save_crop=True,
     enable_text_read=True,
     provided_dims_mm=None,
+    absolute_deadline_ts: Optional[float] = None,
 ):
     return analyze_cropped_item_stage(
         moodboard_path,
@@ -1202,6 +1400,7 @@ def analyze_cropped_item(
         save_crop=save_crop,
         enable_text_read=enable_text_read,
         provided_dims_mm=provided_dims_mm,
+        absolute_deadline_ts=absolute_deadline_ts,
     )
 
 # [NEW] 엔드포인트: 도면 업로드 대신 -> 그냥 사진들만 업로드
@@ -1218,10 +1417,10 @@ def generate_empty_room(image_path, unique_id, start_time, stage_name="Stage 1",
         return_raw=return_raw,
         total_timeout_limit=TOTAL_TIMEOUT_LIMIT,
         log_step=log_step,
-        model_name=MODEL_NAME,
+        model_name=MAIN_IMAGE_MODEL_NAME,
         build_empty_room_prompt=build_empty_room_prompt,
         allow_all_safety_settings=allow_all_safety_settings,
-        call_gemini_with_failover=call_gemini_with_failover,
+        call_image_with_failover=CALL_MAIN_IMAGE_WITH_PROVIDER,
         match_aspect_to_target=match_aspect_to_target,
     )
 
@@ -1240,6 +1439,10 @@ def generate_furnished_room(
     room_dims_parsed=None,
     wall_span_norm=None,
     size_hierarchy=None,
+    scale_plan=None,
+    geometry_contract=None,
+    scene_contract=None,
+    placement_plan=None,
     start_time=0,
     room_planes=None,
     windows_present=None,
@@ -1260,6 +1463,10 @@ def generate_furnished_room(
         room_dims_parsed=room_dims_parsed,
         wall_span_norm=wall_span_norm,
         size_hierarchy=size_hierarchy,
+        scale_plan=scale_plan,
+        geometry_contract=geometry_contract,
+        scene_contract=scene_contract,
+        placement_plan=placement_plan,
         start_time=start_time,
         room_planes=room_planes,
         windows_present=windows_present,
@@ -1276,8 +1483,10 @@ def generate_furnished_room(
         log_brief=LOG_BRIEF,
         log_summary=LOG_SUMMARY,
         allow_all_safety_settings=allow_all_safety_settings,
-        call_gemini_with_failover=call_gemini_with_failover,
-        model_name=MODEL_NAME,
+        call_generation_with_failover=CALL_MAIN_IMAGE_WITH_PROVIDER,
+        generation_model_name=MAIN_IMAGE_MODEL_NAME,
+        call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+        repair_model_name=REPAIR_IMAGE_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
     )
@@ -1481,6 +1690,7 @@ def render_room(
                     use_s3_moodboard=USE_S3_MOODBOARD,
                     max_concurrency_analysis=GEMINI_MAX_CONCURRENCY_ANALYSIS,
                     cart_max_analysis_workers=CART_MAX_ANALYSIS_WORKERS,
+                    total_timeout_limit_sec=TOTAL_TIMEOUT_LIMIT,
                 ),
                 storage=RenderWorkflowStorageServices(
                     normalize_audience=_normalize_audience,
@@ -1494,6 +1704,13 @@ def render_room(
                 analysis=RenderWorkflowAnalysisServices(
                     parse_room_dimensions_mm=parse_room_dimensions_mm,
                     room_dims_valid_fn=_room_dims_valid,
+                    build_explicit_room_dims_contract=build_explicit_room_dims_contract_stage,
+                    estimate_room_dims_contract=estimate_room_dims_contract_stage,
+                    build_scene_contract=build_scene_contract_stage,
+                    build_geometry_contract=build_geometry_contract_stage,
+                    build_product_identity_bundle=build_product_identity_bundle_stage,
+                    build_archetype_strategies=build_archetype_strategies_stage,
+                    build_placement_plan=build_placement_plan_stage,
                     build_item_target_key=_build_item_target_key,
                     canonical_category=_canonical_category,
                     detect_furniture_boxes=detect_furniture_boxes,
@@ -1524,72 +1741,10 @@ def render_room(
         traceback.print_exc()
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-job_entrypoints_module.configure_job_entrypoints(
-    JobEntrypointServices(
-        normalize_audience=_normalize_audience,
-        save_job_result=_save_job_result_s3,
-        materialize_input=_materialize_input,
-        build_s3_prefix=_build_s3_prefix,
-        resolve_image_url=resolve_image_url,
-        render_room=render_room,
-        generate_empty_room=generate_empty_room,
-        call_magnific_api=call_magnific_api,
-        s3_prefix_from_url=_s3_prefix_from_url,
-        process_image_edit_logic=lambda photo_paths, instructions, mode, unique_id, index, mask_path=None: process_image_edit_logic_stage(
-            photo_paths,
-            instructions,
-            mode,
-            unique_id,
-            index,
-            build_image_edit_step_prompt=build_image_edit_step_prompt,
-            pad_image_to_target_canvas=pad_image_to_target_canvas,
-            call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
-            match_aspect_to_target=match_aspect_to_target,
-            mask_path=mask_path,
-        ),
-        generate_frontal_room_from_photos=lambda photo_paths, unique_id, index: generate_frontal_room_from_photos_stage(
-            photo_paths,
-            unique_id,
-            index,
-            build_frontal_analysis_prompt=build_frontal_analysis_prompt,
-            build_frontal_generation_prompt=build_frontal_generation_prompt,
-            call_gemini_with_failover=call_gemini_with_failover,
-            analysis_model_name=ANALYSIS_MODEL_NAME,
-            model_name=MODEL_NAME,
-            allow_all_safety_settings=allow_all_safety_settings,
-            standardize_image=standardize_image,
-        ),
-        log_section=log_section,
-        detect_furniture_boxes=detect_furniture_boxes,
-        canonical_category=_canonical_category,
-        build_item_target_key=_build_item_target_key,
-        analyze_cropped_item=analyze_cropped_item,
-        attach_volume_ranks=_attach_volume_ranks,
-        construct_dynamic_styles=construct_dynamic_styles_stage,
-        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: generate_detail_view_stage(
-            original_image_path,
-            style_config,
-            unique_id,
-            index,
-            furniture_data,
-            materialize_input=_materialize_input,
-            normalize_label_for_match=_normalize_label_for_match,
-            allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,
-            call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
-        ),
-        normalize_label_for_match=_normalize_label_for_match,
-        volume_ranking_snapshot=_volume_ranking_snapshot,
-        finalize_request_factory=FinalizeRequest,
-        upscale_request_factory=UpscaleRequest,
-        max_concurrency_analysis=GEMINI_MAX_CONCURRENCY_ANALYSIS,
-    )
-)
-
 def _queue_route_deps() -> QueueRouteDependencies:
-    return QueueRouteDependencies(
+        return QueueRouteDependencies(
         redis_url=REDIS_URL,
+        local_inline_queue_enabled=LOCAL_INLINE_QUEUE_ENABLED,
         rq_queue_render=RQ_QUEUE_RENDER,
         rq_queue_upscale=RQ_QUEUE_UPSCALE,
         cart_max_items=CART_MAX_ITEMS,
@@ -1608,21 +1763,26 @@ def _queue_route_deps() -> QueueRouteDependencies:
         resolve_image_url=resolve_image_url,
         build_s3_prefix=_build_s3_prefix,
         build_item_target_key=_build_item_target_key,
-        persist_internal_render_uploads=persist_internal_render_uploads,
+        parse_internal_render_items_form=parse_internal_render_items_form,
+        persist_internal_room_upload=persist_internal_room_upload,
+        persist_internal_item_uploads=persist_internal_item_uploads,
         persist_internal_media_uploads=persist_internal_media_uploads,
-        build_internal_async_render_job_payload=build_internal_async_render_job_payload,
+        build_internal_render_job_payload=build_internal_render_job_payload,
+        build_internal_itemized_async_render_job_payload=build_internal_itemized_async_render_job_payload,
         build_image_edit_job_payload=build_image_edit_job_payload,
         build_frontal_view_job_payload=build_frontal_view_job_payload,
         build_upscale_job_payload=build_upscale_job_payload,
         build_finalize_download_job_payload=build_finalize_download_job_payload,
         build_empty_room_job_payload=build_empty_room_job_payload,
-        build_internal_render_job_payload=build_internal_render_job_payload,
         build_external_preset_job=build_external_preset_job,
         build_external_cart_job=build_external_cart_job,
+        build_external_render_video_job=build_external_render_video_job,
         build_regenerate_detail_job_payload=build_regenerate_detail_job_payload,
         build_detail_generation_job_payload=build_detail_generation_job_payload,
+        rq_video_job_timeout=RQ_VIDEO_JOB_TIMEOUT,
         job_render=job_render,
         job_render_with_details=job_render_with_details,
+        job_generate_render_video=job_generate_render_video,
         job_image_edit=job_image_edit,
         job_frontal_view=job_frontal_view,
         job_upscale=job_upscale,
@@ -1672,17 +1832,18 @@ def render_room_async(
     room: str = Form(...),
     style: str = Form(...),
     variant: str = Form(...),
-    moodboard: UploadFile = File(None),
+    items_json: str = Form(...),
+    item_images: List[UploadFile] = File(...),
     dimensions: str = Form(""),
     placement: str = Form(""),
-    audience: str = Form("")
 ):
     return handle_render_room_async(
         file=file,
         room=room,
         style=style,
         variant=variant,
-        moodboard=moodboard,
+        items_json=items_json,
+        item_images=item_images,
         dimensions=dimensions,
         placement=placement,
         deps=_queue_route_deps(),
@@ -1740,6 +1901,11 @@ def api_external_render_preset(req: PresetRenderRequest, request: Request):
 @async_wrap
 def api_external_render_cart(req: CartRenderRequest, request: Request):
     return handle_api_external_render_cart(req, request, deps=_queue_route_deps())
+
+@app.post("/api/external/render/video")
+@async_wrap
+def api_external_render_video(req: ExternalRenderVideoRequest, request: Request):
+    return handle_api_external_render_video(req, request, deps=_queue_route_deps())
 
 def finalize_download(req: FinalizeRequest):
     return job_entrypoints_module.finalize_download(req)
@@ -1853,7 +2019,8 @@ def _freepik_kling_poll(
     clip_index: int,
     total_clips: int,
     update_job_status,
-    timeout_sec: int = 600,
+    status_callback=None,
+    timeout_sec: int = 1800,
 ) -> str:
     return poll_kling_task_impl(
         task_id,
@@ -1863,8 +2030,87 @@ def _freepik_kling_poll(
         kling_endpoint=KLING_ENDPOINT,
         video_semaphore=_video_sem,
         update_job_status=update_job_status,
+        status_callback=status_callback,
         timeout_sec=timeout_sec,
     )
+
+job_entrypoints_module.configure_job_entrypoints(
+    JobEntrypointServices(
+        normalize_audience=_normalize_audience,
+        save_job_result=_save_job_result_s3,
+        materialize_input=_materialize_input,
+        build_s3_prefix=_build_s3_prefix,
+        resolve_image_url=resolve_image_url,
+        render_room=render_room,
+        generate_empty_room=generate_empty_room,
+        call_magnific_api=call_magnific_api,
+        s3_prefix_from_url=_s3_prefix_from_url,
+        process_image_edit_logic=lambda photo_paths, instructions, mode, unique_id, index, mask_path=None: process_image_edit_logic_stage(
+            photo_paths,
+            instructions,
+            mode,
+            unique_id,
+            index,
+            build_image_edit_step_prompt=build_image_edit_step_prompt,
+            pad_image_to_target_canvas=pad_image_to_target_canvas,
+            call_gemini_with_failover=call_gemini_with_failover,
+            model_name=MODEL_NAME,
+            match_aspect_to_target=match_aspect_to_target,
+            mask_path=mask_path,
+        ),
+        generate_frontal_room_from_photos=lambda photo_paths, unique_id, index: generate_frontal_room_from_photos_stage(
+            photo_paths,
+            unique_id,
+            index,
+            build_frontal_analysis_prompt=build_frontal_analysis_prompt,
+            build_frontal_generation_prompt=build_frontal_generation_prompt,
+            call_gemini_with_failover=call_gemini_with_failover,
+            analysis_model_name=ANALYSIS_MODEL_NAME,
+            model_name=MODEL_NAME,
+            allow_all_safety_settings=allow_all_safety_settings,
+            standardize_image=standardize_image,
+        ),
+        log_section=log_section,
+        detect_furniture_boxes=detect_furniture_boxes,
+        canonical_category=_canonical_category,
+        build_item_target_key=_build_item_target_key,
+        analyze_cropped_item=analyze_cropped_item,
+        attach_volume_ranks=_attach_volume_ranks,
+        construct_dynamic_styles=construct_dynamic_styles_stage,
+        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: generate_detail_view_stage(
+            original_image_path,
+            style_config,
+            unique_id,
+            index,
+            furniture_data,
+            materialize_input=_materialize_input,
+            normalize_label_for_match=_normalize_label_for_match,
+            allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,
+            call_gemini_with_failover=call_gemini_with_failover,
+            model_name=MODEL_NAME,
+        ),
+        normalize_label_for_match=_normalize_label_for_match,
+        volume_ranking_snapshot=_volume_ranking_snapshot,
+        finalize_request_factory=FinalizeRequest,
+        upscale_request_factory=UpscaleRequest,
+        max_concurrency_analysis=GEMINI_MAX_CONCURRENCY_ANALYSIS,
+        fetch_job=lambda job_id: _fetch_job(job_id),
+        load_job_result=lambda job_id: _load_job_result_s3(job_id),
+        queue_source_generation_job=queue_source_generation_job,
+        queue_final_compile_job=queue_final_compile_job,
+        get_video_job=get_video_job,
+        create_kling_task=lambda image_b64, prompt, negative_prompt, duration, cfg_scale: _freepik_kling_create_task(
+            image_b64,
+            prompt,
+            negative_prompt,
+            duration,
+            cfg_scale,
+        ),
+        poll_kling_task=lambda task_id, **kwargs: _freepik_kling_poll(task_id, **kwargs),
+        video_target_fps=VIDEO_TARGET_FPS,
+        video_max_concurrency=VIDEO_MAX_CONCURRENCY,
+    )
+)
 
 @app.post("/video-mvp/generate-sources")
 @async_wrap

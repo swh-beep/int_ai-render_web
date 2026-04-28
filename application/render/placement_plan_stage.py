@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+from typing import Any
+
+from application.render.render_contracts import PlacementPlan
+
+
+_SURFACE_FAMILIES = {"table_lamp", "decor"}
+_SMALL_FREE_FAMILIES = {"floor_lamp", "table_lamp", "stool"}
+_ADJACENT_SEATING_FAMILIES = {"chair", "lounge_chair"}
+_SECONDARY_ADJACENT_SEATING_FAMILIES = {"lounge_seating", "armchair", "loveseat"}
+
+
+def _coerce_ratio(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except Exception:
+        return None
+    return round(parsed, 4) if parsed > 0 else None
+
+
+def _item_family(item: dict) -> str:
+    identity = (item.get("product_identity") or item.get("identity_profile") or {}) if isinstance(item, dict) else {}
+    return str(
+        identity.get("family")
+        or item.get("category_canonical")
+        or item.get("category")
+        or item.get("label")
+        or ""
+    ).strip().lower()
+
+
+def _room_width_ratio_hint(item: dict) -> float | None:
+    envelope = (item.get("layout_envelope") or {}) if isinstance(item, dict) else {}
+    return _coerce_ratio(envelope.get("room_width_ratio"))
+
+
+def _item_width_mm(item: dict) -> int | None:
+    dims = (item.get("product_identity") or {}).get("dims_mm") or item.get("requested_dims_mm") or {}
+    try:
+        width_mm = int(dims.get("width_mm") or 0)
+    except Exception:
+        return None
+    return width_mm if width_mm > 0 else None
+
+
+def _is_adjacent_seating(item: dict) -> bool:
+    family = _item_family(item)
+    if family in _ADJACENT_SEATING_FAMILIES:
+        return True
+    if family not in _SECONDARY_ADJACENT_SEATING_FAMILIES:
+        return False
+    width_mm = _item_width_mm(item) or 0
+    room_width_ratio = _room_width_ratio_hint(item) or 0.0
+    return width_mm <= 1600 or room_width_ratio <= 0.24
+
+
+def _placement_family(item: dict) -> str:
+    family = _item_family(item)
+    if family == "mirror":
+        return "wall_attached"
+    if family == "rug":
+        return "rug"
+    if family in _SURFACE_FAMILIES:
+        return "surface_placed"
+    if family in _SMALL_FREE_FAMILIES:
+        return "small_free_object"
+    return "floor_placed"
+
+
+def _zone_name(item: dict) -> str:
+    family = _item_family(item)
+    placement_family = _placement_family(item)
+    if family in {"sofa", "lounge_sofa", "storage"}:
+        return "back_wall_anchor_band"
+    if family == "mirror":
+        return "wall_mid_band"
+    if _is_adjacent_seating(item):
+        return "adjacent_seating_band"
+    if family in {"table", "desk"}:
+        return "center_floor_anchor"
+    if family == "rug":
+        return "under_anchor_band"
+    if placement_family == "surface_placed":
+        return "surface_top_band"
+    if placement_family == "small_free_object":
+        return "edge_floor_band"
+    return "general_floor_band"
+
+
+def _anchor_relationship(item: dict, anchor_item_key: str | None) -> dict[str, Any]:
+    relationship = {
+        "anchor_to": anchor_item_key,
+        "width_ratio": None,
+        "height_ratio": None,
+        "footprint_ratio": None,
+    }
+    return relationship
+
+
+def _small_item_absolute_clamp(item: dict) -> dict[str, Any] | None:
+    family = _item_family(item)
+    if family not in _SMALL_FREE_FAMILIES:
+        return None
+    dims = (item.get("product_identity") or {}).get("dims_mm") or item.get("requested_dims_mm") or {}
+    try:
+        width_mm = int(dims.get("width_mm") or 0)
+        depth_mm = int(dims.get("depth_mm") or 0)
+        height_mm = int(dims.get("height_mm") or 0)
+    except Exception:
+        return None
+    if width_mm <= 0 and depth_mm <= 0 and height_mm <= 0:
+        return None
+    return {
+        "target_key": item.get("target_key"),
+        "family": family,
+        "max_width_mm": width_mm or None,
+        "max_depth_mm": depth_mm or None,
+        "max_height_mm": height_mm or None,
+    }
+
+
+def build_placement_plan(
+    *,
+    analyzed_items: list[dict] | None,
+    primary_item: dict | None,
+    scene_contract: Any,
+    placement_instructions: str | None = None,
+) -> tuple[PlacementPlan, list[dict]]:
+    scene_contract_dict = scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {})
+    anchor_item_key = str(
+        (primary_item or {}).get("target_key")
+        or scene_contract_dict.get("anchor_item_key")
+        or ((scene_contract_dict.get("critical_item_keys") or [None])[0] if isinstance(scene_contract_dict, dict) else None)
+        or ""
+    ) or None
+    geometry_targets = dict(scene_contract_dict.get("geometry_targets") or {}) if isinstance(scene_contract_dict, dict) else {}
+    pairwise_by_item = {
+        str(row.get("item_key") or ""): row
+        for row in (scene_contract_dict.get("pairwise_ratio_contracts") or [])
+        if isinstance(row, dict) and str(row.get("item_key") or "")
+    }
+
+    placement_zones: dict[str, Any] = {}
+    small_item_absolute_clamps: list[dict[str, Any]] = []
+    enriched_items: list[dict] = []
+
+    for row in analyzed_items or []:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        item_key = str(item.get("target_key") or item.get("label") or "")
+        geometry_target = geometry_targets.get(item_key) or {}
+        anchor_pair = pairwise_by_item.get(item_key) or {}
+        placement_contract = {
+            "target_key": item_key,
+            "family": _item_family(item),
+            "placement_family": _placement_family(item),
+            "zone": _zone_name(item),
+            "anchor_relationship": {
+                **_anchor_relationship(item, anchor_item_key),
+                "width_ratio": anchor_pair.get("width_ratio"),
+                "height_ratio": anchor_pair.get("height_ratio"),
+                "footprint_ratio": anchor_pair.get("footprint_ratio"),
+            },
+            "room_ratio_targets": {
+                "room_width_ratio": _coerce_ratio(geometry_target.get("room_width_ratio")),
+                "room_depth_ratio": _coerce_ratio(geometry_target.get("room_depth_ratio")),
+                "room_height_ratio": _coerce_ratio(geometry_target.get("room_height_ratio")),
+                "footprint_ratio": _coerce_ratio(geometry_target.get("footprint_ratio")),
+            },
+        }
+        placement_zones[item_key] = placement_contract
+        item["placement_contract"] = placement_contract
+        clamp = _small_item_absolute_clamp(item)
+        if clamp:
+            small_item_absolute_clamps.append(clamp)
+        enriched_items.append(item)
+
+    placement_plan = PlacementPlan(
+        anchor_item_key=anchor_item_key,
+        placement_zones=placement_zones,
+        pairwise_ratio_contracts=list((scene_contract_dict.get("pairwise_ratio_contracts") or []) if isinstance(scene_contract_dict, dict) else []),
+        small_item_absolute_clamps=small_item_absolute_clamps,
+    )
+
+    placement_plan_dict = placement_plan.as_dict()
+    if placement_instructions:
+        placement_plan_dict["placement_instructions"] = str(placement_instructions).strip()
+    return placement_plan, enriched_items

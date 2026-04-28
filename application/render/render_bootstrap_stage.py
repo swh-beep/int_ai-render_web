@@ -15,6 +15,7 @@ def _build_summary() -> dict[str, int]:
         "dims_fail": 0,
         "dims_warn": 0,
         "scalecheck_fail": 0,
+        "scalecheck_retry": 0,
         "scale_guide_skipped": 0,
     }
 

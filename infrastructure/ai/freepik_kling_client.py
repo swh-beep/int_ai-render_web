@@ -60,6 +60,23 @@ def create_kling_task(
     return task_id
 
 
+def _provider_message(status: str, *, clip_index: int, total_clips: int, elapsed_sec: int) -> str:
+    phase_map = {
+        "CREATED": "Queued at provider",
+        "PENDING": "Queued at provider",
+        "QUEUED": "Queued at provider",
+        "IN_PROGRESS": "Rendering at provider",
+        "PROCESSING": "Rendering at provider",
+        "COMPLETED": "Finalizing result",
+        "SUCCEEDED": "Finalizing result",
+        "SUCCESS": "Finalizing result",
+        "DONE": "Finalizing result",
+    }
+    phase = phase_map.get(status or "", f"Provider status: {status or 'UNKNOWN'}")
+    elapsed_label = f"{max(1, int(elapsed_sec // 60))}m" if elapsed_sec >= 60 else f"{elapsed_sec}s"
+    return f"Clip {clip_index + 1}/{total_clips}: {phase} ({elapsed_label})"
+
+
 def poll_kling_task(
     task_id: str,
     *,
@@ -69,7 +86,11 @@ def poll_kling_task(
     kling_endpoint: str,
     video_semaphore: Semaphore,
     update_job_status: Optional[Callable[[int, str], None]] = None,
-    timeout_sec: int = 600,
+    status_callback: Optional[Callable[[str, int, int], None]] = None,
+    timeout_sec: int = 1800,
+    poll_interval_sec: int = 2,
+    slow_poll_interval_sec: int = 5,
+    slow_after_sec: int = 180,
 ) -> str:
     headers = {"x-freepik-api-key": freepik_api_key}
     start = time.time()
@@ -78,7 +99,8 @@ def poll_kling_task(
     clip_start_percent = clip_index * clip_share_percent
 
     while True:
-        if time.time() - start > timeout_sec:
+        elapsed_sec = int(time.time() - start)
+        if elapsed_sec > timeout_sec:
             raise RuntimeError("Kling task timeout.")
 
         poll_count += 1
@@ -89,14 +111,14 @@ def poll_kling_task(
             if not response.ok:
                 if response.status_code >= 500:
                     print(f"[Server Warning] {response.status_code}. Retrying...", flush=True)
-                    time.sleep(3)
+                    time.sleep(slow_poll_interval_sec)
                     continue
                 raise RuntimeError(f"Kling status failed ({response.status_code}): {response.text[:300]}")
 
             status_payload = response.json()
         except requests.exceptions.RequestException as exc:
             print(f"[Network Warning] Polling failed temporarily: {exc}. Retrying...", flush=True)
-            time.sleep(3)
+            time.sleep(slow_poll_interval_sec)
             continue
 
         data = status_payload.get("data", {})
@@ -108,6 +130,12 @@ def poll_kling_task(
 
         simulated_progress = clip_share_percent * 0.95 * (1 - math.exp(-0.05 * poll_count))
         current_total_progress = int(clip_start_percent + simulated_progress)
+        status_message = _provider_message(
+            status,
+            clip_index=clip_index,
+            total_clips=total_clips,
+            elapsed_sec=elapsed_sec,
+        )
 
         if poll_count <= 3 or poll_count % 5 == 0:
             print(
@@ -117,7 +145,10 @@ def poll_kling_task(
             )
 
         if update_job_status:
-            update_job_status(current_total_progress, f"Generating clip {clip_index + 1}/{total_clips}: {status}...")
+            update_job_status(current_total_progress, status_message)
+
+        if status_callback:
+            status_callback(status, current_total_progress, elapsed_sec)
 
         if status in ("COMPLETED", "SUCCEEDED", "SUCCESS", "DONE"):
             print(f"[COMPLETED] Clip {clip_index + 1}/{total_clips}. Fetching URL...", flush=True)
@@ -176,4 +207,4 @@ def poll_kling_task(
                 error_msg = status_payload.get("error") or status_payload.get("message") or error_msg
             raise RuntimeError(f"Kling task failed: {error_msg}")
 
-        time.sleep(2)
+        time.sleep(slow_poll_interval_sec if elapsed_sec >= slow_after_sec else poll_interval_sec)
