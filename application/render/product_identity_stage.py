@@ -69,12 +69,16 @@ _CRITICAL_FAMILIES = {
     "sofa",
     "lounge_sofa",
     "lounge_seating",
+    "chair",
+    "lounge_chair",
     "mirror",
     "rug",
     "table",
     "desk",
     "floor_lamp",
     "table_lamp",
+    "ceiling_light",
+    "wall_light",
     "storage",
 }
 

@@ -150,6 +150,17 @@ def _build_detail_entries(
     return details
 
 
+def _build_furniture_data_snapshot(analyzed_items: list) -> list:
+    snapshot = []
+    for item in analyzed_items or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row.pop("_normalized_label", None)
+        snapshot.append(row)
+    return snapshot
+
+
 def build_detail_generation_output(
     *,
     analyzed_items: list,
@@ -187,6 +198,7 @@ def build_detail_generation_output(
 
     return {
         "details": details,
+        "furniture_data": _build_furniture_data_snapshot(normalized_items),
         "furniture_boxes": furniture_boxes,
         "used_cutout_references": used_cutout_references,
         "volume_ranking": volume_ranking_snapshot(normalized_items),

@@ -69,6 +69,8 @@ class RegenerateDetailRequest(BaseModel):
     style_index: int = 1
     target_key: Optional[str] = None
     target_label: Optional[str] = None
+    target_box_2d: Optional[List[float]] = None
+    target_source_box_2d: Optional[List[float]] = None
     style_index_mode: Optional[str] = "auto"
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None
@@ -111,6 +113,8 @@ class CompileClip(BaseModel):
     speed: float = 1.0
     trim_start: float = 0.0
     trim_end: float = 5.0
+    reverse: bool = False
+    flip_horizontal: bool = False
 
 
 class CompileRequest(BaseModel):
@@ -118,3 +122,5 @@ class CompileRequest(BaseModel):
     include_intro_outro: bool = False
     intro_url: Optional[str] = None
     outro_url: Optional[str] = None
+    aspect_ratio: str = "9:16"
+    aspect_mode: str = "crop"

@@ -1588,6 +1588,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await pollJob(job.job_id);
 
                 if (data.details && data.details.length > 0) {
+                    if (Array.isArray(data.furniture_data) && data.furniture_data.length > 0) {
+                        currentFurnitureData = data.furniture_data;
+                    }
                     const detailUrls = data.details.map(d => d.url);
 
                     data.details.forEach(item => {
@@ -1622,12 +1625,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = Number.isFinite(parsedIndex) && parsedIndex > 0
             ? parsedIndex
             : (fullList ? (fullList.indexOf(url) + 1) : 1);
+        card.dataset.detailIndex = String(index);
 
         const detailMeta = {
             target_key: item.target_key || null,
             target_label: item.target_label || null,
             style_name: item.style_name || null,
             target_box_source: item.target_box_source || null,
+            target_box_2d: item.target_box_2d || null,
+            target_source_box_2d: item.target_source_box_2d || null,
         };
 
         const img = document.createElement('img');
@@ -1658,7 +1664,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         retryBtn.onclick = (e) => {
             e.stopPropagation();
-            retrySingleDetail(card, styleIndex, detailMeta || {});
+            const currentStyleIndex = Number(card.dataset.detailIndex || styleIndex) || styleIndex;
+            retrySingleDetail(card, currentStyleIndex, detailMeta || {});
         };
 
         const upBtn = document.createElement('button');
@@ -1712,9 +1719,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
                     style_index: styleIndex,
-                    style_index_mode: "overall", // current UI uses server-returned overall index
+                    style_index_mode: (targetKey || targetLabel) ? "auto" : "overall",
                     target_key: targetKey,
                     target_label: targetLabel,
+                    target_box_2d: detailMeta?.target_box_2d || null,
+                    target_source_box_2d: detailMeta?.target_source_box_2d || null,
                     moodboard_url: currentMoodboardUrl,
                     furniture_data: currentFurnitureData,
                     audience: "internal"
@@ -1731,6 +1740,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
                 imgElement.onclick = () => openLightbox(data.url, [data.url], 0);
+                if (Array.isArray(data.furniture_data) && data.furniture_data.length > 0) {
+                    currentFurnitureData = data.furniture_data;
+                }
+                if (detailMeta && typeof detailMeta === 'object') {
+                    if (data.target_key) detailMeta.target_key = data.target_key;
+                    if (data.target_label) detailMeta.target_label = data.target_label;
+                    if (data.style_name) detailMeta.style_name = data.style_name;
+                    if (data.target_box_source) detailMeta.target_box_source = data.target_box_source;
+                    if (data.target_box_2d) detailMeta.target_box_2d = data.target_box_2d;
+                    if (data.target_source_box_2d) detailMeta.target_source_box_2d = data.target_source_box_2d;
+                }
+                const resolvedStyleIndex = Number(data.resolved_style_index);
+                if (Number.isFinite(resolvedStyleIndex) && resolvedStyleIndex > 0) {
+                    cardElement.dataset.detailIndex = String(resolvedStyleIndex);
+                }
             } else {
                 showCustomAlert("Failed", "재생성 실패: " + (data.error || "Unknown error"));
             }

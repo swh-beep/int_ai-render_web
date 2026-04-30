@@ -12,6 +12,7 @@ from application.render.render_scale_stage import run_render_scale_stage
 from application.render.render_variant_stage import run_render_variant_stage
 from application.render.qc_gate_stage import annotate_variant_reviews, select_rankable_paths, sort_variant_paths
 from application.render.scale_plan_support import build_scale_plan
+from application.render.postprocess_support import category_match_family
 from application.render.two_pass_strategy_stage import apply_two_pass_strategy
 from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
@@ -27,10 +28,72 @@ def _coerce_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _room_dims_summary_line(room_dims_contract) -> str:
+    contract = room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {})
+    dims = dict(contract.get("dims_mm_center") or {})
+    width_mm = _coerce_positive_int(dims.get("width_mm"))
+    depth_mm = _coerce_positive_int(dims.get("depth_mm"))
+    height_mm = _coerce_positive_int(dims.get("height_mm"))
+    if not any((width_mm, depth_mm, height_mm)):
+        return ""
+
+    source = str(contract.get("source") or "").strip().lower()
+    confidence = str(contract.get("confidence") or "").strip().lower()
+    label = "USER-PROVIDED ROOM DIMENSIONS" if source == "explicit" else "ANALYSIS-DERIVED ROOM DIMENSIONS"
+    dims_text = ", ".join(
+        [
+            f"W {width_mm if width_mm else 'unknown'}mm",
+            f"D {depth_mm if depth_mm else 'unknown'}mm",
+            f"H {height_mm if height_mm else 'unknown'}mm",
+        ]
+    )
+    if source == "explicit" or confidence in {"", "none"}:
+        return f"{label}: {dims_text}."
+    return f"{label}: {dims_text}. Confidence: {confidence}."
+
+
+def _merge_room_analysis_text(room_analysis_text: str | None, room_dims_contract) -> str:
+    base = str(room_analysis_text or "").strip()
+    summary_line = _room_dims_summary_line(room_dims_contract)
+    if not summary_line:
+        return base
+    if summary_line in base:
+        return base
+    if "USER-PROVIDED ROOM DIMENSIONS:" in base or "ANALYSIS-DERIVED ROOM DIMENSIONS:" in base:
+        return base
+    if not base:
+        return summary_line
+    return f"{base}\n{summary_line}"
+
+
+def _normalize_style_key(value: Any) -> str:
+    return str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _resolve_style_prompt(style_map: dict | None, style_name: Any) -> Any:
+    if not isinstance(style_map, dict):
+        return "Custom Moodboard Style"
+
+    raw_key = str(style_name or "").strip()
+    if raw_key in style_map:
+        return style_map[raw_key]
+
+    normalized = _normalize_style_key(style_name)
+    if normalized and normalized in style_map:
+        return style_map[normalized]
+
+    for key, value in style_map.items():
+        if _normalize_style_key(key) == normalized:
+            return value
+
+    return "Custom Moodboard Style"
+
+
 def _placement_family_for_item(item: dict) -> str:
     identity = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
     family = str(
         identity.get("family")
+        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
         or item.get("category_canonical")
         or item.get("category")
         or item.get("label")
@@ -808,6 +871,7 @@ def run_render_room_workflow(
             "windows_present": windows_present,
             "room_planes": room_planes,
             "wall_span_norm": wall_span_norm,
+            "estimated_dimensions_mm": getattr(analysis_result, "estimated_room_dims", None),
         }
         room_dims_contract = deps.analysis.estimate_room_dims_contract(
             room=request.room,
@@ -818,6 +882,7 @@ def run_render_room_workflow(
             primary_item=primary_item,
             audience=aud,
         )
+        room_analysis_text = _merge_room_analysis_text(room_analysis_text, room_dims_contract)
         room_dims_center = dict(getattr(room_dims_contract, "dims_mm_center", {}) or {})
         if room_dims_center:
             room_dims_parsed = {
@@ -910,9 +975,10 @@ def run_render_room_workflow(
         )
 
         ref_input = ref_paths if len(ref_paths) > 1 else (ref_paths[0] if ref_paths else None)
+        resolved_style_prompt = _resolve_style_prompt(deps.runtime.style_map, request.style)
         variant_results = run_render_variant_stage(
             step1_img=step1_img,
-            style_prompt=deps.runtime.style_map.get(request.style, "Custom Moodboard Style"),
+            style_prompt=resolved_style_prompt,
             ref_input=ref_input,
             unique_id=unique_id,
             furniture_specs_text=furniture_specs_text,
@@ -962,7 +1028,7 @@ def run_render_room_workflow(
                 variant_results.extend(
                     run_render_variant_stage(
                         step1_img=step1_img,
-                        style_prompt=deps.runtime.style_map.get(request.style, "Custom Moodboard Style"),
+                        style_prompt=resolved_style_prompt,
                         ref_input=ref_input,
                         unique_id=unique_id,
                         furniture_specs_text=furniture_specs_text,

@@ -423,7 +423,7 @@ def build_external_cart_job(
     payload = {
         "file_path": req.image_url,
         "moodboard_items": item_refs,
-        "room": req.room or "livingroom",
+        "room": req.room or "",
         "style": "Customize",
         "variant": str(req.variant or "1"),
         "dimensions": req.dimensions or "",
@@ -473,6 +473,8 @@ def build_regenerate_detail_job_payload(req: RegenerateDetailRequest) -> dict:
         "style_index": req.style_index,
         "target_key": req.target_key,
         "target_label": req.target_label,
+        "target_box_2d": req.target_box_2d,
+        "target_source_box_2d": req.target_source_box_2d,
         "style_index_mode": req.style_index_mode,
         "furniture_data": req.furniture_data,
         "moodboard_url": req.moodboard_url,

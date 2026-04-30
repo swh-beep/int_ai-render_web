@@ -51,10 +51,29 @@ _FAMILY_SEVERITY_MULTIPLIERS = {
     "rug": 1.10,
     "floor_lamp": 1.05,
     "table_lamp": 1.05,
+    "ceiling_light": 1.10,
+    "wall_light": 1.05,
     "sofa": 1.10,
     "lounge_seating": 1.10,
+    "chair": 1.05,
+    "lounge_chair": 1.05,
     "table": 1.05,
     "storage": 1.05,
+}
+
+_EXTRA_INSTANCE_TRACKED_FAMILIES = {
+    "sofa",
+    "lounge_sofa",
+    "lounge_seating",
+    "chair",
+    "lounge_chair",
+    "table",
+    "storage",
+    "rug",
+    "floor_lamp",
+    "table_lamp",
+    "ceiling_light",
+    "wall_light",
 }
 
 
@@ -446,9 +465,11 @@ def _rule_kind_for_id(rule_id: str) -> str:
         return "reference_material_drift"
     if normalized.startswith("reference_integration_drift"):
         return "reference_integration_drift"
+    if normalized.startswith("extra_instance_detected"):
+        return "reference_integration_drift"
     if normalized.startswith("mirror_reflection_drift"):
         return "reflection_violation"
-    if normalized in {"wall_attached_floor_collision", "rug_floating_above_floor_zone", "floor_item_floating"}:
+    if normalized in {"wall_attached_floor_collision", "ceiling_attached_height_violation", "rug_floating_above_floor_zone", "floor_item_floating"}:
         return "placement_violation"
     if normalized in {"primary_width_vs_room_width", "rug_vs_anchor_footprint", "tiny_item_vs_anchor_height", "relative_height_vs_anchor"}:
         return "scale_fit_violation"
@@ -1048,11 +1069,15 @@ def _placement_family(item: dict) -> str:
     placement_contract = (item.get("placement_contract") or {}) if isinstance(item, dict) else {}
     category = _normalized_item_category(item)
     placement_hint = str(placement_contract.get("placement_family") or envelope.get("placement_family") or "").strip().lower()
-    if placement_hint in {"wall_attached", "rug", "surface_placed", "floor_placed", "small_free_object"}:
+    if placement_hint in {"wall_attached", "ceiling_attached", "rug", "surface_placed", "floor_placed", "small_free_object"}:
         return placement_hint
     if identity_profile.get("wall_attached_expected"):
         return "wall_attached"
+    if identity_profile.get("ceiling_attached_expected") or category == "ceiling_light":
+        return "ceiling_attached"
     if category in {"art", "poster", "mirror", "frame", "wall_art", "wall_decor"}:
+        return "wall_attached"
+    if category == "wall_light":
         return "wall_attached"
     if category == "rug":
         return "rug"
@@ -1171,6 +1196,34 @@ def validate_scale_from_detection_map(
                     }
                 )
 
+        extra_detected_items = []
+        for row_index, row in enumerate(rows):
+            if row_index in used_row_indexes or not isinstance(row, dict):
+                continue
+            family = _normalized_family(row.get("category") or row.get("category_canonical") or row.get("label"))
+            if family not in _EXTRA_INSTANCE_TRACKED_FAMILIES:
+                continue
+            requested_count = int(item_family_counts.get(family) or 0)
+            if requested_count <= 0:
+                continue
+            bbox_norm = _coerce_bbox_norm(row.get("bbox_norm"))
+            if bbox_norm is None:
+                continue
+            xmin, ymin, xmax, ymax = bbox_norm
+            area_norm = max(0.0, float(xmax) - float(xmin)) * max(0.0, float(ymax) - float(ymin))
+            min_area_norm = 0.025 if family in {"rug", "sofa", "lounge_sofa", "lounge_seating", "storage"} else 0.01
+            if area_norm < min_area_norm:
+                continue
+            extra_detected_items.append(
+                {
+                    "family": family,
+                    "label": row.get("label"),
+                    "bbox_norm": list(bbox_norm),
+                    "area_norm": round(area_norm, 4),
+                    "requested_count": requested_count,
+                }
+            )
+
         if not matched_items:
             issue_records = [
                 _build_issue_record(
@@ -1259,7 +1312,11 @@ def validate_scale_from_detection_map(
             issues.append(message)
             matched = matched_items.get(str(item_key or "")) or {}
             item = item_lookup.get(str(item_key or "")) or {}
-            family = str(matched.get("family") or _normalized_family(item.get("category") or item.get("label")) or "")
+            family = str(
+                matched.get("family")
+                or _normalized_family(item.get("category") or item.get("label"))
+                or str((evidence or {}).get("family") or "")
+            )
             importance = float(matched.get("item_importance") or _item_importance_score(item, is_primary=(str(item_key or "") == str(primary_key))))
             confidence = float(matched.get("match_confidence") or 0.65)
             issue_records.append(
@@ -1400,6 +1457,23 @@ def validate_scale_from_detection_map(
                         },
                     )
                 )
+        if extra_detected_items:
+            rule_details["extra_detected_items"] = list(extra_detected_items)
+            extras_by_family: dict[str, list[dict]] = {}
+            for row in extra_detected_items:
+                extras_by_family.setdefault(str(row.get("family") or ""), []).append(row)
+            for family, rows_for_family in extras_by_family.items():
+                _append_issue(
+                    "extra_instance_detected",
+                    f"extra_instance_detected:{family}",
+                    item_key=family,
+                    evidence={
+                        "family": family,
+                        "extra_count": len(rows_for_family),
+                        "requested_count": int(item_family_counts.get(family) or 0),
+                        "rows": rows_for_family,
+                    },
+                )
         rug_details = []
         for item_key, matched in matched_items.items():
             if not matched.get("is_rug"):
@@ -1536,6 +1610,19 @@ def validate_scale_from_detection_map(
                         detail["max_bottom"] = float(max_bottom)
                         if float(ymax) > max_bottom:
                             _append_issue("wall_attached_floor_collision", f"wall_attached_floor_collision: {item_key}", item_key=item_key, evidence=detail)
+                        placement_details.append(detail)
+                    elif family == "ceiling_attached":
+                        max_top = y_top + max(0.18, wall_h_norm * 0.22)
+                        max_bottom = y_top + max(0.46, wall_h_norm * 0.55)
+                        detail["max_top"] = float(max_top)
+                        detail["max_bottom"] = float(max_bottom)
+                        if float(ymin) > max_top or float(ymax) > max_bottom:
+                            _append_issue(
+                                "ceiling_attached_height_violation",
+                                f"ceiling_attached_height_violation: {item_key}",
+                                item_key=item_key,
+                                evidence=detail,
+                            )
                         placement_details.append(detail)
                     elif family == "rug":
                         min_bottom = y_bottom - max(0.16, wall_h_norm * 0.20)
@@ -2222,7 +2309,7 @@ def validate_furnished_scale(
         reference_review_performed_keys: list[str] = []
         reference_review_skipped_item_keys: list[str] = []
         for candidate_index, (_, fallback_index, item_key, item, bbox) in enumerate(reference_review_candidates):
-            if candidate_index >= 3:
+            if candidate_index >= 5:
                 reference_review_skipped_item_keys.append(item_key)
                 continue
             fidelity_timeout_sec = _bounded_timeout(25.0, minimum_sec=4.0)

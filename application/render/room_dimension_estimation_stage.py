@@ -3,20 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 from application.render.postprocess_support import category_match_family
-from application.render.render_contracts import RoomDimsContract, build_explicit_room_dims_contract
-
-
-_ROOM_DEFAULTS_MM: dict[str, dict[str, int]] = {
-    "livingroom": {"width_mm": 5200, "depth_mm": 4300, "height_mm": 2400},
-    "bedroom": {"width_mm": 3800, "depth_mm": 3400, "height_mm": 2400},
-    "diningroom": {"width_mm": 4600, "depth_mm": 3800, "height_mm": 2400},
-    "office": {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2400},
-}
+from application.render.render_contracts import (
+    RoomDimsContract,
+    build_explicit_room_dims_contract,
+    build_unknown_room_dims_contract,
+)
 
 _ANCHOR_ROOM_WIDTH_RATIO_HINTS: dict[str, float] = {
     "sofa": 0.46,
+    "lounge_sofa": 0.3,
     "lounge_seating": 0.2,
     "chair": 0.16,
+    "lounge_chair": 0.18,
     "table": 0.22,
     "desk": 0.28,
     "storage": 0.34,
@@ -34,9 +32,18 @@ def _coerce_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
-def _room_defaults(room: str | None) -> dict[str, int]:
-    key = str(room or "").strip().lower()
-    return dict(_ROOM_DEFAULTS_MM.get(key, _ROOM_DEFAULTS_MM["livingroom"]))
+def _extract_room_analysis_dims(room_analysis: dict | None) -> dict[str, int | None]:
+    room_analysis = room_analysis if isinstance(room_analysis, dict) else {}
+    raw_dims = room_analysis.get("estimated_dimensions_mm") if isinstance(room_analysis.get("estimated_dimensions_mm"), dict) else {}
+    return {
+        "width_mm": _coerce_positive_int(raw_dims.get("width_mm")),
+        "depth_mm": _coerce_positive_int(raw_dims.get("depth_mm")),
+        "height_mm": _coerce_positive_int(raw_dims.get("height_mm")),
+    }
+
+
+def _has_any_dims(dims: dict[str, int | None]) -> bool:
+    return any(_coerce_positive_int(value) is not None for value in (dims or {}).values())
 
 
 def _ratio_range(center_value: int, *, percent: float) -> dict[str, int]:
@@ -60,6 +67,7 @@ def _family_for_item(item: dict | None) -> str:
     identity = item.get("identity_profile") or {}
     return str(
         identity.get("family")
+        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
         or item.get("category_canonical")
         or category_match_family(item.get("category") or item.get("label"))
         or ""
@@ -117,20 +125,16 @@ def estimate_room_dims_contract(
         strict_mode = "strict_geometry_mode" if str(audience or "").strip().lower() == "internal" else "range_based_geometry_mode"
         return build_explicit_room_dims_contract(explicit_room_dims, strict_scale_mode=strict_mode)
 
-    defaults = _room_defaults(room)
-    basis: list[str] = ["room_defaults"]
-    confidence = "low"
+    basis: list[str] = []
+    confidence = "none"
     strict_scale_mode = "advisory_geometry_mode"
-    center: dict[str, int | None] = {
-        "width_mm": defaults["width_mm"],
-        "depth_mm": defaults["depth_mm"],
-        "height_mm": defaults["height_mm"],
-    }
+    center: dict[str, int | None] = {"width_mm": None, "depth_mm": None, "height_mm": None}
 
     room_analysis = room_analysis if isinstance(room_analysis, dict) else {}
     room_planes = room_analysis.get("room_planes") if isinstance(room_analysis.get("room_planes"), dict) else {}
     wall_span_norm = room_analysis.get("wall_span_norm")
     windows_present = bool(room_analysis.get("windows_present"))
+    analysis_dims = _extract_room_analysis_dims(room_analysis)
     calibration_metadata = {
         "camera_height_estimate": None,
         "horizon_band": None,
@@ -140,10 +144,15 @@ def estimate_room_dims_contract(
         "anchor_basis": None,
     }
 
-    if room_planes:
-        basis.append("room_planes")
+    if _has_any_dims(analysis_dims):
+        center.update(analysis_dims)
+        basis.append("room_image_estimate")
         confidence = "medium"
         strict_scale_mode = "range_based_geometry_mode"
+        calibration_metadata["estimated_dimensions_mm"] = dict(analysis_dims)
+
+    if room_planes:
+        basis.append("room_planes")
         try:
             y_top = float(room_planes.get("y_top", 0.0))
             y_bottom = float(room_planes.get("y_bottom", 1.0))
@@ -159,10 +168,11 @@ def estimate_room_dims_contract(
     if anchor_width > 0:
         ratio_hint = _ANCHOR_ROOM_WIDTH_RATIO_HINTS.get(anchor_family) or 0.28
         estimated_width = max(2200, int(round(anchor_width / max(0.08, ratio_hint))))
-        if estimated_width > center["width_mm"]:
+        existing_width = _coerce_positive_int(center.get("width_mm"))
+        if existing_width is None:
             center["width_mm"] = estimated_width
         else:
-            center["width_mm"] = int(round((center["width_mm"] + estimated_width) / 2))
+            center["width_mm"] = int(round((existing_width + estimated_width) / 2))
         basis.append("anchor_item")
         confidence = "medium"
         strict_scale_mode = "range_based_geometry_mode"
@@ -173,26 +183,13 @@ def estimate_room_dims_contract(
             "ratio_hint": ratio_hint,
         }
 
-    if isinstance(wall_span_norm, (tuple, list)) and len(wall_span_norm) == 2:
-        try:
-            span = max(0.15, float(wall_span_norm[1]) - float(wall_span_norm[0]))
-            center["width_mm"] = max(center["width_mm"] or 0, int(round((center["width_mm"] or defaults["width_mm"]) / max(0.45, span))))
-            basis.append("wall_span_norm")
-            confidence = "medium"
-            strict_scale_mode = "range_based_geometry_mode"
-        except Exception:
-            pass
-
-    width_center = _coerce_positive_int(center["width_mm"]) or defaults["width_mm"]
-    depth_default_factor = 0.85 if str(room or "").strip().lower() == "livingroom" else 0.9
-    center["depth_mm"] = max(
-        defaults["depth_mm"],
-        int(round(width_center * depth_default_factor)),
-    )
     if windows_present:
         basis.append("windows_present")
 
-    percent = 0.18 if confidence == "medium" else 0.35
+    if not _has_any_dims(center):
+        return build_unknown_room_dims_contract(reason="missing_room_dimensions_analysis")
+
+    percent = 0.18 if confidence == "medium" else 0.28
     return RoomDimsContract(
         source="estimated",
         confidence=confidence,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from application.render.postprocess_support import category_match_family
 from application.render.render_contracts import PlacementPlan
 
 
@@ -9,6 +10,8 @@ _SURFACE_FAMILIES = {"table_lamp", "decor"}
 _SMALL_FREE_FAMILIES = {"floor_lamp", "table_lamp", "stool"}
 _ADJACENT_SEATING_FAMILIES = {"chair", "lounge_chair"}
 _SECONDARY_ADJACENT_SEATING_FAMILIES = {"lounge_seating", "armchair", "loveseat"}
+_CEILING_ATTACHED_FAMILIES = {"ceiling_light"}
+_WALL_ATTACHED_FAMILIES = {"mirror", "wall_light"}
 
 
 def _coerce_ratio(value: Any) -> float | None:
@@ -23,6 +26,7 @@ def _item_family(item: dict) -> str:
     identity = (item.get("product_identity") or item.get("identity_profile") or {}) if isinstance(item, dict) else {}
     return str(
         identity.get("family")
+        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
         or item.get("category_canonical")
         or item.get("category")
         or item.get("label")
@@ -57,8 +61,10 @@ def _is_adjacent_seating(item: dict) -> bool:
 
 def _placement_family(item: dict) -> str:
     family = _item_family(item)
-    if family == "mirror":
+    if family in _WALL_ATTACHED_FAMILIES:
         return "wall_attached"
+    if family in _CEILING_ATTACHED_FAMILIES:
+        return "ceiling_attached"
     if family == "rug":
         return "rug"
     if family in _SURFACE_FAMILIES:
@@ -73,7 +79,9 @@ def _zone_name(item: dict) -> str:
     placement_family = _placement_family(item)
     if family in {"sofa", "lounge_sofa", "storage"}:
         return "back_wall_anchor_band"
-    if family == "mirror":
+    if placement_family == "ceiling_attached":
+        return "ceiling_anchor_band"
+    if placement_family == "wall_attached":
         return "wall_mid_band"
     if _is_adjacent_seating(item):
         return "adjacent_seating_band"
@@ -86,6 +94,24 @@ def _zone_name(item: dict) -> str:
     if placement_family == "small_free_object":
         return "edge_floor_band"
     return "general_floor_band"
+
+
+def _orientation_hint(item: dict) -> str | None:
+    family = _item_family(item)
+    placement_family = _placement_family(item)
+    if placement_family == "ceiling_attached":
+        return "Keep this fixture suspended from the ceiling plane with a vertical drop. Do not pull it forward into the room."
+    if placement_family == "wall_attached":
+        return "Keep this object attached to the wall plane. Do not float it into room depth."
+    if family in {"sofa", "lounge_sofa", "storage"}:
+        return "Keep the back roughly parallel to the back wall and face the seating area toward the room center."
+    if _is_adjacent_seating(item):
+        return "Keep this seat oriented toward the primary seating group instead of rotating it diagonally."
+    if family == "rug":
+        return "Keep a single rug centered under the anchor seating group. Do not duplicate or offset it."
+    if family in {"table", "desk"}:
+        return "Keep the tabletop aligned to the seating anchor geometry unless explicit placement instructions say otherwise."
+    return None
 
 
 def _anchor_relationship(item: dict, anchor_item_key: str | None) -> dict[str, Any]:
@@ -157,6 +183,7 @@ def build_placement_plan(
             "family": _item_family(item),
             "placement_family": _placement_family(item),
             "zone": _zone_name(item),
+            "orientation_hint": _orientation_hint(item),
             "anchor_relationship": {
                 **_anchor_relationship(item, anchor_item_key),
                 "width_ratio": anchor_pair.get("width_ratio"),

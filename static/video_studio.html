@@ -1478,6 +1478,838 @@
             color: #111111;
         }
 
+        #workspace-feature-2 {
+            min-height: 0;
+            height: auto;
+            padding-left: 0;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif;
+        }
+
+        #workspace-feature-2 .workspace-breadcrumb {
+            padding: 0 0 14px 4px;
+            gap: 10px;
+        }
+
+        #workspace-feature-2 .breadcrumb-btn {
+            background: #ffffff;
+            border: 1px solid #b6b6b6;
+            color: #363636;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1;
+            min-height: 40px;
+            padding: 0 14px;
+        }
+
+        #workspace-feature-2 .breadcrumb-divider,
+        #workspace-feature-2 .breadcrumb-current {
+            color: #707070;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+        }
+
+        #workspace-feature-2 .assemble-editor-shell {
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            gap: 18px;
+            min-height: min(880px, calc(100vh - 180px));
+        }
+
+        #workspace-feature-2 .assemble-panel {
+            background: #ffffff;
+            border: 1px solid #e4e4e4;
+            border-radius: 10px;
+            box-shadow: 0 18px 38px rgba(43, 43, 43, 0.06);
+        }
+
+        #workspace-feature-2 .assemble-editor-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 24px 24px 22px;
+        }
+
+        #workspace-feature-2 .assemble-editor-grid {
+            display: grid;
+            grid-template-columns: 280px minmax(0, 1fr) 340px;
+            gap: 18px;
+            min-height: 0;
+        }
+
+        #workspace-feature-2 .assemble-timeline-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            padding: 22px 24px 24px;
+        }
+
+        #workspace-feature-2 .assemble-media-panel,
+        #workspace-feature-2 .assemble-stage-panel,
+        #workspace-feature-2 .assemble-inspector-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        #workspace-feature-2 .assemble-media-panel {
+            padding: 20px;
+            gap: 16px;
+        }
+
+        #workspace-feature-2 .assemble-stage-panel {
+            padding: 20px;
+            gap: 18px;
+        }
+
+        #workspace-feature-2 .assemble-inspector-panel {
+            padding: 20px;
+            gap: 16px;
+        }
+
+        #workspace-feature-2 .assemble-eyebrow,
+        #workspace-feature-2 .assemble-panel-eyebrow,
+        #workspace-feature-2 .assemble-stat span,
+        #workspace-feature-2 .assemble-control-label span,
+        #workspace-feature-2 .assemble-readout span,
+        #workspace-feature-2 .assemble-note-help {
+            color: #8f8f8f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+            font-weight: 400;
+            line-height: 1.4;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-2 .assemble-heading,
+        #workspace-feature-2 .assemble-panel-title,
+        #workspace-feature-2 .assemble-monitor-empty h3,
+        #workspace-feature-2 .assemble-inspector-empty h3 {
+            color: #2f2f2f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            letter-spacing: 0;
+            margin: 0;
+        }
+
+        #workspace-feature-2 .assemble-heading {
+            font-size: 40px;
+            font-weight: 400;
+            line-height: 1.08;
+            margin-top: 4px;
+        }
+
+        #workspace-feature-2 .assemble-panel-title {
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 1.18;
+        }
+
+        #workspace-feature-2 .assemble-description,
+        #workspace-feature-2 .assemble-panel-copy,
+        #workspace-feature-2 .assemble-status,
+        #workspace-feature-2 .assemble-monitor-empty p,
+        #workspace-feature-2 .assemble-inspector-empty p,
+        #workspace-feature-2 .assemble-timeline-empty,
+        #workspace-feature-2 .assemble-dropzone-copy,
+        #workspace-feature-2 .assemble-dropzone-copy strong,
+        #workspace-feature-2 .assemble-export-copy {
+            color: #707070;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.6;
+            letter-spacing: 0;
+            margin: 0;
+        }
+
+        #workspace-feature-2 .assemble-header-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        #workspace-feature-2 .assemble-header-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        #workspace-feature-2 .assemble-header-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(112px, 1fr));
+            gap: 12px;
+            min-width: 360px;
+        }
+
+        #workspace-feature-2 .assemble-stat {
+            border: 1px solid #e4e4e4;
+            background: #fbfbfb;
+            border-radius: 10px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #workspace-feature-2 .assemble-stat strong {
+            color: #2f2f2f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 1;
+            letter-spacing: 0;
+        }
+
+        #workspace-feature-2 .assemble-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            align-self: center;
+        }
+
+        #workspace-feature-2 .assemble-action-btn,
+        #workspace-feature-2 .assemble-export-btn,
+        #workspace-feature-2 .assemble-timeline-btn,
+        #workspace-feature-2 .assemble-monitor-switch {
+            border-radius: 10px;
+            border: 1px solid #d1d1d1;
+            background: #ffffff;
+            color: #2f2f2f;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1;
+            min-height: 44px;
+            padding: 0 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+        }
+
+        #workspace-feature-2 .assemble-action-btn:hover,
+        #workspace-feature-2 .assemble-export-btn:hover:not(:disabled),
+        #workspace-feature-2 .assemble-timeline-btn:hover:not(:disabled),
+        #workspace-feature-2 .assemble-monitor-switch:hover:not(.is-active) {
+            border-color: #7b7b7b;
+            background: #f7f7f7;
+        }
+
+        #workspace-feature-2 .assemble-export-btn {
+            border-color: #2f2f2f;
+            background: #2f2f2f;
+            color: #ffffff;
+            padding: 0 18px;
+        }
+
+        #workspace-feature-2 .assemble-export-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        #workspace-feature-2 .assemble-export-btn .material-symbols-outlined {
+            color: #ffffff;
+        }
+
+        #workspace-feature-2 .assemble-panel-header,
+        #workspace-feature-2 .assemble-stage-toolbar,
+        #workspace-feature-2 .assemble-timeline-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        #workspace-feature-2 .assemble-panel-header {
+            flex-direction: column;
+        }
+
+        #workspace-feature-2 .assemble-monitor-switches {
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        #workspace-feature-2 .assemble-monitor-switch.is-active {
+            background: #2f2f2f;
+            border-color: #2f2f2f;
+            color: #ffffff;
+        }
+
+        #workspace-feature-2 .assemble-dropzone {
+            border: 1px dashed #bdbdbd;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #fafafa 0%, #f4f4f4 100%);
+            min-height: 188px;
+            padding: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+        }
+
+        #workspace-feature-2 .assemble-dropzone:hover,
+        #workspace-feature-2 .assemble-dropzone.dragover {
+            border-color: #2f2f2f;
+            background: linear-gradient(180deg, #ffffff 0%, #f7f7f7 100%);
+        }
+
+        #workspace-feature-2 .assemble-dropzone .material-symbols-outlined {
+            color: #6d6d6d;
+            font-size: 34px;
+        }
+
+        #workspace-feature-2 .assemble-dropzone-content {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #workspace-feature-2 .assemble-dropzone-title {
+            color: #2f2f2f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 18px;
+            font-weight: 400;
+            line-height: 1.2;
+        }
+
+        #workspace-feature-2 .assemble-media-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 0;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        #workspace-feature-2 .assemble-media-list::-webkit-scrollbar,
+        #workspace-feature-2 .assemble-timeline-track::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+
+        #workspace-feature-2 .assemble-media-list::-webkit-scrollbar-thumb,
+        #workspace-feature-2 .assemble-timeline-track::-webkit-scrollbar-thumb {
+            background: #d0d0d0;
+            border-radius: 999px;
+        }
+
+        #workspace-feature-2 .assemble-media-item {
+            border: 1px solid #e4e4e4;
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 10px;
+            display: grid;
+            grid-template-columns: 72px minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        #workspace-feature-2 .assemble-media-item:hover,
+        #workspace-feature-2 .assemble-media-item.is-active {
+            border-color: #2f2f2f;
+            box-shadow: 0 12px 24px rgba(43, 43, 43, 0.08);
+            transform: translateY(-1px);
+        }
+
+        #workspace-feature-2 .assemble-media-thumb {
+            width: 72px;
+            aspect-ratio: 9 / 16;
+            overflow: hidden;
+            border-radius: 10px;
+            background: #111111;
+            border: 1px solid #ececec;
+        }
+
+        #workspace-feature-2 .assemble-media-thumb video,
+        #workspace-feature-2 .assemble-timeline-thumb video,
+        #workspace-feature-2 .assemble-monitor-player video,
+        #workspace-feature-2 .assemble-export-grid video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #111111;
+        }
+
+        #workspace-feature-2 .assemble-media-meta,
+        #workspace-feature-2 .assemble-timeline-card-copy {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #workspace-feature-2 .assemble-media-name,
+        #workspace-feature-2 .assemble-timeline-name,
+        #workspace-feature-2 .assemble-clip-meta-card strong {
+            color: #2f2f2f;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.45;
+            font-weight: 600;
+            word-break: break-word;
+        }
+
+        #workspace-feature-2 .assemble-media-sub,
+        #workspace-feature-2 .assemble-timeline-sub,
+        #workspace-feature-2 .assemble-clip-meta-card span {
+            color: #8c8c8c;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        #workspace-feature-2 .assemble-monitor {
+            position: relative;
+            border-radius: 10px;
+            background:
+                radial-gradient(circle at top, rgba(255, 255, 255, 0.1), transparent 32%),
+                linear-gradient(180deg, #171717 0%, #0d0d0d 100%);
+            min-height: 520px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            overflow: hidden;
+        }
+
+        #workspace-feature-2 .assemble-monitor-empty,
+        #workspace-feature-2 .assemble-inspector-empty {
+            width: 100%;
+            min-height: 220px;
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 12px;
+            padding: 24px;
+        }
+
+        #workspace-feature-2 .assemble-monitor-empty {
+            color: #f4f4f4;
+        }
+
+        #workspace-feature-2 .assemble-inspector-empty {
+            border-color: #d3d3d3;
+            background: #fafafa;
+        }
+
+        #workspace-feature-2 .assemble-monitor-empty .material-symbols-outlined {
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 36px;
+        }
+
+        #workspace-feature-2 .assemble-monitor-empty h3,
+        #workspace-feature-2 .assemble-monitor-empty p {
+            color: #f4f4f4;
+        }
+
+        #workspace-feature-2 .assemble-monitor-player {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        #workspace-feature-2 #assemble-monitor-video {
+            width: min(320px, 100%);
+            aspect-ratio: 9 / 16;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        #workspace-feature-2 .assemble-preview-badge {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 1;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #f4f4f4;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            padding: 8px 12px;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        #workspace-feature-2 .assemble-monitor-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(17, 17, 17, 0.72);
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            z-index: 2;
+        }
+
+        #workspace-feature-2 .assemble-monitor-overlay p {
+            color: #f4f4f4;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        #workspace-feature-2 .assemble-export-panel {
+            border: 1px solid #e4e4e4;
+            background: #f8f8f8;
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        #workspace-feature-2 .assemble-export-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 12px;
+        }
+
+        #workspace-feature-2 .assemble-export-card {
+            border-radius: 10px;
+            background: #ffffff;
+            border: 1px solid #e4e4e4;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        #workspace-feature-2 .assemble-export-card video {
+            aspect-ratio: 9 / 16;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #workspace-feature-2 .assemble-export-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        #workspace-feature-2 .assemble-export-link {
+            color: #4f4f4f;
+            text-decoration: none;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        #workspace-feature-2 .assemble-export-link:hover {
+            color: #111111;
+        }
+
+        #workspace-feature-2 .assemble-status {
+            min-height: 24px;
+        }
+
+        #workspace-feature-2 .assemble-inspector-form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #workspace-feature-2 .assemble-clip-meta-card {
+            border-radius: 10px;
+            border: 1px solid #e4e4e4;
+            background: #fafafa;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        #workspace-feature-2 .assemble-control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        #workspace-feature-2 .assemble-control-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        #workspace-feature-2 .assemble-control-label strong {
+            color: #2f2f2f;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.4;
+            font-weight: 600;
+        }
+
+        #workspace-feature-2 .assemble-control-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 88px;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #workspace-feature-2 .assemble-control-row input[type="range"] {
+            width: 100%;
+            accent-color: #2f2f2f;
+        }
+
+        #workspace-feature-2 .assemble-control-row input[type="number"] {
+            width: 100%;
+            min-height: 34px;
+            border: 1px solid #cfcfcf;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #2f2f2f;
+            padding: 0 10px;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 13px;
+        }
+
+        #workspace-feature-2 .assemble-readouts {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        #workspace-feature-2 .assemble-readout {
+            border: 1px solid #e4e4e4;
+            border-radius: 10px;
+            background: #fafafa;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        #workspace-feature-2 .assemble-readout strong {
+            color: #2f2f2f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 16px;
+            line-height: 1.1;
+            font-weight: 400;
+        }
+
+        #workspace-feature-2 .assemble-fit-label {
+            margin-top: 2px;
+        }
+
+        #workspace-feature-2 .assemble-fit-mode-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
+        }
+
+        #workspace-feature-2 .assemble-fit-btn {
+            min-height: 32px;
+            border-radius: 10px;
+            border: 1px solid #d7dbe2;
+            background: #fff;
+            color: #2f343b;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 13px;
+        }
+
+        #workspace-feature-2 .assemble-note-block {
+            border-top: 1px solid #ececec;
+            padding-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #workspace-feature-2 .assemble-note-block label {
+            color: #2f2f2f;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 18px;
+            line-height: 1.2;
+            font-weight: 400;
+        }
+
+        #workspace-feature-2 .assemble-note-block textarea {
+            resize: none;
+            min-height: 120px;
+            border: 1px solid #cfcfcf;
+            background: #ffffff;
+            color: #2f2f2f;
+            border-radius: 10px;
+            padding: 14px;
+            font-family: 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        #workspace-feature-2 .assemble-timeline-header {
+            align-items: center;
+        }
+
+        #workspace-feature-2 .assemble-timeline-track {
+            display: flex;
+            gap: 14px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            min-height: 248px;
+        }
+
+        #workspace-feature-2 .assemble-timeline-empty {
+            width: 100%;
+            border: 1px dashed #d2d2d2;
+            border-radius: 10px;
+            padding: 28px;
+            text-align: center;
+            background: #fafafa;
+        }
+
+        #workspace-feature-2 .assemble-timeline-card {
+            flex: 0 0 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #dddddd;
+            background: #ffffff;
+            cursor: pointer;
+            transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #workspace-feature-2 .assemble-timeline-card:hover,
+        #workspace-feature-2 .assemble-timeline-card.is-active {
+            border-color: #2f2f2f;
+            transform: translateY(-2px);
+            box-shadow: 0 16px 26px rgba(43, 43, 43, 0.08);
+        }
+
+        #workspace-feature-2 .assemble-timeline-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        #workspace-feature-2 .assemble-shot-badge,
+        #workspace-feature-2 .assemble-timeline-tag {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: #f2f2f2;
+            color: #555555;
+            font-family: 'Syne', 'Pretendard Variable', Pretendard, sans-serif !important;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        #workspace-feature-2 .assemble-timeline-thumb {
+            width: 100%;
+            aspect-ratio: 9 / 16;
+            overflow: hidden;
+            border-radius: 10px;
+            background: #111111;
+        }
+
+        #workspace-feature-2 .assemble-timeline-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        #workspace-feature-2 .assemble-timeline-btn {
+            min-height: 38px;
+            padding: 0 12px;
+            flex: 1 1 auto;
+        }
+
+        #workspace-feature-2 .assemble-timeline-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        #workspace-feature-2 .assemble-timeline-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        #workspace-feature-2 .assemble-timeline-legend {
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        @media (max-width: 1440px) {
+            #workspace-feature-2 .assemble-editor-grid {
+                grid-template-columns: 260px minmax(0, 1fr) 300px;
+            }
+
+            #workspace-feature-2 .assemble-header-row {
+                flex-direction: column;
+            }
+
+            #workspace-feature-2 .assemble-header-stats {
+                min-width: 0;
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 1180px) {
+            #workspace-feature-2 .assemble-editor-shell {
+                min-height: 0;
+            }
+
+            #workspace-feature-2 .assemble-editor-header,
+            #workspace-feature-2 .assemble-editor-grid {
+                grid-template-columns: 1fr;
+                display: grid;
+            }
+
+            #workspace-feature-2 .assemble-header-actions {
+                align-self: stretch;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+        }
+
+        @media (max-width: 860px) {
+            #workspace-feature-2 .assemble-editor-header {
+                padding: 20px;
+            }
+
+            #workspace-feature-2 .assemble-header-stats,
+            #workspace-feature-2 .assemble-readouts {
+                grid-template-columns: 1fr;
+            }
+
+            #workspace-feature-2 .assemble-control-row {
+                grid-template-columns: 1fr;
+            }
+
+            #workspace-feature-2 .assemble-monitor {
+                min-height: 420px;
+            }
+
+            #workspace-feature-2 #assemble-monitor-video {
+                width: min(260px, 100%);
+            }
+        }
+
         @media (max-width: 1180px) {
             #workspace-feature-1 {
                 padding-left: 0;
@@ -1544,7 +2376,7 @@
             background: transparent;
         }
     </style>
-    <link rel="stylesheet" href="/static/css/studio-unified.css?v=20260415_1341">
+<link rel="stylesheet" href="/static/css/studio-unified.css?v=20260501_0043">
 </head>
 
 <body data-page="video-studio">
@@ -1615,7 +2447,7 @@
 
                 <div class="clip-upload-stage">
                     <div id="clip-ref-drop-zone" class="clip-upload-box">
-                        <button id="clip-ref-remove-all" class="breadcrumb-btn hidden" type="button">Clear</button>
+                        <button id="clip-ref-remove-all" class="clear-all-btn clip-clear-btn hidden" type="button">Clear</button>
                         <div id="clip-upload-empty-state" class="clip-upload-empty">
                             <span class="material-symbols-outlined">cloud_upload</span>
                             <span class="clip-upload-title">Upload Image</span>
@@ -1700,9 +2532,9 @@
     </div>
 
     <!-- Workspace 2: Assemble Full Video -->
-    <div id="workspace-feature-2" class="is-workspace hidden">
-        <div class="workspace-breadcrumb">
-            <button id="back-to-menu-2" class="breadcrumb-btn">
+    <div id="workspace-feature-2" class="is-workspace hidden assemble-editor-workspace">
+        <div class="workspace-breadcrumb assemble-breadcrumb">
+            <button id="back-to-menu-2" class="breadcrumb-btn" type="button">
                 <span class="material-symbols-outlined">arrow_back</span> Back
             </button>
             <span class="breadcrumb-divider">/</span>
@@ -1711,76 +2543,230 @@
             <span class="breadcrumb-current">Assemble Video</span>
         </div>
 
-        <div class="is-workspace-card">
-
-            <div class="is-panel-left">
-                <h2 class="is-section-title">Assemble Video</h2>
-                <p class="is-section-desc">
-                    Arrange your clips on the timeline and export the final video.
-                </p>
-
-                <div class="is-upload-box" id="full-ref-drop-zone">
-                    <div class="is-upload-content">
-                        <span class="material-symbols-outlined is-upload-icon">cloud_upload</span>
-                        <span class="is-upload-label">Upload Clips</span>
-                        <span class="is-upload-sub">mp4, mov & webm (up to 100mb)</span>
-                    </div>
-                    <div class="is-internal-preview hidden">
-                        <img src="" alt="Preview">
-                        <button class="remove-btn" title="Remove">
-                            <span class="material-symbols-outlined">close</span>
-                        </button>
-                    </div>
-                    <input type="file" id="full-ref-input" accept="video/*" multiple class="hidden">
-                </div>
-
-                <div id="full-ref-preview-container" class="is-file-list"></div>
-
-                <button id="full-ref-remove-all" class="clear-all-btn hidden">
-                    Clear All Files
-                </button>
-
-                <!-- [NEW] Instruction Textarea -->
-                <div class="is-instruction-box" style="margin-bottom: 20px;">
-                    <label class="input-label">Assembly Instructions</label>
-                    <textarea id="full-instructions" class="dark-input" rows="4" 
-                        placeholder="eg. 클립들을 순서대로 배치하고, 전환 효과를 추가해줘. 배경 음악도 넣어줘."
-                        style="resize: none;"></textarea>
-                </div>
-
-                <button id="full-generate-btn" class="is-generate-btn" disabled>
-                    <span class="material-symbols-outlined" style="font-size: 18px;">auto_fix_high</span>
-                    GENERATE ASSEMBLE VIDEO
-                </button>
-                <div id="statusSource-2" class="vs-status-text" style="margin-top: 10px;"></div>
-            </div>
-
-            <div class="is-panel-right">
-
-                <div id="full-placeholder-text" class="is-placeholder-modern">
-                    <div class="placeholder-preview-box">
-                        <div class="preview-image-slot">
-                            <span class="material-symbols-outlined">video_library</span>
+        <div class="assemble-editor-shell">
+            <div class="assemble-workbench">
+                <main class="assemble-stage-shell">
+                    <section class="assemble-stage-panel assemble-stage-main">
+                        <div class="assemble-stage-topline">
+                            <div class="assemble-stage-copy">
+                                <span id="assemble-monitor-title" class="assemble-stage-title">No clip selected</span>
+                                <p id="assemble-monitor-meta" class="assemble-stage-meta">
+                                    Upload clips and select a shot to preview it here.
+                                </p>
+                            </div>
                         </div>
-                        <span class="preview-arrow">→</span>
-                        <div class="preview-image-slot">
-                            <span class="material-symbols-outlined">movie</span>
+
+                        <div class="assemble-monitor-frame">
+                            <div class="assemble-monitor">
+                                <div id="full-placeholder-text" class="assemble-monitor-empty">
+                                    <span class="material-symbols-outlined">video_library</span>
+                                    <h3>No active shot</h3>
+                                    <p>Import clips to build your sequence, then review them here before export.</p>
+                                </div>
+
+                                <div id="assemble-monitor-player" class="assemble-monitor-player hidden">
+                                    <span id="assemble-preview-badge" class="assemble-preview-badge">Selected Clip</span>
+                                    <div id="assemble-monitor-canvas" class="assemble-monitor-canvas">
+                                        <video id="assemble-monitor-video-backdrop" class="assemble-monitor-video-backdrop" playsinline preload="metadata" muted aria-hidden="true"></video>
+                                        <video id="assemble-monitor-video" playsinline preload="metadata"></video>
+                                    </div>
+                                </div>
+
+                                <div id="full-loading" class="assemble-monitor-overlay hidden">
+                                    <div class="spinner"></div>
+                                    <p>Assembling the sequence...</p>
+                                    <p>This can take up to 30-60 seconds depending on the clip count.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="assemble-toolbar">
+                            <div class="assemble-toolbar-group assemble-toolbar-primary">
+                                <button id="assemble-delete-btn" class="assemble-toolbar-btn" type="button" aria-label="Delete selected clip">
+                                    <span class="material-symbols-outlined">delete</span>
+                                </button>
+                                <button id="assemble-trim-btn" class="assemble-toolbar-btn" type="button" aria-label="Focus trim controls">
+                                    <span class="material-symbols-outlined">content_cut</span>
+                                </button>
+                                <button id="assemble-reverse-btn" class="assemble-toolbar-btn" type="button" aria-label="Reverse selected clip">
+                                    <span class="material-symbols-outlined">replay</span>
+                                </button>
+                                <button id="assemble-flip-btn" class="assemble-toolbar-btn" type="button" aria-label="Flip selected clip horizontally">
+                                    <span class="material-symbols-outlined">flip</span>
+                                </button>
+                            </div>
+                            <div class="assemble-toolbar-group assemble-toolbar-center">
+                                <button id="assemble-play-toggle" class="assemble-toolbar-btn is-emphasis" type="button" aria-label="Play or pause preview">
+                                    <span class="material-symbols-outlined">play_arrow</span>
+                                </button>
+                                <div class="assemble-playback-readout">
+                                    <span id="assemble-playback-current">00:00</span>
+                                    <span>/</span>
+                                    <span id="assemble-playback-total">00:00</span>
+                                </div>
+                            </div>
+                            <div class="assemble-toolbar-group assemble-toolbar-secondary">
+                                <button id="full-ref-remove-all" class="assemble-clear-btn hidden" type="button">
+                                    Clear All
+                                </button>
+                                <button id="full-generate-btn" class="assemble-export-btn" disabled type="button">
+                                    <span class="material-symbols-outlined">upload</span>
+                                    Export Sequence
+                                </button>
+                            </div>
+                        </div>
+
+                        <section class="assemble-timeline-shell">
+                            <div id="assemble-timeline-ruler" class="assemble-timeline-ruler" aria-hidden="true">
+                                <span>00:00</span>
+                                <span>00:05</span>
+                                <span>00:10</span>
+                                <span>00:15</span>
+                                <span>00:20</span>
+                            </div>
+                            <div id="assemble-timeline-viewport" class="assemble-timeline-viewport">
+                                <div id="assemble-timeline-track" class="assemble-timeline-track"></div>
+                                <div id="assemble-timeline-playhead" class="assemble-timeline-playhead hidden" aria-hidden="true">
+                                    <span class="assemble-timeline-playhead-handle"></span>
+                                </div>
+                                <input
+                                    id="assemble-timeline-scrubber"
+                                    class="assemble-timeline-scrubber hidden"
+                                    type="range"
+                                    min="0"
+                                    max="1000"
+                                    step="1"
+                                    value="0"
+                                    aria-label="Scrub sequence timeline"
+                                >
+                                <label id="full-ref-drop-zone" class="assemble-timeline-drop-slot" for="full-ref-input" role="button" tabindex="0" aria-label="Add clips to timeline">
+                                    <span class="material-symbols-outlined">add_photo_alternate</span>
+                                    <div class="assemble-dropzone-content">
+                                        <strong class="assemble-dropzone-title">Drop Clips Here</strong>
+                                        <p class="assemble-dropzone-copy">Drag clips onto the timeline or click to browse.</p>
+                                    </div>
+                                    <input type="file" id="full-ref-input" accept="video/*" multiple class="assemble-file-input" tabindex="-1" aria-hidden="true">
+                                </label>
+                            </div>
+                            <p id="assemble-timeline-summary" class="assemble-timeline-summary">
+                                Upload clips to populate the timeline.
+                            </p>
+                            <div id="full-ref-preview-container" class="assemble-asset-cache hidden" aria-hidden="true"></div>
+                        </section>
+
+                        <div id="statusSource-2" class="assemble-status hidden" aria-hidden="true"></div>
+                    </section>
+                </main>
+
+                <aside class="assemble-inspector-panel">
+                    <div class="assemble-inspector-body">
+                    <div class="assemble-inspector-head">
+                        <div>
+                            <span class="assemble-panel-eyebrow">속도</span>
+                            <h3 class="assemble-panel-title">Clip Controls</h3>
+                        </div>
+                        <div class="assemble-inspector-tabs">
+                            <button class="assemble-inspector-tab is-active" type="button">일반</button>
+                            <button class="assemble-inspector-tab" type="button">곡선</button>
                         </div>
                     </div>
-                    <h3 class="placeholder-title">Ready to Assemble Video</h3>
-                    <p class="placeholder-desc">Upload Video Clips to Assemble Final Video</p>
-                </div>
 
-                <div id="full-loading" class="loading-container hidden">
-                    <div class="spinner"></div>
-                    <p style="color: #ccc; font-size: 1.1rem;">Assembling video...</p>
-                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">This may take up to 30-60 seconds.</p>
-                </div>
+                    <div id="assemble-inspector-empty" class="assemble-inspector-empty">
+                        <h3>No shot selected</h3>
+                        <p>Select a clip from the timeline to control speed and trim.</p>
+                    </div>
 
-                <div id="full-result-container" class="result-container hidden">
-                    <div id="full-gen-grid" class="result-grid"></div>
-                </div>
+                    <div id="assemble-inspector-form" class="assemble-inspector-form hidden">
+                        <div class="assemble-clip-meta-card">
+                            <strong id="assemble-inspector-name">Clip name</strong>
+                            <span id="assemble-inspector-meta">Duration and resolution</span>
+                        </div>
 
+                        <div class="assemble-readouts">
+                            <div class="assemble-readout">
+                                <span>Timeline Slot</span>
+                                <strong id="assemble-clip-order">Shot 01</strong>
+                            </div>
+                            <div class="assemble-readout">
+                                <span>Playback Duration</span>
+                                <strong id="assemble-clip-duration">0.0s</strong>
+                            </div>
+                        </div>
+
+                        <div class="assemble-control-group assemble-control-card">
+                            <div class="assemble-control-label">
+                                <strong>Speed</strong>
+                                <span>x</span>
+                            </div>
+                            <div class="assemble-control-row">
+                                <input id="assemble-speed-range" type="range" min="0.25" max="2" step="0.05" value="1">
+                                <input id="assemble-speed-input" type="number" min="0.25" max="2" step="0.05" value="1">
+                            </div>
+                        </div>
+
+                        <div id="assemble-trim-card" class="assemble-control-group assemble-control-card">
+                            <div class="assemble-control-label">
+                                <strong>Start</strong>
+                                <span>sec</span>
+                            </div>
+                            <div class="assemble-control-row">
+                                <input id="assemble-trim-start-range" type="range" min="0" max="5" step="0.1" value="0">
+                                <input id="assemble-trim-start" type="number" min="0" max="5" step="0.1" value="0">
+                            </div>
+                        </div>
+
+                        <div class="assemble-control-group assemble-control-card">
+                            <div class="assemble-control-label">
+                                <strong>End</strong>
+                                <span>sec</span>
+                            </div>
+                            <div class="assemble-control-row">
+                                <input id="assemble-trim-end-range" type="range" min="0.1" max="5" step="0.1" value="5">
+                                <input id="assemble-trim-end" type="number" min="0.1" max="5" step="0.1" value="5">
+                            </div>
+                        </div>
+
+                        <div class="assemble-inspector-toggle-grid">
+                            <div class="assemble-flag-card">
+                                <span>Reverse</span>
+                                <strong id="assemble-reverse-state">Off</strong>
+                            </div>
+                            <div class="assemble-flag-card">
+                                <span>Flip</span>
+                                <strong id="assemble-flip-state">Off</strong>
+                            </div>
+                        </div>
+
+                        <div class="assemble-control-group assemble-control-card">
+                            <div class="assemble-control-label">
+                                <strong>Ratio</strong>
+                                <span>preview/export</span>
+                            </div>
+                            <div id="assemble-ratio-group" class="assemble-ratio-grid">
+                                <button class="assemble-ratio-btn" type="button" data-ratio="16:9">16:9</button>
+                                <button class="assemble-ratio-btn" type="button" data-ratio="1:1">1:1</button>
+                                <button class="assemble-ratio-btn" type="button" data-ratio="4:5">4:5</button>
+                                <button class="assemble-ratio-btn is-active" type="button" data-ratio="9:16">9:16</button>
+                            </div>
+                            <div class="assemble-control-label assemble-fit-label">
+                                <strong>Source Fit</strong>
+                                <span>clip framing</span>
+                            </div>
+                            <div id="assemble-fit-mode-group" class="assemble-fit-mode-grid">
+                                <button class="assemble-fit-btn is-active" type="button" data-fit-mode="crop">Crop</button>
+                                <button class="assemble-fit-btn" type="button" data-fit-mode="fill">Blur Fill</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="assemble-inspector-rail" aria-hidden="true">
+                        <button class="assemble-inspector-rail-btn" type="button"><span class="material-symbols-outlined">grid_view</span></button>
+                        <button class="assemble-inspector-rail-btn" type="button"><span class="material-symbols-outlined">image</span></button>
+                        <button class="assemble-inspector-rail-btn" type="button"><span class="material-symbols-outlined">auto_fix_high</span></button>
+                        <button class="assemble-inspector-rail-btn" type="button"><span class="material-symbols-outlined">animation</span></button>
+                        <button class="assemble-inspector-rail-btn is-active" type="button"><span class="material-symbols-outlined">speed</span></button>
+                    </div>
+                </aside>
             </div>
         </div>
     </div>

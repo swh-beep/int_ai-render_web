@@ -6,7 +6,7 @@ from application.render.postprocess_support import category_match_family
 from application.render.render_contracts import PlacementPlan, RoomDimsContract, SceneContract
 
 
-_CRITICAL_FAMILIES = {"sofa", "mirror", "rug", "table", "storage", "floor_lamp", "table_lamp"}
+_CRITICAL_FAMILIES = {"sofa", "mirror", "rug", "table", "storage", "floor_lamp", "table_lamp", "ceiling_light", "wall_light", "lounge_seating", "chair", "lounge_chair"}
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -21,6 +21,7 @@ def _item_family(item: dict) -> str:
     identity = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
     return str(
         identity.get("family")
+        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
         or item.get("category_canonical")
         or category_match_family(item.get("category") or item.get("label"))
         or ""
@@ -95,8 +96,10 @@ def _collect_pairwise_ratio_contracts(items: list[dict], primary_item: dict | No
 
 
 def _placement_family_for_family(family: str) -> str:
-    if family == "mirror":
+    if family in {"mirror", "wall_light"}:
         return "wall_attached"
+    if family == "ceiling_light":
+        return "ceiling_attached"
     if family == "rug":
         return "rug"
     if family in {"table_lamp", "decor"}:
@@ -141,6 +144,7 @@ def _collect_geometry_targets(items: list[dict], room_dims_contract: RoomDimsCon
 def _build_placement_zones(items: list[dict]) -> dict[str, list[str]]:
     zones = {
         "wall_attached": [],
+        "ceiling_attached": [],
         "floor_placed": [],
         "rug": [],
         "surface_placed": [],
@@ -157,6 +161,8 @@ def _build_placement_zones(items: list[dict]) -> dict[str, list[str]]:
         family = _item_family(row)
         if placement_family == "wall_attached" or family == "mirror":
             zones["wall_attached"].append(key)
+        elif placement_family == "ceiling_attached" or family == "ceiling_light":
+            zones["ceiling_attached"].append(key)
         elif placement_family == "rug" or family == "rug":
             zones["rug"].append(key)
         elif placement_family == "surface_placed":

@@ -8,6 +8,7 @@ from typing import Any, Callable
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from application.job_entrypoints import job_render_with_extra
 
 @dataclass
 class QueueRouteDependencies:
@@ -102,6 +103,34 @@ def _has_external_video_source_images(result: Any) -> bool:
         if isinstance(value, str) and value.strip():
             return True
     return False
+
+
+def _count_external_video_source_images(result: Any) -> int:
+    if not isinstance(result, dict):
+        return 0
+
+    render_payload = result.get("render") or {}
+    details_payload = result.get("details") or {}
+
+    primary_count = 0
+    result_url = render_payload.get("result_url")
+    if isinstance(result_url, str) and result_url.strip():
+        primary_count = 1
+    else:
+        for value in render_payload.get("result_urls") or []:
+            if isinstance(value, str) and value.strip():
+                primary_count = 1
+                break
+
+    detail_count = 0
+    for row in details_payload.get("details") or []:
+        if not isinstance(row, dict):
+            continue
+        value = row.get("url")
+        if isinstance(value, str) and value.strip():
+            detail_count += 1
+
+    return primary_count + detail_count
 
 
 def _internal_render_allowed_exts() -> set[str]:
@@ -424,6 +453,44 @@ def handle_api_external_render_cart(req: Any, request: Request, *, deps: QueueRo
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
 
 
+def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
+    deps.require_role(
+        request,
+        {"external"},
+        deps.api_auth_disabled,
+        deps.internal_api_keys,
+        deps.external_api_keys,
+    )
+    if not _queue_backend_available(deps):
+        return _redis_not_configured_response()
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="image_url is required")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items are required")
+
+    try:
+        job_payload, kept, dropped = deps.build_external_cart_job(
+            req,
+            cart_max_items=deps.cart_max_items,
+            apply_cart_limits=deps.apply_cart_limits,
+            build_cart_summary=deps.build_cart_summary,
+            materialize_input=deps.materialize_input,
+            normalize_item_image=deps.normalize_item_image,
+            resolve_image_url=deps.resolve_image_url,
+            build_s3_prefix=deps.build_s3_prefix,
+            build_item_target_key=deps.build_item_target_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+    job, err = deps.enqueue_job(job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
+
+
 def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
     deps.require_role(
         request,
@@ -476,7 +543,7 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
             "job_id": job.id,
             "status": "queued",
             "render_job_id": job_payload["render_job_id"],
-            "clip_count": job_payload["clip_count"],
+            "clip_count": _count_external_video_source_images(source_result),
         }
     )
 

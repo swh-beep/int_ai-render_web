@@ -33,6 +33,7 @@ def _item_family(item: dict) -> str:
     identity = (item or {}).get("identity_profile") or {}
     return str(
         identity.get("family")
+        or category_match_family((item or {}).get("category_canonical") or (item or {}).get("category") or (item or {}).get("label"))
         or (item or {}).get("category_canonical")
         or category_match_family((item or {}).get("category") or (item or {}).get("label"))
         or ""

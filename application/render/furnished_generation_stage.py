@@ -616,6 +616,15 @@ def generate_furnished_room(
     room_img = None
     extra_imgs = []
     try:
+        normalized_style_prompt = ""
+        if isinstance(style_prompt, dict):
+            normalized_style_prompt = str(style_prompt.get("prompt") or "").strip()
+            if not normalized_style_prompt:
+                style_name_hint = str(style_prompt.get("name") or style_prompt.get("label") or "").strip()
+                if style_name_hint:
+                    normalized_style_prompt = f"Style direction: preserve the {style_name_hint} mood while keeping the listed product identities exact."
+        else:
+            normalized_style_prompt = str(style_prompt or "").strip()
         room_img = Image.open(room_path)
         if windows_present is None:
             windows_present = detect_windows_present(room_path)
@@ -735,6 +744,7 @@ def generate_furnished_room(
         scale_guide_context = ""
         identity_context = ""
         layout_envelope_context = ""
+        small_scale_context = ""
         scale_plan_context = ""
         geometry_contract_context = ""
         scene_contract_context = ""
@@ -811,17 +821,33 @@ def generate_furnished_room(
                     complete_items = []
                     incomplete_items = []
                     inventory_labels = []
+                    inventory_rows = []
                     identity_rows = []
                     envelope_rows = []
+                    small_scale_rows = []
+                    total_requested_qty = 0
 
                     for it in (furniture_specs_json.get("items") or []):
                         label = (it.get("label") or "").strip() or "Unknown Item"
+                        qty = it.get("qty") or 1
+                        try:
+                            qty = max(1, int(qty))
+                        except Exception:
+                            qty = 1
                         inventory_labels.append(label)
+                        total_requested_qty += qty
                         identity_profile = it.get("identity_profile") or {}
                         product_identity = it.get("product_identity") or {}
                         placement_contract = it.get("placement_contract") or {}
                         layout_envelope = it.get("layout_envelope") or {}
                         family = product_identity.get("family") or identity_profile.get("family")
+                        zone = placement_contract.get("zone")
+                        inventory_bits = [f"qty={qty}"]
+                        if family:
+                            inventory_bits.append(f"family={family}")
+                        if zone:
+                            inventory_bits.append(f"zone={zone}")
+                        inventory_rows.append(f"- {label}: " + "; ".join(inventory_bits))
                         silhouette = identity_profile.get("silhouette_summary")
                         material_cues = ", ".join((identity_profile.get("material_cues") or [])[:3])
                         topology_cues = ", ".join((product_identity.get("topology_cues") or [])[:3])
@@ -831,10 +857,16 @@ def generate_furnished_room(
                         reflection_constraints = ", ".join((product_identity.get("reflection_constraints") or [])[:2])
                         distinctive_parts = ", ".join((identity_profile.get("distinctive_parts") or [])[:3])
                         preserve_rules = ", ".join((product_identity.get("preserve_rules") or identity_profile.get("preserve_rules") or [])[:3])
+                        size_class = identity_profile.get("absolute_size_class")
+                        room_presence_class = identity_profile.get("room_presence_class")
                         if family or silhouette or material_cues or topology_cues or support_geometry or opening_features or pattern_cues or reflection_constraints or distinctive_parts or preserve_rules:
                             detail_bits = []
                             if family:
                                 detail_bits.append(f"family={family}")
+                            if size_class:
+                                detail_bits.append(f"size_class={size_class}")
+                            if room_presence_class:
+                                detail_bits.append(f"room_presence={room_presence_class}")
                             if silhouette:
                                 detail_bits.append(f"silhouette={silhouette}")
                             if material_cues:
@@ -892,6 +924,33 @@ def generate_furnished_room(
                                 pass
                             continue
                         complete_items.append({"label": label, "w": w, "d": d, "h": h})
+                        room_width_ratio = layout_envelope.get("room_width_ratio")
+                        room_depth_ratio = layout_envelope.get("room_depth_ratio")
+                        if room_w > 0 and room_d > 0:
+                            try:
+                                room_width_ratio = float(room_width_ratio if room_width_ratio is not None else (w / room_w))
+                            except Exception:
+                                room_width_ratio = None
+                            try:
+                                room_depth_ratio = float(room_depth_ratio if room_depth_ratio is not None else (d / room_d))
+                            except Exception:
+                                room_depth_ratio = None
+                        compact_object = bool(
+                            family in {"table_lamp", "decor", "stool"}
+                            or (family == "rug" and room_width_ratio is not None and room_width_ratio <= 0.35)
+                            or (room_width_ratio is not None and room_width_ratio <= 0.18)
+                            or (room_depth_ratio is not None and room_depth_ratio <= 0.18)
+                        )
+                        if compact_object:
+                            compact_bits = [f"W={w}mm", f"D={d}mm", f"H={h}mm"]
+                            if size_class:
+                                compact_bits.append(f"size_class={size_class}")
+                            compact_note = "keep visually compact"
+                            if family == "rug":
+                                compact_note = "keep this rug compact relative to the room, not wall-to-wall"
+                            elif family in {"table_lamp", "decor"}:
+                                compact_note = "keep this as a surface-scale object, never side-table sized"
+                            small_scale_rows.append(f"- {label}: " + "; ".join(compact_bits) + f"; {compact_note}.")
 
                     if incomplete_items:
                         if strict_scale_requested:
@@ -910,15 +969,19 @@ def generate_furnished_room(
                                 + "--------------------------------------------------\n"
                             )
 
-                        if inventory_labels:
-                            inventory_context = (
-                                "\n<ITEM INVENTORY (MUST RENDER ALL ITEMS)>\n"
-                                f"Total items: {len(inventory_labels)}\n"
-                                + "\n".join([f"- {lbl}" for lbl in inventory_labels])
-                                + "\nRule: Every listed item must appear in the final image (exactly once unless the list says multiples).\n"
-                                + "If space is tight, reduce size slightly and place items on shelves/tables or walls; do not omit.\n"
-                                + "--------------------------------------------------\n"
-                            )
+                    if inventory_rows:
+                        inventory_context = (
+                            "\n<ITEM INVENTORY (MUST RENDER ALL ITEMS)>\n"
+                            f"Distinct items: {len(inventory_labels)} | Total requested quantity: {total_requested_qty}\n"
+                            + "\n".join(inventory_rows)
+                            + "\nRules:\n"
+                            + "- Render every listed item exactly the requested quantity. Do not add bonus objects.\n"
+                            + "- Do not duplicate rugs, accent chairs, or tables beyond the listed qty.\n"
+                            + "- If qty=1, exactly one instance must appear. If qty>1, render identical multiples only for that item.\n"
+                            + "- Never collapse a repeated item into a single instance.\n"
+                            + "- If space is tight, reduce size slightly or use shelves/walls where appropriate, but never omit or replace items.\n"
+                            + "--------------------------------------------------\n"
+                        )
 
                     if identity_rows:
                         identity_context = (
@@ -933,6 +996,13 @@ def generate_furnished_room(
                             "\n<LAYOUT ENVELOPE SUMMARY>\n"
                             "Use these item-vs-room ratios as hard placement guidance before aesthetic balancing.\n"
                             + "\n".join(envelope_rows)
+                            + "\n--------------------------------------------------\n"
+                        )
+                    if small_scale_rows:
+                        small_scale_context = (
+                            "\n<SMALL ITEM SCALE GUARDRAILS>\n"
+                            "These listed items must stay visually compact on the first pass. Do not enlarge them into anchor furniture.\n"
+                            + "\n".join(small_scale_rows)
                             + "\n--------------------------------------------------\n"
                         )
 
@@ -974,7 +1044,7 @@ def generate_furnished_room(
                             if not isinstance(plan_item, dict):
                                 continue
                             geometry_rows.append(
-                                "- {label}: zone={zone} place={placement} roomW={room_w} roomD={room_d} roomH={room_h} anchorW={anchor_w} anchorD={anchor_d} anchorH={anchor_h} foot={foot}".format(
+                                "- {label}: zone={zone} place={placement} roomW={room_w} roomD={room_d} roomH={room_h} anchorW={anchor_w} anchorD={anchor_d} anchorH={anchor_h} foot={foot} orientation={orientation}".format(
                                     label=plan_item.get("label") or "Item",
                                     zone=plan_item.get("zone") or "unknown",
                                     placement=plan_item.get("placement_family") or "unknown",
@@ -985,6 +1055,7 @@ def generate_furnished_room(
                                     anchor_d=plan_item.get("anchor_depth_ratio"),
                                     anchor_h=plan_item.get("anchor_height_ratio"),
                                     foot=plan_item.get("footprint_ratio"),
+                                    orientation=plan_item.get("orientation_hint") or "keep natural source orientation",
                                 )
                             )
                         geometry_contract_context = (
@@ -1011,7 +1082,7 @@ def generate_furnished_room(
                             room_targets = zone.get("room_ratio_targets") or {}
                             anchor_rel = zone.get("anchor_relationship") or {}
                             placement_rows.append(
-                                "- {key}: mode={mode}; zone={zone_name}; roomW={room_w}; roomH={room_h}; anchorW={anchor_w}; anchorH={anchor_h}; foot={foot}".format(
+                                "- {key}: mode={mode}; zone={zone_name}; roomW={room_w}; roomH={room_h}; anchorW={anchor_w}; anchorH={anchor_h}; foot={foot}; orientation={orientation}".format(
                                     key=item_key,
                                     mode=zone.get("placement_family") or "unknown",
                                     zone_name=zone.get("zone") or "unknown",
@@ -1020,6 +1091,7 @@ def generate_furnished_room(
                                     anchor_w=anchor_rel.get("width_ratio"),
                                     anchor_h=anchor_rel.get("height_ratio"),
                                     foot=room_targets.get("footprint_ratio"),
+                                    orientation=zone.get("orientation_hint") or "keep natural source orientation",
                                 )
                             )
                         if placement_rows:
@@ -1027,6 +1099,10 @@ def generate_furnished_room(
                                 "\n<PLACEMENT PLAN (BINDING)>\n"
                                 "Use these per-item zones and ratio targets before styling. Keep anchor relationships intact.\n"
                                 + "\n".join(placement_rows)
+                                + "\nGlobal rules:\n"
+                                + "- In straight-edged rooms with straight window mullions or wall lines, keep sofas, storage, rugs, desks, and main tables axis-aligned to those dominant room lines.\n"
+                                + "- Do not rotate major furniture 20-60 degrees for styling unless explicit placement instructions or curved/angled architecture require it.\n"
+                                + "- Ceiling fixtures must stay on the ceiling plane, and wall-attached items must stay on the wall plane.\n"
                                 + "\n--------------------------------------------------\n"
                             )
 
@@ -1183,6 +1259,15 @@ def generate_furnished_room(
                 "Do NOT shrink furniture to create artificial empty space. If the room is small, it should look appropriately filled.\n"
                 "--------------------------------------------------\n"
             )
+        elif room_analysis_text:
+            spatial_context = (
+                "\n<ROOM-SCALE INFERENCE RULES>\n"
+                "No explicit room dimensions were provided. Infer scale only from the input room geometry and architecture.\n"
+                "- Keep doors, windows, mullions, columns, ceiling drops, baseboards, and floor plank scale fixed.\n"
+                "- Use those architectural anchors to judge furniture size. Do not enlarge compact lamps, stools, or rugs into anchor-sized objects.\n"
+                "- Preserve the existing room depth and camera position; never rotate the room to build a more frontal composition.\n"
+                "--------------------------------------------------\n"
+            )
 
         if scale_guide_path:
             scale_guide_context = (
@@ -1245,11 +1330,14 @@ def generate_furnished_room(
             "3. **DEPTH PRESERVATION:** Do not expand the room. Keep the original spatial depth.\n"
             "4. **FRAMING LOCK:** Keep the full room framing. Do NOT crop to a close-up. The ceiling and floor edges must match the input.\n"
             "5. **CORNER VISIBILITY:** Both left and right wall corners must remain visible, matching the input framing.\n\n"
+            "6. **OPENING LOCK:** Keep every door, window, balcony opening, wall return, and column on the exact same side and in the exact same location as the input image.\n"
+            "7. **NO ROOM ROTATION OR RESTAGING:** Do not rotate the room, do not convert an angled shot into a frontal shot, and do not recompose the architecture around the furniture.\n\n"
             "<CRITICAL: FURNITURE COMPOSITING>\n"
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
-            "2. **PLACEMENT:** Place items *on* the floor. Ensure legs touch the ground with correct contact shadows.\n"
-            "3. **STYLE:** Match the intended style implied by the provided furniture items.\n"
-            "4. **ONLY LISTED ITEMS:** Render only the listed items. Do NOT add extra furniture or swap designs.\n"
+            "2. **PLACEMENT:** Obey the per-item placement family exactly. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
+            "3. **AXIS ALIGNMENT:** If the room edges, window mullions, or major wall lines are straight, keep sofas, storage, rugs, and large tables parallel or perpendicular to those dominant room axes. Do not place them on a casual 20-60 degree diagonal unless explicit instructions require it.\n"
+            "4. **STYLE:** Match the intended style implied by the provided furniture items.\n"
+            "5. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
             f"{window_context}"
             f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and a CANONICAL GEOMETRY CONTRACT. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
@@ -1292,14 +1380,22 @@ def generate_furnished_room(
             "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
         )
 
+        style_direction_context = (
+            f"<STYLE DIRECTION>\n{normalized_style_prompt}\n--------------------------------------------------\n"
+            if normalized_style_prompt
+            else ""
+        )
+
         base_prompt = (
             "ACT AS: Professional Interior Photographer.\n"
+            f"{style_direction_context}"
             f"{room_analysis_context}\n"
             f"{specs_context}\n"
             f"{dims_table_context}\n"
             f"{incomplete_dims_context}\n"
             f"{identity_context}\n"
             f"{layout_envelope_context}\n"
+            f"{small_scale_context}\n"
             f"{scale_plan_context}\n"
             f"{geometry_contract_context}\n"
             f"{scene_contract_context}\n"

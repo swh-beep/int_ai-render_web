@@ -101,12 +101,12 @@ def match_items_to_detected_rows(
         picked_idx = None
         match_strategy = None
         src_cat = item.get("category_canonical") or canonical_category(item.get("category") or item.get("label") or "")
-        src_family = category_match_family(item.get("category") or item.get("label") or "")
+        src_family = category_match_family(item.get("category_canonical") or item.get("category") or item.get("label") or "")
         sensitive_family = src_family in (sensitive_remap_families or set())
         if best_idx is not None:
             det_best = detected_rows[best_idx] if best_idx < len(detected_rows) else {}
             det_cat = (det_best or {}).get("category_canonical") or canonical_category((det_best or {}).get("category") or (det_best or {}).get("label") or "")
-            det_family = category_match_family((det_best or {}).get("category") or (det_best or {}).get("label") or "")
+            det_family = category_match_family((det_best or {}).get("category_canonical") or (det_best or {}).get("category") or (det_best or {}).get("label") or "")
             if best_score >= 0.52:
                 picked_idx = best_idx
                 match_strategy = "score_threshold"
@@ -123,7 +123,7 @@ def match_items_to_detected_rows(
                 family_candidates = [
                     det_idx
                     for det_idx in remaining
-                    if category_match_family((detected_rows[det_idx] or {}).get("category") or (detected_rows[det_idx] or {}).get("label") or "") == src_family
+                    if category_match_family((detected_rows[det_idx] or {}).get("category_canonical") or (detected_rows[det_idx] or {}).get("category") or (detected_rows[det_idx] or {}).get("label") or "") == src_family
                 ]
             family_unique_threshold = 0.36 if sensitive_family else 0.18
             if len(family_candidates) == 1 and best_idx == family_candidates[0] and best_score >= family_unique_threshold:

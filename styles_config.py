@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 3단계 구조: 공간 -> 스타일 -> 번호 (1-10)
+
 ROOM_STYLES = {
     "Living room": [
         "French-modern",
@@ -9,7 +9,7 @@ ROOM_STYLES = {
         "Natural",
         "Oriental",
         "Scandinavian",
-        "Unique"
+        "Unique",
     ],
     "Dining room": [
         "French-modern",
@@ -19,7 +19,7 @@ ROOM_STYLES = {
         "Natural",
         "Oriental",
         "Scandinavian",
-        "Unique"
+        "Unique",
     ],
     "Bedroom": [
         "French-modern",
@@ -29,42 +29,81 @@ ROOM_STYLES = {
         "Natural",
         "Oriental",
         "Scandinavian",
-        "Unique"
-    ]
+        "Unique",
+    ],
 }
 
-# 하위 호환성을 위한 기존 STYLES (더 이상 사용하지 않지만 유지)
-STYLES = {
-    "French-modern": {
-        "prompt": "",
-        "furniture_specs": {}
+
+_STYLE_LIBRARY = {
+    "french-modern": {
+        "prompt": (
+            "Blend refined French detailing with restrained modern styling. "
+            "Prefer elegant profiles, tailored upholstery, sculpted wood or metal details, "
+            "and a composed editorial balance without clutter."
+        ),
+        "furniture_specs": {},
     },
-    "Luxury": {
-        "prompt": "",
-        "furniture_specs": {}
+    "luxury": {
+        "prompt": (
+            "Aim for quiet luxury rather than flashy staging. "
+            "Use premium materials, generous proportions, deliberate spacing, "
+            "and polished but believable lighting with exact product fidelity."
+        ),
+        "furniture_specs": {},
     },
-    "Mid-Century": {
-        "prompt": "",
-        "furniture_specs": {}
+    "mid-century": {
+        "prompt": (
+            "Preserve a mid-century modern mood with clean structural lines, warm wood tones, "
+            "grounded lounge seating, and balanced negative space. "
+            "Keep silhouettes crisp and avoid overstuffed substitutions."
+        ),
+        "furniture_specs": {},
     },
-    "Modern": {
-        "prompt": "",
-        "furniture_specs": {}
+    "modern": {
+        "prompt": (
+            "Keep the room modern, architectural, and uncluttered. "
+            "Favor clean geometry, confident spacing, and exact furniture identity "
+            "without decorative noise or unnecessary accessories."
+        ),
+        "furniture_specs": {},
     },
-    "Natural": {
-        "prompt": "",
-        "furniture_specs": {}
+    "natural": {
+        "prompt": (
+            "Keep the room bright, calm, and natural. "
+            "Favor warm neutrals, soft daylight, tactile natural materials, "
+            "and relaxed but precise staging without changing the listed product identities."
+        ),
+        "furniture_specs": {},
     },
-    "Oriental": {
-        "prompt": "",
-        "furniture_specs": {}
+    "oriental": {
+        "prompt": (
+            "Respect an oriental-inspired mood through calm symmetry, low visual noise, "
+            "natural materials, and restrained decorative emphasis. "
+            "Keep the arrangement grounded and avoid western generic substitutions."
+        ),
+        "furniture_specs": {},
     },
-    "Scandinavian": {
-        "prompt": "",
-        "furniture_specs": {}
+    "scandinavian": {
+        "prompt": (
+            "Keep the room Scandinavian in tone: airy daylight, pale materials, "
+            "minimal but warm styling, and practical uncluttered composition. "
+            "Maintain exact product identity and avoid overdecorating the scene."
+        ),
+        "furniture_specs": {},
     },
-    "Unique": {
-        "prompt": "",
-        "furniture_specs": {}
-    }
+    "unique": {
+        "prompt": (
+            "Allow a distinctive editorial character, but preserve the listed products exactly. "
+            "The room may feel bold or collectible, yet the staging must remain coherent, "
+            "architecturally believable, and free of random extra objects."
+        ),
+        "furniture_specs": {},
+    },
 }
+
+
+STYLES = {}
+for _canonical_key, _payload in _STYLE_LIBRARY.items():
+    STYLES[_canonical_key] = _payload
+    title_key = _canonical_key.replace("-", " ").title().replace(" ", "-")
+    STYLES[title_key] = _payload

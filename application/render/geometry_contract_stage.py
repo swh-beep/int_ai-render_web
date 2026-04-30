@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from application.render.postprocess_support import category_match_family
 from application.render.render_contracts import GeometryContract, RoomDimsContract
 
 
@@ -81,12 +82,14 @@ def build_geometry_contract(
             "label": item.get("label"),
             "family": ((item.get("product_identity") or {}).get("family") if isinstance(item.get("product_identity"), dict) else None)
             or ((item.get("identity_profile") or {}).get("family") if isinstance(item.get("identity_profile"), dict) else None)
+            or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
             or item.get("category_canonical")
             or item.get("category"),
             "dims_mm": dims_mm,
             "dims_complete": _dims_complete(dims_mm),
             "placement_family": placement_row.get("placement_family"),
             "zone": placement_row.get("zone"),
+            "orientation_hint": placement_row.get("orientation_hint"),
             "room_width_ratio": room_targets.get("room_width_ratio"),
             "room_depth_ratio": room_targets.get("room_depth_ratio"),
             "room_height_ratio": room_targets.get("room_height_ratio"),

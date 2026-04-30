@@ -3,6 +3,246 @@ import time
 from typing import Callable
 
 from PIL import Image
+from application.render.postprocess_support import category_match_family
+
+
+def _parse_ratio(value: str | None) -> tuple[int, int]:
+    text = str(value or "").strip()
+    if ":" not in text:
+        return (16, 9)
+    left, right = text.split(":", 1)
+    try:
+        width = max(1, int(left))
+        height = max(1, int(right))
+    except Exception:
+        return (16, 9)
+    return (width, height)
+
+
+def _coerce_box_2d(value) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        ymin, xmin, ymax, xmax = [float(v) for v in value]
+    except Exception:
+        return None
+    if ymax <= ymin or xmax <= xmin:
+        return None
+    return [ymin, xmin, ymax, xmax]
+
+
+def _target_family(item: dict | None) -> str:
+    item = item if isinstance(item, dict) else {}
+    identity_family = ((item.get("product_identity") or {}).get("family") if isinstance(item.get("product_identity"), dict) else None)
+    if identity_family:
+        return str(identity_family).strip().lower().replace("-", "_").replace(" ", "_")
+    profile_family = ((item.get("identity_profile") or {}).get("family") if isinstance(item.get("identity_profile"), dict) else None)
+    if profile_family:
+        return str(profile_family).strip().lower().replace("-", "_").replace(" ", "_")
+    resolved_family = category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
+    if resolved_family:
+        return str(resolved_family).strip().lower().replace("-", "_").replace(" ", "_")
+    for candidate in (item.get("category_canonical"), item.get("category"), item.get("label")):
+        text = str(candidate or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text:
+            return text
+    return ""
+
+
+def _find_target_item(style_config: dict, furniture_data, normalize_label_for_match: Callable[[str], str]) -> dict | None:
+    style_name = str(style_config.get("name") or "")
+    style_target_key = str(style_config.get("target_key") or "").strip()
+    style_target_label = str(style_config.get("target_label") or "").strip()
+    if not style_target_label and style_name.startswith("Detail:"):
+        style_target_label = style_name.split("Detail:", 1)[1].strip()
+    target_label_norm = normalize_label_for_match(style_target_label)
+
+    for item in furniture_data or []:
+        if not isinstance(item, dict):
+            continue
+        candidate_key = str(item.get("target_key") or "").strip()
+        if style_target_key and candidate_key == style_target_key:
+            return item
+
+    for item in furniture_data or []:
+        if not isinstance(item, dict):
+            continue
+        candidate_label = normalize_label_for_match(str(item.get("label") or ""))
+        if target_label_norm and candidate_label == target_label_norm:
+            return item
+
+    for item in furniture_data or []:
+        if not isinstance(item, dict):
+            continue
+        candidate_label = normalize_label_for_match(str(item.get("label") or ""))
+        if target_label_norm and candidate_label and (
+            target_label_norm in candidate_label or candidate_label in target_label_norm
+        ):
+            return item
+    return None
+
+
+def _box_to_pixels(box_2d: list[float], image_size: tuple[int, int]) -> tuple[int, int, int, int]:
+    width, height = image_size
+    ymin, xmin, ymax, xmax = box_2d
+    left = int(max(0.0, min(1000.0, xmin)) / 1000.0 * width)
+    top = int(max(0.0, min(1000.0, ymin)) / 1000.0 * height)
+    right = int(max(0.0, min(1000.0, xmax)) / 1000.0 * width)
+    bottom = int(max(0.0, min(1000.0, ymax)) / 1000.0 * height)
+    left = max(0, min(width - 1, left))
+    top = max(0, min(height - 1, top))
+    right = max(left + 1, min(width, right))
+    bottom = max(top + 1, min(height, bottom))
+    return (left, top, right, bottom)
+
+
+def _clamp_bounds(bounds: tuple[float, float, float, float], image_size: tuple[int, int]) -> tuple[int, int, int, int]:
+    width, height = image_size
+    left, top, right, bottom = bounds
+    left = max(0.0, min(float(width - 1), left))
+    top = max(0.0, min(float(height - 1), top))
+    right = max(left + 1.0, min(float(width), right))
+    bottom = max(top + 1.0, min(float(height), bottom))
+    return (int(round(left)), int(round(top)), int(round(right)), int(round(bottom)))
+
+
+def _expand_bounds(
+    bounds: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    *,
+    family: str,
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = bounds
+    width = max(1.0, float(right - left))
+    height = max(1.0, float(bottom - top))
+
+    pad_left = width * 0.35
+    pad_right = width * 0.35
+    pad_top = height * 0.30
+    pad_bottom = height * 0.35
+
+    if family in {"ceiling_light", "wall_light", "light", "pendant", "chandelier", "sconce"}:
+        pad_left = width * 0.55
+        pad_right = width * 0.55
+        pad_top = max(height * 0.55, image_size[1] * 0.08)
+        pad_bottom = height * 1.60
+    elif family == "rug":
+        pad_left = width * 0.18
+        pad_right = width * 0.18
+        pad_top = height * 0.80
+        pad_bottom = height * 0.25
+    elif family in {"sofa", "lounge_sofa", "lounge_seating", "chair", "lounge_chair", "armchair", "loveseat"}:
+        pad_left = width * 0.35
+        pad_right = width * 0.35
+        pad_top = height * 0.40
+        pad_bottom = height * 0.45
+    elif family in {"table", "desk", "storage"}:
+        pad_left = width * 0.32
+        pad_right = width * 0.32
+        pad_top = height * 0.35
+        pad_bottom = height * 0.38
+
+    return _clamp_bounds(
+        (
+            float(left) - pad_left,
+            float(top) - pad_top,
+            float(right) + pad_right,
+            float(bottom) + pad_bottom,
+        ),
+        image_size,
+    )
+
+
+def _fit_bounds_to_ratio(
+    bounds: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    *,
+    target_ratio: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = bounds
+    img_w, img_h = image_size
+    target_w, target_h = target_ratio
+    desired_ratio = float(target_w) / float(target_h)
+
+    crop_w = max(1.0, float(right - left))
+    crop_h = max(1.0, float(bottom - top))
+    center_x = (float(left) + float(right)) / 2.0
+    center_y = (float(top) + float(bottom)) / 2.0
+
+    if crop_w / crop_h > desired_ratio:
+        crop_h = crop_w / desired_ratio
+    else:
+        crop_w = crop_h * desired_ratio
+
+    crop_w = min(crop_w, float(img_w))
+    crop_h = min(crop_h, float(img_h))
+
+    left = center_x - crop_w / 2.0
+    right = center_x + crop_w / 2.0
+    top = center_y - crop_h / 2.0
+    bottom = center_y + crop_h / 2.0
+
+    if left < 0.0:
+        right -= left
+        left = 0.0
+    if right > img_w:
+        left -= (right - img_w)
+        right = float(img_w)
+    if top < 0.0:
+        bottom -= top
+        top = 0.0
+    if bottom > img_h:
+        top -= (bottom - img_h)
+        bottom = float(img_h)
+
+    return _clamp_bounds((left, top, right, bottom), image_size)
+
+
+def _render_crop_detail(
+    original_image_path: str,
+    style_config: dict,
+    unique_id: str,
+    index: int,
+    target_item: dict,
+) -> dict | None:
+    box_2d = _coerce_box_2d(target_item.get("box_2d"))
+    if box_2d is None:
+        return None
+
+    style_name = str(style_config.get("name") or f"Detail{index}")
+    family = _target_family(target_item)
+    target_ratio = _parse_ratio(style_config.get("ratio"))
+
+    with Image.open(original_image_path) as img:
+        canvas = img.convert("RGB")
+        bounds = _box_to_pixels(box_2d, canvas.size)
+        bounds = _expand_bounds(bounds, canvas.size, family=family)
+        bounds = _fit_bounds_to_ratio(bounds, canvas.size, target_ratio=target_ratio)
+        crop = canvas.crop(bounds)
+
+        max_edge = max(crop.size)
+        target_max = 1600
+        if max_edge < target_max:
+            scale = float(target_max) / float(max_edge)
+            crop = crop.resize(
+                (max(1, int(crop.size[0] * scale)), max(1, int(crop.size[1] * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        timestamp = int(time.time())
+        safe_style_name = "".join([c for c in style_name if c.isalnum()])[:20] or f"detail{index}"
+        filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
+        path = os.path.join("outputs", filename)
+        crop.save(path, "PNG")
+
+    return {
+        "path": path,
+        "style_name": style_name,
+        "cutout_ref_count": 0,
+        "cutout_ref_labels": [],
+        "generation_mode": "crop_extract",
+        "crop_bounds_px": list(bounds),
+    }
 
 
 def generate_detail_view(
@@ -24,10 +264,17 @@ def generate_detail_view(
     cutout_labels = []
     cutout_ref_count = 0
     try:
+        style_name = str(style_config.get("name") or "")
+        if style_name.startswith("Detail:"):
+            target_item = _find_target_item(style_config, furniture_data, normalize_label_for_match)
+            deterministic_crop = _render_crop_detail(original_image_path, style_config, unique_id, index, target_item or {})
+            if deterministic_crop:
+                return deterministic_crop
+
         img = Image.open(original_image_path)
         target_ratio = style_config.get("ratio", "16:9")
         crop_lock_block = (
-            "<ABSOLUTE RULE #0 — THIS IS THE SAME PHOTO>\n"
+            "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
             "This output MUST be a CROPPED/REFRAMED photograph of the EXACT SAME furnished room image provided.\n"
             "You are NOT creating a new image. You are NOT restaging. You are NOT redesigning.\n"
             "Allowed operations: camera framing, crop, zoom, slight depth-of-field.\n"
@@ -35,7 +282,6 @@ def generate_detail_view(
             "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
         )
 
-        style_name = str(style_config.get("name") or "")
         style_target_key = str(style_config.get("target_key") or "").strip()
         style_target_label = str(style_config.get("target_label") or "").strip()
         if not style_target_label and style_name.startswith("Detail:"):
@@ -185,7 +431,7 @@ def generate_detail_view(
                 extra_imgs.append(cutout_img)
                 if item.get("is_target"):
                     content += [
-                        f"PRIMARY TARGET CUTOUT (ABSOLUTE PRIORITY — MUST MATCH EXACT DESIGN): {item['label']}",
+                        f"PRIMARY TARGET CUTOUT (ABSOLUTE PRIORITY, MUST MATCH EXACT DESIGN): {item['label']}",
                         cutout_img,
                     ]
                 else:
@@ -224,6 +470,7 @@ def generate_detail_view(
                         "style_name": style_config.get("name"),
                         "cutout_ref_count": cutout_ref_count,
                         "cutout_ref_labels": cutout_labels,
+                        "generation_mode": "model_regeneration",
                     }
         return None
     except Exception as exc:

@@ -48,11 +48,11 @@ _SHAPE_CUE_KEYWORDS = (
     "thin",
 )
 
-_SEATING_FAMILIES = {"sofa", "lounge_sofa", "lounge_seating"}
+_SEATING_FAMILIES = {"sofa", "lounge_sofa", "lounge_seating", "chair", "lounge_chair", "armchair", "loveseat"}
 _SUPPORT_GEOMETRY_FAMILIES = {"table", "desk", "stool", "storage"}
 _REFLECTIVE_FAMILIES = {"mirror"}
 _RUG_FAMILIES = {"rug"}
-_LIGHT_FAMILIES = {"floor_lamp", "table_lamp", "light"}
+_LIGHT_FAMILIES = {"floor_lamp", "table_lamp", "light", "ceiling_light", "wall_light"}
 _HIGH_PRIORITY_REFERENCE_REASONS = {
     "reflective_wall_object",
     "support_geometry_object",

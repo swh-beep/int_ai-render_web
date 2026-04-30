@@ -25,6 +25,7 @@ from application.job_entrypoints import JobEntrypointServices
 from application.http.queue_route_handlers import (
     QueueRouteDependencies,
     handle_api_external_render_cart,
+    handle_api_external_render_cart_simple,
     handle_api_external_render_preset,
     handle_api_external_render_video,
     handle_api_internal_render,
@@ -458,6 +459,13 @@ OUTPUTS_ALLOWED_EXTS = {
     for ext in os.getenv("OUTPUTS_ALLOWED_EXTS", ".png,.jpg,.jpeg,.webp").replace(";", ",").split(",")
     if ext.strip()
 }
+OUTPUTS_VIDEO_UPLOAD_MAX_MB = max(1, int(os.getenv("OUTPUTS_VIDEO_UPLOAD_MAX_MB", "100") or "100"))
+OUTPUTS_VIDEO_UPLOAD_MAX_BYTES = OUTPUTS_VIDEO_UPLOAD_MAX_MB * 1024 * 1024
+OUTPUTS_VIDEO_ALLOWED_EXTS = {
+    ext.strip().lower()
+    for ext in os.getenv("OUTPUTS_VIDEO_ALLOWED_EXTS", ".mp4,.mov,.webm").replace(";", ",").split(",")
+    if ext.strip()
+}
 CORS_ALLOW_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").replace(";", ",").split(",")
@@ -598,6 +606,60 @@ def _require_outputs_api_access(request: Request) -> Optional[JSONResponse]:
             EXTERNAL_INTEA_API_KEYS,
         )
     return None
+
+
+async def _store_output_upload(
+    file: UploadFile,
+    *,
+    default_name: str,
+    allowed_exts: set[str],
+    max_bytes: int,
+    max_mb: int,
+) -> JSONResponse | dict:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    orig = (file.filename or default_name).strip()
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", orig)
+    ext = Path(safe).suffix.lower()
+    if ext not in allowed_exts:
+        allowed = ", ".join(sorted(allowed_exts))
+        return JSONResponse(content={"error": f"Unsupported file type. Allowed: {allowed}"}, status_code=400)
+
+    stamp = int(time.time())
+    uid = uuid.uuid4().hex[:8]
+    filename = f"upload_{stamp}_{uid}_{safe}"
+    out_path = OUTPUTS_DIR / filename
+    total_bytes = 0
+
+    try:
+        with open(out_path, "wb") as file_obj:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    file_obj.close()
+                    try:
+                        out_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return JSONResponse(
+                        content={"error": f"File too large (max {max_mb}MB)"},
+                        status_code=413,
+                    )
+                file_obj.write(chunk)
+    finally:
+        await file.close()
+
+    if total_bytes == 0:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return JSONResponse(content={"error": "Empty file"}, status_code=400)
+
+    return {"filename": filename, "url": f"/outputs/{filename}"}
 
 
 def _resolve_public_file_path(url: str) -> Path | None:
@@ -1563,49 +1625,29 @@ async def api_outputs_upload(request: Request, file: UploadFile = File(...)):
     guard = _require_outputs_api_access(request)
     if guard is not None:
         return guard
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    return await _store_output_upload(
+        file,
+        default_name="upload.png",
+        allowed_exts=OUTPUTS_ALLOWED_EXTS,
+        max_bytes=OUTPUTS_UPLOAD_MAX_BYTES,
+        max_mb=OUTPUTS_UPLOAD_MAX_MB,
+    )
 
-    orig = (file.filename or "upload.png").strip()
-    # keep filename safe
-    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", orig)
-    ext = Path(safe).suffix.lower()
-    if ext not in OUTPUTS_ALLOWED_EXTS:
-        return JSONResponse(content={"error": "Unsupported file type"}, status_code=400)
-    stamp = int(time.time())
-    uid = uuid.uuid4().hex[:8]
-    filename = f"upload_{stamp}_{uid}_{safe}"
-    out_path = OUTPUTS_DIR / filename
-    total_bytes = 0
 
-    try:
-        with open(out_path, "wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total_bytes += len(chunk)
-                if total_bytes > OUTPUTS_UPLOAD_MAX_BYTES:
-                    f.close()
-                    try:
-                        out_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return JSONResponse(
-                        content={"error": f"File too large (max {OUTPUTS_UPLOAD_MAX_MB}MB)"},
-                        status_code=413,
-                    )
-                f.write(chunk)
-    finally:
-        await file.close()
-
-    if total_bytes == 0:
-        try:
-            out_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return JSONResponse(content={"error": "Empty file"}, status_code=400)
-
-    return {"filename": filename, "url": f"/outputs/{filename}"}
+@app.post("/api/outputs/upload-video")
+@async_wrap
+async def api_outputs_upload_video(request: Request, file: UploadFile = File(...)):
+    """Upload a video clip to /outputs for Video Studio assemble workflows."""
+    guard = _require_outputs_api_access(request)
+    if guard is not None:
+        return guard
+    return await _store_output_upload(
+        file,
+        default_name="upload.mp4",
+        allowed_exts=OUTPUTS_VIDEO_ALLOWED_EXTS,
+        max_bytes=OUTPUTS_VIDEO_UPLOAD_MAX_BYTES,
+        max_mb=OUTPUTS_VIDEO_UPLOAD_MAX_MB,
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -1901,6 +1943,11 @@ def api_external_render_preset(req: PresetRenderRequest, request: Request):
 @async_wrap
 def api_external_render_cart(req: CartRenderRequest, request: Request):
     return handle_api_external_render_cart(req, request, deps=_queue_route_deps())
+
+@app.post("/api/external/render/cart-simple")
+@async_wrap
+def api_external_render_cart_simple(req: CartRenderRequest, request: Request):
+    return handle_api_external_render_cart_simple(req, request, deps=_queue_route_deps())
 
 @app.post("/api/external/render/video")
 @async_wrap

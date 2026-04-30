@@ -120,6 +120,27 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
     )
 
 
+def job_render_with_extra(payload: dict) -> dict:
+    services = _services()
+    render_payload = payload.get("render") or {}
+    extra = payload.get("extra") or {}
+
+    audience = services.normalize_audience(render_payload.get("audience"))
+    render_payload["audience"] = audience
+
+    render_result = job_render(render_payload, persist_result=False)
+    if isinstance(render_result, dict) and ("cart_kept" in extra or "cart_dropped" in extra):
+        render_result.pop("original_url", None)
+
+    if isinstance(render_result, dict) and render_result.get("error"):
+        result = {"error": render_result.get("error"), "render": render_result, **extra}
+    else:
+        result = {"render": render_result, **extra}
+
+    _persist_job_result(result, audience=audience)
+    return result
+
+
 def job_render_with_details(payload: dict) -> dict:
     return run_render_with_details_job(
         payload,
@@ -226,6 +247,11 @@ def job_regenerate_single_detail(payload: dict) -> dict:
         build_s3_prefix=services.build_s3_prefix,
         materialize_input=services.materialize_input,
         resolve_image_url=services.resolve_image_url,
+        detect_furniture_boxes=services.detect_furniture_boxes,
+        canonical_category=services.canonical_category,
+        build_item_target_key=services.build_item_target_key,
+        max_concurrency_analysis=services.max_concurrency_analysis,
+        analyze_cropped_item=services.analyze_cropped_item,
         attach_volume_ranks=services.attach_volume_ranks,
         construct_dynamic_styles=services.construct_dynamic_styles,
         normalize_label_for_match=services.normalize_label_for_match,

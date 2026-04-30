@@ -2,6 +2,8 @@ from typing import Callable
 
 from PIL import Image
 
+_ROOM_ANALYSIS_SEED = 7
+
 
 def analyze_room_structure(
     room_path,
@@ -28,6 +30,14 @@ def analyze_room_structure(
             "Focus on architecture, wall layout, openings (windows/doors), ceiling and floor details. "
             "If windows are clearly present, set windows_present=true. If uncertain, use false.\n"
             f"ROOM DIMENSIONS (if provided): {room_dimensions or 'N/A'}\n\n"
+            "Return estimated room dimensions in millimeters.\n"
+            "- If ROOM DIMENSIONS were provided, echo those values exactly in estimated_dimensions_mm.\n"
+            "- If ROOM DIMENSIONS were not provided, estimate width/depth/height as carefully as possible from the room image.\n"
+            "- Round width/depth to the nearest 500 mm.\n"
+            "- Round height to the nearest 100 mm.\n"
+            "- Prefer the smaller conservative value when two absolute size estimates look similarly plausible.\n"
+            "- Do not invent false precision beyond what the image supports.\n"
+            "- Use null for any axis you cannot justify from the image.\n\n"
             "Also return numeric room geometry bounds that can be used directly by scale math.\n"
             'Use "room_planes" only for normalized numeric bounds, not wall labels.\n'
             'Example: "room_planes": {"y_top": 0.08, "y_bottom": 0.92}\n'
@@ -37,7 +47,8 @@ def analyze_room_structure(
             '  "room_text": "...",\n'
             '  "windows_present": true/false,\n'
             '  "room_planes": {"y_top": 0.0, "y_bottom": 1.0},\n'
-            '  "wall_span_norm": [0.0, 1.0]\n'
+            '  "wall_span_norm": [0.0, 1.0],\n'
+            '  "estimated_dimensions_mm": {"width_mm": null, "depth_mm": null, "height_mm": null}\n'
             "}\n"
         )
         content = [prompt]
@@ -46,7 +57,13 @@ def analyze_room_structure(
         res = call_gemini_with_failover(
             model_name,
             content,
-            {"timeout": timeout, "max_attempts": max(1, int(max_attempts or 1))},
+            {
+                "timeout": timeout,
+                "max_attempts": max(1, int(max_attempts or 1)),
+                "temperature": 0,
+                "seed": _ROOM_ANALYSIS_SEED,
+                "response_mime_type": "application/json",
+            },
             {},
             log_tag="Analysis.RoomOnly",
         )

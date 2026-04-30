@@ -10,13 +10,32 @@ def resolve_regeneration_style(
     style_index_mode: str,
     normalize_label_for_match: Callable[[str], str],
 ) -> tuple[dict | None, str | None, int | None]:
-    detail_styles = [
-        style for style in dynamic_styles
+    detail_style_refs = [
+        (index, style)
+        for index, style in enumerate(dynamic_styles)
         if str((style or {}).get("name") or "").startswith("Detail:")
     ]
+    detail_styles = [style for _, style in detail_style_refs]
 
     def _to_zero_based(value: int) -> int:
         return value - 1 if value >= 1 else value
+
+    def _resolve_detail_by_index(raw_index: int) -> tuple[dict | None, str | None, int | None]:
+        if raw_index < 0:
+            raw_index = 0
+        if 0 <= raw_index < len(dynamic_styles):
+            candidate = dynamic_styles[raw_index]
+            if str((candidate or {}).get("name") or "").startswith("Detail:"):
+                return candidate, "style_index_detail_from_overall", raw_index + 1
+        if detail_styles:
+            detail_index = raw_index
+            if detail_index >= len(detail_styles):
+                detail_index = len(detail_styles) - 1
+            if detail_index < 0:
+                detail_index = 0
+            overall_index, style = detail_style_refs[detail_index]
+            return style, "style_index_detail", overall_index + 1
+        return None, None, None
 
     style = None
     resolved_by = None
@@ -46,6 +65,23 @@ def resolve_regeneration_style(
                 resolved_style_index = index + 1
                 break
 
+        if style is None:
+            for index, item_style in enumerate(dynamic_styles):
+                name = str((item_style or {}).get("name") or "")
+                if not name.startswith("Detail:"):
+                    continue
+                style_label = str((item_style or {}).get("target_label") or "").strip()
+                if not style_label:
+                    style_label = name.split("Detail:", 1)[1].strip()
+                normalized_style_label = normalize_label_for_match(style_label)
+                if normalized_target and normalized_style_label and (
+                    normalized_target in normalized_style_label or normalized_style_label in normalized_target
+                ):
+                    style = item_style
+                    resolved_by = "target_label_partial"
+                    resolved_style_index = index + 1
+                    break
+
     if style is not None:
         return style, resolved_by, resolved_style_index
 
@@ -58,20 +94,18 @@ def resolve_regeneration_style(
         return dynamic_styles[index], "style_index_overall", index + 1
 
     if style_index_mode == "detail":
-        if detail_styles:
-            if index < 0:
-                index = 0
-            elif index >= len(detail_styles):
-                index = len(detail_styles) - 1
-            return detail_styles[index], "style_index_detail", index + 1
+        style, resolved_by, resolved_style_index = _resolve_detail_by_index(index)
+        if style is not None:
+            return style, resolved_by, resolved_style_index
         if index < 0:
             index = 0
         elif index >= len(dynamic_styles):
             index = len(dynamic_styles) - 1
         return dynamic_styles[index], "style_index_overall_fallback", index + 1
 
-    if detail_styles and 0 <= index < len(detail_styles):
-        return detail_styles[index], "style_index_detail_auto", index + 1
+    style, resolved_by, resolved_style_index = _resolve_detail_by_index(index)
+    if style is not None:
+        return style, resolved_by if resolved_by != "style_index_detail" else "style_index_detail_auto", resolved_style_index
 
     if index < 0:
         index = 0

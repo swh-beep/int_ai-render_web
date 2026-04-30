@@ -11,25 +11,78 @@ from application.render.batch_detection_support import (
 
 
 _CANONICAL_RULES = [
-    ("mirror", ["mirror", "거울"]),
-    ("storage", ["sideboard", "credenza", "dresser", "drawers", "cabinet", "storage", "wardrobe", "bookcase", "shelf", "수납", "서랍", "캐비닛", "선반", "장식장"]),
-    ("sofa", ["lounge sofa", "lounge_sofa", "sectional", "sofa", "couch", "loveseat", "소파"]),
+    ("lounge_sofa", ["lounge sofa", "lounge_sofa", "라운지소파", "라운지 소파"]),
+    ("sofa_table", ["sofa table", "sofa_table", "coffee table", "coffee_table", "cocktail table", "center table", "living room table", "소파테이블", "소파 테이블", "커피테이블", "커피 테이블"]),
+    ("main_sofa", ["main sofa", "main_sofa", "메인소파", "메인 소파", "sectional", "couch", "loveseat", "sofa", "소파"]),
+    ("dining_table", ["dining table", "dining_table", "식탁", "다이닝테이블", "다이닝 테이블"]),
+    ("side_table", ["side table", "side_table", "end table", "console table", "console_table", "nightstand", "bedside table", "bedside_table", "사이드테이블", "사이드 테이블", "협탁", "콘솔"]),
+    ("lounge_chair", ["lounge chair", "lounge_chair", "armchair", "accent chair", "easy chair", "라운지체어", "라운지 체어", "암체어"]),
+    ("desk_chair", ["desk chair", "desk_chair", "office chair", "task chair", "swivel chair", "computer chair", "desk seating", "데스크체어", "데스크 체어", "데스크체이", "책상의자", "사무용의자"]),
+    ("dining_chair", ["dining chair", "dining_chair", "side chair", "식탁의자", "다이닝체어", "다이닝 체어", "chair", "의자"]),
+    ("pendant_lamp", ["pendant lamp", "pendant_lamp", "pendant", "chandelier", "ceiling light", "ceiling_light", "팬던트램프", "팬던트 램프", "펜던트램프", "펜던트 램프", "샹들리에"]),
+    ("floor_lamp", ["floor lamp", "floor_lamp", "arc lamp", "standing lamp", "플로어램프", "플로어 램프"]),
+    ("table_lamp", ["table lamp", "table_lamp", "desk lamp", "bedside lamp", "bedside_lamp", "테이블램프", "테이블 램프"]),
+    ("desk_table", ["desk table", "desk_table", "desk", "office desk", "writing desk", "책상", "데스크테이블", "데스크 테이블"]),
+    ("stool_pouf", ["stool/pouf", "stool pouf", "stool_pouf", "stool", "pouf", "ottoman", "footstool", "스툴/푸프", "스툴 푸프", "스툴", "푸프", "오토만"]),
     ("bed", ["bed", "침대"]),
-    ("table", ["side table", "coffee table", "dining table", "dining_table", "table", "desk", "console", "테이블", "책상", "콘솔"]),
-    ("chair", ["lounge chair", "lounge_chair", "armchair", "chair", "stool", "pouf", "ottoman", "의자", "스툴", "푸프", "오토만"]),
-    ("light", ["floor lamp", "floor_lamp", "table lamp", "table_lamp", "arc lamp", "lamp", "light", "chandelier", "pendant", "sconce", "조명", "램프"]),
     ("rug", ["rug", "carpet", "mat", "러그", "카펫", "매트"]),
-    ("tv", ["tv", "television", "티비", "텔레비전"]),
+    ("storage_cabinet_shelf", ["storage cabinet shelf", "storage_cabinet_shelf", "storage", "cabinet", "shelf", "shelving", "sideboard", "credenza", "dresser", "drawers", "wardrobe", "bookcase", "스토리지", "캐비닛", "쉘", "쉘프", "수납", "서랍", "선반", "장식장", "수납장"]),
+    ("electronics", ["electronics", "electronic", "tv", "television", "speaker", "stereo", "monitor", "projector", "전자제품", "티비", "텔레비전", "스피커"]),
+    ("mirror", ["mirror", "거울"]),
+    ("decor", ["decor", "vase", "art", "frame", "object", "장식", "액자", "화병", "데코"]),
+    ("sofa", ["sofa", "couch"]),
+    ("table", ["table", "console"]),
+    ("chair", ["chair"]),
+    ("light", ["lamp", "light", "조명", "램프"]),
+    ("storage", ["storage"]),
+    ("tv", ["tv", "television"]),
     ("plant", ["plant", "tree", "화분", "식물"]),
-    ("decor", ["vase", "art", "frame", "decor", "장식", "액자", "화병"]),
 ]
 
 _FAMILY_KEYWORDS = {
     "mirror": ("mirror", "거울"),
-    "storage": ("sideboard", "credenza", "dresser", "drawers", "cabinet", "storage", "wardrobe", "bookcase", "shelf", "수납", "서랍", "캐비닛", "선반", "장식장"),
+    "storage": ("sideboard", "credenza", "dresser", "drawers", "cabinet", "storage", "wardrobe", "bookcase", "shelf", "shelving", "수납", "서랍", "캐비닛", "선반", "장식장", "수납장", "스토리지", "쉘", "쉘프"),
     "stool": ("stool", "pouf", "ottoman", "footstool", "스툴", "푸프", "오토만"),
-    "floor_lamp": ("floor lamp", "floor_lamp", "arc lamp"),
-    "table_lamp": ("table lamp", "table_lamp", "desk lamp", "bedside lamp"),
+    "floor_lamp": ("floor lamp", "floor_lamp", "arc lamp", "standing lamp", "플로어램프", "플로어 램프"),
+    "table_lamp": ("table lamp", "table_lamp", "desk lamp", "bedside lamp", "bedside_lamp", "테이블램프", "테이블 램프"),
+    "ceiling_light": ("pendant", "pendant lamp", "pendant_lamp", "chandelier", "ceiling light", "ceiling_light", "팬던트램프", "팬던트 램프", "펜던트램프", "펜던트 램프"),
+    "wall_light": ("sconce", "wall light", "wall_light"),
+}
+
+_CATEGORY_FAMILY_MAP = {
+    "main_sofa": "sofa",
+    "lounge_sofa": "lounge_sofa",
+    "sofa_table": "table",
+    "dining_table": "table",
+    "side_table": "table",
+    "desk_table": "desk",
+    "dining_chair": "chair",
+    "desk_chair": "chair",
+    "lounge_chair": "lounge_chair",
+    "pendant_lamp": "ceiling_light",
+    "floor_lamp": "floor_lamp",
+    "table_lamp": "table_lamp",
+    "stool_pouf": "stool",
+    "bed": "bed",
+    "rug": "rug",
+    "storage_cabinet_shelf": "storage",
+    "electronics": "electronics",
+    "mirror": "mirror",
+    "decor": "decor",
+    "sofa": "sofa",
+    "chair": "chair",
+    "table": "table",
+    "desk": "desk",
+    "light": "light",
+    "storage": "storage",
+    "tv": "electronics",
+    "plant": "plant",
+    "stool": "stool",
+    "floor_lamp": "floor_lamp",
+    "table_lamp": "table_lamp",
+    "ceiling_light": "ceiling_light",
+    "wall_light": "wall_light",
+    "lounge_seating": "lounge_seating",
 }
 
 _SENSITIVE_REMAP_FAMILIES = {
@@ -38,11 +91,17 @@ _SENSITIVE_REMAP_FAMILIES = {
     "stool",
     "floor_lamp",
     "table_lamp",
+    "ceiling_light",
+    "wall_light",
     "lounge_seating",
+    "lounge_sofa",
+    "lounge_chair",
     "sofa",
+    "desk",
     "table",
     "rug",
     "chair",
+    "electronics",
 }
 
 
@@ -163,13 +222,19 @@ def category_match_family(raw: Optional[str]) -> str:
         return "storage"
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["stool"]):
         return "stool"
+    if canonical:
+        return _CATEGORY_FAMILY_MAP.get(canonical, canonical)
     if "lounge" in text and any(keyword in text for keyword in ("chair", "armchair", "sofa", "sectional", "loveseat", "의자", "소파")):
         return "lounge_seating"
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["floor_lamp"]):
         return "floor_lamp"
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["table_lamp"]):
         return "table_lamp"
-    return canonical or ""
+    if any(keyword in text for keyword in _FAMILY_KEYWORDS["ceiling_light"]):
+        return "ceiling_light"
+    if any(keyword in text for keyword in _FAMILY_KEYWORDS["wall_light"]):
+        return "wall_light"
+    return ""
 
 
 def safe_key_token(raw: Optional[str], fallback: str = "na", max_len: int = 24) -> str:
@@ -288,13 +353,15 @@ def remap_match_score(src_item: dict, det_item: dict, src_idx: int, det_idx: int
 
     src_cat = (src_item or {}).get("category_canonical") or canonical_category((src_item or {}).get("category") or src_label)
     det_cat = (det_item or {}).get("category_canonical") or canonical_category((det_item or {}).get("category") or det_label)
-    src_family = category_match_family((src_item or {}).get("category") or src_label)
-    det_family = category_match_family((det_item or {}).get("category") or det_label)
+    src_family = category_match_family((src_item or {}).get("category_canonical") or (src_item or {}).get("category") or src_label)
+    det_family = category_match_family((det_item or {}).get("category_canonical") or (det_item or {}).get("category") or det_label)
 
     cat_bonus = 0.0
     if src_cat and det_cat:
         if src_cat == det_cat:
             cat_bonus = 0.22
+        elif src_family and det_family and src_family == det_family:
+            cat_bonus = 0.12
         elif base < 0.60:
             cat_bonus = -0.18
 

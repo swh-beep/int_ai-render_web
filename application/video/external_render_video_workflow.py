@@ -8,14 +8,21 @@ from api_models import CompileClip, CompileRequest, SourceGenRequest, SourceItem
 from application.video.video_support import download_to_path, ffmpeg_image_to_video
 
 
-_CLIP_BLUEPRINTS: tuple[tuple[str, str], ...] = (
-    ("zoom_in_slow", "sunlight"),
-    ("orbit_r_slow", "none"),
-    ("orbit_l_slow", "plants"),
-    ("zoom_out_slow", "blinds"),
-    ("orbit_r_fast", "lights_on"),
-    ("zoom_in_fast", "door_open"),
+_PRIMARY_MOTION_SEQUENCE: tuple[str, ...] = (
+    "zoom_in_slow",
+    "orbit_l_slow",
+    "orbit_r_slow",
+    "zoom_in_slow",
 )
+_REPEATING_MOTION_SEQUENCE: tuple[str, ...] = (
+    "orbit_l_slow",
+    "orbit_r_slow",
+    "zoom_in_slow",
+)
+_DETAIL_PRIORITY_ORDER: tuple[int, ...] = (5, 0, 4, 2, 3, 1)
+_EXTERNAL_BRAND_CARD_SEC = 3.0
+_EXTERNAL_BRAND_CARD_PATH = Path(__file__).resolve().parents[2] / "static" / "thumbnails" / "external_video_logo_card.jpg"
+_EXTERNAL_BRAND_CARD_FALLBACK_PATH = Path(__file__).resolve().parents[2] / "static" / "TIOR STUDIO(Black).png"
 
 
 def _is_external_render_job_result(result: dict | None) -> bool:
@@ -47,51 +54,75 @@ def _render_job_result(fetch_job: Callable[[str], Any], load_job_result: Callabl
     return None, "Source render job was not found"
 
 
+def _preferred_brand_card_path() -> Path | None:
+    for candidate in (_EXTERNAL_BRAND_CARD_PATH, _EXTERNAL_BRAND_CARD_FALLBACK_PATH):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _reorder_detail_images(detail_urls: list[str]) -> list[str]:
+    if not detail_urls:
+        return []
+    ordered: list[str] = []
+    seen: set[int] = set()
+    for index in _DETAIL_PRIORITY_ORDER:
+        if 0 <= index < len(detail_urls) and index not in seen:
+            ordered.append(detail_urls[index])
+            seen.add(index)
+    for index, url in enumerate(detail_urls):
+        if index not in seen:
+            ordered.append(url)
+    return ordered
+
+
 def _extract_source_images(result: dict | None) -> list[str]:
     if not isinstance(result, dict):
         return []
 
-    candidates: list[str] = []
     render_payload = result.get("render") or {}
     details_payload = result.get("details") or {}
+    primary_main = None
+    if isinstance(render_payload.get("result_url"), str) and render_payload.get("result_url", "").strip():
+        primary_main = render_payload["result_url"].strip()
+    elif isinstance(render_payload.get("result_urls"), list):
+        for value in render_payload.get("result_urls") or []:
+            if isinstance(value, str) and value.strip():
+                primary_main = value.strip()
+                break
 
-    for value in (render_payload.get("result_url"),):
-        if isinstance(value, str) and value.strip():
-            candidates.append(value.strip())
-
-    for value in render_payload.get("result_urls") or []:
-        if isinstance(value, str) and value.strip():
-            candidates.append(value.strip())
-
+    detail_urls: list[str] = []
     for row in details_payload.get("details") or []:
         if not isinstance(row, dict):
             continue
         value = row.get("url")
         if isinstance(value, str) and value.strip():
-            candidates.append(value.strip())
+            detail_urls.append(value.strip())
 
-    unique: list[str] = []
-    seen: set[str] = set()
-    for value in candidates:
-        if value in seen:
-            continue
-        seen.add(value)
-        unique.append(value)
-    return unique
+    ordered: list[str] = []
+    if primary_main:
+        ordered.append(primary_main)
+    ordered.extend(_reorder_detail_images(detail_urls))
+    return ordered
 
 
-def _build_source_request(source_images: list[str], *, clip_count: int, cfg_scale: float) -> SourceGenRequest:
+def _motion_for_external_clip(index: int) -> str:
+    if index < len(_PRIMARY_MOTION_SEQUENCE):
+        return _PRIMARY_MOTION_SEQUENCE[index]
+    return _REPEATING_MOTION_SEQUENCE[(index - len(_PRIMARY_MOTION_SEQUENCE)) % len(_REPEATING_MOTION_SEQUENCE)]
+
+
+def _build_source_request(source_images: list[str], *, cfg_scale: float) -> SourceGenRequest:
     planned_items: list[SourceItem] = []
     if not source_images:
         return SourceGenRequest(items=planned_items, cfg_scale=cfg_scale)
 
-    for index in range(max(1, int(clip_count))):
-        motion, effect = _CLIP_BLUEPRINTS[index % len(_CLIP_BLUEPRINTS)]
+    for index, source_image in enumerate(source_images):
         planned_items.append(
             SourceItem(
-                url=source_images[index % len(source_images)],
-                motion=motion,
-                effect=effect,
+                url=source_image,
+                motion=_motion_for_external_clip(index),
+                effect="sunlight",
             )
         )
     return SourceGenRequest(items=planned_items, cfg_scale=cfg_scale)
@@ -168,6 +199,23 @@ def _build_static_fallback_clips(
     return fallback_results
 
 
+def _build_brand_card_clip(
+    render_job_id: str,
+    *,
+    position: str,
+    video_target_fps: int,
+) -> str | None:
+    card_path = _preferred_brand_card_path()
+    if card_path is None:
+        return None
+    out_dir = Path("outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output_video = out_dir / f"external_brand_{render_job_id}_{position}.mp4"
+    if not output_video.exists():
+        ffmpeg_image_to_video(card_path, output_video, _EXTERNAL_BRAND_CARD_SEC, 1080, 1920, video_target_fps)
+    return f"/outputs/{output_video.name}"
+
+
 def _supplement_missing_clips(
     existing_results: list[str],
     *,
@@ -211,7 +259,6 @@ def run_external_render_video_job(
 ) -> dict:
     render_job_id = str(payload.get("render_job_id") or "").strip()
     audience = normalize_audience(payload.get("audience"))
-    requested_clip_count = max(4, min(6, int(payload.get("clip_count") or 4)))
     cfg_scale = float(payload.get("cfg_scale") or 0.5)
 
     if not render_job_id:
@@ -235,7 +282,8 @@ def run_external_render_video_job(
             "clip_urls": [],
         }
 
-    source_req = _build_source_request(source_images, clip_count=requested_clip_count, cfg_scale=cfg_scale)
+    requested_clip_count = max(1, len(source_images))
+    source_req = _build_source_request(source_images, cfg_scale=cfg_scale)
     source_job_id = queue_source_generation_job(
         source_req,
         video_target_fps=video_target_fps,
@@ -283,15 +331,24 @@ def run_external_render_video_job(
         )
         fallback_used = True
 
+    intro_artifact = _build_brand_card_clip(render_job_id, position="intro", video_target_fps=video_target_fps)
+    outro_artifact = _build_brand_card_clip(render_job_id, position="outro", video_target_fps=video_target_fps)
+    compile_clip_urls: list[str] = []
+    if intro_artifact:
+        compile_clip_urls.append(intro_artifact)
+    compile_clip_urls.extend(source_results)
+    if outro_artifact:
+        compile_clip_urls.append(outro_artifact)
+
     compile_req = CompileRequest(
         clips=[
             CompileClip(
                 video_url=clip_url,
                 speed=1.0,
                 trim_start=0.0,
-                trim_end=5.0,
+                trim_end=_EXTERNAL_BRAND_CARD_SEC if clip_url in {intro_artifact, outro_artifact} else 5.0,
             )
-            for clip_url in source_results
+            for clip_url in compile_clip_urls
         ],
         include_intro_outro=False,
     )
@@ -325,6 +382,20 @@ def run_external_render_video_job(
                 if resolved
             ],
             "clip_count": len(source_results),
+            "intro_url": _resolve_artifact_url(
+                intro_artifact,
+                audience=audience,
+                subfolder="clips",
+                resolve_image_url=resolve_image_url,
+                build_s3_prefix=build_s3_prefix,
+            ) if intro_artifact else None,
+            "outro_url": _resolve_artifact_url(
+                outro_artifact,
+                audience=audience,
+                subfolder="clips",
+                resolve_image_url=resolve_image_url,
+                build_s3_prefix=build_s3_prefix,
+            ) if outro_artifact else None,
         }
 
     clip_urls = [
@@ -341,6 +412,20 @@ def run_external_render_video_job(
         )
         if resolved
     ]
+    intro_url = _resolve_artifact_url(
+        intro_artifact,
+        audience=audience,
+        subfolder="clips",
+        resolve_image_url=resolve_image_url,
+        build_s3_prefix=build_s3_prefix,
+    ) if intro_artifact else None
+    outro_url = _resolve_artifact_url(
+        outro_artifact,
+        audience=audience,
+        subfolder="clips",
+        resolve_image_url=resolve_image_url,
+        build_s3_prefix=build_s3_prefix,
+    ) if outro_artifact else None
     video_url = _resolve_artifact_url(
         final_artifact,
         audience=audience,
@@ -355,6 +440,9 @@ def run_external_render_video_job(
         "clip_urls": clip_urls,
         "clip_count": len(clip_urls),
         "video_url": video_url,
+        "intro_url": intro_url,
+        "outro_url": outro_url,
+        "assembled_clip_count": len(clip_urls) + (1 if intro_url else 0) + (1 if outro_url else 0),
     }
     if fallback_used:
         result["fallback_used"] = True

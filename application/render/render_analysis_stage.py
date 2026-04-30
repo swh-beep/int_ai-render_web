@@ -16,6 +16,7 @@ class RenderAnalysisStageResult:
     room_analysis_text: str = ""
     room_planes: dict | None = None
     wall_span_norm: tuple[float, float] = (0.0, 1.0)
+    estimated_room_dims: dict | None = None
     furniture_specs_text: str | None = None
     furniture_specs_json: dict | None = None
     full_analyzed_data: list[dict] | None = None
@@ -111,8 +112,10 @@ def _merge_unique_str_lists(*values: list[str], limit: int = 6) -> list[str]:
 
 def _expected_placement_family(family: str) -> str:
     normalized = str(family or "").strip().lower()
-    if normalized in {"mirror"}:
+    if normalized in {"mirror", "wall_light"}:
         return "wall_attached"
+    if normalized == "ceiling_light":
+        return "ceiling_attached"
     if normalized == "rug":
         return "rug"
     if normalized in {"table_lamp", "decor"}:
@@ -151,6 +154,70 @@ def _build_layout_envelope(*, dims_mm: dict, room_dims_parsed: dict, family: str
         else None,
         "placement_family": _expected_placement_family(family),
     }
+
+
+def _absolute_size_class(*, family: str, dims_mm: dict) -> str | None:
+    if not isinstance(dims_mm, dict):
+        return None
+    try:
+        width_mm = int(dims_mm.get("width_mm") or 0)
+        depth_mm = int(dims_mm.get("depth_mm") or 0)
+        height_mm = int(dims_mm.get("height_mm") or 0)
+        radius_mm = int(dims_mm.get("radius_mm") or 0)
+    except Exception:
+        return None
+    max_dim = max(width_mm, depth_mm, height_mm, radius_mm)
+    footprint_max = max(width_mm, depth_mm)
+    normalized_family = str(family or "").strip().lower()
+    if max_dim <= 0:
+        return None
+    if normalized_family == "rug":
+        if footprint_max <= 1200:
+            return "small"
+        if footprint_max <= 2000:
+            return "medium"
+        if footprint_max <= 3000:
+            return "large"
+        return "extra-large"
+    if normalized_family in {"table_lamp", "decor"}:
+        if max_dim <= 250:
+            return "tiny"
+        if max_dim <= 450:
+            return "small"
+        if max_dim <= 800:
+            return "medium"
+        return "large"
+    if max_dim <= 250:
+        return "tiny"
+    if max_dim <= 700:
+        return "small"
+    if max_dim <= 1400:
+        return "medium"
+    if max_dim <= 2400:
+        return "large"
+    return "extra-large"
+
+
+def _room_presence_class(layout_envelope: dict | None) -> str | None:
+    if not isinstance(layout_envelope, dict):
+        return None
+    try:
+        room_width_ratio = float(layout_envelope.get("room_width_ratio") or 0.0)
+        room_depth_ratio = float(layout_envelope.get("room_depth_ratio") or 0.0)
+        footprint_ratio = float(layout_envelope.get("footprint_ratio") or 0.0)
+    except Exception:
+        return None
+    if max(room_width_ratio, room_depth_ratio, footprint_ratio) <= 0.0:
+        return None
+    if max(room_width_ratio, room_depth_ratio) <= 0.12 and footprint_ratio <= 0.02:
+        return "tiny-room-presence"
+    if max(room_width_ratio, room_depth_ratio) <= 0.22 and footprint_ratio <= 0.05:
+        return "small-room-presence"
+    if max(room_width_ratio, room_depth_ratio) <= 0.38 and footprint_ratio <= 0.14:
+        return "medium-room-presence"
+    if max(room_width_ratio, room_depth_ratio) <= 0.58 and footprint_ratio <= 0.3:
+        return "large-room-presence"
+    return "anchor-room-presence"
 
 
 def _build_identity_profile(
@@ -194,8 +261,10 @@ def _build_identity_profile(
     reflective_surface = bool(reflective_flag) or family == "mirror" or any(
         token in material_cues for token in ("mirror", "reflective", "glass", "chrome")
     )
-    wall_attached = _expected_placement_family(family) == "wall_attached"
-    floor_contact = _expected_placement_family(family) in {"floor_placed", "rug"}
+    expected_placement_family = _expected_placement_family(family)
+    wall_attached = expected_placement_family == "wall_attached"
+    ceiling_attached = expected_placement_family == "ceiling_attached"
+    floor_contact = expected_placement_family in {"floor_placed", "rug"}
 
     silhouette_summary = ", ".join(shape_cues[:3]) if shape_cues else (family or category_canonical or "generic")
     layout_envelope = _build_layout_envelope(
@@ -220,8 +289,11 @@ def _build_identity_profile(
         "silhouette_summary": silhouette_summary,
         "reflective_surface": reflective_surface,
         "wall_attached_expected": wall_attached,
+        "ceiling_attached_expected": ceiling_attached,
         "floor_contact_expected": floor_contact,
         "layout_envelope": layout_envelope,
+        "absolute_size_class": _absolute_size_class(family=family, dims_mm=dims_mm or {}),
+        "room_presence_class": _room_presence_class(layout_envelope),
     }
 
 
@@ -322,6 +394,29 @@ def _normalize_windows_present(raw_value: Any) -> bool:
     return False
 
 
+def _normalize_room_dimension_axis(raw_value: Any, *, step_mm: int) -> int | None:
+    try:
+        value = int(raw_value or 0)
+    except Exception:
+        return None
+    if value <= 0:
+        return None
+    return int(step_mm * ((value + (step_mm // 2)) // step_mm))
+
+
+def _normalize_estimated_room_dims(raw_value: Any) -> dict | None:
+    if not isinstance(raw_value, dict):
+        return None
+    normalized = {
+        "width_mm": _normalize_room_dimension_axis(raw_value.get("width_mm"), step_mm=500),
+        "depth_mm": _normalize_room_dimension_axis(raw_value.get("depth_mm"), step_mm=500),
+        "height_mm": _normalize_room_dimension_axis(raw_value.get("height_mm"), step_mm=100),
+    }
+    if not any(normalized.values()):
+        return None
+    return normalized
+
+
 def _append_requested_dimensions_if_missing(description: str, req_dims: dict) -> str:
     dim_pairs = []
     width_mm = req_dims.get("width_mm")
@@ -350,6 +445,78 @@ def _append_requested_dimensions_if_missing(description: str, req_dims: dict) ->
     if desc_text and not desc_text.endswith((".", "!", "?")):
         desc_text += "."
     return (desc_text + f" It measures {', '.join(dim_pairs)}.").strip()
+
+
+def _description_is_generic(description: str, label: str) -> bool:
+    normalized = str(description or "").strip().lower()
+    label_normalized = str(label or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized.startswith("a high quality ") or normalized == label_normalized or normalized == f"{label_normalized}.":
+        return True
+    word_count = len(re.findall(r"[A-Za-z0-9가-힣]+", normalized))
+    if word_count < 12:
+        return True
+    return False
+
+
+def _requested_size_hint(req_dims: dict, category: str | None) -> str:
+    dims = req_dims if isinstance(req_dims, dict) else {}
+    try:
+        max_dim = max(
+            int(dims.get("width_mm") or 0),
+            int(dims.get("depth_mm") or 0),
+            int(dims.get("height_mm") or 0),
+            int(dims.get("radius_mm") or 0),
+        )
+    except Exception:
+        max_dim = 0
+    family = category_match_family(category) or str(category or "").strip().lower()
+    if family == "rug":
+        if max_dim <= 1200:
+            return "a compact rug accent"
+        if max_dim <= 2000:
+            return "a mid-scale rug"
+        return "a large rug anchor"
+    if family in {"table_lamp", "decor"}:
+        if max_dim <= 250:
+            return "a tiny surface object"
+        if max_dim <= 450:
+            return "a compact tabletop object"
+        return "a substantial but still secondary tabletop object"
+    if max_dim <= 250:
+        return "a tiny accessory-scale piece"
+    if max_dim <= 700:
+        return "a compact accent piece"
+    if max_dim <= 1400:
+        return "a standard human-scale furniture piece"
+    if max_dim <= 2400:
+        return "a large anchor furniture piece"
+    if max_dim > 0:
+        return "an oversized anchor furniture piece"
+    return "the original product scale"
+
+
+def _stabilize_requested_item_description(*, label: str, category: str | None, description: str, req_dims: dict) -> str:
+    base = str(description or "").strip()
+    if _description_is_generic(base, label):
+        size_hint = _requested_size_hint(req_dims, category)
+        base = (
+            f"{label} should preserve its original silhouette, material identity, and support geometry. "
+            f"Treat it as {size_hint} rather than a generic substitute."
+        )
+    return _append_requested_dimensions_if_missing(base, req_dims)
+
+
+def _description_is_generic(description: str, label: str) -> bool:
+    normalized = str(description or "").strip().lower()
+    label_normalized = str(label or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized.startswith("a high quality ") or normalized == label_normalized or normalized == f"{label_normalized}.":
+        return True
+    word_count = len(re.findall(r"[A-Za-z0-9_]+", normalized))
+    return word_count < 12
 
 
 def _analyze_items(
@@ -419,13 +586,19 @@ def _analyze_items(
     for idx, meta in enumerate(item_metas):
         res_item = results[idx] if isinstance(results[idx], dict) else {}
         label = meta.get("label") or res_item.get("label") or f"Item{idx+1}"
-        desc = (res_item.get("description") if isinstance(res_item, dict) else None) or f"A high quality {label}."
+        category_val = meta.get("category") or res_item.get("category")
+        desc = (res_item.get("description") if isinstance(res_item, dict) else None) or f"{label} with its original identity preserved."
         req_dims = normalize_dims_dict(meta.get("dims_mm") or {})
         opts = meta.get("options")
         qty = meta.get("qty") or 1
 
-        if is_cart_mode and req_dims:
-            desc = _append_requested_dimensions_if_missing(desc, req_dims)
+        if req_dims:
+            desc = _stabilize_requested_item_description(
+                label=label,
+                category=category_val,
+                description=desc,
+                req_dims=req_dims,
+            )
 
         extra_lines = []
         if qty and qty > 1:
@@ -451,7 +624,6 @@ def _analyze_items(
 
         full_desc = (desc + (" " + " ".join(extra_lines) if extra_lines else "")).strip()
         source_index = int(meta.get("source_index") or (idx + 1))
-        category_val = meta.get("category") or res_item.get("category")
         category_canonical_val = (
             meta.get("category_canonical")
             or res_item.get("category_canonical")
@@ -664,6 +836,7 @@ def run_render_analysis_stage(
             )
         result.room_analysis_text = (room_result.get("room_text") or "").strip()
         result.windows_present = _normalize_windows_present(room_result.get("windows_present"))
+        result.estimated_room_dims = _normalize_estimated_room_dims(room_result.get("estimated_dimensions_mm"))
         room_planes = room_result.get("room_planes")
         if isinstance(room_planes, dict):
             result.room_planes = dict(room_planes)
