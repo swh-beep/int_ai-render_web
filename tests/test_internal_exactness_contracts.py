@@ -88,7 +88,7 @@ def test_sync_furniture_specs_contracts_rehydrates_primary_from_analyzed_items()
     assert synced["primary"]["archetype_strategy"]["strictness"] == "critical"
 
 
-def test_build_render_response_payload_blocks_final_result_but_keeps_internal_candidates():
+def test_build_render_response_payload_blocks_final_result_but_still_returns_best_effort_candidate():
     payload = build_render_response_payload(
         std_path="outputs/original.png",
         step1_img="outputs/empty.png",
@@ -115,11 +115,50 @@ def test_build_render_response_payload_blocks_final_result_but_keeps_internal_ca
         resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{path}",
     )
 
-    assert payload["result_url"] is None
-    assert payload["result_urls"] == []
+    assert payload["result_url"] == "https://cdn.example/outputs/result_a.png"
+    assert payload["result_urls"] == [
+        "https://cdn.example/outputs/result_a.png",
+        "https://cdn.example/outputs/result_b.png",
+    ]
     assert payload["final_result_blocked"] is True
     assert payload["candidate_result_urls"] == [
         "https://cdn.example/outputs/result_a.png",
         "https://cdn.example/outputs/result_b.png",
     ]
+    assert payload["selected_result_filename"] == "result_a.png"
+    assert payload["message"] == "QC blocked final selection"
+
+
+def test_build_render_response_payload_blocks_final_result_but_falls_back_to_empty_room_when_no_candidates():
+    payload = build_render_response_payload(
+        std_path="outputs/original.png",
+        step1_img="outputs/empty.png",
+        scale_guide_path=None,
+        generated_results=[],
+        candidate_results=[],
+        selected_result_index=None,
+        selected_result_reason="strict_hard_qc_blocked",
+        selected_variant_review=None,
+        variant_diagnostics=[],
+        final_result_blocked=True,
+        scale_plan={"strict_scale_requested": True},
+        room_dims_contract={"source": "estimated", "confidence": "medium"},
+        geometry_contract={"strict_scale_ready": False, "anchor_item_key": "sofa-1"},
+        scene_contract={"geometry_source": "estimated", "critical_item_keys": ["sofa-1"]},
+        placement_plan={"anchor_item_key": "sofa-1"},
+        include_replay_debug=True,
+        moodboard_url=None,
+        furniture_data=[],
+        volume_ranking=[],
+        prefix_main_user="internal/mainrendered/user/",
+        prefix_main_empty="internal/mainrendered/empty/",
+        prefix_main_rendered="internal/mainrendered/rendered/",
+        resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{path}",
+    )
+
+    assert payload["result_url"] == "https://cdn.example/outputs/empty.png"
+    assert payload["result_urls"] == ["https://cdn.example/outputs/empty.png"]
+    assert payload["final_result_blocked"] is True
+    assert payload["candidate_result_urls"] == []
+    assert payload["selected_result_filename"] == "empty.png"
     assert payload["message"] == "QC blocked final selection"

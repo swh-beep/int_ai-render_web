@@ -216,3 +216,77 @@ def test_build_placement_plan_routes_secondary_lounge_seating_to_adjacent_band()
 
     assert placement_plan.placement_zones["seat-1"]["placement_family"] == "floor_placed"
     assert placement_plan.placement_zones["seat-1"]["zone"] == "adjacent_seating_band"
+
+
+def test_build_placement_plan_routes_ceiling_and_wall_fixtures_with_orientation_hints():
+    analyzed_items = [
+        {
+            "target_key": "sofa-1",
+            "label": "Main Sofa",
+            "category": "sofa",
+            "layout_envelope": {
+                "room_width_ratio": 0.34,
+                "room_depth_ratio": 0.22,
+                "room_height_ratio": 0.28,
+                "footprint_ratio": 0.11,
+            },
+            "product_identity": {"family": "sofa", "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 760}},
+        },
+        {
+            "target_key": "ceiling-1",
+            "label": "Pendant Light",
+            "category": "ceiling_light",
+            "layout_envelope": {
+                "room_width_ratio": 0.14,
+                "room_depth_ratio": 0.14,
+                "room_height_ratio": 0.35,
+                "footprint_ratio": 0.01,
+            },
+            "product_identity": {"family": "ceiling_light", "dims_mm": {"width_mm": 600, "depth_mm": 600, "height_mm": 1200}},
+        },
+        {
+            "target_key": "wall-1",
+            "label": "Wall Sconce",
+            "category": "wall_light",
+            "layout_envelope": {
+                "room_width_ratio": 0.08,
+                "room_depth_ratio": 0.04,
+                "room_height_ratio": 0.16,
+                "footprint_ratio": 0.004,
+            },
+            "product_identity": {"family": "wall_light", "dims_mm": {"width_mm": 240, "depth_mm": 120, "height_mm": 420}},
+        },
+    ]
+
+    scene_contract = SceneContract(
+        room_dims_contract=RoomDimsContract(
+            source="explicit",
+            confidence="high",
+            dims_mm_center={"width_mm": 5000, "depth_mm": 4500, "height_mm": 2600},
+            dims_mm_range={},
+            estimation_basis=["user_dimensions"],
+            strict_scale_mode="strict_geometry_mode",
+            room_dims_valid=True,
+        ),
+        room="livingroom",
+        audience="internal",
+        anchor_item_key="sofa-1",
+        geometry_targets={},
+    )
+
+    placement_plan, _ = build_placement_plan(
+        analyzed_items=analyzed_items,
+        primary_item=analyzed_items[0],
+        scene_contract=scene_contract,
+        placement_instructions="",
+    )
+
+    ceiling_zone = placement_plan.placement_zones["ceiling-1"]
+    wall_zone = placement_plan.placement_zones["wall-1"]
+
+    assert ceiling_zone["placement_family"] == "ceiling_attached"
+    assert ceiling_zone["zone"] == "ceiling_anchor_band"
+    assert "suspended from the ceiling plane" in str(ceiling_zone["orientation_hint"])
+    assert wall_zone["placement_family"] == "wall_attached"
+    assert wall_zone["zone"] == "wall_mid_band"
+    assert "attached to the wall plane" in str(wall_zone["orientation_hint"])

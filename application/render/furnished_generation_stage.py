@@ -6,6 +6,12 @@ from typing import Any, Callable
 
 from PIL import Image
 from application.render.repair_strategy_stage import build_repair_strategy_plan
+from shared.image_canvas import (
+    get_image_size,
+    image_matches_ratio,
+    match_aspect_to_ratio,
+    match_aspect_to_target as default_match_aspect_to_target,
+)
 
 
 _PLACEMENT_FAILED_RULE_IDS = {"wall_attached_floor_collision", "rug_floating_above_floor_zone", "floor_item_floating"}
@@ -87,12 +93,18 @@ def _normalize_render_candidate_aspect(
     max_crop_fraction: float = 0.20,
 ) -> str | None:
     try:
-        with Image.open(image_path) as candidate_img:
-            width, height = candidate_img.size
+        if image_matches_ratio(image_path, expected_ratio, ratio_tol):
+            return image_path
+
+        width, height = get_image_size(image_path, exif_safe=True)
         if height <= 0:
             return None
-        current_ratio = width / height
         normalized_path = image_path
+        current_ratio = width / height
+        if match_aspect_to_target is not None and match_aspect_to_target is not default_match_aspect_to_target:
+            normalized_path = match_aspect_to_target(image_path, room_path)
+            if image_matches_ratio(normalized_path, expected_ratio, ratio_tol):
+                return normalized_path
         if abs(current_ratio - expected_ratio) > ratio_tol:
             if current_ratio > expected_ratio:
                 retained_fraction = expected_ratio / current_ratio if current_ratio > 0 else 0.0
@@ -106,7 +118,7 @@ def _normalize_render_candidate_aspect(
                         flush=True,
                     )
                 return None
-            normalized_path = match_aspect_to_target(image_path, room_path)
+            normalized_path = match_aspect_to_ratio(image_path, expected_ratio)
             if not normalized_path:
                 if log_brief:
                     print(f"[RatioCheck] FAIL {width}x{height} (expected ~{expected_ratio:.4f})", flush=True)
@@ -634,9 +646,8 @@ def generate_furnished_room(
             pass
 
         width, height = room_img.size
-        is_portrait = height > width
-        ratio_instruction = "PORTRAIT (4:5 Ratio)" if is_portrait else "LANDSCAPE (16:9 Ratio)"
-        expected_ratio = (4 / 5) if is_portrait else (16 / 9)
+        ratio_instruction = "LANDSCAPE (16:9 Ratio)"
+        expected_ratio = 16 / 9
         ratio_tol = 0.1
         system_instruction = "You are an expert interior designer AI."
         generation_call = call_generation_with_failover or call_gemini_with_failover
@@ -1410,8 +1421,8 @@ def generate_furnished_room(
             "1. **FULL BLEED CANVAS:** The output image MUST fill the entire canvas from edge to edge. **NO WHITE BARS.** NO SPLIT SCREENS.\n"
             "2. **NO TEXT OVERLAY:** Do NOT write any dimensions, labels, or watermarks on the final image. It must be a clean photo.\n"
             "3. **ASPECT RATIO LOCK (HARD):** You MUST output EXACTLY " + ratio_instruction + ". Any other ratio is invalid.\n"
-            "4. **NO PORTRAIT FOR LANDSCAPE INPUTS:** If the input is landscape, output must remain landscape (16:9). Never generate portrait.\n"
-            "5. **NO LANDSCAPE FOR PORTRAIT INPUTS:** If the input is portrait, output must remain portrait (4:5). Never generate landscape.\n"
+            "4. **LANDSCAPE OUTPUT ONLY:** Keep the final main render landscape (16:9) even if some references or inputs are portrait.\n"
+            "5. **IGNORE SOURCE ORIENTATION:** Preserve the scene faithfully, but do not switch the final canvas to portrait.\n"
             "6. **IGNORE REFERENCE RATIO:** You MUST output a " + ratio_instruction + " image. Do not mimic any reference image shape.\n"
             "7. **NO MULTI-PANEL OUTPUT:** Output must be ONE single staged room photograph only. Do NOT append catalog sheets, white inventory panels, split layouts, or include the reference image anywhere."
         ).replace("{size_hierarchy_hint}", size_hierarchy_hint or "")
@@ -1555,7 +1566,7 @@ def generate_furnished_room(
                         path = os.path.join("outputs", filename)
                         with open(path, "wb") as output_file:
                             output_file.write(part.inline_data.data)
-                        return _normalize_render_candidate_aspect(
+                        normalized_path = _normalize_render_candidate_aspect(
                             path,
                             room_path,
                             expected_ratio=expected_ratio,
@@ -1563,6 +1574,18 @@ def generate_furnished_room(
                             match_aspect_to_target=match_aspect_to_target,
                             log_brief=log_brief,
                         )
+                        if normalized_path is None:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            return None
+                        if normalized_path != path:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                        return normalized_path
             return None
 
         def _render_once():
@@ -1570,7 +1593,12 @@ def generate_furnished_room(
             if current_timeout <= 0.0:
                 return None
             content = _build_content()
-            request_options = {"timeout": current_timeout}
+            request_options = {
+                "timeout": current_timeout,
+                "aspect_ratio": "16:9",
+                "thinking_level": "high",
+                "include_thoughts": False,
+            }
             if b_lite_runtime:
                 request_options["max_attempts"] = 1
             response = generation_call(
@@ -1815,7 +1843,12 @@ def generate_furnished_room(
                         opened.append(crop_img)
                         content.extend(["Reference crop (must preserve exact design):", crop_img])
 
-                request_options = {"timeout": current_timeout}
+                request_options = {
+                    "timeout": current_timeout,
+                    "aspect_ratio": "16:9",
+                    "thinking_level": "high",
+                    "include_thoughts": False,
+                }
                 if b_lite_runtime:
                     request_options["max_attempts"] = 1
                 response = repair_call(

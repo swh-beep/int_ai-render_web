@@ -182,3 +182,47 @@ def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeyp
     assert allow_flags == [True]
     assert "2400mm" in result["description"]
     assert result["reference_features"]["extraction_mode"] == "model"
+
+
+def test_analyze_cropped_item_rewrites_generic_description_into_dimension_aware_identity(monkeypatch, tmp_path):
+    image_path = tmp_path / "item.png"
+    _write_png(image_path)
+
+    def _fake_extract_reference_features(**kwargs):
+        return {
+            "material_cues": ["metal", "linen"],
+            "silhouette_cues": ["curved", "slim"],
+            "distinctive_parts": ["wrapped arm rail"],
+            "preserve_rules": ["keep the exposed frame visible"],
+        }
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Accent Chair",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "chair",
+            "category_canonical": "chair",
+            "target_key": "accent_chair",
+            "source_index": 1,
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(
+            text=json.dumps({"description": "A high quality Accent Chair."})
+        ),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: {k: v for k, v in dims.items() if v},
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        provided_dims_mm={"width_mm": 680, "depth_mm": 760, "height_mm": 820},
+    )
+
+    assert "W=680mm" in result["description"]
+    assert "curved" in result["description"]
+    assert "wrapped arm rail" in result["description"]
+    assert "human-scale furniture piece" in result["description"]

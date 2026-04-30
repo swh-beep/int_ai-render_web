@@ -1285,6 +1285,80 @@ def test_validate_scale_from_detection_map_flags_wall_attached_item_near_floor()
     assert "placement_family_checks" in diagnostics["rule_details"]
 
 
+def test_validate_scale_from_detection_map_flags_ceiling_attached_item_too_low():
+    from application.render.scale_validation_support import validate_scale_from_detection_map
+
+    items = [
+        {
+            "label": "Sofa",
+            "category": "sofa",
+            "target_key": "anchor_sofa",
+            "source_index": 0,
+            "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 850},
+        },
+        {
+            "label": "Pendant",
+            "category": "ceiling_light",
+            "target_key": "pendant_01",
+            "source_index": 1,
+            "dims_mm": {"width_mm": 700, "depth_mm": 700, "height_mm": 900},
+        },
+    ]
+
+    ok, issues, diagnostics = validate_scale_from_detection_map(
+        items,
+        {"width_mm": 5000, "depth_mm": 5000, "height_mm": 2600},
+        room_planes={"y_top": 0.10, "y_bottom": 0.86},
+        detected_rows=[
+            {"label": "Sofa", "target_key": "anchor_sofa", "source_index": 0, "bbox_norm": [0.18, 0.54, 0.58, 0.84]},
+            {"label": "Pendant", "target_key": "pendant_01", "source_index": 1, "bbox_norm": [0.42, 0.42, 0.58, 0.76]},
+        ],
+        primary_target_key="anchor_sofa",
+    )
+
+    assert ok is False
+    assert any(issue.startswith("ceiling_attached_height_violation: pendant_01") for issue in issues)
+    assert "placement_family_checks" in diagnostics["rule_details"]
+
+
+def test_validate_scale_from_detection_map_flags_extra_instance_for_duplicate_rug():
+    from application.render.scale_validation_support import validate_scale_from_detection_map
+
+    items = [
+        {
+            "label": "Sofa",
+            "category": "sofa",
+            "target_key": "anchor_sofa",
+            "source_index": 0,
+            "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 850},
+        },
+        {
+            "label": "Rug",
+            "category": "rug",
+            "target_key": "rug_01",
+            "source_index": 1,
+            "dims_mm": {"width_mm": 1800, "depth_mm": 1800, "height_mm": 10},
+        },
+    ]
+
+    ok, issues, diagnostics = validate_scale_from_detection_map(
+        items,
+        {"width_mm": 5000, "depth_mm": 5000, "height_mm": 2600},
+        room_planes={"y_top": 0.10, "y_bottom": 0.86},
+        detected_rows=[
+            {"label": "Sofa", "target_key": "anchor_sofa", "source_index": 0, "bbox_norm": [0.18, 0.54, 0.58, 0.84]},
+            {"label": "Rug", "target_key": "rug_01", "source_index": 1, "bbox_norm": [0.22, 0.62, 0.56, 0.88]},
+            {"label": "Rug", "bbox_norm": [0.60, 0.60, 0.92, 0.88]},
+        ],
+        primary_target_key="anchor_sofa",
+    )
+
+    assert ok is False
+    assert "extra_instance_detected:rug" in issues
+    assert "extra_instance_detected" in diagnostics["failed_rules"]
+    assert diagnostics["rule_details"]["extra_detected_items"][0]["family"] == "rug"
+
+
 def test_validate_scale_from_detection_map_fails_closed_on_internal_exception(monkeypatch):
     from application.render import scale_validation_support as support
 

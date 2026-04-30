@@ -160,6 +160,31 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(item_refs[0]["target_key"], "cart_chair-1_001")
         self.assertEqual(item_refs[1]["target_key"], "cart_sofa-1_002")
 
+    def test_build_external_cart_job_keeps_room_blank_when_user_did_not_provide_it(self):
+        req = CartRenderRequest(
+            image_url="https://example.com/room.png",
+            items=[
+                CartItem(id="chair-1", category="chair", image_url="https://example.com/chair.png", qty=1, name="Chair"),
+            ],
+            room=None,
+            style="warm modern",
+        )
+        job_payload, kept, dropped = build_external_cart_job(
+            req,
+            cart_max_items=2,
+            apply_cart_limits=lambda items, limit: (items[:limit], []),
+            build_cart_summary=lambda items: "summary",
+            materialize_input=lambda url, prefix: f"C:/tmp/{prefix}.png",
+            normalize_item_image=lambda local_path, unique_id, index: f"C:/tmp/norm-{index}.png",
+            resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{path.split('/')[-1]}",
+            build_s3_prefix=lambda audience, category: f"{audience}/{category}/",
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
+        )
+
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped, [])
+        self.assertEqual(job_payload["render"]["room"], "")
+
     def test_build_external_render_video_job_validates_clip_count_range(self):
         payload = build_external_render_video_job(ExternalRenderVideoRequest(render_job_id="render-job-1", clip_count=5))
         self.assertEqual(

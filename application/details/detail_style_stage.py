@@ -4,10 +4,15 @@ def construct_dynamic_styles(analyzed_items):
         {
             "name": "High Angle Overview",
             "prompt": (
-                "CAMERA POSITION: High-angle view looking down from the ceiling.\n"
-                "SUBJECT: The entire room layout exactly as shown in the original image.\n"
+                "CAMERA POSITION: Moderately elevated high-angle overview from just above standing eye level, "
+                "as if photographed by a person holding the camera slightly above head height inside the room.\n"
+                "CAMERA TILT: Mild downward tilt only. Keep the horizon natural and the vertical lines stable.\n"
+                "FORBIDDEN CAMERA: Do NOT use bird's-eye, top-down, drone, ceiling-mounted, surveillance, or "
+                "extreme overhead viewpoints.\n"
+                "COMPOSITION: Show the entire room layout exactly as shown in the original image, but from a "
+                "natural elevated in-room overview near a doorway or corner.\n"
             ),
-            "ratio": "16:9",
+            "ratio": "4:5",
         }
     )
     styles.append(
@@ -19,7 +24,7 @@ def construct_dynamic_styles(analyzed_items):
                 "CAMERA ANGLE: Slight pan to the left, but keep the original standing position.\n"
                 "CRITICAL: Do not move any furniture. Keep the exact arrangement."
             ),
-            "ratio": "16:9",
+            "ratio": "4:5",
         }
     )
     styles.append(
@@ -31,7 +36,7 @@ def construct_dynamic_styles(analyzed_items):
                 "CAMERA ANGLE: Slight pan to the right, but keep the original standing position.\n"
                 "CRITICAL: Do not move any furniture. Keep the exact arrangement."
             ),
-            "ratio": "16:9",
+            "ratio": "4:5",
         }
     )
 

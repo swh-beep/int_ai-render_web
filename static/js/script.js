@@ -1539,6 +1539,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function hideLoading() { loadingOverlay.classList.add('hidden'); }
 
+    function extractFurnitureSnapshot(data) {
+        if (data && Array.isArray(data.furniture_data) && data.furniture_data.length > 0) {
+            return data.furniture_data;
+        }
+        if (data && Array.isArray(data.furniture_boxes) && data.furniture_boxes.length > 0) {
+            return data.furniture_boxes;
+        }
+        return null;
+    }
+
     if (detailBtn) {
         detailBtn.onclick = async () => {
             const currentImgUrl = resultAfter ? resultAfter.src : null;
@@ -1588,8 +1598,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await pollJob(job.job_id);
 
                 if (data.details && data.details.length > 0) {
-                    if (Array.isArray(data.furniture_data) && data.furniture_data.length > 0) {
-                        currentFurnitureData = data.furniture_data;
+                    const furnitureSnapshot = extractFurnitureSnapshot(data);
+                    if (furnitureSnapshot) {
+                        currentFurnitureData = furnitureSnapshot;
                     }
                     const detailUrls = data.details.map(d => d.url);
 
@@ -1740,8 +1751,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const imgElement = cardElement.querySelector('img');
                 imgElement.src = data.url;
                 imgElement.onclick = () => openLightbox(data.url, [data.url], 0);
-                if (Array.isArray(data.furniture_data) && data.furniture_data.length > 0) {
-                    currentFurnitureData = data.furniture_data;
+                const furnitureSnapshot = extractFurnitureSnapshot(data);
+                if (furnitureSnapshot) {
+                    currentFurnitureData = furnitureSnapshot;
                 }
                 if (detailMeta && typeof detailMeta === 'object') {
                     if (data.target_key) detailMeta.target_key = data.target_key;

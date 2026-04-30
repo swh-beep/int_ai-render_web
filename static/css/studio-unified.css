@@ -545,6 +545,8 @@ body[data-page="video-studio"] .loading-container:not(.hidden) {
     justify-content: center !important;
     color: var(--studio-ink) !important;
     text-align: center !important;
+    --spinner-track: rgba(54, 54, 54, 0.16);
+    --spinner-accent: #2b2b2b;
 }
 
 body[data-page="image-studio"] .loading-container.hidden,
@@ -557,6 +559,13 @@ body[data-page="video-studio"] .loading-container p,
 body[data-page="video-studio"] #clip-loading h3 {
     color: var(--studio-ink-muted) !important;
     font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
+}
+
+body[data-page="image-studio"] .spinner,
+body[data-page="video-studio"] .spinner {
+    width: 48px !important;
+    height: 48px !important;
+    border-width: 3px !important;
 }
 
 body[data-page="video-studio"] .clip-output-placeholder,
@@ -1197,6 +1206,8 @@ body[data-page="video-studio"] #workspace-feature-2 .assemble-monitor-overlay {
     gap: 12px !important;
     text-align: center !important;
     color: #ffffff !important;
+    --spinner-track: rgba(255, 255, 255, 0.24);
+    --spinner-accent: #ffffff;
 }
 
 body[data-page="video-studio"] #workspace-feature-2 .hidden,
@@ -1506,6 +1517,13 @@ body[data-page="video-studio"] #workspace-feature-2 .assemble-timeline-drop-slot
 body[data-page="video-studio"] #workspace-feature-2 .assemble-timeline-drop-slot.dragover {
     border-color: #c7ccd6 !important;
     background: linear-gradient(180deg, #ffffff 0%, #f7f7f7 100%) !important;
+}
+
+body[data-page="video-studio"] #workspace-feature-2 .assemble-timeline-drop-slot:focus,
+body[data-page="video-studio"] #workspace-feature-2 .assemble-timeline-drop-slot:focus-visible {
+    outline: none !important;
+    border-color: #c7ccd6 !important;
+    box-shadow: 0 0 0 2px rgba(199, 204, 214, 0.45) !important;
 }
 
 body[data-page="video-studio"] #workspace-feature-2 .assemble-timeline-drop-slot.is-empty {

@@ -5,7 +5,71 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Studio - AI Interior</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260415_1341">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260501_0127">
+    <style>
+        .spinner,
+        .mini-spinner,
+        .vs-spinner {
+            display: inline-block !important;
+            flex: 0 0 auto !important;
+            box-sizing: border-box !important;
+            position: relative !important;
+            background: none !important;
+            -webkit-mask: none !important;
+            mask: none !important;
+        }
+
+        .spinner {
+            width: var(--spinner-size, 48px) !important;
+            height: var(--spinner-size, 48px) !important;
+        }
+
+        .mini-spinner {
+            width: 24px !important;
+            height: 24px !important;
+            --spinner-stroke: 2.5px !important;
+        }
+
+        .vs-spinner {
+            width: 18px !important;
+            height: 18px !important;
+            --spinner-stroke: 2px !important;
+            vertical-align: middle !important;
+        }
+
+        .spinner::before,
+        .spinner::after,
+        .mini-spinner::before,
+        .mini-spinner::after,
+        .vs-spinner::before,
+        .vs-spinner::after {
+            content: "" !important;
+            position: absolute !important;
+            inset: 0 !important;
+            box-sizing: border-box !important;
+            border-radius: 50% !important;
+        }
+
+        .spinner::before,
+        .mini-spinner::before,
+        .vs-spinner::before {
+            border: var(--spinner-stroke, 3px) solid var(--spinner-track, rgba(43, 43, 43, 0.16)) !important;
+        }
+
+        .spinner::after,
+        .mini-spinner::after,
+        .vs-spinner::after {
+            border: var(--spinner-stroke, 3px) solid transparent !important;
+            border-top-color: var(--spinner-accent, #2b2b2b) !important;
+            animation: spin 0.85s linear infinite !important;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
     <link rel="stylesheet"
@@ -976,12 +1040,6 @@
             color: #ffffff;
         }
 
-        .spinner {
-            width: 50px; height: 50px; border: 3px solid #333; border-top: 3px solid #fff;
-            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
         /* Result Cards & Buttons */
         .result-container { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 20px; }
         .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; width: 100%; }
@@ -1443,11 +1501,6 @@
             font-family: 'Outfit', 'Pretendard Variable', Pretendard, sans-serif !important;
         }
 
-        #workspace-feature-1 .spinner {
-            border: 3px solid #dedede;
-            border-top-color: #111111;
-        }
-
         #workspace-feature-1 .clip-generated-card video {
             width: auto;
             height: auto;
@@ -1754,7 +1807,7 @@
 
         #workspace-feature-2 .assemble-dropzone:hover,
         #workspace-feature-2 .assemble-dropzone.dragover {
-            border-color: #2f2f2f;
+            border-color: #c7ccd6;
             background: linear-gradient(180deg, #ffffff 0%, #f7f7f7 100%);
         }
 
@@ -2376,7 +2429,7 @@
             background: transparent;
         }
     </style>
-<link rel="stylesheet" href="/static/css/studio-unified.css?v=20260501_0043">
+    <link rel="stylesheet" href="/static/css/studio-unified.css?v=20260501_0126">
 </head>
 
 <body data-page="video-studio">
@@ -2639,14 +2692,14 @@
                                     value="0"
                                     aria-label="Scrub sequence timeline"
                                 >
-                                <label id="full-ref-drop-zone" class="assemble-timeline-drop-slot" for="full-ref-input" role="button" tabindex="0" aria-label="Add clips to timeline">
+                                <div id="full-ref-drop-zone" class="assemble-timeline-drop-slot" role="button" tabindex="0" aria-label="Add clips to timeline">
                                     <span class="material-symbols-outlined">add_photo_alternate</span>
                                     <div class="assemble-dropzone-content">
                                         <strong class="assemble-dropzone-title">Drop Clips Here</strong>
                                         <p class="assemble-dropzone-copy">Drag clips onto the timeline or click to browse.</p>
                                     </div>
                                     <input type="file" id="full-ref-input" accept="video/*" multiple class="assemble-file-input" tabindex="-1" aria-hidden="true">
-                                </label>
+                                </div>
                             </div>
                             <p id="assemble-timeline-summary" class="assemble-timeline-summary">
                                 Upload clips to populate the timeline.

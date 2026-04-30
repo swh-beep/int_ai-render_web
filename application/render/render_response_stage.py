@@ -91,18 +91,24 @@ def build_render_response_payload(
 
     candidate_paths = list(candidate_results or generated_results or [])
     candidate_result_urls = [resolve_image_url(path, s3_prefix_override=prefix_main_rendered) for path in candidate_paths if path]
-    result_urls = [] if final_result_blocked else [
+    delivery_paths = list(candidate_paths if final_result_blocked else (generated_results or []))
+    result_urls = [
         resolve_image_url(path, s3_prefix_override=prefix_main_rendered)
-        for path in (generated_results or [])
+        for path in delivery_paths
         if path
     ]
-    if not result_urls and step1_img and not final_result_blocked:
+    if not result_urls and step1_img:
         result_urls = [resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)]
 
     selected_result_filename = None
-    if generated_results and not final_result_blocked:
+    if delivery_paths:
         try:
-            selected_result_filename = os.path.basename(generated_results[0])
+            selected_result_filename = os.path.basename(delivery_paths[0])
+        except Exception:
+            selected_result_filename = None
+    elif result_urls and step1_img:
+        try:
+            selected_result_filename = os.path.basename(step1_img)
         except Exception:
             selected_result_filename = None
 

@@ -5,7 +5,71 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Interior Rendering Service</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260415_1341">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260501_0127">
+    <style>
+        .spinner,
+        .mini-spinner,
+        .vs-spinner {
+            display: inline-block !important;
+            flex: 0 0 auto !important;
+            box-sizing: border-box !important;
+            position: relative !important;
+            background: none !important;
+            -webkit-mask: none !important;
+            mask: none !important;
+        }
+
+        .spinner {
+            width: var(--spinner-size, 48px) !important;
+            height: var(--spinner-size, 48px) !important;
+        }
+
+        .mini-spinner {
+            width: 24px !important;
+            height: 24px !important;
+            --spinner-stroke: 2.5px !important;
+        }
+
+        .vs-spinner {
+            width: 18px !important;
+            height: 18px !important;
+            --spinner-stroke: 2px !important;
+            vertical-align: middle !important;
+        }
+
+        .spinner::before,
+        .spinner::after,
+        .mini-spinner::before,
+        .mini-spinner::after,
+        .vs-spinner::before,
+        .vs-spinner::after {
+            content: "" !important;
+            position: absolute !important;
+            inset: 0 !important;
+            box-sizing: border-box !important;
+            border-radius: 50% !important;
+        }
+
+        .spinner::before,
+        .mini-spinner::before,
+        .vs-spinner::before {
+            border: var(--spinner-stroke, 3px) solid var(--spinner-track, rgba(43, 43, 43, 0.16)) !important;
+        }
+
+        .spinner::after,
+        .mini-spinner::after,
+        .vs-spinner::after {
+            border: var(--spinner-stroke, 3px) solid transparent !important;
+            border-top-color: var(--spinner-accent, #2b2b2b) !important;
+            animation: spin 0.85s linear infinite !important;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />

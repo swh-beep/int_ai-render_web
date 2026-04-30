@@ -2,6 +2,7 @@ import io
 import json
 import os
 import glob
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
@@ -12,7 +13,10 @@ from application.render.furnished_generation_stage import generate_furnished_roo
 from application.render.reference_features_stage import extract_reference_features
 from application.render.render_audience_stage import run_render_audience_stage
 from application.render.render_bootstrap_stage import _build_summary
-from application.render.render_analysis_stage import run_render_analysis_stage
+from application.render.render_analysis_stage import (
+    _normalize_estimated_room_dims,
+    run_render_analysis_stage,
+)
 from application.render.scale_plan_support import build_scale_plan
 from application.render.scale_plan_support import select_scale_anchor
 from application.render.empty_room_generation_stage import generate_empty_room
@@ -122,6 +126,175 @@ def test_generate_empty_room_retries_invalid_zero_byte_response(tmp_path):
         empty_stage.time.time = original_time
 
 
+def test_generate_empty_room_requests_landscape_ratio_and_high_thinking(tmp_path):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    captured = {}
+    original_time = furnished_generation_stage.time.time
+
+    import application.render.empty_room_generation_stage as empty_stage
+    empty_stage.time.time = lambda: 1001.0
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        captured["model_name"] = model_name
+        captured["request_options"] = dict(request_options)
+        return SimpleNamespace(
+            candidates=[SimpleNamespace()],
+            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(160, 90)))],
+        )
+
+    result = generate_empty_room(
+        str(room_path),
+        "empty-config",
+        1000.0,
+        stage_name="Stage 1",
+        return_raw=False,
+        total_timeout_limit=60,
+        log_step=lambda *_args, **_kwargs: None,
+        model_name="gemini-3.1-flash-image-preview",
+        build_empty_room_prompt=lambda: "prompt",
+        allow_all_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        match_aspect_to_target=lambda path, _room: path,
+    )
+    try:
+        assert os.path.exists(result)
+        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["request_options"]["aspect_ratio"] == "16:9"
+        assert captured["request_options"]["thinking_level"] == "high"
+        assert captured["request_options"]["include_thoughts"] is False
+    finally:
+        empty_stage.time.time = original_time
+
+
+def test_generate_empty_room_retries_when_landscape_crop_would_remove_too_much_scene(tmp_path):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    captured = {"calls": 0}
+
+    import application.render.empty_room_generation_stage as empty_stage
+
+    original_time = empty_stage.time.time
+    empty_stage.time.time = lambda: 1001.0
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        captured["calls"] += 1
+        content[1].tobytes()
+        return SimpleNamespace(
+            candidates=[SimpleNamespace()],
+            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(800, 1000)))],
+        )
+
+    try:
+        result = generate_empty_room(
+            str(room_path),
+            "empty-config",
+            1000.0,
+            stage_name="Stage 1",
+            return_raw=False,
+            total_timeout_limit=60,
+            log_step=lambda *_args, **_kwargs: None,
+            model_name="gemini-3.1-flash-image-preview",
+            build_empty_room_prompt=lambda: "prompt",
+            allow_all_safety_settings=lambda: {},
+            call_gemini_with_failover=_call_gemini,
+            match_aspect_to_target=lambda path, _room: path,
+        )
+    finally:
+        empty_stage.time.time = original_time
+
+    assert captured["calls"] == 3
+    assert result == str(room_path)
+
+
+def test_generate_empty_room_uses_injected_postprocessor_when_it_returns_matching_landscape_canvas(tmp_path):
+    room_path = tmp_path / "room.png"
+    processed_path = tmp_path / "processed.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    processed_path.write_bytes(_make_png_bytes(1600, 900))
+    captured = {"calls": 0}
+
+    import application.render.empty_room_generation_stage as empty_stage
+
+    original_time = empty_stage.time.time
+    empty_stage.time.time = lambda: 1001.0
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        return SimpleNamespace(
+            candidates=[SimpleNamespace()],
+            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(800, 1000)))],
+        )
+
+    def _postprocess(_candidate, _room):
+        captured["calls"] += 1
+        return str(processed_path)
+
+    try:
+        result = generate_empty_room(
+            str(room_path),
+            "empty-config",
+            1000.0,
+            stage_name="Stage 1",
+            return_raw=False,
+            total_timeout_limit=60,
+            log_step=lambda *_args, **_kwargs: None,
+            model_name="gemini-3.1-flash-image-preview",
+            build_empty_room_prompt=lambda: "prompt",
+            allow_all_safety_settings=lambda: {},
+            call_gemini_with_failover=_call_gemini,
+            match_aspect_to_target=_postprocess,
+        )
+    finally:
+        empty_stage.time.time = original_time
+
+    assert captured["calls"] == 1
+    assert result == str(processed_path)
+
+
+def test_generate_empty_room_removes_raw_sibling_after_aspect_normalization(tmp_path):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+
+    import application.render.empty_room_generation_stage as empty_stage
+
+    original_time = empty_stage.time.time
+    empty_stage.time.time = lambda: 1001.0
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        return SimpleNamespace(
+            candidates=[SimpleNamespace()],
+            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(1536, 1024)))],
+        )
+
+    try:
+        result = generate_empty_room(
+            str(room_path),
+            "empty-cleanup",
+            1000.0,
+            stage_name="Stage 1",
+            return_raw=False,
+            total_timeout_limit=60,
+            log_step=lambda *_args, **_kwargs: None,
+            model_name="gemini-3.1-flash-image-preview",
+            build_empty_room_prompt=lambda: "prompt",
+            allow_all_safety_settings=lambda: {},
+            call_gemini_with_failover=_call_gemini,
+            match_aspect_to_target=lambda path, _room: path,
+        )
+    finally:
+        empty_stage.time.time = original_time
+
+    output_path = Path(result)
+    raw_output_path = Path(str(output_path).replace("_aspect.png", ".png"))
+    try:
+        assert output_path.exists()
+        assert output_path.name.endswith("_aspect.png")
+        assert not raw_output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_one_variant_normalizes_legacy_string_results_to_structured_scale_metadata():
     result = _generate_one_variant(
         0,
@@ -171,6 +344,7 @@ def test_run_render_analysis_stage_exposes_room_geometry_when_room_analysis_retu
             "windows_present": True,
             "room_planes": {"y_top": 0.15, "y_bottom": 0.85},
             "wall_span_norm": (0.2, 0.8),
+            "estimated_dimensions_mm": {"width_mm": 5200, "depth_mm": 4100, "height_mm": 2600},
         },
         analyze_cropped_item=lambda *args, **kwargs: {},
         normalize_dims_dict=lambda dims: dims,
@@ -192,6 +366,7 @@ def test_run_render_analysis_stage_exposes_room_geometry_when_room_analysis_retu
     assert result.windows_present is True
     assert result.room_planes == {"y_top": 0.15, "y_bottom": 0.85}
     assert result.wall_span_norm == (0.2, 0.8)
+    assert result.estimated_room_dims == {"width_mm": 5000, "depth_mm": 4000, "height_mm": 2600}
     assert result.scale_plan["strict_scale_requested"] is True
     assert result.scale_plan["strict_scale_ready"] is False
     assert "missing_anchor" in result.scale_plan["missing_requirements"]
@@ -492,8 +667,9 @@ def test_analyze_room_structure_requests_numeric_room_geometry_fields(tmp_path):
 
     def fake_call_gemini_with_failover(model_name, content, *args, **kwargs):
         captured["prompt"] = content[0]
+        captured["request_options"] = args[0]
         return SimpleNamespace(
-            text='{"room_text":"room analysis","windows_present":true,"room_planes":{"y_top":0.1,"y_bottom":0.9},"wall_span_norm":[0.1,0.9]}'
+            text='{"room_text":"room analysis","windows_present":true,"room_planes":{"y_top":0.1,"y_bottom":0.9},"wall_span_norm":[0.1,0.9],"estimated_dimensions_mm":{"width_mm":5200,"depth_mm":4100,"height_mm":2600}}'
         )
 
     result = analyze_room_structure(
@@ -508,8 +684,25 @@ def test_analyze_room_structure_requests_numeric_room_geometry_fields(tmp_path):
     assert '"room_planes": {"y_top": 0.08, "y_bottom": 0.92}' in captured["prompt"]
     assert '"room_planes": {"floor":' not in captured["prompt"]
     assert "wall_span_norm" in captured["prompt"]
+    assert "estimated_dimensions_mm" in captured["prompt"]
+    assert "Round width/depth to the nearest 500 mm" in captured["prompt"]
+    assert "Round height to the nearest 100 mm" in captured["prompt"]
+    assert captured["request_options"]["temperature"] == 0
+    assert captured["request_options"]["seed"] == 7
+    assert captured["request_options"]["response_mime_type"] == "application/json"
     assert result["room_planes"] == {"y_top": 0.1, "y_bottom": 0.9}
     assert result["wall_span_norm"] == [0.1, 0.9]
+    assert result["estimated_dimensions_mm"] == {"width_mm": 5200, "depth_mm": 4100, "height_mm": 2600}
+
+
+def test_normalize_estimated_room_dims_uses_coarse_architectural_rounding():
+    assert _normalize_estimated_room_dims(
+        {"width_mm": 6420, "depth_mm": 7680, "height_mm": 2835}
+    ) == {
+        "width_mm": 6500,
+        "depth_mm": 7500,
+        "height_mm": 2800,
+    }
 
 
 def test_generate_furnished_room_keeps_incomplete_dims_context_even_for_legacy_two_dim_labels(tmp_path, monkeypatch):
@@ -567,6 +760,111 @@ def test_generate_furnished_room_keeps_incomplete_dims_context_even_for_legacy_t
     assert result["path"] == os.path.join("outputs", "result_1010_job-incomplete-prompt.png")
     assert "<INCOMPLETE DIMENSIONS (DO NOT IGNORE)>" in captured["prompt"]
     assert "- Mirror: missing H" in captured["prompt"]
+
+
+def test_generate_furnished_room_requests_landscape_ratio_and_high_thinking(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    captured = {}
+
+    gemini_response = SimpleNamespace(
+        candidates=[SimpleNamespace()],
+        parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(160, 90)))],
+    )
+
+    monkeypatch.setattr(furnished_generation_stage.time, "time", lambda: 1010.0)
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        captured["model_name"] = model_name
+        captured["request_options"] = dict(request_options)
+        return gemini_response
+
+    result = generate_furnished_room(
+        str(room_path),
+        "style",
+        "ref.png",
+        "job-main-config",
+        furniture_specs_json={"items": []},
+        room_dimensions="8000x8000x3000",
+        room_dims_parsed={"width_mm": 8000, "depth_mm": 8000, "height_mm": 3000},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        start_time=1010.0,
+        enable_scale_check=False,
+        total_timeout_limit=30,
+        detect_windows_present=lambda path: False,
+        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 8000, "depth_mm": 8000, "height_mm": 3000},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: True,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=SimpleNamespace(get=lambda: _build_summary()),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, []),
+    )
+
+    assert result["path"] == os.path.join("outputs", "result_1010_job-main-config.png")
+    assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+    assert captured["request_options"]["aspect_ratio"] == "16:9"
+    assert captured["request_options"]["thinking_level"] == "high"
+    assert captured["request_options"]["include_thoughts"] is False
+
+
+def test_generate_furnished_room_removes_raw_sibling_after_aspect_normalization(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+
+    gemini_response = SimpleNamespace(
+        candidates=[SimpleNamespace()],
+        parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(1536, 1024)))],
+    )
+
+    monkeypatch.setattr(furnished_generation_stage.time, "time", lambda: 1010.0)
+
+    def _call_gemini(model_name, content, request_options, *args, **kwargs):
+        return gemini_response
+
+    result = generate_furnished_room(
+        str(room_path),
+        "style",
+        "ref.png",
+        "job-main-cleanup",
+        furniture_specs_json={"items": []},
+        room_dimensions="8000x8000x3000",
+        room_dims_parsed={"width_mm": 8000, "depth_mm": 8000, "height_mm": 3000},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        start_time=1010.0,
+        enable_scale_check=False,
+        total_timeout_limit=30,
+        detect_windows_present=lambda path: False,
+        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 8000, "depth_mm": 8000, "height_mm": 3000},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: True,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=SimpleNamespace(get=lambda: _build_summary()),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, []),
+    )
+
+    output_path = Path(result["path"])
+    raw_output_path = Path(str(output_path).replace("_aspect.png", ".png"))
+    try:
+        assert output_path.exists()
+        assert output_path.name.endswith("_aspect.png")
+        assert not raw_output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
 
 
 def test_generate_furnished_room_does_not_send_scale_guide_image_to_model(tmp_path, monkeypatch):
@@ -2175,7 +2473,8 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
 
     def fake_scale_stage(**kwargs):
         return SimpleNamespace(
-            room_dims_parsed={"width_mm": 8000},
+            room_dims_parsed={"width_mm": 0, "depth_mm": 0, "height_mm": 0},
+            room_dims_valid=False,
             enable_scale_guidance=True,
             room_planes=None,
             wall_span_norm=(0.0, 1.0),
@@ -2209,6 +2508,7 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
     def fake_variant_stage(**kwargs):
         captured["room_planes"] = kwargs["room_planes"]
         captured["wall_span_norm"] = kwargs["wall_span_norm"]
+        captured["room_analysis_text"] = kwargs["room_analysis_text"]
         return [
             {
                 "path": "outputs/variant-1.png",
@@ -2241,7 +2541,7 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
         room="room",
         style="style",
         variant="variant",
-        dimensions="8000x8000",
+        dimensions="",
         placement="center",
         audience="internal",
         moodboard_items=[],
@@ -2272,8 +2572,8 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
             s3_public_url=lambda path: f"url://{path}",
         ),
         analysis=RenderWorkflowAnalysisServices(
-            parse_room_dimensions_mm=lambda dimensions: {"width_mm": 8000},
-            room_dims_valid_fn=lambda dims: True,
+            parse_room_dimensions_mm=lambda dimensions: {"width_mm": 0, "depth_mm": 0, "height_mm": 0},
+            room_dims_valid_fn=lambda dims: False,
             build_item_target_key=lambda *args, **kwargs: "target",
             canonical_category=lambda value: value or "unknown",
             detect_furniture_boxes=lambda *args, **kwargs: [],
@@ -2284,6 +2584,26 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
             build_furniture_specs_json=lambda *args, **kwargs: {"items": []},
             create_scale_guide_overlay_with_model=lambda *args, **kwargs: None,
             match_aspect_to_target=lambda *args, **kwargs: None,
+            estimate_room_dims_contract=lambda **kwargs: SimpleNamespace(
+                source="estimated",
+                confidence="medium",
+                strict_scale_mode="range_based_geometry_mode",
+                dims_mm_center={"width_mm": 5200, "depth_mm": 4100, "height_mm": 2600},
+                as_dict=lambda: {
+                    "source": "estimated",
+                    "confidence": "medium",
+                    "strict_scale_mode": "range_based_geometry_mode",
+                    "dims_mm_center": {"width_mm": 5200, "depth_mm": 4100, "height_mm": 2600},
+                    "dims_mm_range": {
+                        "width_mm": {"min_mm": 4264, "max_mm": 6136},
+                        "depth_mm": {"min_mm": 3362, "max_mm": 4838},
+                        "height_mm": {"min_mm": 2132, "max_mm": 3068},
+                    },
+                    "estimation_basis": ["room_image_estimate"],
+                    "calibration_metadata": {},
+                    "room_dims_valid": False,
+                },
+            ),
         ),
         generation=RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: ("outputs/step1.png", None),
@@ -2301,6 +2621,8 @@ def test_run_render_room_workflow_passes_analysis_geometry_into_variants(monkeyp
 
     assert captured["room_planes"] == {"floor": "plane"}
     assert captured["wall_span_norm"] == (0.25, 0.75)
+    assert "ANALYSIS-DERIVED ROOM DIMENSIONS" in captured["room_analysis_text"]
+    assert "W 5200mm" in captured["room_analysis_text"]
 
 
 def test_generate_furnished_room_counts_retries_before_first_success(tmp_path, monkeypatch):

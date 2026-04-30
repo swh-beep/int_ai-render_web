@@ -61,6 +61,34 @@ def test_call_gemini_with_failover_applies_2k_image_defaults_for_flash_image_mod
     assert captured["config"]["image_config"]["image_size"] == "2K"
 
 
+def test_call_gemini_with_failover_forwards_explicit_image_ratio_and_thinking_config(monkeypatch):
+    captured = {}
+    _install_fake_genai_client(monkeypatch, captured)
+
+    call_gemini_with_failover(
+        "gemini-3.1-flash-image-preview",
+        ["prompt"],
+        {
+            "timeout": 12,
+            "aspect_ratio": "4:5",
+            "thinking_level": "high",
+            "include_thoughts": False,
+        },
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+        log_tag="Detail.Generate",
+    )
+
+    assert captured["config"]["response_modalities"] == ["IMAGE"]
+    assert captured["config"]["image_config"]["aspect_ratio"] == "4:5"
+    assert captured["config"]["image_config"]["image_size"] == "2K"
+    assert captured["config"]["thinking_config"]["thinking_level"] == "high"
+    assert captured["config"]["thinking_config"]["include_thoughts"] is False
+
+
 def test_call_gemini_with_failover_uses_high_thinking_for_furniture_analysis(monkeypatch):
     captured = {}
     _install_fake_genai_client(monkeypatch, captured)

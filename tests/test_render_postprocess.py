@@ -146,8 +146,26 @@ class RenderPostprocessTests(unittest.TestCase):
 
     def test_category_normalizers_support_requested_internal_taxonomy(self):
         self.assertEqual(canonical_category("거울 장식"), "mirror")
-        self.assertEqual(canonical_category("수납장"), "storage")
+        self.assertEqual(canonical_category("메인소파"), "main_sofa")
+        self.assertEqual(canonical_category("라운지소파"), "lounge_sofa")
+        self.assertEqual(canonical_category("소파테이블"), "sofa_table")
+        self.assertEqual(canonical_category("다이닝테이블"), "dining_table")
+        self.assertEqual(canonical_category("데스크테이블"), "desk_table")
+        self.assertEqual(canonical_category("사이드테이블"), "side_table")
+        self.assertEqual(canonical_category("다이닝체어"), "dining_chair")
+        self.assertEqual(canonical_category("데스크체이"), "desk_chair")
+        self.assertEqual(canonical_category("라운지체어"), "lounge_chair")
+        self.assertEqual(canonical_category("팬던트램프"), "pendant_lamp")
+        self.assertEqual(canonical_category("테이블램프"), "table_lamp")
+        self.assertEqual(canonical_category("수납장"), "storage_cabinet_shelf")
+        self.assertEqual(canonical_category("TV 스피커"), "electronics")
         self.assertEqual(category_match_family("스툴"), "stool")
+        self.assertEqual(category_match_family("메인소파"), "sofa")
+        self.assertEqual(category_match_family("라운지체어"), "lounge_chair")
+        self.assertEqual(category_match_family("데스크테이블"), "desk")
+        self.assertEqual(category_match_family("desk chair"), "chair")
+        self.assertEqual(category_match_family("desk lamp"), "table_lamp")
+        self.assertEqual(category_match_family("팬던트램프"), "ceiling_light")
         self.assertEqual(category_match_family("Arc Floor Lamp"), "floor_lamp")
 
     def test_run_render_postprocess_stage_external_keeps_best_only_and_attaches_volume(self):

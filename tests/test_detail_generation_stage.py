@@ -1,0 +1,413 @@
+import io
+from pathlib import Path
+
+from PIL import Image, ImageOps
+
+from application.details.detail_generation_stage import (
+    _box_to_pixels,
+    _expand_bounds,
+    _fit_bounds_to_ratio,
+    generate_detail_view,
+)
+
+
+def _landscape_png_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_generate_detail_view_uses_selected_box_crop_before_model_regeneration(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Accent Chair",
+            "target_key": "chair_01",
+            "target_label": "Accent Chair",
+            "ratio": "4:5",
+            "prompt": "unused because crop-first path should win",
+        },
+        "unitcase",
+        1,
+        furniture_data=[
+            {
+                "label": "Accent Chair",
+                "target_key": "chair_01",
+                "category": "chair",
+                "box_2d": [220, 310, 760, 610],
+                "crop_path": str(tmp_path / "stale-cutout.png"),
+            }
+        ],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not materialize cutouts")
+        ),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not request model safety settings")
+        ),
+        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not call the generation model")
+        ),
+        model_name="unused",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert result["generation_mode"] == "crop_extract"
+        assert result["style_name"] == "Detail: Accent Chair"
+        assert result["cutout_ref_count"] == 0
+        assert isinstance(result["crop_bounds_px"], list)
+        assert output_path.exists()
+
+        with Image.open(output_path) as rendered:
+            ratio = rendered.size[0] / rendered.size[1]
+            assert abs(ratio - (4.0 / 5.0)) < 0.02
+            assert rendered.size[1] > rendered.size[0]
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_passes_vertical_aspect_ratio_and_high_thinking_to_gemini(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    captured = {}
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        captured["model_name"] = model_name
+        captured["request_options"] = dict(request_options)
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Accent Chair",
+            "target_key": "chair_01",
+            "target_label": "Accent Chair",
+            "ratio": "4:5",
+            "prompt": "render a detail crop",
+        },
+        "unitcase",
+        2,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert captured["request_options"]["thinking_level"] == "high"
+        assert captured["request_options"]["include_thoughts"] is False
+        assert output_path.exists()
+        with Image.open(output_path) as rendered:
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+        raw_output_path = Path(str(output_path).replace("_aspect.png", ".png"))
+        if raw_output_path != output_path:
+            assert not raw_output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    captured = {}
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        captured["request_options"] = dict(request_options)
+        captured["prompt"] = content[0]
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "High Angle Overview",
+            "prompt": "render a standing-height overview",
+        },
+        "unitcase",
+        3,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert captured["request_options"]["thinking_level"] == "high"
+        assert captured["request_options"]["include_thoughts"] is False
+        assert "OUTPUT ASPECT RATIO: 4:5" in captured["prompt"]
+        assert output_path.exists()
+        with Image.open(output_path) as rendered:
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+        raw_output_path = Path(str(output_path).replace("_aspect.png", ".png"))
+        if raw_output_path != output_path:
+            assert not raw_output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_sanitizes_invalid_ratio_to_vertical_canvas(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    captured = {}
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        captured["request_options"] = dict(request_options)
+        captured["prompt"] = content[0]
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "High Angle Overview",
+            "ratio": "portrait",
+            "prompt": "render a standing-height overview",
+        },
+        "unitcase",
+        6,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert "OUTPUT ASPECT RATIO: 4:5" in captured["prompt"]
+        with Image.open(output_path) as rendered:
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_rejects_unsafe_ratio_crop_and_cleans_up_raw_attempt(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "High Angle Overview",
+            "prompt": "render a standing-height overview",
+        },
+        "unsafe-crop-case",
+        7,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=lambda *args, **kwargs: type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()})()],
+            },
+        )(),
+        model_name="gemini-3.1-flash-image-preview",
+    )
+
+    leaked = list(Path("outputs").glob("detail_*_unsafe-crop-case_7_*.png"))
+    try:
+        assert result is None
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_defaults_ratio_less_detail_crop_to_vertical_canvas(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Accent Chair",
+            "target_key": "chair_01",
+            "target_label": "Accent Chair",
+            "prompt": "unused because crop-first path should win",
+        },
+        "unitcase",
+        4,
+        furniture_data=[
+            {
+                "label": "Accent Chair",
+                "target_key": "chair_01",
+                "category": "chair",
+                "box_2d": [220, 310, 760, 610],
+            }
+        ],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not materialize cutouts")
+        ),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not request model safety settings")
+        ),
+        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not call the generation model")
+        ),
+        model_name="unused",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        with Image.open(output_path) as rendered:
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+            assert rendered.size[1] > rendered.size[0]
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_crop_first_full_image_box_still_outputs_vertical_ratio(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (2752, 1536), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Accent Chair",
+            "target_key": "chair_01",
+            "target_label": "Accent Chair",
+            "prompt": "unused because crop-first path should win",
+        },
+        "unitcase",
+        44,
+        furniture_data=[
+            {
+                "label": "Accent Chair",
+                "target_key": "chair_01",
+                "category": "chair",
+                "box_2d": [0, 0, 1000, 1000],
+            }
+        ],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not materialize cutouts")
+        ),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not request model safety settings")
+        ),
+        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not call the generation model")
+        ),
+        model_name="unused",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        with Image.open(output_path) as rendered:
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+            assert rendered.size[1] > rendered.size[0]
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_crop_first_uses_exif_transposed_canvas(tmp_path):
+    source_path = tmp_path / "room_oriented.jpg"
+    base = Image.new("RGB", (900, 1600), color=(255, 0, 0))
+    for y in range(800, 1600):
+        for x in range(900):
+            base.putpixel((x, y), (0, 0, 255))
+    exif = Image.Exif()
+    exif[274] = 6
+    base.save(source_path, format="JPEG", exif=exif)
+
+    style = {
+        "name": "Detail: Accent Chair",
+        "target_key": "chair_01",
+        "target_label": "Accent Chair",
+        "prompt": "unused because crop-first path should win",
+    }
+    furniture_item = {
+        "label": "Accent Chair",
+        "target_key": "chair_01",
+        "category": "chair",
+        "box_2d": [250, 50, 750, 350],
+    }
+
+    result = generate_detail_view(
+        str(source_path),
+        style,
+        "unitcase",
+        5,
+        furniture_data=[furniture_item],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not materialize cutouts")
+        ),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not request model safety settings")
+        ),
+        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not call the generation model")
+        ),
+        model_name="unused",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        with Image.open(source_path) as raw_img:
+            displayed = ImageOps.exif_transpose(raw_img).convert("RGB")
+        bounds = _box_to_pixels(furniture_item["box_2d"], displayed.size)
+        bounds = _expand_bounds(bounds, displayed.size, family="chair")
+        bounds = _fit_bounds_to_ratio(bounds, displayed.size, target_ratio=(4, 5))
+        expected_crop = displayed.crop(bounds).resize((40, 50))
+
+        with Image.open(output_path) as rendered:
+            rendered_probe = rendered.resize((40, 50))
+
+        expected_pixel = expected_crop.resize((1, 1)).getpixel((0, 0))
+        rendered_pixel = rendered_probe.resize((1, 1)).getpixel((0, 0))
+
+        assert rendered_pixel[2] > rendered_pixel[0]
+        assert abs(rendered_pixel[2] - expected_pixel[2]) < 35
+    finally:
+        if output_path.exists():
+            output_path.unlink()

@@ -4,6 +4,73 @@ from typing import Optional
 from PIL import Image, ImageOps
 
 
+def get_image_size(
+    image_path: str,
+    *,
+    exif_safe: bool = False,
+) -> tuple[int, int]:
+    with Image.open(image_path) as img:
+        if exif_safe:
+            img = ImageOps.exif_transpose(img)
+        return img.size
+
+
+def image_matches_ratio(
+    image_path: str,
+    target_ratio: float,
+    ratio_tol: float = 0.02,
+) -> bool:
+    try:
+        if not image_path or not target_ratio or target_ratio <= 0:
+            return False
+        width, height = get_image_size(image_path, exif_safe=True)
+        if width <= 0 or height <= 0:
+            return False
+        return abs((width / height) - target_ratio) <= ratio_tol
+    except Exception:
+        return False
+
+
+def match_aspect_to_ratio(
+    image_path: str,
+    target_ratio: float,
+    output_path: Optional[str] = None,
+) -> str:
+    try:
+        if not target_ratio or target_ratio <= 0:
+            return image_path
+
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
+            width, height = img.size
+            if width <= 0 or height <= 0:
+                return image_path
+
+            current_ratio = width / height
+            if abs(current_ratio - target_ratio) < 1e-3:
+                return image_path
+
+            if current_ratio > target_ratio:
+                new_w = int(height * target_ratio)
+                x0 = max(0, (width - new_w) // 2)
+                img = img.crop((x0, 0, x0 + new_w, height))
+            else:
+                new_h = int(width / target_ratio)
+                y0 = max(0, (height - new_h) // 2)
+                img = img.crop((0, y0, width, y0 + new_h))
+
+            base, _ = os.path.splitext(output_path or image_path)
+            out_path = f"{base}_aspect.png"
+            img.save(out_path, "PNG")
+            return out_path
+    except Exception as exc:
+        print(f"!! [Aspect Fit Failed] {exc}", flush=True)
+        return image_path
+
+
 def standardize_image(image_path, output_path=None, keep_ratio=False, force_landscape=False):
     try:
         if output_path is None:

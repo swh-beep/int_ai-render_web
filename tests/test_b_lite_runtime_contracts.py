@@ -1137,8 +1137,24 @@ def test_strict_b_lite_runtime_caps_stage2_generation_requests_and_disables_prov
     )
 
     assert result is not None
-    assert generation_requests == [{"timeout": 150.0, "max_attempts": 1}]
-    assert repair_requests == [{"timeout": 90.0, "max_attempts": 1}]
+    assert generation_requests == [
+        {
+            "timeout": 150.0,
+            "aspect_ratio": "16:9",
+            "thinking_level": "high",
+            "include_thoughts": False,
+            "max_attempts": 1,
+        }
+    ]
+    assert repair_requests == [
+        {
+            "timeout": 90.0,
+            "aspect_ratio": "16:9",
+            "thinking_level": "high",
+            "include_thoughts": False,
+            "max_attempts": 1,
+        }
+    ]
     assert validate_calls == [None, ["chair-1"], None]
 
 

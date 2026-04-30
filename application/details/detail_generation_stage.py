@@ -2,21 +2,59 @@ import os
 import time
 from typing import Callable
 
-from PIL import Image
+from PIL import Image, ImageOps
 from application.render.postprocess_support import category_match_family
+from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 
-def _parse_ratio(value: str | None) -> tuple[int, int]:
+def _normalize_ratio_string(value: str | None, default: str = "4:5") -> str:
     text = str(value or "").strip()
     if ":" not in text:
-        return (16, 9)
+        return default
     left, right = text.split(":", 1)
     try:
         width = max(1, int(left))
         height = max(1, int(right))
     except Exception:
-        return (16, 9)
+        return default
+    return f"{width}:{height}"
+
+
+def _parse_ratio(value: str | None) -> tuple[int, int]:
+    text = _normalize_ratio_string(value)
+    left, right = text.split(":", 1)
+    width = max(1, int(left))
+    height = max(1, int(right))
     return (width, height)
+
+
+def _normalize_generated_detail_ratio(
+    image_path: str,
+    *,
+    requested_ratio: str,
+    ratio_tol: float = 0.02,
+    max_crop_fraction: float = 0.20,
+) -> str | None:
+    ratio_w, ratio_h = _parse_ratio(requested_ratio)
+    expected_ratio = float(ratio_w) / float(ratio_h)
+
+    width, height = get_image_size(image_path, exif_safe=True)
+    if width <= 0 or height <= 0:
+        return None
+
+    current_ratio = width / height
+    if abs(current_ratio - expected_ratio) <= ratio_tol:
+        return image_path
+
+    if current_ratio > expected_ratio:
+        retained_fraction = expected_ratio / current_ratio if current_ratio > 0 else 0.0
+    else:
+        retained_fraction = current_ratio / expected_ratio if expected_ratio > 0 else 0.0
+    crop_fraction = max(0.0, 1.0 - retained_fraction)
+    if crop_fraction > max_crop_fraction:
+        return None
+
+    return match_aspect_to_ratio(image_path, expected_ratio)
 
 
 def _coerce_box_2d(value) -> list[float] | None:
@@ -174,8 +212,15 @@ def _fit_bounds_to_ratio(
     else:
         crop_w = crop_h * desired_ratio
 
-    crop_w = min(crop_w, float(img_w))
-    crop_h = min(crop_h, float(img_h))
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
+    if crop_h > float(img_h):
+        crop_h = float(img_h)
+        crop_w = crop_h * desired_ratio
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
 
     left = center_x - crop_w / 2.0
     right = center_x + crop_w / 2.0
@@ -214,7 +259,7 @@ def _render_crop_detail(
     target_ratio = _parse_ratio(style_config.get("ratio"))
 
     with Image.open(original_image_path) as img:
-        canvas = img.convert("RGB")
+        canvas = ImageOps.exif_transpose(img).convert("RGB")
         bounds = _box_to_pixels(box_2d, canvas.size)
         bounds = _expand_bounds(bounds, canvas.size, family=family)
         bounds = _fit_bounds_to_ratio(bounds, canvas.size, target_ratio=target_ratio)
@@ -272,7 +317,7 @@ def generate_detail_view(
                 return deterministic_crop
 
         img = Image.open(original_image_path)
-        target_ratio = style_config.get("ratio", "16:9")
+        target_ratio = _normalize_ratio_string(style_config.get("ratio"))
         crop_lock_block = (
             "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
             "This output MUST be a CROPPED/REFRAMED photograph of the EXACT SAME furnished room image provided.\n"
@@ -449,10 +494,16 @@ def generate_detail_view(
             request_timeout_sec = 90.0
         if request_timeout_sec <= 0.0:
             return None
+        requested_ratio = target_ratio
         response = call_gemini_with_failover(
             model_name,
             content,
-            {"timeout": max(1.0, min(90.0, request_timeout_sec))},
+            {
+                "timeout": max(1.0, min(90.0, request_timeout_sec)),
+                "aspect_ratio": requested_ratio,
+                "thinking_level": "high",
+                "include_thoughts": False,
+            },
             safety_settings,
             log_tag="Detail.Generate",
         )
@@ -465,6 +516,22 @@ def generate_detail_view(
                     path = os.path.join("outputs", filename)
                     with open(path, "wb") as file_obj:
                         file_obj.write(part.inline_data.data)
+                    normalized_path = _normalize_generated_detail_ratio(
+                        path,
+                        requested_ratio=requested_ratio,
+                    )
+                    if normalized_path is None:
+                        try:
+                            os.remove(path)
+                        except Exception:
+                            pass
+                        continue
+                    if normalized_path != path:
+                        try:
+                            os.remove(path)
+                        except Exception:
+                            pass
+                        path = normalized_path
                     return {
                         "path": path,
                         "style_name": style_config.get("name"),

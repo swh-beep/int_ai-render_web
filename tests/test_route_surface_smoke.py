@@ -17,6 +17,7 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         self.assertIn("/api/internal/render", paths)
         self.assertIn("/generate-details", paths)
         self.assertIn("/regenerate-single-detail", paths)
+        self.assertIn("/api/outputs/upload-video", paths)
 
     def test_async_render_multipart_binding_routes_itemized_inputs(self):
         fake_deps = MagicMock()

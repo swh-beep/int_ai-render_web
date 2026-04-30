@@ -92,6 +92,10 @@ def _external_finished_result_payload():
         },
         "details": {
             "items": [],
+            "details": [
+                {"url": "https://cdn.example/detail-1.png"},
+                {"url": "https://cdn.example/detail-2.png"},
+            ],
             "selected_item_review": [{"target_key": "sofa-1"}],
         },
         "resolved": {"room": "livingroom", "style": "natural", "variant": "2"},
@@ -204,7 +208,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
                 "job_id": "job-video",
                 "status": "queued",
                 "render_job_id": "job-xyz",
-                "clip_count": 4,
+                "clip_count": 3,
             },
         )
 

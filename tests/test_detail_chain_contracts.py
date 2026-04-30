@@ -3,6 +3,7 @@ from pathlib import Path
 
 from api_models import DetailRequest, RegenerateDetailRequest
 from application.details.detail_analysis_stage import load_analyzed_items
+from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
 from application.details.detail_workflow import run_generate_details_job
 from application.render.render_result_stage import build_detail_payload
 from application.render.render_workflow import run_render_with_details_job
@@ -47,6 +48,8 @@ class DetailChainContractsTests(unittest.TestCase):
             style_index=2,
             target_key="detail_001",
             target_label="Accent Chair",
+            target_box_2d=[10, 20, 200, 220],
+            target_source_box_2d=[12, 24, 198, 218],
             style_index_mode="overall",
             furniture_data=[{"label": "Accent Chair", "target_key": "detail_001"}],
             audience="internal",
@@ -58,10 +61,261 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(payload["style_index"], 2)
         self.assertEqual(payload["target_key"], "detail_001")
         self.assertEqual(payload["target_label"], "Accent Chair")
+        self.assertEqual(payload["target_box_2d"], [10, 20, 200, 220])
+        self.assertEqual(payload["target_source_box_2d"], [12, 24, 198, 218])
         self.assertEqual(payload["style_index_mode"], "overall")
         self.assertIsNone(payload["moodboard_url"])
         self.assertEqual(payload["furniture_data"], [{"label": "Accent Chair", "target_key": "detail_001"}])
         self.assertEqual(payload["audience"], "internal")
+
+    def test_run_regenerate_single_detail_job_rehydrates_requested_target_when_snapshot_missing(self):
+        source_path = Path("outputs/test-regenerate-source.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        detect_calls = []
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 4,
+                    "style_index_mode": "overall",
+                    "target_key": "detail_001_floor-lamp",
+                    "target_label": "Floor Lamp",
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: detect_calls.append(path) or [{"label": "Floor Lamp", "box_2d": [10, 20, 300, 400]}],
+                canonical_category=lambda label: str(label or "").lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: {
+                    **item,
+                    "description": "Tall articulated floor lamp with cream shade",
+                    "crop_path": str(source_path),
+                    "category_canonical": "floor_lamp",
+                },
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    {
+                        "name": "Detail: Floor Lamp",
+                        "target_key": items[0].get("target_key"),
+                        "target_label": items[0].get("label"),
+                    },
+                ],
+                normalize_label_for_match=lambda text: str(text).strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(len(detect_calls), 1)
+        self.assertEqual(result["target_label"], "Floor Lamp")
+        self.assertEqual(result["requested_target_key"], "detail_001_floor-lamp")
+        self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
+        self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_floor-lamp")
+
+    def test_run_regenerate_single_detail_job_preserves_requested_target_even_when_box_overlaps_other_detection(self):
+        source_path = Path("outputs/test-regenerate-box-source.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        detections = [
+            {"label": "Wardrobe", "box_2d": [100, 100, 300, 320]},
+            {"label": "Floor Lamp", "box_2d": [350, 500, 700, 620]},
+        ]
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 4,
+                    "style_index_mode": "auto",
+                    "target_key": "legacy_cabinet_key",
+                    "target_label": "Cabinet",
+                    "target_box_2d": [102, 104, 298, 318],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: detections,
+                canonical_category=lambda label: str(label or "").lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: {
+                    **item,
+                    "description": f"{item['label']} description",
+                    "crop_path": str(source_path),
+                    "category_canonical": str(item["label"]).lower().replace(" ", "_"),
+                },
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    {
+                        "name": f"Detail: {items[0].get('label')}",
+                        "target_key": items[0].get("target_key"),
+                        "target_label": items[0].get("label"),
+                    },
+                    {
+                        "name": f"Detail: {items[1].get('label')}",
+                        "target_key": items[1].get("target_key"),
+                        "target_label": items[1].get("label"),
+                    },
+                ],
+                normalize_label_for_match=lambda text: str(text).strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["style_name"], "Detail: Cabinet")
+        self.assertEqual(result["target_label"], "Cabinet")
+        self.assertEqual(result["target_key"], "legacy_cabinet_key")
+        self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
+        self.assertEqual(result["furniture_data"][0]["target_key"], "legacy_cabinet_key")
+
+    def test_run_regenerate_single_detail_job_preserves_requested_target_when_analysis_falls_back(self):
+        source_path = Path("outputs/test-regenerate-generic-fallback.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 9,
+                    "style_index_mode": "auto",
+                    "target_key": "detail_pillow_022",
+                    "target_label": "Pillow",
+                    "target_box_2d": [420, 410, 560, 590],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: [],
+                canonical_category=lambda label: str(label or "").lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    {
+                        "name": f"Detail: {items[0].get('label')}",
+                        "target_key": items[0].get("target_key"),
+                        "target_label": items[0].get("label"),
+                    },
+                ],
+                normalize_label_for_match=lambda text: str(text).strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["style_name"], "Detail: Pillow")
+        self.assertEqual(result["target_key"], "detail_pillow_022")
+        self.assertEqual(result["target_label"], "Pillow")
+        self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
+
+    def test_run_regenerate_single_detail_job_preserves_requested_target_among_unmatched_analysis_items(self):
+        source_path = Path("outputs/test-regenerate-unmatched-analysis.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        detections = [
+            {"label": "Pendant Lamp", "box_2d": [20, 20, 140, 120]},
+            {"label": "Dining Table", "box_2d": [300, 300, 700, 700]},
+            {"label": "Sofa", "box_2d": [420, 410, 980, 900]},
+        ]
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 21,
+                    "style_index_mode": "auto",
+                    "target_key": "detail_pillow_022",
+                    "target_label": "Pillow",
+                    "target_box_2d": [540, 485, 670, 620],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: detections,
+                canonical_category=lambda label: str(label or "").lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: {
+                    **item,
+                    "description": f"{item['label']} description",
+                    "crop_path": str(source_path),
+                    "category_canonical": str(item["label"]).lower().replace(" ", "_"),
+                },
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    *[
+                        {
+                            "name": f"Detail: {item.get('label')}",
+                            "target_key": item.get("target_key"),
+                            "target_label": item.get("label"),
+                        }
+                        for item in items
+                    ],
+                ],
+                normalize_label_for_match=lambda text: str(text).strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["style_name"], "Detail: Pillow")
+        self.assertEqual(result["target_key"], "detail_pillow_022")
+        self.assertEqual(result["target_label"], "Pillow")
+        self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
 
     def test_load_analyzed_items_prefers_cached_furniture_data(self):
         furniture_data = [{"label": "Accent Chair", "target_key": "detail_001"}]

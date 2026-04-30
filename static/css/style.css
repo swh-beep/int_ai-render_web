@@ -12,6 +12,11 @@
     --transition: 0.3s ease;
     --brand-color: #4A1215;
     --brand-hover: #631a1e;
+    --spinner-track: rgba(43, 43, 43, 0.16);
+    --spinner-accent: #2b2b2b;
+    --spinner-size: 48px;
+    --spinner-stroke: 3px;
+    --spinner-speed: 0.85s;
 }
 
 html {
@@ -1304,14 +1309,49 @@ body[data-page="home"] .furniture-item-card .furniture-item-upload-icon {
     z-index: 5000;
 }
 
+.spinner,
+.mini-spinner,
+.vs-spinner {
+    display: inline-block;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    position: relative;
+    background: none;
+    -webkit-mask: none;
+    mask: none;
+}
+
 .spinner {
-    width: 60px;
-    height: 60px;
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-left-color: var(--text-color);
+    width: var(--spinner-size);
+    height: var(--spinner-size);
+    margin: 0 auto 1.5rem;
+}
+
+.spinner::before,
+.spinner::after,
+.mini-spinner::before,
+.mini-spinner::after,
+.vs-spinner::before,
+.vs-spinner::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
     border-radius: 50%;
-    animation: spin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    margin-bottom: 2rem;
+}
+
+.spinner::before,
+.mini-spinner::before,
+.vs-spinner::before {
+    border: var(--spinner-stroke) solid var(--spinner-track);
+}
+
+.spinner::after,
+.mini-spinner::after,
+.vs-spinner::after {
+    border: var(--spinner-stroke) solid transparent;
+    border-top-color: var(--spinner-accent);
+    animation: spin var(--spinner-speed) linear infinite;
 }
 
 .loading-title {
@@ -1648,15 +1688,14 @@ body[data-page="home"] .furniture-item-card .furniture-item-upload-icon {
     z-index: 50;
     border-radius: 10px;
     animation: fadeIn 0.3s ease;
+    --spinner-track: rgba(255, 255, 255, 0.22);
+    --spinner-accent: #ffffff;
 }
 
 .mini-spinner {
-    width: 30px;
-    height: 30px;
-    border: 3px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #000000;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
+    width: 24px;
+    height: 24px;
+    --spinner-stroke: 2.5px;
 }
 
 @keyframes fadeIn {
@@ -2119,20 +2158,10 @@ body[data-page="home"] .furniture-item-card .furniture-item-upload-icon {
 
 /* [FIX] 로딩 스피너 (회색) */
 .vs-spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.15);
-    border-radius: 50%;
-    border-top-color: #888 !important;
-    animation: vs-spin 0.8s linear infinite;
-    display: inline-block;
+    width: 18px;
+    height: 18px;
+    --spinner-stroke: 2px;
     vertical-align: middle;
-}
-
-@keyframes vs-spin {
-    to {
-        transform: rotate(360deg);
-    }
 }
 
 /* Mobile */
@@ -2679,8 +2708,8 @@ body[data-page] {
     --radius: 5px;
 }
 
-body[data-page] *,
-body[data-page] *::before,
-body[data-page] *::after {
+body[data-page] *:not(.spinner):not(.mini-spinner):not(.vs-spinner),
+body[data-page] *:not(.spinner):not(.mini-spinner):not(.vs-spinner)::before,
+body[data-page] *:not(.spinner):not(.mini-spinner):not(.vs-spinner)::after {
     border-radius: 5px !important;
 }

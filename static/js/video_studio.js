@@ -2068,12 +2068,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function bindAssembleWorkspace() {
         if (assembleDropZone && assembleInput) {
-            const openAssemblePicker = (event) => {
-                event?.preventDefault?.();
-                event?.stopPropagation?.();
-                if (event?.target?.closest?.("button")) {
-                    return;
-                }
+            const triggerAssemblePicker = () => {
                 try {
                     if (typeof assembleInput.showPicker === "function") {
                         assembleInput.showPicker();
@@ -2083,6 +2078,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 } catch (_error) {
                     assembleInput.click();
                 }
+            };
+            const openAssemblePicker = (event) => {
+                if (event?.target?.closest?.("button")) {
+                    return;
+                }
+                if (event?.type === "keydown") {
+                    event.preventDefault();
+                }
+                triggerAssemblePicker();
             };
             const onDragOver = (event) => {
                 event.preventDefault();
