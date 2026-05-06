@@ -17,9 +17,23 @@ def _landscape_png_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def test_generate_detail_view_uses_selected_box_crop_before_model_regeneration(tmp_path):
+def test_generate_detail_view_initial_detail_prefers_editorial_model_generation_over_crop_extract(tmp_path):
     source_path = tmp_path / "room.png"
-    Image.new("RGB", (1200, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+    captured = {}
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        captured["model_name"] = model_name
+        captured["prompt"] = content[0]
+        captured["request_options"] = dict(request_options)
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
 
     result = generate_detail_view(
         str(source_path),
@@ -28,7 +42,7 @@ def test_generate_detail_view_uses_selected_box_crop_before_model_regeneration(t
             "target_key": "chair_01",
             "target_label": "Accent Chair",
             "ratio": "4:5",
-            "prompt": "unused because crop-first path should win",
+            "prompt": "render an editorial portrait of the chair",
         },
         "unitcase",
         1,
@@ -41,25 +55,22 @@ def test_generate_detail_view_uses_selected_box_crop_before_model_regeneration(t
                 "crop_path": str(tmp_path / "stale-cutout.png"),
             }
         ],
-        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("crop-first detail extraction should not materialize cutouts")
-        ),
+        materialize_input=lambda path, prefix: path,
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
-        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
-            AssertionError("crop-first detail extraction should not request model safety settings")
-        ),
-        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("crop-first detail extraction should not call the generation model")
-        ),
-        model_name="unused",
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
     )
 
     output_path = Path(result["path"])
     try:
-        assert result["generation_mode"] == "crop_extract"
+        assert result["generation_mode"] == "model_regeneration"
         assert result["style_name"] == "Detail: Accent Chair"
         assert result["cutout_ref_count"] == 0
-        assert isinstance(result["crop_bounds_px"], list)
+        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert "Create a NEW editorial close-up photographed inside the EXACT SAME finished room." in captured["prompt"]
+        assert "Do NOT turn this into a simple digital crop of the input." in captured["prompt"]
         assert output_path.exists()
 
         with Image.open(output_path) as rendered:
@@ -281,6 +292,7 @@ def test_generate_detail_view_defaults_ratio_less_detail_crop_to_vertical_canvas
                 "box_2d": [220, 310, 760, 610],
             }
         ],
+        prefer_crop_extract=True,
         materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("crop-first detail extraction should not materialize cutouts")
         ),
@@ -326,6 +338,7 @@ def test_generate_detail_view_crop_first_full_image_box_still_outputs_vertical_r
                 "box_2d": [0, 0, 1000, 1000],
             }
         ],
+        prefer_crop_extract=True,
         materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("crop-first detail extraction should not materialize cutouts")
         ),
@@ -378,6 +391,7 @@ def test_generate_detail_view_crop_first_uses_exif_transposed_canvas(tmp_path):
         "unitcase",
         5,
         furniture_data=[furniture_item],
+        prefer_crop_extract=True,
         materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("crop-first detail extraction should not materialize cutouts")
         ),

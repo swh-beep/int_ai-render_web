@@ -140,6 +140,125 @@ def _normalize_render_candidate_aspect(
         return None
 
 
+def _format_identity_dims(dims: dict | None) -> str:
+    if not isinstance(dims, dict):
+        return ""
+    parts: list[str] = []
+    width_mm = dims.get("width_mm")
+    depth_mm = dims.get("depth_mm")
+    height_mm = dims.get("height_mm")
+    if width_mm is not None:
+        parts.append(f"W={width_mm}mm")
+    if depth_mm is not None:
+        parts.append(f"D={depth_mm}mm")
+    if height_mm is not None:
+        parts.append(f"H={height_mm}mm")
+    return " ".join(parts)
+
+
+def _join_identity_tokens(values: list[Any] | tuple[Any, ...] | None, *, limit: int) -> str:
+    tokens: list[str] = []
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text or text in tokens:
+            continue
+        tokens.append(text)
+        if len(tokens) >= limit:
+            break
+    return ", ".join(tokens)
+
+
+def _build_item_exactness_cards_context(furniture_specs_json: dict | None) -> str:
+    if not isinstance(furniture_specs_json, dict):
+        return ""
+    rows: list[str] = []
+    for item in furniture_specs_json.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
+        if not label:
+            continue
+        try:
+            qty = max(1, int(item.get("qty") or 1))
+        except Exception:
+            qty = 1
+        identity_profile = item.get("identity_profile") or {}
+        product_identity = item.get("product_identity") or {}
+        archetype_strategy = item.get("archetype_strategy") or {}
+        dims = (item.get("requested_dims_mm") or item.get("dims_mm") or {}) if isinstance(item, dict) else {}
+        family = (
+            product_identity.get("family")
+            or identity_profile.get("family")
+            or item.get("category_canonical")
+            or item.get("category")
+        )
+        silhouette = str(identity_profile.get("silhouette_summary") or "").strip()
+        dims_text = _format_identity_dims(dims)
+        materials = _join_identity_tokens(identity_profile.get("material_cues"), limit=2)
+        topology_cues = _join_identity_tokens(product_identity.get("topology_cues"), limit=2)
+        support_geometry = _join_identity_tokens(product_identity.get("support_geometry"), limit=2)
+        opening_features = _join_identity_tokens(product_identity.get("opening_or_gap_features"), limit=2)
+        pattern_cues = _join_identity_tokens(product_identity.get("pattern_cues"), limit=2)
+        reflection_constraints = _join_identity_tokens(product_identity.get("reflection_constraints"), limit=2)
+        distinctive_parts = _join_identity_tokens(identity_profile.get("distinctive_parts"), limit=3)
+        preserve_rules = _join_identity_tokens(
+            (product_identity.get("preserve_rules") or identity_profile.get("preserve_rules")),
+            limit=3,
+        )
+        forbidden_substitutions = _join_identity_tokens(
+            archetype_strategy.get("forbidden_substitutions"),
+            limit=2,
+        )
+        bits = [f"qty={qty}"]
+        if family:
+            bits.append(f"family={family}")
+        if silhouette:
+            bits.append(f"silhouette={silhouette}")
+        if dims_text:
+            bits.append(dims_text)
+        if materials:
+            bits.append(f"materials={materials}")
+        if topology_cues:
+            bits.append(f"topology={topology_cues}")
+        if support_geometry:
+            bits.append(f"support={support_geometry}")
+        if opening_features:
+            bits.append(f"gaps={opening_features}")
+        if pattern_cues:
+            bits.append(f"pattern={pattern_cues}")
+        if reflection_constraints:
+            bits.append(f"reflection={reflection_constraints}")
+        if distinctive_parts:
+            bits.append(f"distinctive={distinctive_parts}")
+        if preserve_rules:
+            bits.append(f"preserve={preserve_rules}")
+        if forbidden_substitutions:
+            bits.append(f"avoid={forbidden_substitutions}")
+        rows.append(f"- {label}: " + "; ".join(bits))
+    if not rows:
+        return ""
+    return (
+        "\n<ITEM EXACTNESS CARDS>\n"
+        "Use only these compact identity cards plus the cutout images as the product-exactness source.\n"
+        "Do not restyle, simplify, or generalize an item into a same-family substitute.\n"
+        + "\n".join(rows)
+        + "\n--------------------------------------------------\n"
+    )
+
+
+def _build_fallback_furniture_guidance_context(furniture_specs: str | None) -> str:
+    text = str(furniture_specs or "").strip()
+    if not text:
+        return ""
+    return (
+        "\n<FALLBACK ITEM GUIDANCE>\n"
+        "Structured item cards are unavailable for this request.\n"
+        "Use the fallback list below only as a last-resort reference, and prefer any attached reference images over this prose.\n"
+        f"{text}\n"
+        "--------------------------------------------------\n"
+    )
+
+
 def _summarize_scale_review(diagnostics: dict | None) -> dict:
     raw = diagnostics or {}
     failed_rules = list(raw.get("failed_rules") or [])
@@ -704,19 +823,9 @@ def generate_furnished_room(
                 "--------------------------------------------------\n"
             )
 
-        specs_context = ""
-        if furniture_specs:
-            specs_context = (
-                "\n<REFERENCE FURNITURE LIST (GUIDANCE ONLY)>\n"
-                "The following list describes the items detected from the moodboard.\n"
-                "Use this as a soft reference for material, color, shape, and scale cues.\n"
-                "If there is any conflict, prioritize the provided furniture cutout images.\n"
-                "Respect quantities exactly. If qty>1, render multiple identical instances.\n"
-                "Do NOT add extra items. Do NOT omit any listed items.\n"
-                "Do NOT replace any listed item with a generic substitute (no sofa instead of a desk, etc.).\n"
-                f"{furniture_specs}\n"
-                "--------------------------------------------------\n"
-            )
+        specs_context = _build_item_exactness_cards_context(furniture_specs_json)
+        if not specs_context:
+            specs_context = _build_fallback_furniture_guidance_context(furniture_specs)
 
         dims_table_context = ""
         try:
@@ -852,6 +961,7 @@ def generate_furnished_room(
                         placement_contract = it.get("placement_contract") or {}
                         layout_envelope = it.get("layout_envelope") or {}
                         family = product_identity.get("family") or identity_profile.get("family")
+                        size_class = identity_profile.get("absolute_size_class")
                         zone = placement_contract.get("zone")
                         inventory_bits = [f"qty={qty}"]
                         if family:
@@ -860,26 +970,26 @@ def generate_furnished_room(
                             inventory_bits.append(f"zone={zone}")
                         inventory_rows.append(f"- {label}: " + "; ".join(inventory_bits))
                         silhouette = identity_profile.get("silhouette_summary")
-                        material_cues = ", ".join((identity_profile.get("material_cues") or [])[:3])
-                        topology_cues = ", ".join((product_identity.get("topology_cues") or [])[:3])
-                        support_geometry = ", ".join((product_identity.get("support_geometry") or [])[:3])
+                        material_cues = ", ".join((identity_profile.get("material_cues") or [])[:2])
+                        topology_cues = ", ".join((product_identity.get("topology_cues") or [])[:2])
+                        support_geometry = ", ".join((product_identity.get("support_geometry") or [])[:2])
                         opening_features = ", ".join((product_identity.get("opening_or_gap_features") or [])[:2])
                         pattern_cues = ", ".join((product_identity.get("pattern_cues") or [])[:2])
                         reflection_constraints = ", ".join((product_identity.get("reflection_constraints") or [])[:2])
                         distinctive_parts = ", ".join((identity_profile.get("distinctive_parts") or [])[:3])
                         preserve_rules = ", ".join((product_identity.get("preserve_rules") or identity_profile.get("preserve_rules") or [])[:3])
-                        size_class = identity_profile.get("absolute_size_class")
-                        room_presence_class = identity_profile.get("room_presence_class")
-                        if family or silhouette or material_cues or topology_cues or support_geometry or opening_features or pattern_cues or reflection_constraints or distinctive_parts or preserve_rules:
+                        forbidden_substitutions = ", ".join(
+                            (((it.get("archetype_strategy") or {}).get("forbidden_substitutions")) or [])[:2]
+                        )
+                        dims_text = _format_identity_dims(it.get("requested_dims_mm") or it.get("dims_mm") or {})
+                        if family or silhouette or material_cues or topology_cues or support_geometry or opening_features or pattern_cues or reflection_constraints or distinctive_parts or preserve_rules or forbidden_substitutions or dims_text:
                             detail_bits = []
                             if family:
                                 detail_bits.append(f"family={family}")
-                            if size_class:
-                                detail_bits.append(f"size_class={size_class}")
-                            if room_presence_class:
-                                detail_bits.append(f"room_presence={room_presence_class}")
                             if silhouette:
                                 detail_bits.append(f"silhouette={silhouette}")
+                            if dims_text:
+                                detail_bits.append(dims_text)
                             if material_cues:
                                 detail_bits.append(f"materials={material_cues}")
                             if topology_cues:
@@ -896,8 +1006,8 @@ def generate_furnished_room(
                                 detail_bits.append(f"distinctive_parts={distinctive_parts}")
                             if preserve_rules:
                                 detail_bits.append(f"preserve_rules={preserve_rules}")
-                            if placement_contract.get("zone"):
-                                detail_bits.append(f"zone={placement_contract.get('zone')}")
+                            if forbidden_substitutions:
+                                detail_bits.append(f"avoid={forbidden_substitutions}")
                             identity_rows.append(f"- {label}: " + "; ".join(detail_bits))
                         if layout_envelope:
                             env_bits = []
@@ -996,8 +1106,8 @@ def generate_furnished_room(
 
                     if identity_rows:
                         identity_context = (
-                            "\n<ITEM IDENTITY PROFILES (STRICT)>\n"
-                            "Each listed item has a stable identity. Preserve silhouette, support geometry, and material identity.\n"
+                            "\n<ITEM IDENTITY LOCKS (STRICT)>\n"
+                            "These are the only text-level product identity cues. Keep each item exact and do not collapse it into a same-family generic substitute.\n"
                             + "\n".join(identity_rows)
                             + "\n--------------------------------------------------\n"
                         )
@@ -1347,8 +1457,9 @@ def generate_furnished_room(
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
             "2. **PLACEMENT:** Obey the per-item placement family exactly. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
             "3. **AXIS ALIGNMENT:** If the room edges, window mullions, or major wall lines are straight, keep sofas, storage, rugs, and large tables parallel or perpendicular to those dominant room axes. Do not place them on a casual 20-60 degree diagonal unless explicit instructions require it.\n"
-            "4. **STYLE:** Match the intended style implied by the provided furniture items.\n"
-            "5. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
+            "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
+            "5. **STYLE:** Match the intended style implied by the provided furniture items.\n"
+            "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
             f"{window_context}"
             f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and a CANONICAL GEOMETRY CONTRACT. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
@@ -1520,14 +1631,13 @@ def generate_furnished_room(
                     except Exception:
                         pass
                     extra_imgs.append(cutout_img)
-                    reference_header = "Furniture Cutout Reference (MUST MATCH EXACT DESIGN). "
+                    reference_header = "Furniture Cutout Reference (PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
                     if two_pass_staging_runtime and item_key in pass2_detail_keys:
-                        reference_header = "Pass2 Detail Reserve Reference (VISUAL CONTEXT ONLY - DO NOT PLACE IN FIRST PASS). "
+                        reference_header = "Pass2 Detail Reserve Reference (VISUAL CONTEXT ONLY - DO NOT PLACE IN FIRST PASS, BUT KEEP THIS EXACT PRODUCT IDENTITY). "
                     reference_content += [
                         (
                             reference_header
-                            + 
-                            f"Label={lbl} | Qty={qty} | W={w if w is not None else 'null'}mm "
+                            + f"Label={lbl} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
                             f"| Options={opts_txt}"
                             + (
@@ -1552,6 +1662,22 @@ def generate_furnished_room(
                             )
                         ),
                         cutout_img,
+                    ]
+            if not reference_content and ref_path:
+                fallback_refs = ref_path if isinstance(ref_path, (list, tuple)) else [ref_path]
+                for index, raw_path in enumerate(fallback_refs, start=1):
+                    path_str = str(raw_path or "").strip()
+                    if not path_str or not os.path.exists(path_str):
+                        continue
+                    ref_img = Image.open(path_str)
+                    try:
+                        ref_img.thumbnail((384, 384), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    extra_imgs.append(ref_img)
+                    reference_content += [
+                        f"Fallback Furniture Reference Image {index} (EXACTNESS ANCHOR - use this reference image even if structured item cards are unavailable).",
+                        ref_img,
                     ]
         except Exception:
             pass

@@ -215,6 +215,8 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         self.assertEqual(captured["compile_req"].clips[0].trim_end, 3.0)
         self.assertEqual(captured["compile_req"].clips[-1].trim_end, 3.0)
         self.assertTrue(all(clip.trim_end == 5.0 for clip in captured["compile_req"].clips[1:-1]))
+        self.assertEqual(captured["compile_req"].aspect_ratio, "16:9")
+        self.assertEqual(captured["compile_req"].aspect_mode, "fill")
         self.assertEqual(captured["compile_kwargs"]["video_target_fps"], 12)
 
     def test_run_external_render_video_job_uses_s3_result_when_render_job_not_in_queue(self):

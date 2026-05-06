@@ -297,6 +297,7 @@ def generate_detail_view(
     index,
     furniture_data=None,
     *,
+    prefer_crop_extract: bool = False,
     materialize_input: Callable[[str | None, str], str | None],
     normalize_label_for_match: Callable[[str], str],
     allow_harassment_only_safety_settings: Callable[[], object],
@@ -310,22 +311,33 @@ def generate_detail_view(
     cutout_ref_count = 0
     try:
         style_name = str(style_config.get("name") or "")
-        if style_name.startswith("Detail:"):
-            target_item = _find_target_item(style_config, furniture_data, normalize_label_for_match)
+        target_item = _find_target_item(style_config, furniture_data, normalize_label_for_match)
+        if prefer_crop_extract and style_name.startswith("Detail:"):
             deterministic_crop = _render_crop_detail(original_image_path, style_config, unique_id, index, target_item or {})
             if deterministic_crop:
                 return deterministic_crop
 
         img = Image.open(original_image_path)
         target_ratio = _normalize_ratio_string(style_config.get("ratio"))
-        crop_lock_block = (
-            "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
-            "This output MUST be a CROPPED/REFRAMED photograph of the EXACT SAME furnished room image provided.\n"
-            "You are NOT creating a new image. You are NOT restaging. You are NOT redesigning.\n"
-            "Allowed operations: camera framing, crop, zoom, slight depth-of-field.\n"
-            "Forbidden operations: moving/adding/removing/replacing ANY object, changing materials, changing colors, changing lighting style.\n"
-            "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
-        )
+        if prefer_crop_extract and style_name.startswith("Detail:"):
+            scene_lock_block = (
+                "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
+                "This output MUST be a CROPPED/REFRAMED photograph of the EXACT SAME furnished room image provided.\n"
+                "You are NOT creating a new image. You are NOT restaging. You are NOT redesigning.\n"
+                "Allowed operations: camera framing, crop, zoom, slight depth-of-field.\n"
+                "Forbidden operations: moving/adding/removing/replacing ANY object, changing materials, changing colors, changing lighting style.\n"
+                "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
+            )
+            camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
+        else:
+            scene_lock_block = (
+                "<SCENE LOCK: SAME ROOM, NEW CAMERA>\n"
+                "Create a NEW editorial close-up photographed inside the EXACT SAME finished room.\n"
+                "You may move the camera to a nearby in-room standing-height viewpoint and change focal length to create a fresh composition.\n"
+                "Keep the architecture, furniture placement, object scale, object identities, materials, and lighting direction consistent with the source image.\n"
+                "Do NOT turn this into a simple digital crop of the input.\n"
+            )
+            camera_lock_line = "4. **NEW IN-ROOM VIEWPOINT IS ALLOWED:** You may change camera position, yaw, pitch, and focal length slightly, but the room layout and object placement must stay fixed.\n\n"
 
         style_target_key = str(style_config.get("target_key") or "").strip()
         style_target_label = str(style_config.get("target_label") or "").strip()
@@ -342,26 +354,38 @@ def generate_detail_view(
                 "- Keep this target item's geometry/design signature unchanged.\n"
                 "- Other objects are context only and must never replace the target.\n\n"
             )
+        target_anchor_block = ""
+        if isinstance(target_item, dict):
+            target_box = _coerce_box_2d(target_item.get("box_2d"))
+            target_family = _target_family(target_item)
+            target_anchor_lines = []
+            if target_box is not None:
+                target_anchor_lines.append(f"- TARGET BOX IN SOURCE IMAGE (0-1000): {target_box}")
+            if target_family:
+                target_anchor_lines.append(f"- TARGET FAMILY: {target_family}")
+            if target_anchor_lines:
+                target_anchor_block = "<TARGET ANCHOR>\n" + "\n".join(target_anchor_lines) + "\n\n"
 
         final_prompt = (
-            f"{crop_lock_block}\n"
+            f"{scene_lock_block}\n"
             f"{target_lock_block}"
+            f"{target_anchor_block}"
             f"{style_config['prompt']}\n\n"
             "<CRITICAL: LAYOUT FREEZE (PRIORITY #0)>\n"
             "1. **DO NOT MOVE / REARRANGE ANYTHING:** Every existing furniture, lighting fixture, decor item, and their positions must remain EXACTLY the same as the input image.\n"
             "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
             "3. **NO REMOVALS:** Do NOT remove existing objects either.\n"
-            "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
+            f"{camera_lock_line}"
             "<OUTPUT REQUIREMENTS>\n"
             "1. Generate a photorealistic high-quality detail view based on the selected camera shot.\n"
             "2. Keep the overall interior style consistent with the main furnished room.\n"
-            "3. IMPORTANT: focus on the specified target area only (close-up composition).\n"
+            "3. IMPORTANT: focus on the specified target area only and make it read like a dedicated editorial shot of that object in the room.\n"
             "4. DO NOT add text, labels, logos, or watermarks.\n"
             f"OUTPUT ASPECT RATIO: {target_ratio}"
         )
 
         safety_settings = allow_harassment_only_safety_settings()
-        content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
+        content = [final_prompt, "Original Room Reality (scene anchor, keep layout stable):", img]
 
         try:
             max_cutout_refs = 12

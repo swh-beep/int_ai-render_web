@@ -351,6 +351,8 @@ def run_external_render_video_job(
             for clip_url in compile_clip_urls
         ],
         include_intro_outro=False,
+        aspect_ratio="16:9",
+        aspect_mode="fill",
     )
     compile_job_id = queue_final_compile_job(compile_req, video_target_fps=video_target_fps)
     compile_state = _poll_video_job_until_terminal(

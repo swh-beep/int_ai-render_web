@@ -310,7 +310,14 @@ def run_regenerate_single_detail_job(
             return {"error": "No matching style for regeneration"}
 
         unique_id = uuid.uuid4().hex[:6]
-        result = generate_detail_view(local_path, style, unique_id, int(resolved_style_index or 1), analyzed_items)
+        result = generate_detail_view(
+            local_path,
+            style,
+            unique_id,
+            int(resolved_style_index or 1),
+            analyzed_items,
+            prefer_crop_extract=True,
+        )
         if not result:
             return {"error": "Generation failed"}
 

@@ -2124,12 +2124,13 @@ job_entrypoints_module.configure_job_entrypoints(
         analyze_cropped_item=analyze_cropped_item,
         attach_volume_ranks=_attach_volume_ranks,
         construct_dynamic_styles=construct_dynamic_styles_stage,
-        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: generate_detail_view_stage(
+        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: generate_detail_view_stage(
             original_image_path,
             style_config,
             unique_id,
             index,
             furniture_data,
+            **kwargs,
             materialize_input=_materialize_input,
             normalize_label_for_match=_normalize_label_for_match,
             allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,

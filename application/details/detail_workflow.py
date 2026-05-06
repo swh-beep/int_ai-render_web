@@ -4,7 +4,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
-from application.details.detail_analysis_stage import load_analyzed_items
+from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.detail_result_stage import build_detail_generation_output
 
 
@@ -117,7 +117,7 @@ def run_generate_details_job(
         unique_id = uuid.uuid4().hex[:6]
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
 
-        analyzed_items = load_analyzed_items(
+        analyzed_items = prepare_detail_generation_items(
             furniture_data=furniture_data,
             moodboard_url=moodboard_url,
             local_path=local_path,
@@ -128,6 +128,7 @@ def run_generate_details_job(
             max_concurrency_analysis=max_concurrency_analysis,
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
+            normalize_label_for_match=normalize_label_for_match,
         )
         if budgeted_mode:
             remaining_budget = _remaining_deadline_sec()
