@@ -54,7 +54,7 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
     captured = {}
 
     def fake_generation(model_name, content, *args, **kwargs):
-        captured["prompt"] = content[0]
+        captured.setdefault("prompt", content[0])
         return _response()
 
     result = generate_furnished_room(
@@ -149,7 +149,7 @@ def test_generate_furnished_room_includes_small_item_guardrails_and_external_roo
     captured = {}
 
     def fake_generation(model_name, content, *args, **kwargs):
-        captured["prompt"] = content[0]
+        captured.setdefault("prompt", content[0])
         return _response()
 
     result = generate_furnished_room(
@@ -355,6 +355,265 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         assert "PRODUCT EXACTNESS FIRST" in prompt
         assert long_item_prose not in prompt
         assert "PRIMARY EXACTNESS ANCHOR" in content[3]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_splits_primary_locks_from_secondary_items_and_orders_cutout_headers(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    sofa_ref = tmp_path / "sofa.png"
+    sofa_ref.write_bytes(_make_png_bytes(80, 80))
+    cabinet_ref = tmp_path / "cabinet.png"
+    cabinet_ref.write_bytes(_make_png_bytes(80, 80))
+    rug_ref = tmp_path / "rug.png"
+    rug_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 4500.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["prompt"] = content[0]
+        captured["content"] = content
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the room restrained and architectural."},
+        str(sofa_ref),
+        "prompt-contract-primary-locks",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "sofa-1",
+                    "label": "Hero Sofa",
+                    "category": "main_sofa",
+                    "category_canonical": "main_sofa",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 2600, "depth_mm": 1000, "height_mm": 760},
+                    "requested_dims_mm": {"width_mm": 2600, "depth_mm": 1000, "height_mm": 760},
+                    "crop_path": str(sofa_ref),
+                    "identity_profile": {
+                        "family": "main_sofa",
+                        "silhouette_summary": "low deep sofa with broad seat modules",
+                        "distinctive_parts": ["broad seat modules"],
+                        "preserve_rules": ["keep low continuous seat"],
+                    },
+                    "product_identity": {
+                        "family": "main_sofa",
+                        "support_geometry": ["deep low sofa plinth"],
+                        "preserve_rules": ["keep low continuous seat"],
+                    },
+                    "placement_contract": {"zone": "back_wall_anchor_band"},
+                },
+                {
+                    "target_key": "cabinet-1",
+                    "label": "Tall Cabinet",
+                    "category": "storage_cabinet_shelf",
+                    "category_canonical": "storage_cabinet_shelf",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 1800, "depth_mm": 450, "height_mm": 980},
+                    "requested_dims_mm": {"width_mm": 1800, "depth_mm": 450, "height_mm": 980},
+                    "crop_path": str(cabinet_ref),
+                    "identity_profile": {
+                        "family": "storage_cabinet_shelf",
+                        "room_presence_class": "large-room-presence",
+                        "silhouette_summary": "long low cabinet with four doors",
+                        "distinctive_parts": ["four equal door fronts"],
+                        "preserve_rules": ["keep long low cabinet proportion"],
+                    },
+                    "product_identity": {
+                        "family": "storage_cabinet_shelf",
+                        "support_geometry": ["box cabinet on plinth"],
+                        "preserve_rules": ["keep long low cabinet proportion"],
+                    },
+                    "placement_contract": {"zone": "back_wall_support_band"},
+                },
+                {
+                    "target_key": "rug-1",
+                    "label": "Round Rug",
+                    "category": "rug",
+                    "category_canonical": "rug",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 1800, "depth_mm": 1800, "height_mm": 10},
+                    "requested_dims_mm": {"width_mm": 1800, "depth_mm": 1800, "height_mm": 10},
+                    "crop_path": str(rug_ref),
+                    "identity_profile": {
+                        "family": "rug",
+                        "silhouette_summary": "round rug",
+                        "preserve_rules": ["keep circular footprint"],
+                    },
+                    "product_identity": {
+                        "family": "rug",
+                        "preserve_rules": ["keep circular footprint"],
+                    },
+                    "placement_contract": {"zone": "centered_rug_zone"},
+                },
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Hero Sofa"},
+        },
+        room_dimensions="5200x4200x2600",
+        primary_item={"target_key": "sofa-1", "label": "Hero Sofa"},
+        room_dims_parsed={"width_mm": 5200, "depth_mm": 4200, "height_mm": 2600},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=4500.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5200, "depth_mm": 4200, "height_mm": 2600},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        content = captured["content"]
+        assert "<PRIMARY PRODUCT LOCKS>" in prompt
+        assert "<SECONDARY SUPPORTING ITEMS>" in prompt
+        assert "PRIMARY LOCK ORDER" in prompt
+        assert "Hero Sofa" in prompt
+        assert "Tall Cabinet" in prompt
+        assert "Round Rug" in prompt
+        assert prompt.index("<PRIMARY PRODUCT LOCKS>") < prompt.index("- Hero Sofa:")
+        assert prompt.index("- Tall Cabinet:") < prompt.index("<SECONDARY SUPPORTING ITEMS>")
+        assert prompt.index("<SECONDARY SUPPORTING ITEMS>") < prompt.index("- Round Rug:")
+        assert "Hero Sofa, Tall Cabinet" in prompt
+        headers = [part for part in content if isinstance(part, str) and "Furniture Cutout Reference" in part]
+        assert "PRIMARY PRODUCT LOCK" in headers[0]
+        assert "PRIMARY PRODUCT LOCK" in headers[1]
+        assert "SECONDARY SUPPORT ITEM" in headers[2]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_locks(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    sofa_ref = tmp_path / "sofa.png"
+    sofa_ref.write_bytes(_make_png_bytes(80, 80))
+    table_ref = tmp_path / "table.png"
+    table_ref.write_bytes(_make_png_bytes(80, 80))
+    chair_ref = tmp_path / "chair.png"
+    chair_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 4600.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the room restrained and architectural."},
+        str(sofa_ref),
+        "prompt-contract-primary-locks-two-pass",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "sofa-1",
+                    "label": "Hero Sofa",
+                    "category": "sofa",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 2400, "depth_mm": 1000, "height_mm": 760},
+                    "requested_dims_mm": {"width_mm": 2400, "depth_mm": 1000, "height_mm": 760},
+                    "crop_path": str(sofa_ref),
+                    "identity_profile": {"family": "sofa", "room_presence_class": "anchor-room-presence"},
+                    "product_identity": {"family": "sofa"},
+                },
+                {
+                    "target_key": "table-1",
+                    "label": "Support Table",
+                    "category": "table",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 900, "depth_mm": 900, "height_mm": 420},
+                    "requested_dims_mm": {"width_mm": 900, "depth_mm": 900, "height_mm": 420},
+                    "crop_path": str(table_ref),
+                    "identity_profile": {"family": "table", "room_presence_class": "medium-room-presence"},
+                    "product_identity": {"family": "table"},
+                },
+                {
+                    "target_key": "chair-1",
+                    "label": "Pass2 Chair",
+                    "category": "chair",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 640, "depth_mm": 680, "height_mm": 760},
+                    "requested_dims_mm": {"width_mm": 640, "depth_mm": 680, "height_mm": 760},
+                    "crop_path": str(chair_ref),
+                    "identity_profile": {"family": "chair", "room_presence_class": "medium-room-presence"},
+                    "product_identity": {"family": "chair"},
+                },
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Hero Sofa"},
+            "two_pass_strategy": {
+                "pass1_primary_keys": ["sofa-1"],
+                "pass1_support_keys": ["table-1"],
+                "pass2_detail_keys": ["chair-1"],
+            },
+        },
+        room_dimensions="5200x4200x2600",
+        primary_item={"target_key": "sofa-1", "label": "Hero Sofa"},
+        room_dims_parsed={"width_mm": 5200, "depth_mm": 4200, "height_mm": 2600},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=4600.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5200, "depth_mm": 4200, "height_mm": 2600},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        primary_section = prompt.split("<PRIMARY PRODUCT LOCKS>", 1)[1].split("<SECONDARY SUPPORTING ITEMS>", 1)[0]
+        assert "Hero Sofa" in primary_section
+        assert "Support Table" not in primary_section
+        assert "Pass2 Chair" not in primary_section
+        assert "PRIMARY LOCK ORDER" in prompt
+        assert "Hero Sofa" in prompt
+        assert "Support Table" not in prompt.split("PRIMARY LOCK ORDER:", 1)[1].split("\\n", 1)[0]
+        assert "Pass2 Chair" not in prompt.split("PRIMARY LOCK ORDER:", 1)[1].split("\\n", 1)[0]
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -577,6 +836,100 @@ def test_generate_furnished_room_keeps_reflection_and_opening_cues_in_compact_ca
         assert "gaps=narrow reveal between frame and mirror edge" in prompt
         assert "pattern=plain uninterrupted reflective field" in prompt
         assert "reflection=reflect opposite wall only" in prompt
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_keeps_tiny_surface_items_out_of_primary_locks(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    sofa_ref = tmp_path / "sofa.png"
+    sofa_ref.write_bytes(_make_png_bytes(80, 80))
+    lamp_ref = tmp_path / "lamp.png"
+    lamp_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 6200.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["prompt"] = content[0]
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the room minimal."},
+        str(sofa_ref),
+        "prompt-contract-tiny-secondary",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "sofa-1",
+                    "label": "Lounge Sofa",
+                    "category": "sofa",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 2400, "depth_mm": 980, "height_mm": 780},
+                    "requested_dims_mm": {"width_mm": 2400, "depth_mm": 980, "height_mm": 780},
+                    "crop_path": str(sofa_ref),
+                    "identity_profile": {"family": "sofa", "room_presence_class": "anchor-room-presence"},
+                    "product_identity": {"family": "sofa"},
+                },
+                {
+                    "target_key": "lamp-1",
+                    "label": "Mini Table Lamp",
+                    "category": "table_lamp",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 110, "depth_mm": 110, "height_mm": 130},
+                    "requested_dims_mm": {"width_mm": 110, "depth_mm": 110, "height_mm": 130},
+                    "crop_path": str(lamp_ref),
+                    "identity_profile": {
+                        "family": "table_lamp",
+                        "room_presence_class": "tiny-room-presence",
+                        "absolute_size_class": "tiny",
+                    },
+                    "product_identity": {"family": "table_lamp"},
+                },
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Lounge Sofa"},
+        },
+        room_dimensions="5000x5000x2700",
+        primary_item={"target_key": "sofa-1", "label": "Lounge Sofa"},
+        room_dims_parsed={"width_mm": 5000, "depth_mm": 5000, "height_mm": 2700},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=6200.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5000, "depth_mm": 5000, "height_mm": 2700},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        primary_section = prompt.split("<PRIMARY PRODUCT LOCKS>", 1)[1].split("<SECONDARY SUPPORTING ITEMS>", 1)[0]
+        assert "Lounge Sofa" in primary_section
+        assert "Mini Table Lamp" not in primary_section
+        assert "Lounge Sofa, Mini Table Lamp" not in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():

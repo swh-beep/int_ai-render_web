@@ -168,82 +168,263 @@ def _join_identity_tokens(values: list[Any] | tuple[Any, ...] | None, *, limit: 
     return ", ".join(tokens)
 
 
-def _build_item_exactness_cards_context(furniture_specs_json: dict | None) -> str:
+def _item_target_key_for_prompt(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("target_key") or item.get("source_index") or item.get("label") or "").strip()
+
+
+def _item_dims_for_prompt(item: dict | None) -> dict:
+    if not isinstance(item, dict):
+        return {}
+    dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
+    return dims if isinstance(dims, dict) else {}
+
+
+def _item_anchor_priority(item: dict | None, *, explicit_primary_key: str) -> tuple:
+    if not isinstance(item, dict):
+        return (-1, -1, -1, -1, -1)
+    item_key = _item_target_key_for_prompt(item)
+    dims = _item_dims_for_prompt(item)
+    identity_profile = item.get("identity_profile") or {}
+    product_identity = item.get("product_identity") or {}
+    family = str(
+        product_identity.get("family")
+        or identity_profile.get("family")
+        or item.get("category_canonical")
+        or item.get("category")
+        or ""
+    ).strip().lower()
+
+    try:
+        width_mm = int(dims.get("width_mm") or 0)
+    except Exception:
+        width_mm = 0
+    try:
+        depth_mm = int(dims.get("depth_mm") or 0)
+    except Exception:
+        depth_mm = 0
+    try:
+        height_mm = int(dims.get("height_mm") or 0)
+    except Exception:
+        height_mm = 0
+    try:
+        volume_proxy = int(item.get("volume_proxy") or 0)
+    except Exception:
+        volume_proxy = 0
+    if volume_proxy <= 0:
+        volume_proxy = max(width_mm * max(depth_mm, 1) * max(height_mm, 1), width_mm * max(height_mm, 1))
+
+    family_bonus_map = {
+        "main_sofa": 9,
+        "lounge_sofa": 9,
+        "sofa": 9,
+        "storage_cabinet_shelf": 8,
+        "storage": 8,
+        "cabinet": 8,
+        "desk_table": 7,
+        "dining_table": 7,
+        "table": 6,
+        "lounge_chair": 6,
+        "armchair": 6,
+        "chair": 5,
+        "floor_lamp": 5,
+        "pendant_lamp": 4,
+        "table_lamp": 2,
+        "mirror": 1,
+        "rug": 0,
+        "decor": 0,
+        "plant": 0,
+    }
+    family_bonus = family_bonus_map.get(family, 3 if family else 0)
+    room_presence = str(identity_profile.get("room_presence_class") or "").strip().lower()
+    presence_bonus = 0
+    if "anchor" in room_presence:
+        presence_bonus = 3
+    elif "large" in room_presence:
+        presence_bonus = 2
+    elif "medium" in room_presence:
+        presence_bonus = 1
+    has_dims = 1 if any(v > 0 for v in (width_mm, depth_mm, height_mm)) else 0
+    explicit_primary = 1 if explicit_primary_key and item_key == explicit_primary_key else 0
+    return (explicit_primary, family_bonus, presence_bonus, has_dims, volume_proxy)
+
+
+def _select_primary_anchor_keys(furniture_specs_json: dict | None, *, limit: int = 4) -> list[str]:
+    if not isinstance(furniture_specs_json, dict):
+        return []
+    items = [item for item in (furniture_specs_json.get("items") or []) if isinstance(item, dict)]
+    if not items:
+        return []
+    explicit_primary_key = str(
+        ((furniture_specs_json.get("primary_scale") or {}) if isinstance(furniture_specs_json.get("primary_scale"), dict) else {}).get("target_key")
+        or ((furniture_specs_json.get("primary") or {}) if isinstance(furniture_specs_json.get("primary"), dict) else {}).get("target_key")
+        or ""
+    ).strip()
+    two_pass_summary = (furniture_specs_json.get("two_pass_strategy") or {}) if isinstance(furniture_specs_json.get("two_pass_strategy"), dict) else {}
+    pass1_primary_keys = [
+        str(value or "").strip()
+        for value in (two_pass_summary.get("pass1_primary_keys") or [])
+        if str(value or "").strip()
+    ]
+    excluded_keys = {
+        str(value or "").strip()
+        for value in (
+            list(two_pass_summary.get("pass1_support_keys") or [])
+            + list(two_pass_summary.get("pass2_detail_keys") or [])
+        )
+        if str(value or "").strip()
+    }
+    explicit_role_data_present = bool(pass1_primary_keys or excluded_keys)
+    if explicit_role_data_present:
+        selected: list[str] = []
+        for item_key in pass1_primary_keys + ([explicit_primary_key] if explicit_primary_key else []):
+            if not item_key or item_key in excluded_keys or item_key in selected:
+                continue
+            selected.append(item_key)
+            if len(selected) >= limit:
+                return selected
+        if selected:
+            return selected
+    scored_items = [
+        (_item_anchor_priority(item, explicit_primary_key=explicit_primary_key), item)
+        for item in items
+    ]
+    sorted_items = [item for _, item in sorted(scored_items, key=lambda pair: pair[0], reverse=True)]
+    eligible_items = [
+        item
+        for score, item in sorted(scored_items, key=lambda pair: pair[0], reverse=True)
+        if (
+            score[0] == 1
+            or (
+                score[1] >= 2
+                and score[2] >= 1
+                and "tiny" not in str(((item.get("identity_profile") or {}).get("room_presence_class") or "")).lower()
+                and str(((item.get("identity_profile") or {}).get("absolute_size_class") or "")).lower() != "tiny"
+            )
+        )
+    ]
+    candidate_items = eligible_items or sorted_items[:1]
+    selected: list[str] = []
+    for item in candidate_items:
+        item_key = _item_target_key_for_prompt(item)
+        if not item_key or item_key in selected or item_key in excluded_keys:
+            continue
+        selected.append(item_key)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _build_item_exactness_card_row(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
+    if not label:
+        return ""
+    try:
+        qty = max(1, int(item.get("qty") or 1))
+    except Exception:
+        qty = 1
+    identity_profile = item.get("identity_profile") or {}
+    product_identity = item.get("product_identity") or {}
+    archetype_strategy = item.get("archetype_strategy") or {}
+    dims = _item_dims_for_prompt(item)
+    family = (
+        product_identity.get("family")
+        or identity_profile.get("family")
+        or item.get("category_canonical")
+        or item.get("category")
+    )
+    silhouette = str(identity_profile.get("silhouette_summary") or "").strip()
+    dims_text = _format_identity_dims(dims)
+    materials = _join_identity_tokens(identity_profile.get("material_cues"), limit=2)
+    topology_cues = _join_identity_tokens(product_identity.get("topology_cues"), limit=2)
+    support_geometry = _join_identity_tokens(product_identity.get("support_geometry"), limit=2)
+    opening_features = _join_identity_tokens(product_identity.get("opening_or_gap_features"), limit=2)
+    pattern_cues = _join_identity_tokens(product_identity.get("pattern_cues"), limit=2)
+    reflection_constraints = _join_identity_tokens(product_identity.get("reflection_constraints"), limit=2)
+    distinctive_parts = _join_identity_tokens(identity_profile.get("distinctive_parts"), limit=3)
+    preserve_rules = _join_identity_tokens(
+        (product_identity.get("preserve_rules") or identity_profile.get("preserve_rules")),
+        limit=3,
+    )
+    forbidden_substitutions = _join_identity_tokens(
+        archetype_strategy.get("forbidden_substitutions"),
+        limit=2,
+    )
+    bits = [f"qty={qty}"]
+    if family:
+        bits.append(f"family={family}")
+    if silhouette:
+        bits.append(f"silhouette={silhouette}")
+    if dims_text:
+        bits.append(dims_text)
+    if materials:
+        bits.append(f"materials={materials}")
+    if topology_cues:
+        bits.append(f"topology={topology_cues}")
+    if support_geometry:
+        bits.append(f"support={support_geometry}")
+    if opening_features:
+        bits.append(f"gaps={opening_features}")
+    if pattern_cues:
+        bits.append(f"pattern={pattern_cues}")
+    if reflection_constraints:
+        bits.append(f"reflection={reflection_constraints}")
+    if distinctive_parts:
+        bits.append(f"distinctive={distinctive_parts}")
+    if preserve_rules:
+        bits.append(f"preserve={preserve_rules}")
+    if forbidden_substitutions:
+        bits.append(f"avoid={forbidden_substitutions}")
+    return f"- {label}: " + "; ".join(bits)
+
+
+def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, primary_anchor_keys: list[str] | None = None) -> str:
     if not isinstance(furniture_specs_json, dict):
         return ""
-    rows: list[str] = []
+    anchor_key_set = {
+        str(value or "").strip()
+        for value in (primary_anchor_keys or [])
+        if str(value or "").strip()
+    }
+    primary_rows: list[str] = []
+    secondary_rows: list[str] = []
     for item in furniture_specs_json.get("items") or []:
-        if not isinstance(item, dict):
+        row = _build_item_exactness_card_row(item)
+        if not row:
             continue
-        label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
-        if not label:
-            continue
-        try:
-            qty = max(1, int(item.get("qty") or 1))
-        except Exception:
-            qty = 1
-        identity_profile = item.get("identity_profile") or {}
-        product_identity = item.get("product_identity") or {}
-        archetype_strategy = item.get("archetype_strategy") or {}
-        dims = (item.get("requested_dims_mm") or item.get("dims_mm") or {}) if isinstance(item, dict) else {}
-        family = (
-            product_identity.get("family")
-            or identity_profile.get("family")
-            or item.get("category_canonical")
-            or item.get("category")
-        )
-        silhouette = str(identity_profile.get("silhouette_summary") or "").strip()
-        dims_text = _format_identity_dims(dims)
-        materials = _join_identity_tokens(identity_profile.get("material_cues"), limit=2)
-        topology_cues = _join_identity_tokens(product_identity.get("topology_cues"), limit=2)
-        support_geometry = _join_identity_tokens(product_identity.get("support_geometry"), limit=2)
-        opening_features = _join_identity_tokens(product_identity.get("opening_or_gap_features"), limit=2)
-        pattern_cues = _join_identity_tokens(product_identity.get("pattern_cues"), limit=2)
-        reflection_constraints = _join_identity_tokens(product_identity.get("reflection_constraints"), limit=2)
-        distinctive_parts = _join_identity_tokens(identity_profile.get("distinctive_parts"), limit=3)
-        preserve_rules = _join_identity_tokens(
-            (product_identity.get("preserve_rules") or identity_profile.get("preserve_rules")),
-            limit=3,
-        )
-        forbidden_substitutions = _join_identity_tokens(
-            archetype_strategy.get("forbidden_substitutions"),
-            limit=2,
-        )
-        bits = [f"qty={qty}"]
-        if family:
-            bits.append(f"family={family}")
-        if silhouette:
-            bits.append(f"silhouette={silhouette}")
-        if dims_text:
-            bits.append(dims_text)
-        if materials:
-            bits.append(f"materials={materials}")
-        if topology_cues:
-            bits.append(f"topology={topology_cues}")
-        if support_geometry:
-            bits.append(f"support={support_geometry}")
-        if opening_features:
-            bits.append(f"gaps={opening_features}")
-        if pattern_cues:
-            bits.append(f"pattern={pattern_cues}")
-        if reflection_constraints:
-            bits.append(f"reflection={reflection_constraints}")
-        if distinctive_parts:
-            bits.append(f"distinctive={distinctive_parts}")
-        if preserve_rules:
-            bits.append(f"preserve={preserve_rules}")
-        if forbidden_substitutions:
-            bits.append(f"avoid={forbidden_substitutions}")
-        rows.append(f"- {label}: " + "; ".join(bits))
-    if not rows:
+        item_key = _item_target_key_for_prompt(item)
+        if item_key and item_key in anchor_key_set:
+            primary_rows.append(row)
+        else:
+            secondary_rows.append(row)
+    if not primary_rows and not secondary_rows:
         return ""
-    return (
-        "\n<ITEM EXACTNESS CARDS>\n"
-        "Use only these compact identity cards plus the cutout images as the product-exactness source.\n"
-        "Do not restyle, simplify, or generalize an item into a same-family substitute.\n"
-        + "\n".join(rows)
-        + "\n--------------------------------------------------\n"
-    )
+    lines = [
+        "\n<ITEM EXACTNESS CARDS>\n",
+        "Use only these compact identity cards plus the cutout images as the product-exactness source.\n",
+        "Do not restyle, simplify, or generalize an item into a same-family substitute.\n",
+    ]
+    if primary_rows:
+        lines.extend(
+            [
+                "<PRIMARY PRODUCT LOCKS>\n",
+                "Match these hero products first. If any tradeoff exists, preserve these exact products before styling or simplifying any supporting item.\n",
+                *[row + "\n" for row in primary_rows],
+            ]
+        )
+    if secondary_rows:
+        lines.extend(
+            [
+                "<SECONDARY SUPPORTING ITEMS>\n",
+                "Render these after the primary product locks are correct. Keep product identity if visible, but never let these override the primary locks.\n",
+                *[row + "\n" for row in secondary_rows],
+            ]
+        )
+    lines.append("--------------------------------------------------\n")
+    return "".join(lines)
 
 
 def _build_fallback_furniture_guidance_context(furniture_specs: str | None) -> str:
@@ -823,7 +1004,12 @@ def generate_furnished_room(
                 "--------------------------------------------------\n"
             )
 
-        specs_context = _build_item_exactness_cards_context(furniture_specs_json)
+        primary_anchor_keys = _select_primary_anchor_keys(furniture_specs_json)
+        anchor_key_set = set(primary_anchor_keys)
+        specs_context = _build_item_exactness_cards_context(
+            furniture_specs_json,
+            primary_anchor_keys=primary_anchor_keys,
+        )
         if not specs_context:
             specs_context = _build_fallback_furniture_guidance_context(furniture_specs)
 
@@ -871,24 +1057,6 @@ def generate_furnished_room(
         placement_plan_context = ""
         strict_scale_requested = bool(isinstance(scale_plan, dict) and scale_plan.get("strict_scale_requested"))
         b_lite_runtime = strict_scale_requested
-        two_pass_staging_runtime = bool(
-            (isinstance(scale_plan, dict) and scale_plan.get("two_pass_staging_runtime"))
-            or (isinstance(geometry_contract, dict) and geometry_contract.get("two_pass_staging_runtime"))
-        )
-        two_pass_summary = (furniture_specs_json.get("two_pass_strategy") or {}) if isinstance(furniture_specs_json, dict) else {}
-        pass2_detail_keys = {
-            str(value or "").strip()
-            for value in ((two_pass_summary.get("pass2_detail_keys") or []) if isinstance(two_pass_summary, dict) else [])
-            if str(value or "").strip()
-        }
-        pass1_render_keys = {
-            str(value or "").strip()
-            for value in (
-                list((two_pass_summary.get("pass1_primary_keys") or []) if isinstance(two_pass_summary, dict) else [])
-                + list((two_pass_summary.get("pass1_support_keys") or []) if isinstance(two_pass_summary, dict) else [])
-            )
-            if str(value or "").strip()
-        }
         item_labels_by_key: dict[str, str] = {}
         if isinstance(furniture_specs_json, dict):
             for item in furniture_specs_json.get("items") or []:
@@ -897,21 +1065,7 @@ def generate_furnished_room(
                 item_key = str(item.get("target_key") or item.get("source_index") or item.get("label") or "").strip()
                 if item_key and item_key not in item_labels_by_key:
                     item_labels_by_key[item_key] = str(item.get("label") or item.get("category") or item_key)
-        if two_pass_staging_runtime and pass2_detail_keys and not pass1_render_keys:
-            pass1_render_keys = {item_key for item_key in item_labels_by_key.keys() if item_key not in pass2_detail_keys}
-        pass1_labels = [item_labels_by_key.get(item_key, item_key) for item_key in sorted(pass1_render_keys)]
-        pass2_labels = [item_labels_by_key.get(item_key, item_key) for item_key in sorted(pass2_detail_keys)]
-        two_pass_prompt_context = ""
-        if two_pass_staging_runtime and pass2_labels:
-            pass1_text = ", ".join(pass1_labels[:8]) if pass1_labels else "anchor and footprint-defining furniture"
-            pass2_text = ", ".join(pass2_labels[:8])
-            two_pass_prompt_context = (
-                "\n<TWO-PASS STAGING MODE>\n"
-                f"This first render must stage only these pass1 anchor/footprint items: {pass1_text}.\n"
-                f"Do NOT insert these pass2 detail items yet: {pass2_text}.\n"
-                "They will be added in a later localized completion step. Keep space reserved for them.\n"
-                "--------------------------------------------------\n"
-            )
+        anchor_labels = [item_labels_by_key.get(item_key, item_key) for item_key in primary_anchor_keys if item_key in item_labels_by_key]
 
         try:
             _room_dims = room_dims_parsed or parse_room_dimensions_mm(room_dimensions or "")
@@ -1458,6 +1612,17 @@ def generate_furnished_room(
             "2. **PLACEMENT:** Obey the per-item placement family exactly. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
             "3. **AXIS ALIGNMENT:** If the room edges, window mullions, or major wall lines are straight, keep sofas, storage, rugs, and large tables parallel or perpendicular to those dominant room axes. Do not place them on a casual 20-60 degree diagonal unless explicit instructions require it.\n"
             "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
+            + (
+                f"4a. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
+                if anchor_labels
+                else ""
+            )
+            + (
+                "4b. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
+                if anchor_labels
+                else ""
+            )
+            +
             "5. **STYLE:** Match the intended style implied by the provided furniture items.\n"
             "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
             f"{window_context}"
@@ -1522,7 +1687,6 @@ def generate_furnished_room(
             f"{geometry_contract_context}\n"
             f"{scene_contract_context}\n"
             f"{placement_plan_context}\n"
-            f"{two_pass_prompt_context}\n"
             f"{spatial_context}\n"
             f"{scale_guide_context}\n"
             f"{inventory_context}\n"
@@ -1541,8 +1705,17 @@ def generate_furnished_room(
         repair_focus_context = ""
         reference_content = []
 
-        def _build_content():
-            return [base_prompt + repair_focus_context, "Empty Room (Target Canvas - KEEP THIS):", room_img, *reference_content]
+        def _build_content(
+            *,
+            prompt_override: str | None = None,
+            reference_override: list | None = None,
+            room_image_override=None,
+            room_label: str = "Empty Room (Target Canvas - KEEP THIS):",
+        ):
+            prompt = prompt_override if prompt_override is not None else base_prompt + repair_focus_context
+            image = room_image_override if room_image_override is not None else room_img
+            refs = reference_override if reference_override is not None else reference_content
+            return [prompt, room_label, image, *list(refs or [])]
 
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
@@ -1576,27 +1749,12 @@ def generate_furnished_room(
                         idx = int((row or {}).get("index") or 0)
                     except Exception:
                         idx = 0
-                    return (has_dims, vol, w, d, h, cat, -idx)
+                    item_key = _item_target_key_for_prompt(row)
+                    is_primary_anchor = 1 if item_key and item_key in anchor_key_set else 0
+                    return (is_primary_anchor, has_dims, vol, w, d, h, cat, -idx)
 
-                if two_pass_staging_runtime and pass2_detail_keys:
-                    pass1_cutout_items = [
-                        row
-                        for row in items_for_cutout
-                        if str((row or {}).get("target_key") or (row or {}).get("source_index") or (row or {}).get("label") or "").strip()
-                        not in pass2_detail_keys
-                    ]
-                    pass2_cutout_items = [
-                        row
-                        for row in items_for_cutout
-                        if str((row or {}).get("target_key") or (row or {}).get("source_index") or (row or {}).get("label") or "").strip()
-                        in pass2_detail_keys
-                    ]
-                    pass1_cutout_items.sort(key=_cutout_scale_priority, reverse=True)
-                    pass2_cutout_items.sort(key=_cutout_scale_priority, reverse=True)
-                    items_for_cutout = pass1_cutout_items[:12] + pass2_cutout_items[:4]
-                else:
-                    items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
-                    items_for_cutout = items_for_cutout[:12]
+                items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
+                items_for_cutout = items_for_cutout[:12]
                 for it in items_for_cutout:
                     cp = it.get("crop_path")
                     if cp and os.path.exists(cp):
@@ -1625,16 +1783,14 @@ def generate_furnished_room(
                     cutout_img = Image.open(cp)
                     try:
                         max_thumb = _reference_thumbnail_size(it)
-                        if two_pass_staging_runtime and item_key in pass2_detail_keys:
-                            max_thumb = min(max_thumb, 256)
                         cutout_img.thumbnail((max_thumb, max_thumb), Image.Resampling.LANCZOS)
                     except Exception:
                         pass
                     extra_imgs.append(cutout_img)
-                    reference_header = "Furniture Cutout Reference (PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
-                    if two_pass_staging_runtime and item_key in pass2_detail_keys:
-                        reference_header = "Pass2 Detail Reserve Reference (VISUAL CONTEXT ONLY - DO NOT PLACE IN FIRST PASS, BUT KEEP THIS EXACT PRODUCT IDENTITY). "
-                    reference_content += [
+                    reference_header = "Furniture Cutout Reference (SECONDARY SUPPORT ITEM - KEEP PRODUCT IDENTITY AFTER PRIMARY LOCKS ARE CORRECT). "
+                    if item_key and item_key in anchor_key_set:
+                        reference_header = "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
+                    reference_entry = [
                         (
                             reference_header
                             + f"Label={lbl} | Qty={qty} | W={w if w is not None else 'null'}mm "
@@ -1663,6 +1819,7 @@ def generate_furnished_room(
                         ),
                         cutout_img,
                     ]
+                    reference_content += reference_entry
             if not reference_content and ref_path:
                 fallback_refs = ref_path if isinstance(ref_path, (list, tuple)) else [ref_path]
                 for index, raw_path in enumerate(fallback_refs, start=1):
@@ -1675,10 +1832,11 @@ def generate_furnished_room(
                     except Exception:
                         pass
                     extra_imgs.append(ref_img)
-                    reference_content += [
+                    fallback_entry = [
                         f"Fallback Furniture Reference Image {index} (EXACTNESS ANCHOR - use this reference image even if structured item cards are unavailable).",
                         ref_img,
                     ]
+                    reference_content += fallback_entry
         except Exception:
             pass
         safety_settings = allow_all_safety_settings()
@@ -1714,11 +1872,7 @@ def generate_furnished_room(
                         return normalized_path
             return None
 
-        def _render_once():
-            current_timeout = _bounded_stage2_timeout()
-            if current_timeout <= 0.0:
-                return None
-            content = _build_content()
+        def _generation_request_options(current_timeout: float) -> dict:
             request_options = {
                 "timeout": current_timeout,
                 "aspect_ratio": "16:9",
@@ -1727,12 +1881,27 @@ def generate_furnished_room(
             }
             if b_lite_runtime:
                 request_options["max_attempts"] = 1
+            return request_options
+
+        def _call_generation(content: list, *, current_timeout: float, log_tag: str):
             response = generation_call(
                 resolved_generation_model,
                 content,
-                request_options,
+                _generation_request_options(current_timeout),
                 safety_settings,
                 system_instruction,
+                log_tag=log_tag,
+            )
+            return response
+
+        def _render_once():
+            current_timeout = _bounded_stage2_timeout()
+            if current_timeout <= 0.0:
+                return None
+            content = _build_content()
+            response = _call_generation(
+                content,
+                current_timeout=current_timeout,
                 log_tag="Stage2.Furnish",
             )
             return _save_render_from_response(response, prefix="result")
@@ -1824,49 +1993,7 @@ def generate_furnished_room(
                 if str((((row.get("item") or {}).get("archetype_strategy") or {}).get("strictness") or "")).strip().lower() == "critical"
                 or bool(row.get("unmatched"))
             ]
-            if b_lite_runtime and pass2_detail_keys:
-                prioritized_targets: list[dict] = []
-                seen_keys: set[str] = set()
-                primary_target_key = str(
-                    ((furniture_specs_json.get("primary_scale") or {}) if isinstance(furniture_specs_json, dict) else {}).get("target_key")
-                    or ((furniture_specs_json.get("primary") or {}) if isinstance(furniture_specs_json, dict) else {}).get("target_key")
-                    or ""
-                ).strip()
-
-                def _pass_role_for_row(row: dict) -> str:
-                    item = row.get("item") or {}
-                    two_pass = (item.get("two_pass_strategy") or {}) if isinstance(item, dict) else {}
-                    return str(two_pass.get("pass_role") or item.get("pass_role") or "").strip().lower()
-
-                protected_pass1_targets = [
-                    row
-                    for row in critical_targets
-                    if (
-                        str(row.get("item_key") or "").strip() == primary_target_key
-                        or str(row.get("item_key") or "").strip() in pass1_render_keys
-                        or _pass_role_for_row(row) in {"pass1_anchor", "pass1_footprint"}
-                    )
-                ]
-                buckets = [
-                    protected_pass1_targets,
-                    [row for row in targets if str(row.get("item_key") or "").strip() in pass2_detail_keys],
-                    critical_targets,
-                    targets,
-                ]
-                for bucket in buckets:
-                    for row in bucket:
-                        item_key = str(row.get("item_key") or "").strip()
-                        dedupe_key = item_key or str(id(row))
-                        if dedupe_key in seen_keys:
-                            continue
-                        prioritized_targets.append(row)
-                        seen_keys.add(dedupe_key)
-                        if len(prioritized_targets) >= 5:
-                            break
-                    if len(prioritized_targets) >= 5:
-                        break
-                targets = prioritized_targets[:5]
-            elif critical_targets:
+            if critical_targets:
                 targets = critical_targets[:3]
             else:
                 targets = targets[:3]

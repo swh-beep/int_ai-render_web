@@ -282,6 +282,22 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
 MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
+DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3-pro-image-preview"
+
+
+def _default_direct_gemini_image_model_name() -> str:
+    configured_model = (
+        os.getenv("GEMINI_IMAGE_MODEL_NAME")
+        or os.getenv("MAIN_IMAGE_MODEL_NAME")
+        or ""
+    ).strip()
+    normalized = configured_model.lower()
+    if configured_model and not normalized.startswith(("gpt-", "dall-e-", "chatgpt-")):
+        return configured_model
+    return DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME
+
+
+GEMINI_IMAGE_MODEL_NAME = _default_direct_gemini_image_model_name()
 PROVIDER_DEFAULTS = resolve_provider_defaults(os.environ)
 FORCE_GEMINI_ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.force_gemini_analysis_provider
 FORCE_GEMINI_IMAGE_PROVIDERS = PROVIDER_DEFAULTS.force_gemini_image_providers
@@ -314,7 +330,7 @@ def _default_main_image_model_name() -> str:
         provider=MAIN_IMAGE_PROVIDER,
         configured_model_name=os.getenv("MAIN_IMAGE_MODEL_NAME"),
         default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
-        default_gemini_model_name=MODEL_NAME,
+        default_gemini_model_name=GEMINI_IMAGE_MODEL_NAME,
     )
 
 
@@ -323,7 +339,7 @@ def _default_repair_image_model_name() -> str:
         provider=REPAIR_IMAGE_PROVIDER,
         configured_model_name=os.getenv("REPAIR_IMAGE_MODEL_NAME"),
         default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
-        default_gemini_model_name=MODEL_NAME,
+        default_gemini_model_name=GEMINI_IMAGE_MODEL_NAME,
     )
 
 
@@ -1248,7 +1264,7 @@ def create_scale_guide_overlay_with_model(
         room_dims_valid_fn=_room_dims_valid,
         allow_all_safety_settings=allow_all_safety_settings,
         call_gemini_with_failover=call_gemini_with_failover,
-        model_name=MODEL_NAME,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
         logger=logger,
     )
 
@@ -1989,7 +2005,7 @@ def generate_moodboard_options(
         build_prompt=build_moodboard_generation_prompt,
         allow_all_safety_settings=allow_all_safety_settings,
         call_gemini_with_failover=call_gemini_with_failover,
-        model_name=MODEL_NAME,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
     )
     if result.get("error"):
         return JSONResponse(content=result, status_code=500)
@@ -2101,7 +2117,7 @@ job_entrypoints_module.configure_job_entrypoints(
             build_image_edit_step_prompt=build_image_edit_step_prompt,
             pad_image_to_target_canvas=pad_image_to_target_canvas,
             call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
+            model_name=GEMINI_IMAGE_MODEL_NAME,
             match_aspect_to_target=match_aspect_to_target,
             mask_path=mask_path,
         ),
@@ -2113,7 +2129,7 @@ job_entrypoints_module.configure_job_entrypoints(
             build_frontal_generation_prompt=build_frontal_generation_prompt,
             call_gemini_with_failover=call_gemini_with_failover,
             analysis_model_name=ANALYSIS_MODEL_NAME,
-            model_name=MODEL_NAME,
+            model_name=GEMINI_IMAGE_MODEL_NAME,
             allow_all_safety_settings=allow_all_safety_settings,
             standardize_image=standardize_image,
         ),
@@ -2135,7 +2151,7 @@ job_entrypoints_module.configure_job_entrypoints(
             normalize_label_for_match=_normalize_label_for_match,
             allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,
             call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
+            model_name=GEMINI_IMAGE_MODEL_NAME,
         ),
         normalize_label_for_match=_normalize_label_for_match,
         volume_ranking_snapshot=_volume_ranking_snapshot,
