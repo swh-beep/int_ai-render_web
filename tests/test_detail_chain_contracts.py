@@ -3,6 +3,8 @@ from pathlib import Path
 
 from api_models import DetailRequest, RegenerateDetailRequest
 from application.details.detail_analysis_stage import load_analyzed_items, prepare_detail_generation_items
+from application.details.detail_generation_stage import generate_detail_view as actual_generate_detail_view
+from application.details.detail_style_stage import construct_dynamic_styles
 from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
 from application.details.detail_workflow import run_generate_details_job
 from application.render.render_result_stage import build_detail_payload
@@ -76,6 +78,7 @@ class DetailChainContractsTests(unittest.TestCase):
         )
 
         detect_calls = []
+        generation_kwargs = []
 
         try:
             result = run_regenerate_single_detail_job(
@@ -100,6 +103,7 @@ class DetailChainContractsTests(unittest.TestCase):
                     "description": "Tall articulated floor lamp with cream shade",
                     "crop_path": str(source_path),
                     "category_canonical": "floor_lamp",
+                    "box_source": "detail_current_image_analysis",
                 },
                 attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
                 construct_dynamic_styles=lambda items: [
@@ -113,10 +117,13 @@ class DetailChainContractsTests(unittest.TestCase):
                     },
                 ],
                 normalize_label_for_match=lambda text: str(text).strip().lower(),
-                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: {
-                    "path": original_image_path,
-                    "style_name": style_config.get("name"),
-                },
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: (
+                    generation_kwargs.append(kwargs)
+                    or {
+                        "path": original_image_path,
+                        "style_name": style_config.get("name"),
+                    }
+                ),
                 volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
             )
         finally:
@@ -127,6 +134,8 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["requested_target_key"], "detail_001_floor-lamp")
         self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
         self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_floor-lamp")
+        self.assertEqual(result["furniture_data"][0]["box_source"], "detail_current_image_analysis")
+        self.assertEqual(generation_kwargs[0].get("prefer_crop_extract"), True)
 
     def test_run_regenerate_single_detail_job_preserves_requested_target_even_when_box_overlaps_other_detection(self):
         source_path = Path("outputs/test-regenerate-box-source.png")
@@ -164,6 +173,7 @@ class DetailChainContractsTests(unittest.TestCase):
                     "description": f"{item['label']} description",
                     "crop_path": str(source_path),
                     "category_canonical": str(item["label"]).lower().replace(" ", "_"),
+                    "box_source": "detail_current_image_analysis",
                 },
                 attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
                 construct_dynamic_styles=lambda items: [
@@ -196,6 +206,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["target_key"], "legacy_cabinet_key")
         self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
         self.assertEqual(result["furniture_data"][0]["target_key"], "legacy_cabinet_key")
+        self.assertEqual(result["furniture_data"][0]["box_source"], "detail_current_image_analysis")
 
     def test_run_regenerate_single_detail_job_preserves_requested_target_when_analysis_falls_back(self):
         source_path = Path("outputs/test-regenerate-generic-fallback.png")
@@ -503,7 +514,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["furniture_data"][0]["target_key"], "cached_table_001")
         self.assertEqual(result["furniture_data"][1]["label"], "Armchair")
 
-    def test_run_regenerate_single_detail_job_requests_crop_first_mode(self):
+    def test_run_regenerate_single_detail_job_requests_crop_first_for_detail_styles(self):
         source_path = Path("outputs/test-regenerate-crop-mode.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.write_bytes(
@@ -549,6 +560,153 @@ class DetailChainContractsTests(unittest.TestCase):
 
         self.assertEqual(result["style_name"], "Detail: Accent Chair")
         self.assertTrue(captured["prefer_crop_extract"])
+
+    def test_run_generate_details_job_blocks_source_reference_crop_targets(self):
+        source_path = Path("outputs/test-detail-source-reference.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        try:
+            result = run_generate_details_job(
+                {
+                    "image_url": str(source_path),
+                    "furniture_data": [
+                        {
+                            "label": "Accent Chair",
+                            "target_key": "chair_01",
+                            "box_2d": [120, 180, 820, 640],
+                            "box_source": "source_reference",
+                            "crop_path": str(source_path),
+                            "description": "Accent chair",
+                            "category": "chair",
+                            "category_canonical": "chair",
+                        }
+                    ],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                persist_job_result=lambda payload, audience=None: None,
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                log_section=lambda message: None,
+                detect_furniture_boxes=lambda path: [],
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: items,
+                construct_dynamic_styles=lambda items: [
+                    {
+                        "name": "Detail: Accent Chair",
+                        "target_key": "chair_01",
+                        "target_label": "Accent Chair",
+                    }
+                ],
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: actual_generate_detail_view(
+                    original_image_path,
+                    style_config,
+                    unique_id,
+                    index,
+                    furniture_data=furniture_data,
+                    materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not materialize cutouts")
+                    ),
+                    normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                    allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not request model safety settings")
+                    ),
+                    call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not call the generation model")
+                    ),
+                    model_name="unused",
+                    **kwargs,
+                ),
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                volume_ranking_snapshot=lambda items: [],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["error"], "Failed to generate images")
+
+    def test_run_regenerate_single_detail_job_blocks_source_reference_crop_targets(self):
+        source_path = Path("outputs/test-regenerate-source-reference.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 4,
+                    "style_index_mode": "auto",
+                    "target_key": "chair_01",
+                    "target_label": "Accent Chair",
+                    "furniture_data": [
+                        {
+                            "label": "Accent Chair",
+                            "target_key": "chair_01",
+                            "box_2d": [120, 180, 820, 640],
+                            "box_source": "source_reference",
+                            "crop_path": str(source_path),
+                            "description": "Accent chair",
+                            "category": "chair",
+                            "category_canonical": "chair",
+                        }
+                    ],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: [],
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: items,
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    {
+                        "name": "Detail: Accent Chair",
+                        "target_key": "chair_01",
+                        "target_label": "Accent Chair",
+                    },
+                ],
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: actual_generate_detail_view(
+                    original_image_path,
+                    style_config,
+                    unique_id,
+                    index,
+                    furniture_data=furniture_data,
+                    materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not materialize cutouts")
+                    ),
+                    normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                    allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not request model safety settings")
+                    ),
+                    call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("source_reference crop block should not call the generation model")
+                    ),
+                    model_name="unused",
+                    **kwargs,
+                ),
+                volume_ranking_snapshot=lambda items: [],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["error"], "Generation failed")
 
 
 if __name__ == "__main__":
@@ -675,6 +833,74 @@ def test_run_generate_details_job_budgeted_mode_limits_styles_and_uses_style_tim
     assert len(result["details"]) == 1
     assert recorded_timeouts == [29.0]
     assert result["details"][0]["style_name"] == "Detail: Chair"
+
+
+def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    recorded_styles = {}
+    recorded_crop_preferences = {}
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        recorded_styles[int(index)] = dict(style_config)
+        recorded_crop_preferences[int(index)] = bool(kwargs.get("prefer_crop_extract"))
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+            "audience": "internal",
+        },
+        normalize_audience=lambda audience: audience or "internal",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: [
+            {
+                "label": "Accent Chair",
+                "box_2d": [100, 100, 700, 700],
+            }
+        ],
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: {
+            **item,
+            "description": "single accent chair",
+            "crop_path": str(image_path),
+        },
+        attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: str(label or "").strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    assert [row["style_name"] for row in result["details"][:3]] == [
+        "High Angle Overview",
+        "Side Composition (Focus Left)",
+        "Side Composition (Focus Right)",
+    ]
+    assert [row["aspect_ratio"] for row in result["details"][:3]] == ["16:9", "16:9", "16:9"]
+    assert [recorded_styles[idx].get("ratio") for idx in [1, 2, 3]] == ["16:9", "16:9", "16:9"]
+    assert recorded_styles[1].get("camera_mode") == "overview_angle"
+    assert recorded_styles[2].get("camera_mode") == "side_angle"
+    assert recorded_styles[2].get("focus_side") == "left"
+    assert recorded_styles[3].get("camera_mode") == "side_angle"
+    assert recorded_styles[3].get("focus_side") == "right"
+    assert recorded_crop_preferences[1] is False
+    assert recorded_crop_preferences[2] is False
+    assert recorded_crop_preferences[3] is False
+    assert recorded_crop_preferences[4] is True
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):

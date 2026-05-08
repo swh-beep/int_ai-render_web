@@ -42,11 +42,10 @@ def _build_video_filter(
     safe_mode = (aspect_mode or "crop").strip().lower()
     if safe_mode == "fill":
         return (
-            f"[0:v]{base_chain},split=2[bg][fg];"
-            f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-            f"crop={target_w}:{target_h},boxblur=12:1[bgv];"
-            f"[fg]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[fgv];"
-            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2,setsar=1,fps={video_target_fps}[vout]"
+            f"[0:v]{base_chain},"
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps={video_target_fps}[vout]"
         )
     return (
         f"[0:v]{base_chain},"

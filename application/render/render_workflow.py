@@ -64,6 +64,7 @@ def run_render_job(
             placement=prepared.placement,
             audience=prepared.audience,
             moodboard_items=resources.local_items,
+            simple_generation_mode=bool(payload.get("simple_generation_mode")),
         )
         result = json_from_response(response)
         if persist_result:

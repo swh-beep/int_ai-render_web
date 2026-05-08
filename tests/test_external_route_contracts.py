@@ -110,6 +110,19 @@ def _external_cart_finished_result_payload():
     return payload
 
 
+def _external_finished_result_payload_many_sources():
+    payload = _external_finished_result_payload()
+    payload["details"]["details"] = [
+        {"url": "https://cdn.example/detail-1.png"},
+        {"url": "https://cdn.example/detail-2.png"},
+        {"url": "https://cdn.example/detail-3.png"},
+        {"url": "https://cdn.example/detail-4.png"},
+        {"url": "https://cdn.example/detail-5.png"},
+        {"url": "https://cdn.example/detail-6.png"},
+    ]
+    return payload
+
+
 class ExternalRouteContractsTests(unittest.TestCase):
     def test_external_audience_must_keep_scale_check_disabled(self):
         result = run_render_audience_stage(
@@ -209,6 +222,30 @@ class ExternalRouteContractsTests(unittest.TestCase):
                 "status": "queued",
                 "render_job_id": "job-xyz",
                 "clip_count": 3,
+            },
+        )
+
+    def test_external_render_video_route_caps_clip_count_by_request_when_more_sources_exist(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(_external_finished_result_payload_many_sources())
+        deps.enqueue_job = lambda job_func, payload, queue_name=None, **kwargs: (SimpleNamespace(id="job-video"), None)
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/video",
+                json={"render_job_id": "job-xyz", "clip_count": 4},
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "job_id": "job-video",
+                "status": "queued",
+                "render_job_id": "job-xyz",
+                "clip_count": 4,
             },
         )
 

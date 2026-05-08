@@ -2,7 +2,7 @@ import os
 import uuid
 from typing import Callable, Optional
 
-from application.details.detail_analysis_stage import load_analyzed_items
+from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.regenerate_detail_resolution import (
     attach_regenerated_target_metadata,
     resolve_regeneration_style,
@@ -151,9 +151,7 @@ def _inject_requested_target_fallback(
         if req_target_key:
             hydrated["target_key"] = str(req_target_key).strip()
         if normalized_box is not None:
-            hydrated["box_2d"] = list(normalized_box)
-            hydrated["source_box_2d"] = list(normalized_box)
-            hydrated["box_source"] = "requested_target_box"
+            hydrated["requested_target_box_2d"] = list(normalized_box)
         next_items = [hydrated]
         replaced = False
         for item in analyzed_items or []:
@@ -192,9 +190,7 @@ def _inject_requested_target_fallback(
     )
 
     if normalized_box is not None:
-        hydrated["box_2d"] = list(normalized_box)
-        hydrated["source_box_2d"] = list(normalized_box)
-        hydrated["box_source"] = "requested_target_box"
+        hydrated["requested_target_box_2d"] = list(normalized_box)
 
     filtered_items = []
     for item in analyzed_items or []:
@@ -246,22 +242,22 @@ def run_regenerate_single_detail_job(
         resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
         if furniture_data and len(furniture_data) > 0:
-            print(">> [Single Retry] Using cached furniture data!", flush=True)
-            analyzed_items = furniture_data
+            print(">> [Single Retry] Re-aligning cached furniture identity against the current render...", flush=True)
         else:
             print(">> [Single Retry] No cached furniture data. Re-analyzing the source image...", flush=True)
-            analyzed_items = load_analyzed_items(
-                furniture_data=None,
-                moodboard_url=payload.get("moodboard_url"),
-                local_path=local_path,
-                materialize_input=materialize_input,
-                detect_furniture_boxes=detect_furniture_boxes,
-                canonical_category=canonical_category,
-                build_item_target_key=build_item_target_key,
-                max_concurrency_analysis=max_concurrency_analysis,
-                analyze_cropped_item=analyze_cropped_item,
-                attach_volume_ranks=attach_volume_ranks,
-            )
+        analyzed_items = prepare_detail_generation_items(
+            furniture_data=furniture_data,
+            moodboard_url=payload.get("moodboard_url"),
+            local_path=local_path,
+            materialize_input=materialize_input,
+            detect_furniture_boxes=detect_furniture_boxes,
+            canonical_category=canonical_category,
+            build_item_target_key=build_item_target_key,
+            max_concurrency_analysis=max_concurrency_analysis,
+            analyze_cropped_item=analyze_cropped_item,
+            attach_volume_ranks=attach_volume_ranks,
+            normalize_label_for_match=normalize_label_for_match,
+        )
 
         try:
             analyzed_items = attach_volume_ranks(analyzed_items)
@@ -316,7 +312,7 @@ def run_regenerate_single_detail_job(
             unique_id,
             int(resolved_style_index or 1),
             analyzed_items,
-            prefer_crop_extract=True,
+            prefer_crop_extract=str(style.get("name") or "").startswith("Detail:"),
         )
         if not result:
             return {"error": "Generation failed"}
@@ -345,6 +341,7 @@ def run_regenerate_single_detail_job(
         output["resolved_by"] = resolution_chain or None
         if isinstance(result, dict):
             output["style_name"] = result.get("style_name") or style.get("name")
+            output["aspect_ratio"] = result.get("aspect_ratio") or style.get("ratio")
             output["cutout_ref_count"] = int(result.get("cutout_ref_count") or 0)
             labels = list(result.get("cutout_ref_labels") or [])
             if labels:

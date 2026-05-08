@@ -8,8 +8,6 @@ from typing import Any, Callable
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from application.job_entrypoints import job_render_with_extra
-
 @dataclass
 class QueueRouteDependencies:
     redis_url: str | None
@@ -51,6 +49,7 @@ class QueueRouteDependencies:
     rq_video_job_timeout: int
     job_render: Callable[..., dict]
     job_render_with_details: Callable[..., dict]
+    job_render_with_extra: Callable[..., dict]
     job_generate_render_video: Callable[..., dict]
     job_image_edit: Callable[..., dict]
     job_frontal_view: Callable[..., dict]
@@ -485,7 +484,7 @@ def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: 
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
-    job, err = deps.enqueue_job(job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
+    job, err = deps.enqueue_job(deps.job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
@@ -543,7 +542,10 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
             "job_id": job.id,
             "status": "queued",
             "render_job_id": job_payload["render_job_id"],
-            "clip_count": _count_external_video_source_images(source_result),
+            "clip_count": min(
+                int(job_payload.get("clip_count") or 4),
+                _count_external_video_source_images(source_result),
+            ),
         }
     )
 

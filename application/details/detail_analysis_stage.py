@@ -226,6 +226,7 @@ def _merge_cached_identity_into_fresh_items(
         for field in (
             "dims_mm",
             "requested_dims_mm",
+            "reference_features",
             "product_identity",
             "identity_profile",
             "layout_envelope",
@@ -343,6 +344,7 @@ def prepare_detail_generation_items(
     analyze_cropped_item: Callable[[str, dict], dict],
     attach_volume_ranks: Callable[[list], list],
     normalize_label_for_match: Callable[[str], str],
+    simple_generation_mode: bool = False,
 ) -> list:
     fresh_items = load_analyzed_items(
         furniture_data=None,

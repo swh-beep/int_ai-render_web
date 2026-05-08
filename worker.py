@@ -49,7 +49,7 @@ def _run_worker():
                 def __exit__(self, exc_type, exc, tb): return False
             worker.disable_job_timeout = True
             worker.death_penalty_class = _NoopDeathPenalty
-        worker.work()
+        worker.work(with_scheduler=True)
 
 def main():
     workers = int(os.getenv("RQ_WORKERS", "1") or 1)

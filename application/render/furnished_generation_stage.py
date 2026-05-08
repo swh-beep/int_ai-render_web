@@ -329,6 +329,7 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
     identity_profile = item.get("identity_profile") or {}
     product_identity = item.get("product_identity") or {}
     archetype_strategy = item.get("archetype_strategy") or {}
+    reference_features = item.get("reference_features") or {}
     dims = _item_dims_for_prompt(item)
     family = (
         product_identity.get("family")
@@ -349,6 +350,10 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         (product_identity.get("preserve_rules") or identity_profile.get("preserve_rules")),
         limit=3,
     )
+    ref_silhouette = _join_identity_tokens(reference_features.get("silhouette_cues"), limit=2)
+    ref_materials = _join_identity_tokens(reference_features.get("material_cues"), limit=2)
+    ref_parts = _join_identity_tokens(reference_features.get("distinctive_parts"), limit=2)
+    ref_preserve = _join_identity_tokens(reference_features.get("preserve_rules"), limit=2)
     forbidden_substitutions = _join_identity_tokens(
         archetype_strategy.get("forbidden_substitutions"),
         limit=2,
@@ -376,6 +381,14 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         bits.append(f"distinctive={distinctive_parts}")
     if preserve_rules:
         bits.append(f"preserve={preserve_rules}")
+    if ref_silhouette:
+        bits.append(f"ref_shape={ref_silhouette}")
+    if ref_materials:
+        bits.append(f"ref_material={ref_materials}")
+    if ref_parts:
+        bits.append(f"ref_parts={ref_parts}")
+    if ref_preserve:
+        bits.append(f"ref_preserve={ref_preserve}")
     if forbidden_substitutions:
         bits.append(f"avoid={forbidden_substitutions}")
     return f"- {label}: " + "; ".join(bits)
@@ -903,6 +916,7 @@ def generate_furnished_room(
     windows_present=None,
     room_analysis_text=None,
     enable_scale_check=False,
+    max_generation_attempts: int | None = None,
     total_timeout_limit: float,
     detect_windows_present: Callable[[str], bool],
     logger,
@@ -1872,6 +1886,13 @@ def generate_furnished_room(
                         return normalized_path
             return None
 
+        effective_generation_attempts: int | None = None
+        try:
+            if max_generation_attempts is not None:
+                effective_generation_attempts = max(1, int(max_generation_attempts))
+        except Exception:
+            effective_generation_attempts = None
+
         def _generation_request_options(current_timeout: float) -> dict:
             request_options = {
                 "timeout": current_timeout,
@@ -1879,7 +1900,9 @@ def generate_furnished_room(
                 "thinking_level": "high",
                 "include_thoughts": False,
             }
-            if b_lite_runtime:
+            if effective_generation_attempts is not None:
+                request_options["max_attempts"] = effective_generation_attempts
+            elif b_lite_runtime:
                 request_options["max_attempts"] = 1
             return request_options
 
@@ -1907,7 +1930,7 @@ def generate_furnished_room(
             return _save_render_from_response(response, prefix="result")
 
         b_lite_runtime = strict_scale_requested
-        max_attempts = 1 if b_lite_runtime else 3
+        max_attempts = effective_generation_attempts if effective_generation_attempts is not None else (1 if b_lite_runtime else 3)
         guide_attached_to_prompt = False
         last_path = None
         last_success_path = None
@@ -2102,7 +2125,9 @@ def generate_furnished_room(
                     "thinking_level": "high",
                     "include_thoughts": False,
                 }
-                if b_lite_runtime:
+                if effective_generation_attempts is not None:
+                    request_options["max_attempts"] = effective_generation_attempts
+                elif b_lite_runtime:
                     request_options["max_attempts"] = 1
                 response = repair_call(
                     resolved_repair_model,

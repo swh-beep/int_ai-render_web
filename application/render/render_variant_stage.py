@@ -56,6 +56,7 @@ def _generate_one_variant(
     windows_present: bool,
     room_analysis_text: str,
     enable_scale_check: bool,
+    max_generation_attempts: int | None = None,
     generate_furnished_room: Callable[..., str | dict[str, Any] | None],
 ):
     sub_id = f"{unique_id}_v{index+1}"
@@ -83,6 +84,7 @@ def _generate_one_variant(
             windows_present=windows_present,
             room_analysis_text=room_analysis_text,
             enable_scale_check=enable_scale_check,
+            max_generation_attempts=max_generation_attempts,
         )
         if result:
             return _normalize_variant_result(result)
@@ -118,6 +120,7 @@ def run_render_variant_stage(
     generate_furnished_room: Callable[..., str | dict[str, Any] | None],
     max_variants: int = 2,
     max_workers: int = 2,
+    max_generation_attempts: int | None = None,
     start_index: int = 0,
 ) -> list[dict[str, Any]]:
     generated_results: list[dict[str, Any]] = []
@@ -159,6 +162,7 @@ def run_render_variant_stage(
                 windows_present=windows_present,
                 room_analysis_text=room_analysis_text,
                 enable_scale_check=enable_scale_check,
+                max_generation_attempts=max_generation_attempts,
                 generate_furnished_room=generate_furnished_room,
             )
             for index in variant_indexes

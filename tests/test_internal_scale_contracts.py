@@ -2681,6 +2681,51 @@ def test_generate_furnished_room_counts_retries_before_first_success(tmp_path, m
     }
 
 
+def test_generate_furnished_room_respects_explicit_single_attempt_limit(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    call_state = {"count": 0}
+
+    monkeypatch.setattr(furnished_generation_stage.time, "time", lambda: 1014.0)
+
+    def _call_gemini(model_name, content, *args, **kwargs):
+        call_state["count"] += 1
+        return SimpleNamespace(candidates=[SimpleNamespace()], parts=[])
+
+    result = generate_furnished_room(
+        str(room_path),
+        "style",
+        "ref.png",
+        "job-single-attempt",
+        furniture_specs_json={"items": []},
+        room_dimensions="4000x4000x2400",
+        primary_item={"label": "Chair", "dims_mm": {"width_mm": 600, "depth_mm": 600, "height_mm": 900}},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        start_time=1014.0,
+        enable_scale_check=False,
+        total_timeout_limit=30,
+        detect_windows_present=lambda path: False,
+        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=SimpleNamespace(get=lambda: _build_summary()),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, []),
+        max_generation_attempts=1,
+    )
+
+    assert call_state["count"] == 1
+    assert result is None
+
+
 def test_collect_repair_targets_prefers_weighted_issue_score_over_family_priority():
     diagnostics = {
         "matched_items": {

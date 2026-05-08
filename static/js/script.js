@@ -1645,12 +1645,18 @@ document.addEventListener('DOMContentLoaded', () => {
             target_box_source: item.target_box_source || null,
             target_box_2d: item.target_box_2d || null,
             target_source_box_2d: item.target_source_box_2d || null,
+            aspect_ratio: item.aspect_ratio || null,
         };
 
         const img = document.createElement('img');
         img.src = url;
 
-        if (index <= 3) {
+        const aspectRatio = String(item.aspect_ratio || '').replace(/\s/g, '');
+        const styleName = String(item.style_name || '').trim();
+        const isOverallShot = styleName ? !styleName.startsWith("Detail:") : index <= 3;
+        const isLandscape = aspectRatio ? aspectRatio === "16:9" : isOverallShot;
+
+        if (isLandscape) {
             img.style.aspectRatio = "16 / 9";
             card.appendChild(img);
             appendButtonsToCard(card, img, url, index, fullList, detailMeta);
@@ -1759,6 +1765,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (data.target_key) detailMeta.target_key = data.target_key;
                     if (data.target_label) detailMeta.target_label = data.target_label;
                     if (data.style_name) detailMeta.style_name = data.style_name;
+                    if (data.aspect_ratio) detailMeta.aspect_ratio = data.aspect_ratio;
                     if (data.target_box_source) detailMeta.target_box_source = data.target_box_source;
                     if (data.target_box_2d) detailMeta.target_box_2d = data.target_box_2d;
                     if (data.target_source_box_2d) detailMeta.target_source_box_2d = data.target_source_box_2d;

@@ -19,6 +19,7 @@ class InternalRenderRequest(BaseModel):
     moodboard_url: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
+    simple_generation_mode: Optional[bool] = None
 
 
 class PresetRenderRequest(BaseModel):
@@ -29,6 +30,7 @@ class PresetRenderRequest(BaseModel):
     variant: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
+    simple_generation_mode: Optional[bool] = None
 
 
 class CartItem(BaseModel):
@@ -49,6 +51,7 @@ class CartRenderRequest(BaseModel):
     variant: Optional[str] = None
     dimensions: Optional[str] = ""
     placement: Optional[str] = ""
+    simple_generation_mode: Optional[bool] = None
 
 
 class ExternalRenderVideoRequest(BaseModel):
@@ -62,6 +65,7 @@ class DetailRequest(BaseModel):
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None
     audience: Optional[str] = None
+    simple_generation_mode: Optional[bool] = None
 
 
 class RegenerateDetailRequest(BaseModel):

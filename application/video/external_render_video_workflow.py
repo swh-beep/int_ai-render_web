@@ -128,6 +128,15 @@ def _build_source_request(source_images: list[str], *, cfg_scale: float) -> Sour
     return SourceGenRequest(items=planned_items, cfg_scale=cfg_scale)
 
 
+def _requested_external_clip_count(payload: dict, available_source_count: int) -> int:
+    try:
+        requested = int(payload.get("clip_count") or 4)
+    except Exception:
+        requested = 4
+    requested = max(4, min(6, requested))
+    return max(1, min(requested, max(0, int(available_source_count))))
+
+
 def _poll_video_job_until_terminal(
     job_id: str,
     *,
@@ -282,8 +291,9 @@ def run_external_render_video_job(
             "clip_urls": [],
         }
 
-    requested_clip_count = max(1, len(source_images))
-    source_req = _build_source_request(source_images, cfg_scale=cfg_scale)
+    requested_clip_count = _requested_external_clip_count(payload, len(source_images))
+    planned_source_images = list(source_images[:requested_clip_count])
+    source_req = _build_source_request(planned_source_images, cfg_scale=cfg_scale)
     source_job_id = queue_source_generation_job(
         source_req,
         video_target_fps=video_target_fps,
@@ -304,11 +314,13 @@ def run_external_render_video_job(
         for result in (source_state.get("results") or [])
         if isinstance(result, str) and result.strip()
     ]
+    if len(source_results) > requested_clip_count:
+        source_results = source_results[:requested_clip_count]
     fallback_used = False
     if not source_results:
         fallback_results = _build_static_fallback_clips(
             render_job_id,
-            source_images=source_images,
+            source_images=planned_source_images,
             clip_count=requested_clip_count,
             video_target_fps=video_target_fps,
         )
@@ -316,7 +328,7 @@ def run_external_render_video_job(
             return {
                 "error": source_state.get("error") or "Video source generation failed",
                 "render_job_id": render_job_id,
-                "source_images": source_images,
+                "source_images": planned_source_images,
                 "clip_urls": [],
             }
         source_results = fallback_results
@@ -325,7 +337,7 @@ def run_external_render_video_job(
         source_results = _supplement_missing_clips(
             source_results,
             render_job_id=render_job_id,
-            source_images=source_images,
+            source_images=planned_source_images,
             requested_clip_count=requested_clip_count,
             video_target_fps=video_target_fps,
         )
@@ -368,7 +380,7 @@ def run_external_render_video_job(
         return {
             "error": compile_state.get("error") or "Video compile failed",
             "render_job_id": render_job_id,
-            "source_images": source_images,
+            "source_images": planned_source_images,
             "clip_urls": [
                 resolved
                 for resolved in (
@@ -438,7 +450,7 @@ def run_external_render_video_job(
 
     result = {
         "render_job_id": render_job_id,
-        "source_images": source_images,
+        "source_images": planned_source_images,
         "clip_urls": clip_urls,
         "clip_count": len(clip_urls),
         "video_url": video_url,

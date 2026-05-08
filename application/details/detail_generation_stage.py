@@ -1,8 +1,9 @@
+import json
 import os
 import time
 from typing import Callable
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 from application.render.postprocess_support import category_match_family
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
@@ -67,6 +68,81 @@ def _coerce_box_2d(value) -> list[float] | None:
     if ymax <= ymin or xmax <= xmin:
         return None
     return [ymin, xmin, ymax, xmax]
+
+
+def _box_center(box_2d: list[float] | None) -> tuple[float, float] | None:
+    box = _coerce_box_2d(box_2d)
+    if box is None:
+        return None
+    ymin, xmin, ymax, xmax = box
+    return ((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
+
+
+def _is_full_frame_box(box_2d: list[float] | None) -> bool:
+    box = _coerce_box_2d(box_2d)
+    if box is None:
+        return False
+    ymin, xmin, ymax, xmax = box
+    return ymin <= 1.0 and xmin <= 1.0 and ymax >= 999.0 and xmax >= 999.0
+
+
+_RENDER_LOCALIZED_BOX_SOURCES = frozenset(
+    {
+        "detail_current_image_analysis",
+        "main_render",
+        "selected_variant_review",
+    }
+)
+
+
+def _has_localized_render_box(target_item: dict | None) -> bool:
+    if not isinstance(target_item, dict):
+        return False
+    box_source = str(target_item.get("box_source") or "").strip().lower()
+    return box_source in _RENDER_LOCALIZED_BOX_SOURCES
+
+
+def _eligible_crop_box_2d(target_item: dict | None) -> list[float] | None:
+    if not isinstance(target_item, dict):
+        return None
+
+    box_2d = _coerce_box_2d(target_item.get("box_2d"))
+    if box_2d is None or _is_full_frame_box(box_2d):
+        return None
+
+    if not _has_localized_render_box(target_item):
+        return None
+
+    return box_2d
+
+
+def _context_distance_score(candidate: dict, target_item: dict | None) -> float:
+    if not isinstance(candidate, dict) or not isinstance(target_item, dict):
+        return float("inf")
+
+    target_center = _box_center(target_item.get("box_2d")) or _box_center(target_item.get("source_box_2d"))
+    candidate_center = _box_center(candidate.get("box_2d")) or _box_center(candidate.get("source_box_2d"))
+    if target_center is None or candidate_center is None:
+        return float("inf")
+
+    dx = target_center[0] - candidate_center[0]
+    dy = target_center[1] - candidate_center[1]
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def _compact_prompt_metadata(value, *, max_chars: int = 180) -> str | None:
+    if value in (None, "", [], {}):
+        return None
+    try:
+        text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    except Exception:
+        text = str(value)
+    text = str(text).strip()
+    if not text:
+        return None
+    if len(text) > max_chars:
+        return text[: max_chars - 3].rstrip() + "..."
+    return text
 
 
 def _target_family(item: dict | None) -> str:
@@ -250,7 +326,7 @@ def _render_crop_detail(
     index: int,
     target_item: dict,
 ) -> dict | None:
-    box_2d = _coerce_box_2d(target_item.get("box_2d"))
+    box_2d = _eligible_crop_box_2d(target_item)
     if box_2d is None:
         return None
 
@@ -283,6 +359,7 @@ def _render_crop_detail(
     return {
         "path": path,
         "style_name": style_name,
+        "aspect_ratio": _normalize_ratio_string(style_config.get("ratio")),
         "cutout_ref_count": 0,
         "cutout_ref_labels": [],
         "generation_mode": "crop_extract",
@@ -313,12 +390,12 @@ def generate_detail_view(
         style_name = str(style_config.get("name") or "")
         target_item = _find_target_item(style_config, furniture_data, normalize_label_for_match)
         if prefer_crop_extract and style_name.startswith("Detail:"):
-            deterministic_crop = _render_crop_detail(original_image_path, style_config, unique_id, index, target_item or {})
-            if deterministic_crop:
-                return deterministic_crop
+            return _render_crop_detail(original_image_path, style_config, unique_id, index, target_item or {})
 
         img = Image.open(original_image_path)
         target_ratio = _normalize_ratio_string(style_config.get("ratio"))
+        camera_mode = str(style_config.get("camera_mode") or "").strip().lower()
+        focus_side = str(style_config.get("focus_side") or "").strip().lower()
         if prefer_crop_extract and style_name.startswith("Detail:"):
             scene_lock_block = (
                 "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
@@ -329,6 +406,22 @@ def generate_detail_view(
                 "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
             )
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
+        elif camera_mode == "side_angle":
+            scene_lock_block = (
+                "<SCENE LOCK: SAME ROOM, NEW SIDE CAMERA>\n"
+                "Create a NEW side-angle editorial photograph inside the EXACT SAME finished room.\n"
+                "Priority order: (1) visibly new side camera viewpoint, (2) same furniture identities, "
+                "(3) same relative furniture placement and room architecture.\n"
+                "Do NOT copy the source frame, do NOT use the same centered front-facing camera, and do NOT solve this as a crop/zoom.\n"
+                "The camera must move laterally enough to create real parallax, changed occlusion, and visible side planes.\n"
+                "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT force every object from the source image to remain visible.\n"
+                "If a side-focus composition mask is provided, use it only to choose framing weight. Never duplicate, mirror, or copy furniture because of the mask.\n"
+                "Keep the room and objects recognizable, but the viewpoint must be materially different from the input image.\n"
+            )
+            camera_lock_line = (
+                "4. **SIDE CAMERA REQUIRED:** Change camera position and yaw substantially enough that the output cannot be mistaken for the source frame. "
+                "Keep object placement fixed in the room, but allow foreground/background occlusion to change naturally from the new side viewpoint.\n\n"
+            )
         else:
             scene_lock_block = (
                 "<SCENE LOCK: SAME ROOM, NEW CAMERA>\n"
@@ -357,14 +450,37 @@ def generate_detail_view(
         target_anchor_block = ""
         if isinstance(target_item, dict):
             target_box = _coerce_box_2d(target_item.get("box_2d"))
+            source_box = _coerce_box_2d(target_item.get("source_box_2d"))
             target_family = _target_family(target_item)
             target_anchor_lines = []
             if target_box is not None:
                 target_anchor_lines.append(f"- TARGET BOX IN SOURCE IMAGE (0-1000): {target_box}")
+            if source_box is not None:
+                target_anchor_lines.append(f"- ORIGINAL CACHED TARGET BOX (0-1000): {source_box}")
+            box_source = str(target_item.get("box_source") or "").strip()
+            if box_source:
+                target_anchor_lines.append(f"- BOX SOURCE: {box_source}")
             if target_family:
                 target_anchor_lines.append(f"- TARGET FAMILY: {target_family}")
+            placement_contract = _compact_prompt_metadata(target_item.get("placement_contract"))
+            if placement_contract:
+                target_anchor_lines.append(f"- PLACEMENT CONTRACT: {placement_contract}")
+            layout_envelope = _compact_prompt_metadata(target_item.get("layout_envelope"))
+            if layout_envelope:
+                target_anchor_lines.append(f"- LAYOUT ENVELOPE: {layout_envelope}")
             if target_anchor_lines:
                 target_anchor_block = "<TARGET ANCHOR>\n" + "\n".join(target_anchor_lines) + "\n\n"
+
+        is_angle_style = camera_mode in {"overview_angle", "side_angle"} or style_name == "High Angle Overview" or style_name.startswith("Side Composition")
+        if is_angle_style:
+            output_focus_line = (
+                "3. IMPORTANT: this is a room angle shot, not an object close-up. "
+                "Keep enough room context visible to clearly read the camera direction, room geometry, and spatial relationship.\n"
+            )
+        else:
+            output_focus_line = (
+                "3. IMPORTANT: focus on the specified target area only and make it read like a dedicated editorial shot of that object in the room.\n"
+            )
 
         final_prompt = (
             f"{scene_lock_block}\n"
@@ -375,11 +491,12 @@ def generate_detail_view(
             "1. **DO NOT MOVE / REARRANGE ANYTHING:** Every existing furniture, lighting fixture, decor item, and their positions must remain EXACTLY the same as the input image.\n"
             "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
             "3. **NO REMOVALS:** Do NOT remove existing objects either.\n"
+            "3b. **PRESERVE THE MAIN-SHOT LAYOUT:** Keep the target object anchored to the same physical footprint, neighboring objects, wall/floor relationship, and room geometry seen in the main render.\n"
             f"{camera_lock_line}"
             "<OUTPUT REQUIREMENTS>\n"
             "1. Generate a photorealistic high-quality detail view based on the selected camera shot.\n"
             "2. Keep the overall interior style consistent with the main furnished room.\n"
-            "3. IMPORTANT: focus on the specified target area only and make it read like a dedicated editorial shot of that object in the room.\n"
+            f"{output_focus_line}"
             "4. DO NOT add text, labels, logos, or watermarks.\n"
             f"OUTPUT ASPECT RATIO: {target_ratio}"
         )
@@ -387,9 +504,32 @@ def generate_detail_view(
         safety_settings = allow_harassment_only_safety_settings()
         content = [final_prompt, "Original Room Reality (scene anchor, keep layout stable):", img]
 
+        if camera_mode == "side_angle" and focus_side in {"left", "right"}:
+            try:
+                mask_width, mask_height = 768, 432
+                mask = Image.new("RGB", (mask_width, mask_height), color=(72, 72, 72))
+                draw = ImageDraw.Draw(mask)
+                if focus_side == "left":
+                    draw.rectangle((0, 0, int(mask_width * 0.70), mask_height), fill=(245, 245, 245))
+                    draw.rectangle((int(mask_width * 0.70), 0, mask_width, mask_height), fill=(98, 98, 98))
+                else:
+                    draw.rectangle((0, 0, int(mask_width * 0.30), mask_height), fill=(98, 98, 98))
+                    draw.rectangle((int(mask_width * 0.30), 0, mask_width, mask_height), fill=(245, 245, 245))
+                extra_imgs.append(mask)
+                content += [
+                    (
+                        f"Side Focus Composition Mask ({focus_side.upper()} side target): "
+                        "white area is the dominant source-image side, dark area is peripheral/cropped. "
+                        "This is only a framing guide, not an object or furniture reference."
+                    ),
+                    mask,
+                ]
+            except Exception:
+                pass
+
         try:
             max_cutout_refs = 12
-            max_aux_cutout_refs = 12
+            max_detail_aux_cutout_refs = 2
             target_label_norm = normalize_label_for_match(style_target_label)
             is_detail_target_mode = bool(style_name.startswith("Detail:"))
 
@@ -417,6 +557,8 @@ def generate_detail_view(
                         "path": local_path,
                         "target_key": str(item.get("target_key") or "").strip(),
                         "source_index": source_index_val,
+                        "box_2d": _coerce_box_2d(item.get("box_2d")),
+                        "source_box_2d": _coerce_box_2d(item.get("source_box_2d")),
                     }
                 )
 
@@ -448,7 +590,16 @@ def generate_detail_view(
                 return (idx, str(row.get("label") or ""))
 
             target_items.sort(key=_cutout_sort_key)
-            other_items.sort(key=_cutout_sort_key)
+            if is_detail_target_mode and target_items:
+                target_anchor = target_items[0]
+                other_items.sort(
+                    key=lambda row: (
+                        _context_distance_score(row, target_anchor),
+                        *_cutout_sort_key(row),
+                    )
+                )
+            else:
+                other_items.sort(key=_cutout_sort_key)
 
             ordered_items = []
             seen_paths = set()
@@ -483,7 +634,7 @@ def generate_detail_view(
             if is_detail_target_mode and ordered_items:
                 forced_target = [item for item in ordered_items if item.get("is_target")][:1]
                 aux = [item for item in ordered_items if not item.get("is_target")]
-                aux_cap = max(0, min(max_aux_cutout_refs, max_cutout_refs - len(forced_target)))
+                aux_cap = max(0, min(max_detail_aux_cutout_refs, max_cutout_refs - len(forced_target)))
                 cutout_items = forced_target + aux[:aux_cap]
             else:
                 cutout_items = ordered_items[:max_cutout_refs]
@@ -559,6 +710,7 @@ def generate_detail_view(
                     return {
                         "path": path,
                         "style_name": style_config.get("name"),
+                        "aspect_ratio": requested_ratio,
                         "cutout_ref_count": cutout_ref_count,
                         "cutout_ref_labels": cutout_labels,
                         "generation_mode": "model_regeneration",

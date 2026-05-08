@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import traceback
+import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -25,6 +26,7 @@ class JobEntrypointServices:
     normalize_audience: Callable[[Optional[str]], str]
     save_job_result: Callable[[str, dict, Optional[str]], Optional[str]]
     materialize_input: Callable[[str, str], str | None]
+    normalize_item_image: Callable[[str, str, int], str | None]
     build_s3_prefix: Callable[..., str]
     resolve_image_url: Callable[..., str | None]
     render_room: Callable[..., Any]
@@ -58,6 +60,7 @@ class JobEntrypointServices:
 
 
 _SERVICES: JobEntrypointServices | None = None
+_DEFERRED_CART_ITEM_MARKER = "external_cart_item_v1"
 
 
 def configure_job_entrypoints(services: JobEntrypointServices) -> None:
@@ -106,10 +109,75 @@ def _persist_job_result(result: dict, audience: Optional[str] = None) -> None:
         pass
 
 
+def _cleanup_temp_cart_source(local_src: str | None) -> None:
+    try:
+        if not local_src or not os.path.exists(local_src):
+            return
+        abs_src = os.path.abspath(local_src)
+        abs_out = os.path.abspath("outputs") + os.sep
+        if abs_src.startswith(abs_out) and os.path.basename(local_src).startswith("cart_item_"):
+            os.remove(local_src)
+    except Exception:
+        pass
+
+
+def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointServices) -> dict:
+    render_payload = dict(payload)
+    raw_items = list(render_payload.get("moodboard_items") or [])
+    if not raw_items:
+        return render_payload
+
+    has_deferred_items = any(
+        isinstance(item, dict) and item.get("worker_preprocess") == _DEFERRED_CART_ITEM_MARKER
+        for item in raw_items
+    )
+    if not has_deferred_items:
+        return render_payload
+
+    unique_id = uuid.uuid4().hex[:8]
+    processed_items: list[dict] = []
+    for index, item in enumerate(raw_items, start=1):
+        if not isinstance(item, dict):
+            continue
+        if item.get("worker_preprocess") != _DEFERRED_CART_ITEM_MARKER:
+            processed_items.append(item)
+            continue
+
+        source_ref = item.get("path") or item.get("url")
+        local_src = services.materialize_input(source_ref, f"cart_item_{index - 1}")
+        norm_path = services.normalize_item_image(local_src, unique_id, index) if local_src else None
+        if not norm_path:
+            _cleanup_temp_cart_source(local_src)
+            continue
+
+        ref_url = services.resolve_image_url(norm_path, services.build_s3_prefix("external", "customize"))
+        if isinstance(ref_url, str) and ref_url.startswith("http"):
+            try:
+                if os.path.exists(norm_path):
+                    os.remove(norm_path)
+            except Exception:
+                pass
+        _cleanup_temp_cart_source(local_src)
+
+        prepared_item = dict(item)
+        prepared_item["path"] = ref_url or norm_path
+        prepared_item.pop("worker_preprocess", None)
+        processed_items.append(prepared_item)
+
+    if not processed_items:
+        return {"error": "No valid item images after worker preprocessing"}
+
+    render_payload["moodboard_items"] = processed_items
+    return render_payload
+
+
 def job_render(payload: dict, persist_result: bool = True) -> dict:
     services = _services()
+    prepared_payload = _prepare_worker_cart_moodboard_items(payload, services)
+    if isinstance(prepared_payload, dict) and prepared_payload.get("error"):
+        return prepared_payload
     return run_render_job(
-        payload,
+        prepared_payload,
         persist_result=persist_result,
         materialize_input=services.materialize_input,
         normalize_audience=services.normalize_audience,

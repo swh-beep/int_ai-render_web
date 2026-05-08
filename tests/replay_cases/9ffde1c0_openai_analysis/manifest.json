@@ -137,7 +137,7 @@
       "qty": 1,
       "dims_mm": {
         "width_mm": 1600,
-        "depth_mm": 1600,
+        "depth_mm": 600,
         "height_mm": 700
       }
     }

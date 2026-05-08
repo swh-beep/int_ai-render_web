@@ -48,6 +48,7 @@ from application.media.image_edit_generation_stage import (
 )
 from application.render.empty_room_generation_stage import generate_empty_room as generate_empty_room_stage
 from application.render.furnished_generation_stage import generate_furnished_room as generate_furnished_room_stage
+from application.render.main_render_polish_stage import polish_main_render as polish_main_render_stage
 from application.render.dimension_support import (
     available_dim_axes as available_dim_axes_support,
     dims_has_positive_values as dims_has_positive_values_support,
@@ -909,6 +910,9 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
 def job_render_with_details(payload: dict) -> dict:
     return job_entrypoints_module.job_render_with_details(payload)
 
+def job_render_with_extra(payload: dict) -> dict:
+    return job_entrypoints_module.job_render_with_extra(payload)
+
 def job_generate_render_video(payload: dict) -> dict:
     return job_entrypoints_module.job_generate_render_video(payload)
 
@@ -1526,6 +1530,7 @@ def generate_furnished_room(
     windows_present=None,
     room_analysis_text=None,
     enable_scale_check=False,
+    max_generation_attempts=None,
 ):
     return generate_furnished_room_stage(
         room_path,
@@ -1550,6 +1555,7 @@ def generate_furnished_room(
         windows_present=windows_present,
         room_analysis_text=room_analysis_text,
         enable_scale_check=enable_scale_check,
+        max_generation_attempts=max_generation_attempts,
         total_timeout_limit=TOTAL_TIMEOUT_LIMIT,
         detect_windows_present=detect_windows_present,
         logger=logger,
@@ -1567,6 +1573,25 @@ def generate_furnished_room(
         repair_model_name=REPAIR_IMAGE_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
+    )
+
+
+def polish_main_image(
+    source_path,
+    unique_id,
+    timeout_sec: float = 70.0,
+):
+    return polish_main_render_stage(
+        source_path,
+        unique_id=unique_id,
+        allow_all_safety_settings=allow_all_safety_settings,
+        call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+        repair_model_name=REPAIR_IMAGE_MODEL_NAME,
+        call_gemini_with_failover=call_gemini_with_failover,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
+        match_aspect_to_target=match_aspect_to_target,
+        logger=logger,
+        timeout_sec=timeout_sec,
     )
 
 
@@ -1720,6 +1745,7 @@ def render_room(
     placement: str = Form(""),
     audience: str = Form(""),
     moodboard_items: Optional[List[Dict[str, Any]]] = None,
+    simple_generation_mode: bool = False,
 ):
     try:
         payload = run_render_room_workflow(
@@ -1733,6 +1759,7 @@ def render_room(
                 placement=placement,
                 audience=audience,
                 moodboard_items=moodboard_items,
+                simple_generation_mode=bool(simple_generation_mode),
             ),
             RenderWorkflowDependencies(
                 runtime=RenderWorkflowRuntime(
@@ -1783,6 +1810,7 @@ def render_room(
                 generation=RenderWorkflowGenerationServices(
                     generate_empty_room=generate_empty_room,
                     generate_furnished_room=generate_furnished_room,
+                    polish_main_image=polish_main_image,
                 ),
                 postprocess=RenderWorkflowPostprocessServices(
                     rank_best_variant=_rank_best_variant_flash,
@@ -1840,6 +1868,7 @@ def _queue_route_deps() -> QueueRouteDependencies:
         rq_video_job_timeout=RQ_VIDEO_JOB_TIMEOUT,
         job_render=job_render,
         job_render_with_details=job_render_with_details,
+        job_render_with_extra=job_render_with_extra,
         job_generate_render_video=job_generate_render_video,
         job_image_edit=job_image_edit,
         job_frontal_view=job_frontal_view,
@@ -2020,8 +2049,8 @@ FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY") 
 KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-5-pro")  # e.g. kling-v2-1-pro, kling-v2-5-pro
 KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", build_kling_endpoint(KLING_MODEL))
 
-# Concurrency controls (avoid 429 bursts)
-VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "5"))
+# Concurrency controls (Freepik docs explicitly call out 3 concurrent Kling jobs)
+VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "3"))
 _video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
 
 VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "30"))
@@ -2102,6 +2131,7 @@ job_entrypoints_module.configure_job_entrypoints(
         normalize_audience=_normalize_audience,
         save_job_result=_save_job_result_s3,
         materialize_input=_materialize_input,
+        normalize_item_image=lambda local_path, unique_id, index: _normalize_item_image(local_path, unique_id, index, max_size=1024),
         build_s3_prefix=_build_s3_prefix,
         resolve_image_url=resolve_image_url,
         render_room=render_room,

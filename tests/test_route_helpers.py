@@ -133,6 +133,10 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(resolved["placement"], "preserve windows\nkeep the ceiling clean")
 
     def test_build_external_cart_job_applies_limits_and_generates_target_keys(self):
+        materialize_input = MagicMock(side_effect=AssertionError("materialize_input should not run pre-enqueue"))
+        normalize_item_image = MagicMock(side_effect=AssertionError("normalize_item_image should not run pre-enqueue"))
+        resolve_image_url = MagicMock(side_effect=AssertionError("resolve_image_url should not run pre-enqueue"))
+        build_s3_prefix = MagicMock(side_effect=AssertionError("build_s3_prefix should not run pre-enqueue"))
         req = CartRenderRequest(
             image_url="https://example.com/room.png",
             items=[
@@ -148,17 +152,24 @@ class RouteHelperTests(unittest.TestCase):
             cart_max_items=2,
             apply_cart_limits=lambda items, limit: (items[:limit], [dict(items[2], drop_reason="max_items_exceeded", drop_index=3)]),
             build_cart_summary=lambda items: "summary",
-            materialize_input=lambda url, prefix: f"C:/tmp/{prefix}.png",
-            normalize_item_image=lambda local_path, unique_id, index: f"C:/tmp/norm-{index}.png",
-            resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{path.split('/')[-1]}",
-            build_s3_prefix=lambda audience, category: f"{audience}/{category}/",
+            materialize_input=materialize_input,
+            normalize_item_image=normalize_item_image,
+            resolve_image_url=resolve_image_url,
+            build_s3_prefix=build_s3_prefix,
             build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
         )
         self.assertEqual(len(kept), 2)
         self.assertEqual(len(dropped), 1)
         item_refs = job_payload["render"]["moodboard_items"]
+        self.assertEqual(item_refs[0]["path"], "https://example.com/chair.png")
+        self.assertEqual(item_refs[1]["path"], "https://example.com/sofa.png")
+        self.assertEqual(item_refs[0]["worker_preprocess"], "external_cart_item_v1")
         self.assertEqual(item_refs[0]["target_key"], "cart_chair-1_001")
         self.assertEqual(item_refs[1]["target_key"], "cart_sofa-1_002")
+        materialize_input.assert_not_called()
+        normalize_item_image.assert_not_called()
+        resolve_image_url.assert_not_called()
+        build_s3_prefix.assert_not_called()
 
     def test_build_external_cart_job_keeps_room_blank_when_user_did_not_provide_it(self):
         req = CartRenderRequest(
@@ -184,6 +195,10 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(dropped, [])
         self.assertEqual(job_payload["render"]["room"], "")
+        self.assertEqual(
+            job_payload["render"]["moodboard_items"][0]["path"],
+            "https://example.com/chair.png",
+        )
 
     def test_build_external_render_video_job_validates_clip_count_range(self):
         payload = build_external_render_video_job(ExternalRenderVideoRequest(render_job_id="render-job-1", clip_count=5))

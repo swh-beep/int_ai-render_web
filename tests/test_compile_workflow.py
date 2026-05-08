@@ -60,7 +60,7 @@ class CompileWorkflowTests(unittest.TestCase):
         self.assertIn("scale=1080:1080:force_original_aspect_ratio=increase", vf)
         self.assertIn("crop=1080:1080", vf)
 
-    def test_build_video_filter_supports_blur_fill_mode(self):
+    def test_build_video_filter_supports_black_fill_padding(self):
         vf = _build_video_filter(
             trim_start=0.0,
             trim_end=5.0,
@@ -72,9 +72,9 @@ class CompileWorkflowTests(unittest.TestCase):
             aspect_mode="fill",
         )
 
-        self.assertIn("split=2[bg][fg]", vf)
-        self.assertIn("boxblur=12:1", vf)
-        self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
+        self.assertNotIn("split=2[bg][fg]", vf)
+        self.assertNotIn("boxblur=12:1", vf)
+        self.assertIn("pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black", vf)
         self.assertIn("scale=1920:1080:force_original_aspect_ratio=decrease", vf)
 
 
