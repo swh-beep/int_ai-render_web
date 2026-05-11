@@ -65,6 +65,7 @@ def run_generate_details_job(
         moodboard_url = payload.get("moodboard_url")
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
+        require_details = bool(payload.get("require_details"))
         raw_absolute_deadline_ts = payload.get("absolute_deadline_ts")
         raw_minimum_budget_sec = payload.get("minimum_detail_budget_sec")
         try:
@@ -75,9 +76,17 @@ def run_generate_details_job(
             minimum_detail_budget_sec = max(1.0, float(raw_minimum_budget_sec or 5.0))
         except Exception:
             minimum_detail_budget_sec = 5.0
-        budgeted_mode = absolute_deadline_ts is not None
+        budgeted_mode = absolute_deadline_ts is not None and not require_details
 
         aud = normalize_audience(audience)
+        input_furniture_count = len(furniture_data) if isinstance(furniture_data, list) else 0
+        print(
+            ">> [Detail View] mode "
+            f"audience={aud} require_details={require_details} "
+            f"budgeted_mode={budgeted_mode} deadline_supplied={absolute_deadline_ts is not None} "
+            f"furniture_data_count={input_furniture_count}",
+            flush=True,
+        )
         prefix_detail_user = build_s3_prefix(aud, "detailrendered", "user-photos")
         prefix_detail_rendered = build_s3_prefix(aud, "detailrendered", "rendered")
 
@@ -172,11 +181,18 @@ def run_generate_details_job(
                     )
                 )
 
+        detected_item_count = len(analyzed_items or [])
         dynamic_styles = construct_dynamic_styles(analyzed_items)
+        raw_style_count = len(dynamic_styles or [])
         if aud == "internal":
             dynamic_styles = with_internal_angle_styles(dynamic_styles)
         elif aud == "external":
             dynamic_styles = select_external_detail_styles(dynamic_styles)
+        print(
+            ">> [Detail View] target counts "
+            f"analyzed_items={detected_item_count} raw_styles={raw_style_count} final_styles={len(dynamic_styles or [])}",
+            flush=True,
+        )
         if not dynamic_styles:
             if budgeted_mode:
                 return _ret(_build_best_effort_output("No detail styles available within the remaining deadline budget", analyzed_items=analyzed_items))

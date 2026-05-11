@@ -1074,3 +1074,51 @@ def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_
     assert result["details"] == []
     assert result["furniture_boxes"] == []
     assert "deadline budget exhaustion" in result["message"].lower()
+
+
+def test_run_generate_details_job_required_details_ignores_deadline_budget(monkeypatch, tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    monkeypatch.setattr("application.details.detail_workflow.time.time", lambda: 100.0)
+    generated_styles = []
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        generated_styles.append(dict(style_config))
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+            "audience": "external",
+            "require_details": True,
+            "absolute_deadline_ts": 103.0,
+            "minimum_detail_budget_sec": 5.0,
+        },
+        normalize_audience=lambda audience: audience or "external",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: [{"label": "Accent Chair", "box_2d": [100, 100, 700, 700]}],
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: item,
+        attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: label.strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    assert len(result["details"]) == 1
+    assert generated_styles[0]["name"] == "Detail: Accent Chair"
