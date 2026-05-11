@@ -2089,7 +2089,7 @@ def generate_moodboard_options(
 # =========================
 # Use Freepik API key for Kling as well (same header: x-freepik-api-key)
 FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY")  # fallback for existing env
-KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-5-pro")  # e.g. kling-v2-1-pro, kling-v2-5-pro
+KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-6-pro")  # e.g. kling-v2-1-pro, kling-v2-6-pro
 KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", build_kling_endpoint(KLING_MODEL))
 
 # Concurrency controls (Freepik docs explicitly call out 3 concurrent Kling jobs)

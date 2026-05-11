@@ -8,7 +8,7 @@ import requests
 
 
 def build_kling_endpoint(model_name: str) -> str:
-    safe_model = (model_name or "").strip() or "kling-v2-5-pro"
+    safe_model = (model_name or "").strip() or "kling-v2-6-pro"
     return f"https://api.freepik.com/v1/ai/image-to-video/{safe_model}"
 
 
