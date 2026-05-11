@@ -100,6 +100,25 @@ def _stage_status_payload(job_id: str, state: dict) -> dict:
     return payload
 
 
+def _saved_result_can_finish_stale_job(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("error"):
+        return True
+    terminal_keys = {
+        "render",
+        "empty_room_url",
+        "upscaled_url",
+        "final_url",
+        "finalized_url",
+        "video_url",
+        "clip_urls",
+        "source_images",
+        "frontal_url",
+    }
+    return any(key in result for key in terminal_keys)
+
+
 def _set_staging_job(deps: QueueRouteDependencies, job_id: str, state: dict) -> None:
     setter = getattr(deps, "set_staging_job", None)
     if callable(setter):
@@ -350,6 +369,13 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONR
             if saved is not None:
                 payload["result"] = saved
                 payload["result_source"] = "s3"
+    elif not job.is_failed:
+        saved = deps.load_job_result_s3(job_id)
+        if _saved_result_can_finish_stale_job(saved):
+            payload["status"] = "finished"
+            payload["result"] = saved
+            payload["result_source"] = "s3"
+            payload["stale_job_status"] = job.get_status()
     if job.is_failed:
         payload["error"] = job.exc_info
     return JSONResponse(content=payload)
