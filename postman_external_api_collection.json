@@ -104,7 +104,7 @@
     },
     {
       "name": "Render - Video (External)",
-      "description": "### Video ///// 외부 사이트\n### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nPOST {{BASE_URL}}/api/external/render/video\n\n**Required**\n- render_job_id (string): job_id returned by /api/external/render/preset or /api/external/render/cart after the image render has finished\n\n**Optional**\n- clip_count (int): 4 to 6, default 4\n- cfg_scale (number): Kling cfg scale, default 0.5\n\n### Response (Queued)\n- job_id (string)\n- status = \"queued\"\n- render_job_id (string)\n- clip_count (int)\n\n### Notes\n- This endpoint must be called after the source image render job has finished.\n- All video generation is async. Poll /jobs/{job_id} to get the final video payload.\n- The finished result returns source_images, clip_urls, clip_count, and video_url.\n\n### Error Codes\n- 400: Missing render_job_id or invalid clip_count/cfg_scale.\n- 404: render_job_id was not found.\n- 409: render_job_id is not finished yet.\n- 401/403: Invalid or missing x-api-key.\n- 500: Server error (queue/redis/video generation).\n",
+      "description": "### Video ///// 외부 사이트\n### Auth\n- Header: x-api-key = EXTERNAL key\n\n### Request\nPOST {{BASE_URL}}/api/external/render/video\n\n**Required**\n- render_job_id (string): job_id returned by /api/external/render/preset or /api/external/render/cart after the image render has finished\n\n**Optional**\n- clip_count (int): 4 to 7, default 7. Valid legacy lower values are accepted, but generation uses up to 7 source clips when available: main + detail 1-6.\n- cfg_scale (number): Kling cfg scale, default 0.5\n\n### Response (Queued)\n- job_id (string)\n- status = \"queued\"\n- render_job_id (string)\n- clip_count (int)\n\n### Notes\n- This endpoint must be called after the source image render job has finished.\n- All video generation is async. Poll /jobs/{job_id} to get the final video payload.\n- The finished result returns source_images, clip_urls, clip_count, and video_url.\n\n### Error Codes\n- 400: Missing render_job_id or invalid clip_count/cfg_scale.\n- 404: render_job_id was not found.\n- 409: render_job_id is not finished yet.\n- 401/403: Invalid or missing x-api-key.\n- 500: Server error (queue/redis/video generation).\n",
       "request": {
         "method": "POST",
         "header": [
@@ -119,7 +119,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"render_job_id\": \"{{JOB_ID}}\",\n  \"clip_count\": 4,\n  \"cfg_scale\": 0.5\n}",
+          "raw": "{\n  \"render_job_id\": \"{{JOB_ID}}\",\n  \"clip_count\": 7,\n  \"cfg_scale\": 0.5\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -133,7 +133,7 @@
           "name": "Queued",
           "status": "OK",
           "code": 200,
-          "body": "{\n  \"job_id\": \"c1b2c3d4-1111-2222-3333-444455556777\",\n  \"status\": \"queued\",\n  \"render_job_id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"clip_count\": 4\n}"
+          "body": "{\n  \"job_id\": \"c1b2c3d4-1111-2222-3333-444455556777\",\n  \"status\": \"queued\",\n  \"render_job_id\": \"c1b2c3d4-1111-2222-3333-444455556666\",\n  \"clip_count\": 7\n}"
         },
         {
           "name": "Error - Source Render Still Running",

@@ -447,9 +447,10 @@ def build_external_render_video_job(req: ExternalRenderVideoRequest) -> dict:
     if not render_job_id:
         raise ValueError("render_job_id is required")
 
-    clip_count = int(req.clip_count or 4)
-    if clip_count < 4 or clip_count > 6:
-        raise ValueError("clip_count must be between 4 and 6")
+    requested_clip_count = int(req.clip_count or 7)
+    if requested_clip_count < 4 or requested_clip_count > 7:
+        raise ValueError("clip_count must be between 4 and 7")
+    clip_count = 7
 
     cfg_scale = float(req.cfg_scale or 0.5)
     if cfg_scale <= 0:

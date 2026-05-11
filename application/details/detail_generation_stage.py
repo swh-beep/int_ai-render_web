@@ -405,28 +405,25 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
 
     if is_overview:
         return (
-            "Create a high-angle editorial photograph of this exact finished interior. "
-            "Make it feel like a real interior magazine photo with natural light, shadows, and material texture. "
-            "Do not change the room structure, furniture/decor shape, detail, count, color, material, scale, or placement. "
+            "Create a high-angle interior editorial shot of this space. "
+            "Make it feel like a real photographed interior with natural light, shadows, and material texture. "
+            "Do not change the shape, details, count, color, material, placement of any furniture/decor, or the room structure. "
             "No text or watermark."
         )
 
     if is_side:
-        side_text = f" from the {focus_side} side" if focus_side in {"left", "right"} else ""
+        side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
         return (
-            f"Create a side-composition editorial photograph{side_text} of this exact finished interior. "
-            "Keep the same room and furniture arrangement while changing only the camera viewpoint. "
-            "Do not change furniture/decor shape, detail, count, color, material, scale, or placement. "
+            f"Create an interior editorial shot from the {side_text} area of this space. "
+            "Make it feel like a real photographed interior with natural light, shadows, and material texture. "
+            "Do not change the shape, details, count, color, material, placement of any furniture/decor, or the room structure. "
             "No text or watermark."
         )
 
     return (
-        f"Create a detailed editorial photograph focused on the {clean_label} area in this exact finished interior. "
-        "Make it feel like a real interior magazine photo with natural light, shadows, depth, and material texture. "
-        "The target and every visible surrounding furniture/decor item must remain the same original object from the input image. "
-        "Preserve all visible object shapes, silhouettes, details, counts, colors, materials, scale relationships, and placements exactly, including background or support furniture near the target. "
-        "Do not change the room structure, wall/floor/window positions, lighting direction, shadows, furniture/decor shape, detail, count, color, material, scale, or placement. "
-        "Do not redesign, simplify, replace, remove, add, duplicate, or rearrange any visible object. "
+        f"Create an interior editorial shot around the {clean_label} area. "
+        "Make it feel like a real photo. "
+        "Do not change furniture/decor shape, detail, count, color, material, placement, room structure, or nearby spatial relationships. "
         "No text or watermark."
     )
 

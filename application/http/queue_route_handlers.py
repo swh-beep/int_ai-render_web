@@ -723,7 +723,7 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
             "status": "queued",
             "render_job_id": job_payload["render_job_id"],
             "clip_count": min(
-                int(job_payload.get("clip_count") or 4),
+                int(job_payload.get("clip_count") or 7),
                 _count_external_video_source_images(source_result),
             ),
         }

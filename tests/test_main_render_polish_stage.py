@@ -45,8 +45,10 @@ def test_polish_main_render_uses_short_edit_prompt_and_auto_quality_options(tmp_
         assert captured["request_options"]["max_attempts"] == 1
         assert "thinking_level" not in captured["request_options"]
         assert "quality" not in captured["request_options"]
-        assert "real high-end interior magazine photograph" in captured["prompt"]
-        assert "Do not change the room structure" in captured["prompt"]
+        assert "real interior magazine photograph" in captured["prompt"]
+        assert "light, shadows, contrast, white balance, material texture" in captured["prompt"]
+        assert "Reduce any artificial composite look" in captured["prompt"]
+        assert "room structure, camera framing" in captured["prompt"]
         assert len(captured["content"]) == 2
         assert captured["kwargs"]["log_tag"] == "Stage2.MainPolish"
     finally:

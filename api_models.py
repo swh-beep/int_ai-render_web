@@ -56,7 +56,7 @@ class CartRenderRequest(BaseModel):
 
 class ExternalRenderVideoRequest(BaseModel):
     render_job_id: str
-    clip_count: int = 4
+    clip_count: int = 7
     cfg_scale: float = 0.5
 
 

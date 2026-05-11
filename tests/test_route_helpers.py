@@ -231,7 +231,7 @@ class RouteHelperTests(unittest.TestCase):
             payload,
             {
                 "render_job_id": "render-job-1",
-                "clip_count": 5,
+                "clip_count": 7,
                 "cfg_scale": 0.5,
                 "audience": "external",
             },

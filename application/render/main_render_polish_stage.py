@@ -30,9 +30,10 @@ def polish_main_render(
     try:
         image = Image.open(source_path)
         prompt = (
-            "Polish this furnished interior render so it looks like a real high-end interior magazine photograph, not an AI image. "
-            "Improve natural light, shadows, reflections, material texture, depth, and tonal balance. "
-            "Do not change the room structure, camera framing, furniture/decor count, shape, detail, scale, color, material, or placement."
+            "Naturally polish this image like a real interior magazine photograph. "
+            "Enhance the light, shadows, contrast, white balance, material texture, spatial depth, and lens feel so it looks photographed. "
+            "Reduce any artificial composite look and give it a refined high-end editorial tone. "
+            "Do not change the room structure, camera framing, furniture/decor count, shape, details, size, color, material, or placement."
         )
         response = repair_call(
             resolved_model,

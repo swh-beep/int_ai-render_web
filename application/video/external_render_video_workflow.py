@@ -8,16 +8,10 @@ from api_models import CompileClip, CompileRequest, SourceGenRequest, SourceItem
 from application.video.video_support import download_to_path, ffmpeg_image_to_video
 
 
-_PRIMARY_MOTION_SEQUENCE: tuple[str, ...] = (
-    "zoom_in_slow",
+_EXTERNAL_VIDEO_CLIP_COUNT = 7
+_EXTERNAL_MOTION_SEQUENCE: tuple[str, ...] = (
     "orbit_l_slow",
     "orbit_r_slow",
-    "zoom_in_slow",
-)
-_REPEATING_MOTION_SEQUENCE: tuple[str, ...] = (
-    "orbit_l_slow",
-    "orbit_r_slow",
-    "zoom_in_slow",
 )
 _EXTERNAL_BRAND_CARD_SEC = 3.0
 _EXTERNAL_BRAND_CARD_PATH = Path(__file__).resolve().parents[2] / "static" / "thumbnails" / "external_video_logo_card.jpg"
@@ -91,9 +85,7 @@ def _extract_source_images(result: dict | None) -> list[str]:
 
 
 def _motion_for_external_clip(index: int) -> str:
-    if index < len(_PRIMARY_MOTION_SEQUENCE):
-        return _PRIMARY_MOTION_SEQUENCE[index]
-    return _REPEATING_MOTION_SEQUENCE[(index - len(_PRIMARY_MOTION_SEQUENCE)) % len(_REPEATING_MOTION_SEQUENCE)]
+    return _EXTERNAL_MOTION_SEQUENCE[index % len(_EXTERNAL_MOTION_SEQUENCE)]
 
 
 def _build_source_request(source_images: list[str], *, cfg_scale: float) -> SourceGenRequest:
@@ -113,12 +105,7 @@ def _build_source_request(source_images: list[str], *, cfg_scale: float) -> Sour
 
 
 def _requested_external_clip_count(payload: dict, available_source_count: int) -> int:
-    try:
-        requested = int(payload.get("clip_count") or 4)
-    except Exception:
-        requested = 4
-    requested = max(4, min(6, requested))
-    return max(1, min(requested, max(0, int(available_source_count))))
+    return max(1, min(_EXTERNAL_VIDEO_CLIP_COUNT, max(0, int(available_source_count))))
 
 
 def _poll_video_job_until_terminal(

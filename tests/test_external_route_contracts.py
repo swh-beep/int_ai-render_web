@@ -47,7 +47,7 @@ def _external_deps():
         job_render_with_details=lambda payload: payload,
         build_external_render_video_job=lambda req: {
             "render_job_id": req.render_job_id,
-            "clip_count": req.clip_count,
+            "clip_count": 7,
             "audience": "external",
         },
         job_generate_render_video=lambda payload: payload,
@@ -242,7 +242,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
             },
         )
 
-    def test_external_render_video_route_caps_clip_count_by_request_when_more_sources_exist(self):
+    def test_external_render_video_route_uses_all_available_external_sources_up_to_seven(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: _FakeFinishedJob(_external_finished_result_payload_many_sources())
         deps.enqueue_job = lambda job_func, payload, queue_name=None, **kwargs: (SimpleNamespace(id="job-video"), None)
@@ -262,7 +262,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
                 "job_id": "job-video",
                 "status": "queued",
                 "render_job_id": "job-xyz",
-                "clip_count": 4,
+                "clip_count": 7,
             },
         )
 
