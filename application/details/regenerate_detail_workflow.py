@@ -7,6 +7,7 @@ from application.details.regenerate_detail_resolution import (
     attach_regenerated_target_metadata,
     resolve_regeneration_style,
 )
+from application.details.detail_style_stage import with_internal_angle_styles
 
 
 def _normalize_box(box) -> list[float] | None:
@@ -257,6 +258,7 @@ def run_regenerate_single_detail_job(
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
             normalize_label_for_match=normalize_label_for_match,
+            simple_generation_mode=True,
         )
 
         try:
@@ -291,6 +293,8 @@ def run_regenerate_single_detail_job(
         )
 
         dynamic_styles = construct_dynamic_styles(analyzed_items)
+        if aud == "internal":
+            dynamic_styles = with_internal_angle_styles(dynamic_styles)
         if not dynamic_styles:
             return {"error": "No styles available"}
 
@@ -312,7 +316,7 @@ def run_regenerate_single_detail_job(
             unique_id,
             int(resolved_style_index or 1),
             analyzed_items,
-            prefer_crop_extract=str(style.get("name") or "").startswith("Detail:"),
+            prefer_crop_extract=False,
         )
         if not result:
             return {"error": "Generation failed"}

@@ -1,6 +1,6 @@
 import unittest
 
-from application.details.detail_style_stage import construct_dynamic_styles
+from application.details.detail_style_stage import construct_dynamic_styles, construct_internal_angle_styles
 from application.details.detail_result_stage import build_detail_generation_output
 from application.details.regenerate_detail_resolution import (
     attach_regenerated_target_metadata,
@@ -140,52 +140,43 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(enriched["target_box_source"], "main_render")
         self.assertEqual(enriched["resolved_target_label"], "Accent Chair")
 
-    def test_construct_dynamic_styles_limits_overview_camera_to_natural_human_height(self):
+    def test_construct_dynamic_styles_returns_only_simple_detail_targets(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Accent Chair",
+                    "target_key": "chair-key",
+                    "box_2d": [100, 100, 500, 500],
+                    "box_source": "detail_current_image_analysis",
+                }
+            ]
+        )
+
+        self.assertEqual(len(styles), 1)
+        self.assertEqual(styles[0]["name"], "Detail: Accent Chair")
+        self.assertEqual(styles[0]["ratio"], "4:5")
+        self.assertIs(styles[0]["simple_scene_detail"], True)
+        self.assertNotIn("TARGET COORDINATES", styles[0]["prompt"])
+
+    def test_construct_dynamic_styles_returns_no_overview_or_side_angle_styles_without_targets(self):
         styles = construct_dynamic_styles([])
 
-        overview = styles[0]
-        prompt = overview["prompt"]
+        self.assertEqual(styles, [])
 
-        self.assertEqual(overview["name"], "High Angle Overview")
-        self.assertEqual(overview["ratio"], "16:9")
-        self.assertEqual(styles[1]["ratio"], "16:9")
-        self.assertEqual(styles[2]["ratio"], "16:9")
-        self.assertIn("Moderately elevated high-angle overview", prompt)
-        self.assertIn("Shift the camera laterally or backward from the source position", prompt)
-        self.assertIn("reveal more top surfaces of furniture, floor area, and room depth", prompt)
-        self.assertIn("Do NOT use bird's-eye, top-down, drone, ceiling-mounted, surveillance, or extreme overhead viewpoints.", prompt)
-        self.assertIn("natural elevated in-room overview", prompt)
-        self.assertIn("If the output looks like the original source frame", prompt)
-        self.assertIn("Wide horizontal 16:9 angle shot", prompt)
+    def test_construct_internal_angle_styles_returns_internal_overview_and_side_slots(self):
+        styles = construct_internal_angle_styles()
 
-    def test_construct_dynamic_styles_requires_visible_side_angle_viewpoint_change(self):
-        styles = construct_dynamic_styles([])
-
-        left_prompt = styles[1]["prompt"]
-        right_prompt = styles[2]["prompt"]
-
-        self.assertEqual(styles[1]["name"], "Side Composition (Focus Left)")
-        self.assertEqual(styles[2]["name"], "Side Composition (Focus Right)")
+        self.assertEqual(
+            [style["name"] for style in styles],
+            ["High Angle Overview", "Side Composition (Focus Left)", "Side Composition (Focus Right)"],
+        )
+        self.assertEqual([style["ratio"] for style in styles], ["16:9", "16:9", "16:9"])
+        self.assertEqual(styles[0]["camera_mode"], "overview_angle")
         self.assertEqual(styles[1]["camera_mode"], "side_angle")
-        self.assertEqual(styles[2]["camera_mode"], "side_angle")
         self.assertEqual(styles[1]["focus_side"], "left")
+        self.assertEqual(styles[2]["camera_mode"], "side_angle")
         self.assertEqual(styles[2]["focus_side"], "right")
-        self.assertIn("faces the LEFT wall/furniture zone", left_prompt)
-        self.assertIn("left half of the source image must fill about 70 percent or more", left_prompt)
-        self.assertIn("opposite/right side must be cropped out", left_prompt)
-        self.assertIn("faces the RIGHT side of the room", right_prompt)
-        self.assertIn("right half of the source image must fill about 70 percent or more", right_prompt)
-        self.assertIn("opposite/left side must be cropped out", right_prompt)
-        self.assertIn("visibly different diagonal side-angle photograph", left_prompt)
-        self.assertIn("visibly different diagonal side-angle photograph", right_prompt)
-        self.assertIn("PARALLAX REQUIREMENT", left_prompt)
-        self.assertIn("PARALLAX REQUIREMENT", right_prompt)
-        self.assertIn("FRAMING PERMISSION", left_prompt)
-        self.assertIn("FRAMING PERMISSION", right_prompt)
-        self.assertIn("flat front-facing copy of the source is forbidden", left_prompt)
-        self.assertIn("flat front-facing copy of the source is forbidden", right_prompt)
-        self.assertNotIn("keep the original standing position", left_prompt.lower())
-        self.assertNotIn("keep the original standing position", right_prompt.lower())
+        self.assertNotIn("simple_scene_detail", styles[0])
 
     def test_construct_dynamic_styles_deduplicates_same_product_detail_targets(self):
         analyzed_items = [
@@ -276,6 +267,36 @@ class DetailMetadataTests(unittest.TestCase):
         styles = construct_dynamic_styles(analyzed_items)
         detail_targets = [style.get("target_label") for style in styles if str(style.get("name") or "").startswith("Detail:")]
 
-        self.assertEqual(detail_targets, ["De Sede DS-787", "Akari Floor Lamp"])
-        self.assertNotIn("Sofa", detail_targets)
-        self.assertNotIn("Console Table", detail_targets)
+        self.assertEqual(detail_targets, ["De Sede DS-787", "Sofa", "Akari Floor Lamp", "Console Table"])
+
+    def test_construct_dynamic_styles_does_not_prioritize_uncroppable_cached_snapshots(self):
+        analyzed_items = [
+            {
+                "label": "De Sede DS-787",
+                "target_key": "cart_product-2_desede-ds787",
+                "source_index": 2,
+                "category": "sofa",
+                "category_canonical": "sofa",
+                "crop_path": "/tmp/desede.png",
+                "box_2d": [0, 0, 1000, 1000],
+                "box_source": "cached_detail_snapshot",
+                "identity_profile": {"family": "sofa"},
+                "volume_rank": 1,
+            },
+            {
+                "label": "Sofa",
+                "target_key": "detail_2_sofa",
+                "source_index": 99,
+                "category": "sofa",
+                "category_canonical": "sofa",
+                "box_2d": [140, 100, 690, 610],
+                "box_source": "detail_current_image_analysis",
+                "identity_profile": {"family": "sofa"},
+                "volume_rank": 2,
+            },
+        ]
+
+        styles = construct_dynamic_styles(analyzed_items)
+        detail_targets = [style.get("target_label") for style in styles if str(style.get("name") or "").startswith("Detail:")]
+
+        self.assertEqual(detail_targets, ["Sofa"])

@@ -465,6 +465,53 @@ def analyze_cropped_item(
         except Exception:
             crop_path = None
 
+        resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
+        if not enable_text_read:
+            reference_features = extract_reference_features(
+                crop_path=crop_path,
+                label=label,
+                category=item_data.get("category"),
+                description=f"{label} product reference image is authoritative.",
+                dims_mm=resolved_dims_mm,
+                call_gemini_with_failover=call_gemini_with_failover,
+                analysis_model_name=analysis_model_name,
+                safe_json_from_model_text=safe_extract_json,
+                log_brief=log_brief,
+                allow_model_call=False,
+            )
+            if isinstance(reference_features, dict):
+                reference_features["extraction_mode"] = "deterministic"
+                reference_features["extraction_reason"] = "authoritative_reference_image"
+            final_desc = _stabilize_description(
+                label=label,
+                category=item_data.get("category") or item_data.get("category_canonical"),
+                description=f"{label} product reference image is authoritative.",
+                dims_mm=resolved_dims_mm,
+                reference_features=reference_features,
+            )
+            if cropped_img:
+                try:
+                    cropped_img.close()
+                except Exception:
+                    pass
+            if cutout_img:
+                try:
+                    cutout_img.close()
+                except Exception:
+                    pass
+            return {
+                "label": label,
+                "description": final_desc,
+                "box_2d": box,
+                "crop_path": crop_path,
+                "reference_features": reference_features,
+                "target_key": item_data.get("target_key"),
+                "source_index": item_data.get("source_index"),
+                "category": item_data.get("category"),
+                "category_canonical": item_data.get("category_canonical"),
+                "item_id": item_data.get("item_id"),
+            }
+
         if enable_text_read:
             prompt = (
                 f"Analyze this image cutout of a '{label}'.\n"
@@ -545,7 +592,6 @@ def analyze_cropped_item(
             )
 
         desc = f"{label} with its original material and silhouette preserved."
-        resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
 
         if response and response.text:
             data = safe_extract_json(response.text)

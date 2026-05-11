@@ -203,6 +203,7 @@ def build_product_identity_bundle(analyzed_items: list[dict] | None) -> tuple[li
             ["reflective_surface"] if bool(ref.get("reflective_surface") or profile.get("reflective_surface")) else [],
         )
         preserve_rules = _merge_unique(
+            ["exact_reference_image"] if item.get("crop_path") else [],
             list(ref.get("preserve_rules") or []),
             list(profile.get("preserve_rules") or []),
             support_geometry,

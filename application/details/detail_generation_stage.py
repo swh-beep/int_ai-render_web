@@ -367,6 +367,67 @@ def _render_crop_detail(
     }
 
 
+def _build_simple_scene_detail_prompt(target_label: str) -> str:
+    clean_label = str(target_label or "the selected furniture or decor").strip() or "the selected furniture or decor"
+    return (
+        "<TASK>\n"
+        f"Create one photorealistic editorial detail photograph focused on the {clean_label} area in this exact finished interior.\n\n"
+        "<SOURCE OF TRUTH>\n"
+        "Use the provided main room image as the only visual source of truth. This is not a redesign task.\n\n"
+        "<LOCKED SCENE RULES>\n"
+        "- Keep every furniture/decor item's shape, count, placement, scale, material, and color unchanged.\n"
+        "- Keep the room architecture, wall/floor/window locations, lighting direction, shadows, and overall tone unchanged.\n"
+        "- Do not add, remove, replace, duplicate, resize, recolor, or rearrange any object.\n"
+        "- The target must remain the same object in the same physical location, with nearby objects preserved as context.\n\n"
+        "<CAMERA>\n"
+        "Shoot a close editorial detail from a natural in-room camera position. You may crop/reframe or move the virtual camera slightly "
+        "to make the target read clearly, but the scene itself must stay fixed.\n\n"
+        "<STYLE>\n"
+        "High-end interior magazine photography: natural depth of field, clean composition, realistic texture, balanced shadows, no text, no watermark."
+    )
+
+
+def _is_gpt_image_model_name(model_name: str | None) -> bool:
+    return str(model_name or "").strip().lower().startswith("gpt-image-")
+
+
+def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str:
+    style_name = str((style_config or {}).get("name") or "").strip()
+    clean_label = str(target_label or "").strip()
+    if not clean_label and style_name.startswith("Detail:"):
+        clean_label = style_name.split("Detail:", 1)[1].strip()
+    clean_label = clean_label or "the selected furniture or decor"
+
+    camera_mode = str((style_config or {}).get("camera_mode") or "").strip().lower()
+    focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
+    is_overview = camera_mode == "overview_angle" or style_name == "High Angle Overview"
+    is_side = camera_mode == "side_angle" or style_name.startswith("Side Composition")
+
+    if is_overview:
+        return (
+            "Create a high-angle editorial photograph of this exact finished interior. "
+            "Make it feel like a real interior magazine photo with natural light, shadows, and material texture. "
+            "Do not change the room structure, furniture/decor shape, detail, count, color, material, scale, or placement. "
+            "No text or watermark."
+        )
+
+    if is_side:
+        side_text = f" from the {focus_side} side" if focus_side in {"left", "right"} else ""
+        return (
+            f"Create a side-composition editorial photograph{side_text} of this exact finished interior. "
+            "Keep the same room and furniture arrangement while changing only the camera viewpoint. "
+            "Do not change furniture/decor shape, detail, count, color, material, scale, or placement. "
+            "No text or watermark."
+        )
+
+    return (
+        f"Create a detailed editorial photograph focused on the {clean_label} area in this exact finished interior. "
+        "Make it feel like a real interior magazine photo with natural light, shadows, depth, and material texture. "
+        "Do not change the room structure, furniture/decor shape, detail, count, color, material, scale, or placement. "
+        "No text or watermark."
+    )
+
+
 def generate_detail_view(
     original_image_path,
     style_config,
@@ -436,6 +497,117 @@ def generate_detail_view(
         style_target_label = str(style_config.get("target_label") or "").strip()
         if not style_target_label and style_name.startswith("Detail:"):
             style_target_label = style_name.split("Detail:", 1)[1].strip()
+
+        requested_timeout_sec = style_config.get("timeout_sec")
+        try:
+            request_timeout_sec = float(requested_timeout_sec) if requested_timeout_sec is not None else 120.0
+        except Exception:
+            request_timeout_sec = 120.0
+        if request_timeout_sec <= 0.0:
+            return None
+
+        if _is_gpt_image_model_name(model_name):
+            response = call_gemini_with_failover(
+                model_name,
+                [
+                    _build_gpt_image_detail_prompt(style_config, style_target_label or style_name),
+                    "Main furnished room image:",
+                    img,
+                ],
+                {
+                    "timeout": max(1.0, min(120.0, request_timeout_sec)),
+                    "aspect_ratio": target_ratio,
+                    "max_attempts": 1,
+                },
+                allow_harassment_only_safety_settings(),
+                log_tag="Detail.Generate.GPTImage",
+            )
+            if response and hasattr(response, "candidates") and response.candidates:
+                for part in response.parts:
+                    if hasattr(part, "inline_data"):
+                        timestamp = int(time.time())
+                        safe_style_name = "".join([c for c in style_name if c.isalnum()])[:20] or f"detail{index}"
+                        filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
+                        path = os.path.join("outputs", filename)
+                        with open(path, "wb") as file_obj:
+                            file_obj.write(part.inline_data.data)
+                        normalized_path = _normalize_generated_detail_ratio(
+                            path,
+                            requested_ratio=target_ratio,
+                        )
+                        if normalized_path is None:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            continue
+                        if normalized_path != path:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            path = normalized_path
+                        return {
+                            "path": path,
+                            "style_name": style_name,
+                            "aspect_ratio": target_ratio,
+                            "cutout_ref_count": 0,
+                            "cutout_ref_labels": [],
+                            "generation_mode": "gpt_image_detail",
+                        }
+            return None
+
+        if bool(style_config.get("simple_scene_detail")):
+            response = call_gemini_with_failover(
+                model_name,
+                [
+                    _build_simple_scene_detail_prompt(style_target_label or style_name),
+                    "Main furnished room image:",
+                    img,
+                ],
+                {
+                    "timeout": max(1.0, min(120.0, request_timeout_sec)),
+                    "aspect_ratio": target_ratio,
+                    "thinking_level": "high",
+                    "include_thoughts": False,
+                },
+                allow_harassment_only_safety_settings(),
+                log_tag="Detail.Generate.Simple",
+            )
+            if response and hasattr(response, "candidates") and response.candidates:
+                for part in response.parts:
+                    if hasattr(part, "inline_data"):
+                        timestamp = int(time.time())
+                        safe_style_name = "".join([c for c in style_name if c.isalnum()])[:20] or f"detail{index}"
+                        filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
+                        path = os.path.join("outputs", filename)
+                        with open(path, "wb") as file_obj:
+                            file_obj.write(part.inline_data.data)
+                        normalized_path = _normalize_generated_detail_ratio(
+                            path,
+                            requested_ratio=target_ratio,
+                        )
+                        if normalized_path is None:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            continue
+                        if normalized_path != path:
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            path = normalized_path
+                        return {
+                            "path": path,
+                            "style_name": style_name,
+                            "aspect_ratio": target_ratio,
+                            "cutout_ref_count": 0,
+                            "cutout_ref_labels": [],
+                            "generation_mode": "simple_scene_detail",
+                        }
+            return None
 
         target_lock_block = ""
         if style_target_key or style_target_label:
@@ -662,19 +834,12 @@ def generate_detail_view(
         except Exception:
             pass
 
-        requested_timeout_sec = style_config.get("timeout_sec")
-        try:
-            request_timeout_sec = float(requested_timeout_sec) if requested_timeout_sec is not None else 90.0
-        except Exception:
-            request_timeout_sec = 90.0
-        if request_timeout_sec <= 0.0:
-            return None
         requested_ratio = target_ratio
         response = call_gemini_with_failover(
             model_name,
             content,
             {
-                "timeout": max(1.0, min(90.0, request_timeout_sec)),
+                "timeout": max(1.0, min(120.0, request_timeout_sec)),
                 "aspect_ratio": requested_ratio,
                 "thinking_level": "high",
                 "include_thoughts": False,

@@ -6,7 +6,7 @@ from application.details.detail_analysis_stage import load_analyzed_items, prepa
 from application.details.detail_generation_stage import generate_detail_view as actual_generate_detail_view
 from application.details.detail_style_stage import construct_dynamic_styles
 from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
-from application.details.detail_workflow import run_generate_details_job
+from application.details.detail_workflow import run_generate_details_job, select_external_detail_styles
 from application.render.render_result_stage import build_detail_payload
 from application.render.render_workflow import run_render_with_details_job
 from render_route_services import (
@@ -16,6 +16,36 @@ from render_route_services import (
 
 
 class DetailChainContractsTests(unittest.TestCase):
+    def test_select_external_detail_styles_interleaves_primary_and_small_items_at_six(self):
+        styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 13)]
+
+        selected = select_external_detail_styles(styles)
+
+        self.assertEqual(
+            [style["name"] for style in selected],
+            [
+                "Detail: item-1",
+                "Detail: item-12",
+                "Detail: item-2",
+                "Detail: item-11",
+                "Detail: item-3",
+                "Detail: item-10",
+            ],
+        )
+
+    def test_select_external_detail_styles_interleaves_even_when_under_limit(self):
+        three_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 4)]
+        four_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 5)]
+
+        self.assertEqual(
+            [style["name"] for style in select_external_detail_styles(three_styles)],
+            ["Detail: item-1", "Detail: item-3", "Detail: item-2"],
+        )
+        self.assertEqual(
+            [style["name"] for style in select_external_detail_styles(four_styles)],
+            ["Detail: item-1", "Detail: item-4", "Detail: item-2", "Detail: item-3"],
+        )
+
     def test_build_detail_payload_preserves_itemized_context(self):
         render_result = {
             "result_urls": ["https://cdn.example/rendered/main-1.png"],
@@ -135,7 +165,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
         self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_floor-lamp")
         self.assertEqual(result["furniture_data"][0]["box_source"], "detail_current_image_analysis")
-        self.assertEqual(generation_kwargs[0].get("prefer_crop_extract"), True)
+        self.assertEqual(generation_kwargs[0].get("prefer_crop_extract"), False)
 
     def test_run_regenerate_single_detail_job_preserves_requested_target_even_when_box_overlaps_other_detection(self):
         source_path = Path("outputs/test-regenerate-box-source.png")
@@ -509,12 +539,12 @@ class DetailChainContractsTests(unittest.TestCase):
         finally:
             source_path.unlink(missing_ok=True)
 
-        self.assertEqual(captured["style_targets"], ["cached_table_001", "detail_002_armchair"])
+        self.assertEqual(captured["style_targets"], ["detail_001_coffee-table", "detail_002_armchair"])
         self.assertEqual(result["furniture_data"][0]["box_2d"], [420, 430, 640, 700])
-        self.assertEqual(result["furniture_data"][0]["target_key"], "cached_table_001")
+        self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_coffee-table")
         self.assertEqual(result["furniture_data"][1]["label"], "Armchair")
 
-    def test_run_regenerate_single_detail_job_requests_crop_first_for_detail_styles(self):
+    def test_run_regenerate_single_detail_job_uses_simple_generation_for_detail_styles(self):
         source_path = Path("outputs/test-regenerate-crop-mode.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.write_bytes(
@@ -559,7 +589,7 @@ class DetailChainContractsTests(unittest.TestCase):
             source_path.unlink(missing_ok=True)
 
         self.assertEqual(result["style_name"], "Detail: Accent Chair")
-        self.assertTrue(captured["prefer_crop_extract"])
+        self.assertFalse(captured["prefer_crop_extract"])
 
     def test_run_generate_details_job_blocks_source_reference_crop_targets(self):
         source_path = Path("outputs/test-detail-source-reference.png")
@@ -785,6 +815,67 @@ def test_run_render_with_details_job_skips_details_when_budget_is_exhausted():
     assert result["cart_kept"] == [{"id": "chair-1"}]
 
 
+def test_run_render_with_details_job_required_details_ignores_shared_deadline_budget():
+    captured = {}
+    persisted = []
+
+    def fake_detail_job_runner(detail_payload):
+        captured["detail_payload"] = dict(detail_payload)
+        return {"details": [{"url": "https://cdn.example/detail-1.png"}], "message": "ok"}
+
+    result = run_render_with_details_job(
+        {
+            "require_details": True,
+            "render": {"audience": "external"},
+            "extra": {"cart_kept": [{"id": "chair-1"}], "cart_dropped": []},
+        },
+        normalize_audience=lambda audience: audience or "external",
+        render_job_runner=lambda render_payload, persist_result=False: {
+            "result_url": "https://cdn.example/render.png",
+            "result_urls": ["https://cdn.example/render.png"],
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+        },
+        detail_job_runner=fake_detail_job_runner,
+        persist_job_result=lambda payload, audience=None: persisted.append((payload, audience)),
+        total_timeout_limit_sec=1.0,
+        time_now=lambda: 100.0,
+    )
+
+    detail_payload = captured["detail_payload"]
+    assert "absolute_deadline_ts" not in detail_payload
+    assert "detail_budget_sec" not in detail_payload
+    assert detail_payload["require_details"] is True
+    assert result["details"]["details"][0]["url"] == "https://cdn.example/detail-1.png"
+    assert "error" not in result
+    assert persisted[-1][1] == "external"
+
+
+def test_run_render_with_details_job_required_details_marks_empty_details_as_error():
+    persisted = []
+
+    result = run_render_with_details_job(
+        {
+            "require_details": True,
+            "render": {"audience": "external"},
+            "extra": {"resolved": {"room": "livingroom", "style": "natural", "variant": "2"}},
+        },
+        normalize_audience=lambda audience: audience or "external",
+        render_job_runner=lambda render_payload, persist_result=False: {
+            "result_url": "https://cdn.example/render.png",
+            "result_urls": ["https://cdn.example/render.png"],
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+        },
+        detail_job_runner=lambda detail_payload: {"details": [], "message": "no usable detail shots"},
+        persist_job_result=lambda payload, audience=None: persisted.append((payload, audience)),
+        total_timeout_limit_sec=1.0,
+        time_now=lambda: 100.0,
+    )
+
+    assert result["error"] == "Required detail generation failed: no usable detail shots"
+    assert result["details"]["details"] == []
+    assert persisted[-1][0]["error"] == result["error"]
+
+
 def test_run_generate_details_job_budgeted_mode_limits_styles_and_uses_style_timeouts(monkeypatch, tmp_path):
     image_path = tmp_path / "detail-src.png"
     image_path.write_bytes(
@@ -885,22 +976,65 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
         volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
     )
 
-    assert [row["style_name"] for row in result["details"][:3]] == [
+    assert [row["style_name"] for row in result["details"]] == [
         "High Angle Overview",
         "Side Composition (Focus Left)",
         "Side Composition (Focus Right)",
+        "Detail: Accent Chair",
     ]
-    assert [row["aspect_ratio"] for row in result["details"][:3]] == ["16:9", "16:9", "16:9"]
-    assert [recorded_styles[idx].get("ratio") for idx in [1, 2, 3]] == ["16:9", "16:9", "16:9"]
+    assert [row["aspect_ratio"] for row in result["details"]] == ["16:9", "16:9", "16:9", "4:5"]
     assert recorded_styles[1].get("camera_mode") == "overview_angle"
+    assert recorded_styles[1].get("ratio") == "16:9"
     assert recorded_styles[2].get("camera_mode") == "side_angle"
     assert recorded_styles[2].get("focus_side") == "left"
     assert recorded_styles[3].get("camera_mode") == "side_angle"
     assert recorded_styles[3].get("focus_side") == "right"
-    assert recorded_crop_preferences[1] is False
-    assert recorded_crop_preferences[2] is False
-    assert recorded_crop_preferences[3] is False
-    assert recorded_crop_preferences[4] is True
+    assert recorded_styles[4].get("ratio") == "4:5"
+    assert recorded_styles[4].get("simple_scene_detail") is True
+    assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
+
+
+def test_external_generate_details_job_keeps_only_simple_detail_targets(tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    recorded_styles = {}
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        recorded_styles[int(index)] = dict(style_config)
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+            "audience": "external",
+        },
+        normalize_audience=lambda audience: audience or "external",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: [{"label": "Accent Chair", "box_2d": [100, 100, 700, 700]}],
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: {**item, "description": "single accent chair", "crop_path": str(image_path)},
+        attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: str(label or "").strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    assert [row["style_name"] for row in result["details"]] == ["Detail: Accent Chair"]
+    assert recorded_styles[1].get("simple_scene_detail") is True
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):

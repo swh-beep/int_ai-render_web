@@ -40,6 +40,11 @@ from application.http.queue_route_handlers import (
     handle_upscale_async,
 )
 from application.http.local_job_store import enqueue_local_job, get_local_job
+from application.http.staging_job_store import (
+    get_staging_job_state,
+    set_staging_job_state,
+    update_staging_job_state,
+)
 from application.media.frontal_generation_stage import (
     generate_frontal_room_from_photos as generate_frontal_room_from_photos_stage,
 )
@@ -203,10 +208,12 @@ from render_route_services import (
     build_image_edit_job_payload,
     build_internal_render_job_payload,
     build_internal_itemized_async_render_job_payload,
+    prepare_internal_item_upload_paths,
     build_regenerate_detail_job_payload,
     build_upscale_job_payload,
     persist_internal_media_uploads,
     persist_internal_item_uploads,
+    persist_internal_item_source_uploads,
     persist_internal_room_upload,
 )
 from request_helpers import apply_cart_limits, build_cart_summary, require_role
@@ -306,8 +313,8 @@ CONFIGURED_ANALYSIS_PROVIDER = os.getenv("ANALYSIS_PROVIDER", "gemini").strip().
 OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").strip() or "gpt-5.4"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
-CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
-CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", CONFIGURED_MAIN_IMAGE_PROVIDER).strip().lower() or CONFIGURED_MAIN_IMAGE_PROVIDER
+CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
+CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
 ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.analysis_provider
 MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_API_KEY)
 REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_API_KEY)
@@ -417,6 +424,7 @@ RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "600"))
 RQ_VIDEO_JOB_TIMEOUT = int(os.getenv("RQ_VIDEO_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
+STAGING_JOB_TTL = int(os.getenv("STAGING_JOB_TTL", "86400"))
 RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
 RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
@@ -771,6 +779,7 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
     retry = None
     job_timeout = kwargs.pop("job_timeout", RQ_JOB_TIMEOUT)
     result_ttl = kwargs.pop("result_ttl", RQ_RESULT_TTL)
+    custom_job_id = kwargs.pop("job_id", None)
     if q:
         try:
             if RQ_RETRY_MAX > 0:
@@ -791,21 +800,21 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
         except Exception:
             retry = None
         try:
-            job = q.enqueue(
-                func,
-                *args,
-                **kwargs,
-                job_timeout=job_timeout,
-                result_ttl=result_ttl,
-                retry=retry,
-            )
+            enqueue_kwargs = {
+                "job_timeout": job_timeout,
+                "result_ttl": result_ttl,
+                "retry": retry,
+            }
+            if custom_job_id:
+                enqueue_kwargs["job_id"] = str(custom_job_id)
+            job = q.enqueue(func, *args, **kwargs, **enqueue_kwargs)
             return job, None
         except Exception as exc:
             if not LOCAL_INLINE_QUEUE_ENABLED:
                 return None, str(exc)
     if LOCAL_INLINE_QUEUE_ENABLED:
         try:
-            return enqueue_local_job(func, *args, **kwargs), None
+            return enqueue_local_job(func, *args, job_id=str(custom_job_id) if custom_job_id else None, **kwargs), None
         except Exception as exc:
             return None, str(exc)
     return None, "REDIS_URL not configured"
@@ -822,6 +831,33 @@ def _fetch_job(job_id: str):
         return Job.fetch(job_id, connection=conn)
     except Exception:
         return None
+
+
+def _set_staging_job(job_id: str, state: dict) -> None:
+    set_staging_job_state(
+        job_id,
+        state,
+        redis_conn=_get_redis_conn(),
+        ttl_sec=STAGING_JOB_TTL,
+    )
+
+
+def _update_staging_job(job_id: str, fields: dict) -> None:
+    update_staging_job_state(
+        job_id,
+        fields,
+        redis_conn=_get_redis_conn(),
+        ttl_sec=STAGING_JOB_TTL,
+    )
+
+
+def _get_staging_job(job_id: str) -> Optional[dict]:
+    return get_staging_job_state(job_id, redis_conn=_get_redis_conn())
+
+
+def _start_background_task(task):
+    thread = threading.Thread(target=task, name=f"staging-job-{uuid.uuid4().hex[:8]}", daemon=True)
+    thread.start()
 
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1579,7 +1615,8 @@ def generate_furnished_room(
 def polish_main_image(
     source_path,
     unique_id,
-    timeout_sec: float = 70.0,
+    timeout_sec: float = 90.0,
+    **_kwargs,
 ):
     return polish_main_render_stage(
         source_path,
@@ -1852,6 +1889,8 @@ def _queue_route_deps() -> QueueRouteDependencies:
         parse_internal_render_items_form=parse_internal_render_items_form,
         persist_internal_room_upload=persist_internal_room_upload,
         persist_internal_item_uploads=persist_internal_item_uploads,
+        persist_internal_item_source_uploads=persist_internal_item_source_uploads,
+        prepare_internal_item_upload_paths=prepare_internal_item_upload_paths,
         persist_internal_media_uploads=persist_internal_media_uploads,
         build_internal_render_job_payload=build_internal_render_job_payload,
         build_internal_itemized_async_render_job_payload=build_internal_itemized_async_render_job_payload,
@@ -1877,6 +1916,10 @@ def _queue_route_deps() -> QueueRouteDependencies:
         job_generate_empty_room=job_generate_empty_room,
         job_regenerate_single_detail=job_regenerate_single_detail,
         job_generate_details=job_generate_details,
+        set_staging_job=_set_staging_job,
+        update_staging_job=_update_staging_job,
+        get_staging_job=_get_staging_job,
+        start_background_task=_start_background_task,
     )
 
 @app.get("/download")
@@ -2180,8 +2223,8 @@ job_entrypoints_module.configure_job_entrypoints(
             materialize_input=_materialize_input,
             normalize_label_for_match=_normalize_label_for_match,
             allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,
-            call_gemini_with_failover=call_gemini_with_failover,
-            model_name=GEMINI_IMAGE_MODEL_NAME,
+            call_gemini_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+            model_name=REPAIR_IMAGE_MODEL_NAME,
         ),
         normalize_label_for_match=_normalize_label_for_match,
         volume_ranking_snapshot=_volume_ranking_snapshot,

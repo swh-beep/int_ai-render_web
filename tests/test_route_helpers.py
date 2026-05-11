@@ -2,15 +2,16 @@ import io
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from api_models import CartItem, CartRenderRequest, ExternalRenderVideoRequest
+from api_models import CartItem, CartRenderRequest, ExternalRenderVideoRequest, PresetRenderRequest
 from preset_helpers import resolve_preset_request
 from fastapi import UploadFile
 from PIL import Image
 from application.render.direct_item_image_prep import prepare_direct_item_image
-from application.http.queue_route_handlers import handle_render_room_async
-from render_route_services import build_external_cart_job, build_external_render_video_job
+from application.http.queue_route_handlers import handle_get_job_status, handle_render_room_async
+from render_route_services import build_external_cart_job, build_external_preset_job, build_external_render_video_job
 from request_helpers import require_role
 from storage_helpers import is_allowed_download_url, resolve_image_url
 
@@ -161,6 +162,7 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(len(kept), 2)
         self.assertEqual(len(dropped), 1)
         item_refs = job_payload["render"]["moodboard_items"]
+        self.assertIs(job_payload["require_details"], True)
         self.assertEqual(item_refs[0]["path"], "https://example.com/chair.png")
         self.assertEqual(item_refs[1]["path"], "https://example.com/sofa.png")
         self.assertEqual(item_refs[0]["worker_preprocess"], "external_cart_item_v1")
@@ -194,11 +196,34 @@ class RouteHelperTests(unittest.TestCase):
 
         self.assertEqual(len(kept), 1)
         self.assertEqual(dropped, [])
+        self.assertIs(job_payload["require_details"], True)
         self.assertEqual(job_payload["render"]["room"], "")
         self.assertEqual(
             job_payload["render"]["moodboard_items"][0]["path"],
             "https://example.com/chair.png",
         )
+
+    def test_build_external_preset_job_requires_detail_generation(self):
+        req = PresetRenderRequest(
+            image_url="https://example.com/room.png",
+            preset_id="preset-1",
+        )
+
+        job_payload, resolved = build_external_preset_job(
+            req,
+            {
+                "preset-1": {
+                    "room": "livingroom",
+                    "style": "natural",
+                    "variant": "2",
+                    "dimensions": "5000 x 4000 x 2600",
+                    "placement": "preserve windows",
+                }
+            },
+        )
+
+        self.assertEqual(resolved["room"], "livingroom")
+        self.assertIs(job_payload["require_details"], True)
 
     def test_build_external_render_video_job_validates_clip_count_range(self):
         payload = build_external_render_video_job(ExternalRenderVideoRequest(render_job_id="render-job-1", clip_count=5))
@@ -215,18 +240,25 @@ class RouteHelperTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clip_count"):
             build_external_render_video_job(ExternalRenderVideoRequest(render_job_id="render-job-1", clip_count=3))
 
-    def test_handle_render_room_async_uses_itemized_render_helpers(self):
+    def test_handle_render_room_async_returns_staging_job_before_publish_and_enqueue(self):
         deps = MagicMock()
         deps.redis_url = "redis://example"
+        deps.local_inline_queue_enabled = False
         deps.rq_queue_render = "render"
         deps.parse_internal_render_items_form.return_value = [{"upload_index": 0}]
         deps.persist_internal_room_upload.return_value = "outputs/raw.png"
-        deps.persist_internal_item_uploads.return_value = ["outputs/item_1.png"]
+        deps.persist_internal_item_source_uploads.return_value = ["outputs/item_src_1.png"]
+        deps.prepare_internal_item_upload_paths.return_value = ["outputs/item_1.png"]
         deps.build_internal_itemized_async_render_job_payload.return_value = {"render": {"audience": "internal"}}
         deps.resolve_image_url = lambda path, prefix=None: f"resolved:{path}"
         deps.build_s3_prefix = lambda audience, category, subfolder=None: f"{audience}/{category}/{subfolder or 'root'}"
         deps.build_item_target_key = lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}"
-        deps.enqueue_job.return_value = (MagicMock(id="job-1"), None)
+        deps.enqueue_job.side_effect = lambda job_func, payload, queue_name=None, **kwargs: (
+            SimpleNamespace(id=kwargs["job_id"]),
+            None,
+        )
+        staged_tasks = []
+        deps.start_background_task.side_effect = lambda task: staged_tasks.append(task)
 
         response = handle_render_room_async(
             file=_upload("room.png"),
@@ -241,11 +273,54 @@ class RouteHelperTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn(b'"job_id"', response.body)
         deps.parse_internal_render_items_form.assert_called_once()
         deps.persist_internal_room_upload.assert_called_once()
-        deps.persist_internal_item_uploads.assert_called_once()
+        deps.persist_internal_item_source_uploads.assert_called_once()
+        deps.prepare_internal_item_upload_paths.assert_not_called()
+        deps.build_internal_itemized_async_render_job_payload.assert_not_called()
+        deps.enqueue_job.assert_not_called()
+        deps.set_staging_job.assert_called_once()
+        self.assertEqual(len(staged_tasks), 1)
+
+        staged_job_id = deps.set_staging_job.call_args.args[0]
+        staged_tasks[0]()
+
+        deps.prepare_internal_item_upload_paths.assert_called_once_with(["outputs/item_src_1.png"])
         deps.build_internal_itemized_async_render_job_payload.assert_called_once()
+        build_call = deps.build_internal_itemized_async_render_job_payload.call_args.kwargs
+        self.assertIs(build_call["publish_inputs"], True)
+        self.assertEqual(build_call["raw_path"], "outputs/raw.png")
+        self.assertEqual(build_call["item_paths"], ["outputs/item_1.png"])
         deps.enqueue_job.assert_called_once()
+        enqueue_call = deps.enqueue_job.call_args
+        self.assertEqual(enqueue_call.kwargs["job_id"], staged_job_id)
+
+    def test_get_job_status_returns_staging_state_before_rq_job_exists(self):
+        deps = MagicMock()
+        deps.redis_url = "redis://example"
+        deps.local_inline_queue_enabled = False
+        deps.fetch_job.return_value = None
+        deps.load_job_result_s3.return_value = None
+        deps.get_staging_job.return_value = {
+            "job_id": "stage-1",
+            "status": "queued",
+            "stage": "publishing_inputs",
+            "enqueued_at": "2026-05-11T00:00:00+00:00",
+            "started_at": None,
+            "ended_at": None,
+        }
+
+        response = handle_get_job_status("stage-1", deps=deps)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.body,
+            (
+                b'{"id":"stage-1","status":"queued","enqueued_at":"2026-05-11T00:00:00+00:00",'
+                b'"started_at":null,"ended_at":null,"stage":"publishing_inputs"}'
+            ),
+        )
 
     def test_resolve_image_url_respects_s3_required_for_local_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "S3_REQUIRED"):

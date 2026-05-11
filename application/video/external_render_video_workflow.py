@@ -19,7 +19,6 @@ _REPEATING_MOTION_SEQUENCE: tuple[str, ...] = (
     "orbit_r_slow",
     "zoom_in_slow",
 )
-_DETAIL_PRIORITY_ORDER: tuple[int, ...] = (5, 0, 4, 2, 3, 1)
 _EXTERNAL_BRAND_CARD_SEC = 3.0
 _EXTERNAL_BRAND_CARD_PATH = Path(__file__).resolve().parents[2] / "static" / "thumbnails" / "external_video_logo_card.jpg"
 _EXTERNAL_BRAND_CARD_FALLBACK_PATH = Path(__file__).resolve().parents[2] / "static" / "TIOR STUDIO(Black).png"
@@ -61,21 +60,6 @@ def _preferred_brand_card_path() -> Path | None:
     return None
 
 
-def _reorder_detail_images(detail_urls: list[str]) -> list[str]:
-    if not detail_urls:
-        return []
-    ordered: list[str] = []
-    seen: set[int] = set()
-    for index in _DETAIL_PRIORITY_ORDER:
-        if 0 <= index < len(detail_urls) and index not in seen:
-            ordered.append(detail_urls[index])
-            seen.add(index)
-    for index, url in enumerate(detail_urls):
-        if index not in seen:
-            ordered.append(url)
-    return ordered
-
-
 def _extract_source_images(result: dict | None) -> list[str]:
     if not isinstance(result, dict):
         return []
@@ -102,7 +86,7 @@ def _extract_source_images(result: dict | None) -> list[str]:
     ordered: list[str] = []
     if primary_main:
         ordered.append(primary_main)
-    ordered.extend(_reorder_detail_images(detail_urls))
+    ordered.extend(detail_urls)
     return ordered
 
 

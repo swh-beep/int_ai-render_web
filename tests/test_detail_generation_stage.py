@@ -92,6 +92,119 @@ def test_generate_detail_view_initial_detail_prefers_editorial_model_generation_
             output_path.unlink()
 
 
+def test_generate_detail_view_simple_scene_detail_uses_main_image_only(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+    captured = {}
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        captured["content"] = list(content)
+        captured["request_options"] = dict(request_options)
+        captured["prompt"] = content[0]
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Floor Lamp",
+            "target_key": "lamp_01",
+            "target_label": "Floor Lamp",
+            "ratio": "4:5",
+            "simple_scene_detail": True,
+            "prompt": "legacy prompt should not be used",
+        },
+        "unitcase",
+        2,
+        furniture_data=[{"label": "Floor Lamp", "crop_path": str(tmp_path / "cutout.png")}],
+        materialize_input=lambda path, prefix: (_ for _ in ()).throw(AssertionError("cutout refs should not be materialized")),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image-preview",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert result["generation_mode"] == "simple_scene_detail"
+        assert result["cutout_ref_count"] == 0
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert len(captured["content"]) == 3
+        assert "focused on the Floor Lamp area" in captured["prompt"]
+        assert "legacy prompt should not be used" not in captured["prompt"]
+        assert "<TARGET ANCHOR>" not in captured["prompt"]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1600, 2000), color=(245, 245, 245)).save(source_path, format="PNG")
+    captured = {}
+
+    def _call_gpt_image(model_name, content, request_options, safety_settings, **kwargs):
+        captured["model_name"] = model_name
+        captured["content"] = list(content)
+        captured["prompt"] = content[0]
+        captured["request_options"] = dict(request_options)
+        captured["kwargs"] = dict(kwargs)
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Floor Lamp",
+            "target_key": "lamp_01",
+            "target_label": "Floor Lamp",
+            "ratio": "4:5",
+            "simple_scene_detail": True,
+            "prompt": "legacy prompt should not be used",
+        },
+        "unitcase",
+        22,
+        furniture_data=[{"label": "Floor Lamp", "crop_path": str(tmp_path / "cutout.png")}],
+        materialize_input=lambda path, prefix: (_ for _ in ()).throw(AssertionError("cutout refs should not be materialized")),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gpt_image,
+        model_name="gpt-image-2",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert result["generation_mode"] == "gpt_image_detail"
+        assert result["cutout_ref_count"] == 0
+        assert captured["model_name"] == "gpt-image-2"
+        assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert captured["request_options"]["max_attempts"] == 1
+        assert "thinking_level" not in captured["request_options"]
+        assert "quality" not in captured["request_options"]
+        assert len(captured["content"]) == 3
+        assert "focused on the Floor Lamp area" in captured["prompt"]
+        assert "legacy prompt should not be used" not in captured["prompt"]
+        assert "Do not change the room structure" in captured["prompt"]
+        assert captured["kwargs"]["log_tag"] == "Detail.Generate.GPTImage"
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_detail_view_passes_vertical_aspect_ratio_and_high_thinking_to_gemini(tmp_path):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")

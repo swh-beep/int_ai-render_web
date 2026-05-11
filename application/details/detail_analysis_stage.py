@@ -278,6 +278,7 @@ def load_analyzed_items(
     max_concurrency_analysis: int,
     analyze_cropped_item: Callable[[str, dict], dict],
     attach_volume_ranks: Callable[[list], list],
+    simple_generation_mode: bool = False,
 ) -> list:
     analyzed_items = []
     if furniture_data and len(furniture_data) > 0:
@@ -311,12 +312,16 @@ def load_analyzed_items(
                     row["source_index"] = index
                     row["category_canonical"] = canonical_category(label_val)
                     row["target_key"] = build_item_target_key("detail", index, label=label_val)
+                    row["box_source"] = row.get("box_source") or "detail_current_image_analysis"
                     enriched_items.append(row)
 
-                analysis_workers = min(max_concurrency_analysis, max(1, len(enriched_items)))
-                with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
-                    futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in enriched_items]
-                    analyzed_items = [future.result() for future in futures]
+                if simple_generation_mode:
+                    analyzed_items = enriched_items
+                else:
+                    analysis_workers = min(max_concurrency_analysis, max(1, len(enriched_items)))
+                    with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
+                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in enriched_items]
+                        analyzed_items = [future.result() for future in futures]
             except Exception as exc:
                 print(f"!! [Deep Analysis Failed] {exc}", flush=True)
 
@@ -357,6 +362,7 @@ def prepare_detail_generation_items(
         max_concurrency_analysis=max_concurrency_analysis,
         analyze_cropped_item=analyze_cropped_item,
         attach_volume_ranks=attach_volume_ranks,
+        simple_generation_mode=simple_generation_mode,
     )
 
     if not _structured_items_available(fresh_items):
@@ -371,7 +377,11 @@ def prepare_detail_generation_items(
             max_concurrency_analysis=max_concurrency_analysis,
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
+            simple_generation_mode=simple_generation_mode,
         )
+
+    if simple_generation_mode:
+        return fresh_items
 
     if not furniture_data:
         return fresh_items

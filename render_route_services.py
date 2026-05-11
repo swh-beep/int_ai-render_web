@@ -45,6 +45,10 @@ def persist_internal_room_upload(file: UploadFile) -> str:
 
 
 def persist_internal_item_uploads(item_images: list[UploadFile]) -> list[str]:
+    return prepare_internal_item_upload_paths(persist_internal_item_source_uploads(item_images))
+
+
+def persist_internal_item_source_uploads(item_images: list[UploadFile]) -> list[str]:
     unique_id = uuid.uuid4().hex[:8]
     timestamp = int(time.time())
     saved_paths: list[str] = []
@@ -56,10 +60,18 @@ def persist_internal_item_uploads(item_images: list[UploadFile]) -> list[str]:
             unique_id=unique_id,
             timestamp=timestamp,
         )
-        final_path = os.path.join(
-            "outputs",
-            f"cart_item_{timestamp}_{unique_id}_{_safe_upload_name(upload, f'cart_item_{idx}.png')}",
-        )
+        saved_paths.append(raw_path)
+    return saved_paths
+
+
+def prepare_internal_item_upload_paths(raw_paths: list[str]) -> list[str]:
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    saved_paths: list[str] = []
+    for idx, raw_path in enumerate(raw_paths, start=1):
+        basename = os.path.basename(str(raw_path)) or f"cart_item_{idx}.png"
+        safe_name = "".join([c for c in basename if c.isalnum() or c in "._-"]) or f"cart_item_{idx}.png"
+        final_path = os.path.join("outputs", f"cart_item_{timestamp}_{unique_id}_{safe_name}")
         prepared_path = prepare_direct_item_image(raw_path, output_path=final_path, max_size=1024)
         if prepared_path:
             try:
@@ -173,6 +185,7 @@ def build_internal_itemized_async_render_job_payload(
     resolve_image_url: Callable[[str | None, str | None], str | None],
     build_s3_prefix: Callable[[str, str, str | None], str],
     build_item_target_key: Callable[..., str],
+    publish_inputs: bool = True,
 ) -> dict:
     audience = "internal"
     validated_specs: list[dict] = []
@@ -209,16 +222,20 @@ def build_internal_itemized_async_render_job_payload(
             }
         )
 
-    file_ref = resolve_image_url(raw_path, build_s3_prefix(audience, "mainrendered", "user-photos"))
+    file_ref = (
+        resolve_image_url(raw_path, build_s3_prefix(audience, "mainrendered", "user-photos"))
+        if publish_inputs
+        else None
+    )
 
     moodboard_items = []
-    item_prefix = build_s3_prefix(audience, "customize", "item-images")
+    item_prefix = build_s3_prefix(audience, "customize", "item-images") if publish_inputs else None
     for spec in validated_specs:
         item_path = item_paths[spec["upload_index"]]
         if not item_path:
             raise ValueError(f"Item {spec['payload_index']} has invalid upload_index")
 
-        item_ref = resolve_image_url(item_path, item_prefix)
+        item_ref = resolve_image_url(item_path, item_prefix) if publish_inputs else None
 
         moodboard_items.append(
             {
@@ -335,6 +352,7 @@ def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tup
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {
+        "require_details": True,
         "render": payload,
         "extra": {
             "preset_id": req.preset_id,
@@ -417,6 +435,7 @@ def build_external_cart_job(
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {
+        "require_details": True,
         "render": payload,
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }

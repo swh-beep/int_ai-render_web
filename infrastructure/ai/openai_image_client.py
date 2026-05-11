@@ -134,6 +134,63 @@ def _should_retry(exc: Exception) -> bool:
     return any(token in message for token in retry_tokens)
 
 
+def _request_option_text(request_options: dict | None, key: str) -> str:
+    raw_value = (request_options or {}).get(key)
+    if raw_value is None:
+        return ""
+    return str(raw_value).strip()
+
+
+def _aspect_ratio_value(raw_ratio: str) -> float | None:
+    text = str(raw_ratio or "").strip().lower()
+    if ":" not in text:
+        return None
+    left, right = text.split(":", 1)
+    try:
+        width = float(left)
+        height = float(right)
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width / height
+
+
+def _size_from_request_options(request_options: dict | None) -> str:
+    explicit_size = _request_option_text(request_options, "size")
+    if explicit_size:
+        return explicit_size
+
+    ratio = _aspect_ratio_value(_request_option_text(request_options, "aspect_ratio"))
+    if ratio is None:
+        return "auto"
+    if abs(ratio - (16.0 / 9.0)) <= 0.02:
+        return "2048x1152"
+    if abs(ratio - (4.0 / 5.0)) <= 0.02:
+        return "1600x2000"
+    if abs(ratio - 1.0) <= 0.05:
+        return "1024x1024"
+    return "1536x1024" if ratio > 1.0 else "1024x1536"
+
+
+def _image_request_payload(
+    *,
+    model_name: str,
+    prompt: str,
+    request_options: dict | None,
+) -> dict[str, Any]:
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "size": _size_from_request_options(request_options),
+        "output_format": _request_option_text(request_options, "output_format") or "png",
+    }
+    quality = _request_option_text(request_options, "quality")
+    if quality and quality.lower() != "auto":
+        payload["quality"] = quality
+    return payload
+
+
 def call_openai_image(
     model_name: str,
     contents: Sequence[Any],
@@ -154,9 +211,6 @@ def call_openai_image(
 
     prompt, images = _ordered_prompt_and_images(contents, system_instruction=system_instruction)
     timeout_sec = max(10, int((request_options or {}).get("timeout") or 180))
-    size = str((request_options or {}).get("size") or "1536x1024").strip() or "1536x1024"
-    quality = str((request_options or {}).get("quality") or "high").strip() or "high"
-    output_format = str((request_options or {}).get("output_format") or "png").strip() or "png"
     tag = f" tag={log_tag}" if log_tag else ""
     try:
         max_attempts = max(1, int((request_options or {}).get("max_attempts") or 3))
@@ -174,13 +228,11 @@ def call_openai_image(
             started_at = time.time()
             try:
                 if images:
-                    data = {
-                        "model": active_model_name,
-                        "prompt": prompt,
-                        "size": size,
-                        "quality": quality,
-                        "output_format": output_format,
-                    }
+                    data = _image_request_payload(
+                        model_name=active_model_name,
+                        prompt=prompt,
+                        request_options=request_options,
+                    )
                     if not _is_gpt_image_model(active_model_name):
                         data["response_format"] = "b64_json"
                     files = []
@@ -197,16 +249,16 @@ def call_openai_image(
                     response = requests.post(
                         OPENAI_IMAGE_GENERATIONS_URL,
                         headers={**headers, "Content-Type": "application/json"},
-                    json={
-                        "model": active_model_name,
-                        "prompt": prompt,
-                        "size": size,
-                        "quality": quality,
-                        "output_format": output_format,
-                        **({"response_format": "b64_json"} if not _is_gpt_image_model(active_model_name) else {}),
-                    },
-                    timeout=timeout_sec,
-                )
+                        json={
+                            **_image_request_payload(
+                                model_name=active_model_name,
+                                prompt=prompt,
+                                request_options=request_options,
+                            ),
+                            **({"response_format": "b64_json"} if not _is_gpt_image_model(active_model_name) else {}),
+                        },
+                        timeout=timeout_sec,
+                    )
 
                 elapsed_ms = (time.time() - started_at) * 1000
                 if int(getattr(response, "status_code", 0) or 0) >= 400:

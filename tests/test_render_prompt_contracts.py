@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from PIL import Image
 
 from application.render.furnished_generation_stage import generate_furnished_room
+from application.render.postprocess_support import rank_best_variant_flash
 from application.render.render_room_workflow import _resolve_style_prompt
 
 
@@ -27,6 +28,43 @@ def _logger():
 
 def _summary_ref():
     return SimpleNamespace(get=lambda: {"dims_warn": 0, "primary_bbox_miss": 0})
+
+
+def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):
+    candidate_1 = tmp_path / "candidate_1.png"
+    candidate_2 = tmp_path / "candidate_2.png"
+    cutout = tmp_path / "chair_ref.png"
+    candidate_1.write_bytes(_make_png_bytes(160, 90))
+    candidate_2.write_bytes(_make_png_bytes(160, 90))
+    cutout.write_bytes(_make_png_bytes(80, 80))
+
+    captured = {}
+
+    def fake_rank_call(model_name, content, *args, **kwargs):
+        captured["content"] = content
+        captured["prompt"] = content[0]
+        return SimpleNamespace(text='{"best_index": 2, "reason": "Candidate 2 preserves the reference chair."}')
+
+    best_idx = rank_best_variant_flash(
+        [str(candidate_1), str(candidate_2)],
+        [
+            {
+                "label": "Reference Chair",
+                "category": "chair",
+                "target_key": "chair-1",
+                "crop_path": str(cutout),
+                "dims_mm": {"width_mm": 620, "depth_mm": 700, "height_mm": 820},
+            }
+        ],
+        call_gemini_with_failover=fake_rank_call,
+        rank_model_name="ranker",
+        safe_json_from_model_text=lambda text: __import__("json").loads(text),
+    )
+
+    assert best_idx == 1
+    assert "PRODUCT REFERENCE CUTOUTS" in captured["prompt"]
+    assert "product identity errors before photographic polish" in captured["prompt"]
+    assert "Reference Product #1: Reference Chair" in captured["content"]
 
 
 def test_resolve_style_prompt_matches_lowercase_preset_style_keys():
@@ -125,8 +163,8 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "Keep the room Scandinavian in tone" in prompt
         assert "<ITEM INVENTORY (MUST RENDER ALL ITEMS)>" in prompt
         assert "Distinct items: 2 | Total requested quantity: 3" in prompt
-        assert "- Accent Chair: qty=2; family=chair; zone=adjacent_seating_band" in prompt
-        assert "- Rug: qty=1; family=rug; zone=centered_rug_zone" in prompt
+        assert "- Accent Chair: qty=2; category=chair" in prompt
+        assert "- Rug: qty=1; category=rug" in prompt
         assert "Do not duplicate rugs, accent chairs, or tables beyond the listed qty." in prompt
         assert "OPENING LOCK" in prompt
         assert "AXIS ALIGNMENT" in prompt
@@ -248,7 +286,8 @@ def test_generate_furnished_room_includes_small_item_guardrails_and_external_roo
         assert "Round Rug" in prompt
         assert "not wall-to-wall" in prompt
         assert "<ROOM-SCALE INFERENCE RULES>" in prompt
-        assert "keep sofas, storage, rugs, desks, and main tables axis-aligned" in prompt
+        assert "<PLACEMENT PLAN (BINDING)>" not in prompt
+        assert "placement_zones" not in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -347,11 +386,11 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         prompt = captured["prompt"]
         content = captured["content"]
         assert "<ITEM EXACTNESS CARDS>" in prompt
-        assert "<ITEM IDENTITY LOCKS (STRICT)>" in prompt
-        assert "Collector Lounge Chair: qty=1; family=lounge_chair" in prompt
-        assert "distinctive=exposed tubular steel frame, deep wraparound seat" in prompt
-        assert "support=tubular steel sled frame" in prompt
-        assert "avoid=generic club chair, boxy accent chair" in prompt
+        assert "<ITEM IDENTITY LOCKS (STRICT)>" not in prompt
+        assert "Collector Lounge Chair: reference_image=authoritative_cutout; qty=1; category=lounge_chair" in prompt
+        assert "same_family_substitute=invalid" in prompt
+        assert "avoid=generic club chair, boxy accent chair" not in prompt
+        assert "preserve_rules=" not in prompt
         assert "PRODUCT EXACTNESS FIRST" in prompt
         assert long_item_prose not in prompt
         assert "PRIMARY EXACTNESS ANCHOR" in content[3]
@@ -832,10 +871,11 @@ def test_generate_furnished_room_keeps_reflection_and_opening_cues_in_compact_ca
     output_path = Path(result["path"])
     try:
         prompt = captured["prompt"]
-        assert "support=leaning floor mirror" in prompt
-        assert "gaps=narrow reveal between frame and mirror edge" in prompt
-        assert "pattern=plain uninterrupted reflective field" in prompt
-        assert "reflection=reflect opposite wall only" in prompt
+        assert "Lean Floor Mirror: reference_image=authoritative_cutout" in prompt
+        assert "category=mirror" in prompt
+        assert "category_rules=wall_attached_or_leaning_as_reference, preserve_reflective_face" in prompt
+        assert "preserve_rules=keep lean-against-wall posture" not in prompt
+        assert "same_family_substitute=invalid" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -1011,7 +1051,8 @@ def test_generate_furnished_room_keeps_topology_cues_in_compact_cards(tmp_path, 
     output_path = Path(result["path"])
     try:
         prompt = captured["prompt"]
-        assert "topology=rolled back crest rail" in prompt
+        assert "Crest Rail Chair: reference_image=authoritative_cutout" in prompt
+        assert "same_family_substitute=invalid" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():

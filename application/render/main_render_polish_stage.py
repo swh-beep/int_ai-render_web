@@ -30,18 +30,9 @@ def polish_main_render(
     try:
         image = Image.open(source_path)
         prompt = (
-            "ACT AS: Senior interior photo retoucher.\n"
-            "TASK: Improve photorealistic integration of the provided furnished room render.\n\n"
-            "<HARD LOCKS>\n"
-            "1. Keep the exact same furniture count, product identity, silhouette, scale, placement, and room layout.\n"
-            "2. Keep the exact same camera angle, framing, walls, windows, doors, ceiling, and floor geometry.\n"
-            "3. Do NOT add, remove, replace, move, rotate, resize, restyle, or simplify any object.\n"
-            "4. Do NOT change the composition into a different shot.\n\n"
-            "<ALLOWED IMPROVEMENTS ONLY>\n"
-            "1. Improve lighting consistency, contact shadows, ambient occlusion, local reflections, and material blending.\n"
-            "2. Improve tone balance, contrast, highlight rolloff, color temperature consistency, and natural shadow depth.\n"
-            "3. Reduce pasted/composited look while preserving every object exactly.\n\n"
-            "OUTPUT: Return the same image composition with cleaner photorealistic integration only."
+            "Polish this furnished interior render so it looks like a real high-end interior magazine photograph, not an AI image. "
+            "Improve natural light, shadows, reflections, material texture, depth, and tonal balance. "
+            "Do not change the room structure, camera framing, furniture/decor count, shape, detail, scale, color, material, or placement."
         )
         response = repair_call(
             resolved_model,
@@ -49,8 +40,6 @@ def polish_main_render(
             {
                 "timeout": float(timeout_sec),
                 "aspect_ratio": "16:9",
-                "thinking_level": "high",
-                "include_thoughts": False,
                 "max_attempts": 1,
             },
             allow_all_safety_settings(),

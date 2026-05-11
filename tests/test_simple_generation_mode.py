@@ -55,7 +55,7 @@ def test_empty_room_prompt_requests_architectural_grid_alignment():
     assert "perspective/grid rectification takes priority" in prompt
 
 
-def test_simple_generation_specs_keep_exactness_and_layout_identity():
+def test_simple_generation_specs_keep_only_prompt_minimum_and_two_pass_metadata():
     specs = {
         "items": [
             {
@@ -85,13 +85,13 @@ def test_simple_generation_specs_keep_exactness_and_layout_identity():
     assert item["target_key"] == "chair-1"
     assert item["crop_path"] == "outputs/chair.png"
     assert item["dims_mm"] == {"width_mm": 500, "depth_mm": 520, "height_mm": 780}
-    assert item["description"] == "Soft boucle lounge chair"
-    assert item["identity_profile"] == {"silhouette": "long text"}
-    assert item["product_identity"] == {"family": "chair"}
-    assert item["archetype_strategy"] == {"avoid": ["sofa"]}
-    assert item["reference_features"] == {"material_cues": ["boucle"]}
-    assert item["layout_envelope"] == {"room_width_ratio": 0.2}
-    assert item["placement_contract"] == {"zone": "left"}
+    assert "description" not in item
+    assert "identity_profile" not in item
+    assert "product_identity" not in item
+    assert "archetype_strategy" not in item
+    assert "reference_features" not in item
+    assert "layout_envelope" not in item
+    assert "placement_contract" not in item
     assert simple["two_pass_strategy"] == {"pass1_primary_keys": ["chair-1"]}
     assert simple["size_hierarchy_scale"] == ["Chair"]
     assert simple["primary"]["target_key"] == "chair-1"
@@ -309,21 +309,17 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
     assert variant_kwargs["scale_guide_path"] is None
     assert variant_kwargs["primary_item"]["target_key"] == "chair-1"
     assert variant_kwargs["size_hierarchy"] == ["Chair"]
-    assert variant_kwargs["scale_plan"]
-    assert variant_kwargs["geometry_contract"]["anchor_item_key"] == "chair-1"
+    assert variant_kwargs["scale_plan"] is None
+    assert variant_kwargs["geometry_contract"] is None
     assert variant_kwargs["scene_contract"]["critical_item_keys"] == ["chair-1"]
-    assert variant_kwargs["placement_plan"]["placement_zones"] == {"chair-1": "left"}
+    assert variant_kwargs["placement_plan"] is None
     assert simple_item["crop_path"] == "outputs/chair.png"
-    assert simple_item["identity_profile"]["silhouette"] == "long text"
-    assert simple_item["identity_profile"]["layout_envelope"]["placement_family"] == "floor_placed"
-    assert simple_item["identity_profile"]["layout_envelope"]["room_width_ratio"] == 0.125
-    assert simple_item["identity_profile"]["two_pass_strategy"]["target_key"] == "chair-1"
-    assert simple_item["product_identity"] == {"family": "chair"}
-    assert simple_item["archetype_strategy"] == {"avoid": ["sofa"]}
-    assert simple_item["reference_features"] == {"material_cues": ["boucle"]}
-    assert simple_item["layout_envelope"]["room_width_ratio"] == 0.125
-    assert simple_item["layout_envelope"]["placement_family"] == "floor_placed"
-    assert simple_item["placement_contract"] == {"zone": "left"}
+    assert "identity_profile" not in simple_item
+    assert "product_identity" not in simple_item
+    assert "archetype_strategy" not in simple_item
+    assert "reference_features" not in simple_item
+    assert "layout_envelope" not in simple_item
+    assert "placement_contract" not in simple_item
     assert captured["postprocess_kwargs"]["generated_results"] == [
         "outputs/simple-a.png",
         "outputs/simple-b.png",
@@ -559,13 +555,13 @@ def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but
     )
 
     assert detect_calls == [str(source_path)]
-    assert len(analyze_calls) == 1
-    assert result[0]["target_key"] == "chair-1"
+    assert len(analyze_calls) == 0
+    assert result[0]["target_key"] == "detail_1_Chair"
     assert result[0]["box_2d"] == [220, 260, 820, 900]
-    assert result[0]["source_box_2d"] == [100, 100, 700, 700]
     assert result[0]["box_source"] == "detail_current_image_analysis"
-    assert result[0]["crop_path"] == "outputs/chair.png"
-    assert result[0]["identity_profile"] == {"silhouette": "rolled-arm"}
-    assert result[0]["reference_features"] == {"material_cues": ["boucle"]}
-    assert result[0]["placement_contract"] == {"zone": "left"}
+    assert "source_box_2d" not in result[0]
+    assert "crop_path" not in result[0]
+    assert "identity_profile" not in result[0]
+    assert "reference_features" not in result[0]
+    assert "placement_contract" not in result[0]
     assert result[0]["volume_rank"] == 1

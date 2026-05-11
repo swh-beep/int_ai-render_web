@@ -6,6 +6,38 @@ from typing import Callable, Optional
 
 from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.detail_result_stage import build_detail_generation_output
+from application.details.detail_style_stage import with_internal_angle_styles
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default)) or default))
+    except Exception:
+        return max(minimum, int(default))
+
+
+DETAIL_GENERATION_TIMEOUT_CAP_SEC = _env_int("DETAIL_GENERATION_TIMEOUT_SEC", 120, minimum=10)
+DETAIL_GENERATION_BUDGETED_MAX_WORKERS = _env_int("DETAIL_GENERATION_BUDGETED_MAX_WORKERS", 10)
+DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
+EXTERNAL_DETAIL_STYLE_LIMIT = 6
+
+
+def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
+    styles = list(dynamic_styles or [])
+    max_count = max(0, int(limit or 0))
+    if max_count <= 0:
+        return []
+
+    selected: list[dict] = []
+    left = 0
+    right = len(styles) - 1
+    while left <= right and len(selected) < max_count:
+        selected.append(styles[left])
+        left += 1
+        if left <= right and len(selected) < max_count:
+            selected.append(styles[right])
+            right -= 1
+    return selected
 
 
 def run_generate_details_job(
@@ -29,9 +61,6 @@ def run_generate_details_job(
     volume_ranking_snapshot: Callable[[list], list],
 ) -> dict:
     try:
-        def _should_request_crop_extract(style: dict | None) -> bool:
-            return str((style or {}).get("name") or "").startswith("Detail:")
-
         image_url = payload.get("image_url")
         moodboard_url = payload.get("moodboard_url")
         furniture_data = payload.get("furniture_data")
@@ -100,7 +129,7 @@ def run_generate_details_job(
             if budget < minimum_detail_budget_sec:
                 return 0
             cap = int(budget // 18.0)
-            return max(1, min(style_count, max(1, min(6, cap or 1))))
+            return max(1, min(style_count, max(1, min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, cap or 1))))
 
         def _ret(result: dict) -> dict:
             persist_job_result(result, audience=aud)
@@ -131,6 +160,7 @@ def run_generate_details_job(
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
             normalize_label_for_match=normalize_label_for_match,
+            simple_generation_mode=True,
         )
         if budgeted_mode:
             remaining_budget = _remaining_deadline_sec()
@@ -143,13 +173,10 @@ def run_generate_details_job(
                 )
 
         dynamic_styles = construct_dynamic_styles(analyzed_items)
-        if aud == "external":
-            detail_only = []
-            for style in dynamic_styles:
-                name = style.get("name") or ""
-                if name.startswith("Detail:"):
-                    detail_only.append(style)
-            dynamic_styles = detail_only[:9]
+        if aud == "internal":
+            dynamic_styles = with_internal_angle_styles(dynamic_styles)
+        elif aud == "external":
+            dynamic_styles = select_external_detail_styles(dynamic_styles)
         if not dynamic_styles:
             if budgeted_mode:
                 return _ret(_build_best_effort_output("No detail styles available within the remaining deadline budget", analyzed_items=analyzed_items))
@@ -192,7 +219,7 @@ def run_generate_details_job(
             print(f"?? Generating {len(dynamic_styles)} Budgeted Dynamic Shots...", flush=True)
             if len(dynamic_styles) > 1:
                 futures = []
-                max_workers = min(6, len(dynamic_styles))
+                max_workers = min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, len(dynamic_styles))
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     for index, style in enumerate(dynamic_styles):
                         remaining_budget = _remaining_deadline_sec()
@@ -200,7 +227,10 @@ def run_generate_details_job(
                             break
                         style_payload = dict(style or {})
                         if remaining_budget is not None:
-                            style_payload["timeout_sec"] = max(1.0, min(90.0, float(remaining_budget) - 1.0))
+                            style_payload["timeout_sec"] = max(
+                                1.0,
+                                min(float(DETAIL_GENERATION_TIMEOUT_CAP_SEC), float(remaining_budget) - 1.0),
+                            )
                         futures.append(
                             (
                                 index,
@@ -212,7 +242,7 @@ def run_generate_details_job(
                                     unique_id,
                                     index + 1,
                                     analyzed_items,
-                                    prefer_crop_extract=_should_request_crop_extract(style_payload),
+                                    prefer_crop_extract=False,
                                 ),
                             )
                         )
@@ -225,19 +255,22 @@ def run_generate_details_job(
                         break
                     style_payload = dict(style or {})
                     if remaining_budget is not None:
-                        style_payload["timeout_sec"] = max(1.0, min(90.0, float(remaining_budget) - 1.0))
+                        style_payload["timeout_sec"] = max(
+                            1.0,
+                            min(float(DETAIL_GENERATION_TIMEOUT_CAP_SEC), float(remaining_budget) - 1.0),
+                        )
                     result = generate_detail_view(
                         local_path,
                         style_payload,
                         unique_id,
                         index + 1,
                         analyzed_items,
-                        prefer_crop_extract=_should_request_crop_extract(style_payload),
+                        prefer_crop_extract=False,
                     )
                     _append_detail_result(index, style_payload, result)
         else:
             print(f"?? Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-            with ThreadPoolExecutor(max_workers=15) as executor:
+            with ThreadPoolExecutor(max_workers=min(DETAIL_GENERATION_MAX_WORKERS, len(dynamic_styles))) as executor:
                 futures = []
                 for index, style in enumerate(dynamic_styles):
                     futures.append(
@@ -250,7 +283,7 @@ def run_generate_details_job(
                                 unique_id,
                                 index + 1,
                                 analyzed_items,
-                                prefer_crop_extract=_should_request_crop_extract(style),
+                                prefer_crop_extract=False,
                             ),
                         )
                     )

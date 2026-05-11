@@ -112,11 +112,17 @@ def summarize_items_for_ranking(items: list, max_items: int = 30) -> str:
     for index, item in enumerate(items[:max_items], start=1):
         label = (item.get("label") or f"Item{index}").strip()
         qty = item.get("qty") or 1
-        desc = (item.get("description") or "").strip()
-        if len(desc) > 220:
-            desc = desc[:220] + "..."
         qty_text = f" qty={qty}" if qty and qty > 1 else ""
-        lines.append(f"{index}. {label}{qty_text}: {desc}")
+        category = item.get("category_canonical") or item.get("category") or "unknown"
+        dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
+        dims_bits = []
+        if isinstance(dims, dict):
+            for key, short in (("width_mm", "W"), ("depth_mm", "D"), ("height_mm", "H")):
+                value = dims.get(key)
+                if value is not None:
+                    dims_bits.append(f"{short}={value}mm")
+        dims_text = " ".join(dims_bits)
+        lines.append(f"{index}. {label}{qty_text}: category={category}" + (f" | {dims_text}" if dims_text else ""))
     return "\n".join(lines)
 
 
@@ -135,12 +141,14 @@ def rank_best_variant_flash(
     try:
         items_text = summarize_items_for_ranking(analyzed_items or [])
         prompt = (
-            "You are an expert interior photo curator.\n"
+            "You are an expert furniture-product fidelity judge for interior render variants.\n"
             "You will receive multiple candidate images of the SAME room, labeled Candidate #1..#N.\n"
-            "Select the SINGLE best candidate based on:\n"
-            "1) Furniture similarity to the provided item descriptions (shape, material, color, proportions, qty).\n"
-            "2) Photographic realism and aesthetic quality (lighting, coherence, natural look).\n"
-            "3) Constraint compliance (no new windows/doors, no extra or missing items).\n\n"
+            "You will also receive PRODUCT REFERENCE CUTOUTS. Treat those cutouts as the source of truth.\n"
+            "Select the SINGLE best candidate by judging product identity errors before photographic polish:\n"
+            "1) First reject or downgrade candidates with wrong product shape, missing/extra items, wrong qty, wrong category, or obvious same-family substitution.\n"
+            "2) Then judge scale, placement, room architecture preservation, and object count.\n"
+            "3) Use photographic realism, lighting, and styling only as tie-breakers after product fidelity is comparable.\n\n"
+            "PRODUCT REFERENCE CUTOUTS are attached after this prompt and before the candidates.\n\n"
             "ITEM LIST (REFERENCE):\n"
             f"{items_text or '(no items list)'}\n\n"
             "Return STRICT JSON ONLY:\n"
@@ -149,6 +157,39 @@ def rank_best_variant_flash(
         )
         content = [prompt]
         opened = []
+        for index, item in enumerate((analyzed_items or [])[:12], start=1):
+            if not isinstance(item, dict):
+                continue
+            crop_path = str(item.get("crop_path") or "").strip()
+            if not crop_path or not os.path.exists(crop_path):
+                continue
+            try:
+                image = Image.open(crop_path)
+                image.thumbnail((384, 384), Image.Resampling.LANCZOS)
+                opened.append(image)
+                label = (item.get("label") or f"Item{index}").strip()
+                category = item.get("category_canonical") or item.get("category") or "unknown"
+                dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
+                if isinstance(dims, dict):
+                    dims_text = " ".join(
+                        [
+                            f"{short}={dims.get(key)}mm"
+                            for key, short in (("width_mm", "W"), ("depth_mm", "D"), ("height_mm", "H"))
+                            if dims.get(key) is not None
+                        ]
+                    )
+                else:
+                    dims_text = ""
+                content.extend(
+                    [
+                        f"Reference Product #{index}: {label}",
+                        f"Reference Product #{index} Details: category={category}"
+                        + (f" | {dims_text}" if dims_text else ""),
+                        image,
+                    ]
+                )
+            except Exception:
+                continue
         for index, path in enumerate(candidate_paths, start=1):
             try:
                 image = Image.open(path)

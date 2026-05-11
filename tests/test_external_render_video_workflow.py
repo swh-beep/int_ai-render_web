@@ -60,17 +60,17 @@ def _render_with_details_payload():
 
 
 class ExternalRenderVideoWorkflowTests(unittest.TestCase):
-    def test_extract_source_images_uses_main_then_mixed_detail_priority(self):
+    def test_extract_source_images_uses_main_then_detail_order(self):
         self.assertEqual(
             _extract_source_images(_render_with_details_payload()),
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
                 "https://cdn.example/detail-3.png",
                 "https://cdn.example/detail-4.png",
-                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-6.png",
             ],
         )
 
@@ -78,12 +78,12 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         req = _build_source_request(
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
                 "https://cdn.example/detail-3.png",
                 "https://cdn.example/detail-4.png",
-                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-6.png",
             ],
             cfg_scale=0.5,
         )
@@ -180,9 +180,9 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
             result["source_images"],
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-3.png",
             ],
         )
 

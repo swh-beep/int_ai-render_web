@@ -299,6 +299,37 @@ def _copy_prompt_payload_value(value: Any) -> Any:
     return value
 
 
+_MAIN_PROMPT_ITEM_KEYS = (
+    "label",
+    "name",
+    "category",
+    "category_canonical",
+    "qty",
+    "dims_mm",
+    "requested_dims_mm",
+    "target_key",
+    "source_index",
+    "item_id",
+    "payload_index",
+    "index",
+    "crop_path",
+    "options",
+    "two_pass_strategy",
+)
+
+
+def _build_main_prompt_item_payload(src: dict | None) -> dict:
+    if not isinstance(src, dict):
+        return {}
+    item = {}
+    for key in _MAIN_PROMPT_ITEM_KEYS:
+        if src.get(key) is not None:
+            item[key] = _copy_prompt_payload_value(src.get(key))
+    if not item.get("dims_mm") and isinstance(item.get("requested_dims_mm"), dict):
+        item["dims_mm"] = dict(item["requested_dims_mm"])
+    return item
+
+
 def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | None:
     if not isinstance(furniture_specs_json, dict):
         return furniture_specs_json
@@ -320,42 +351,7 @@ def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | 
     for src in furniture_specs_json.get("items") or []:
         if not isinstance(src, dict):
             continue
-        item = {}
-        for key in (
-            "label",
-            "name",
-            "category",
-            "category_canonical",
-            "qty",
-            "dims_mm",
-            "requested_dims_mm",
-            "target_key",
-            "source_index",
-            "item_id",
-            "payload_index",
-            "index",
-            "crop_path",
-            "options",
-            "volume_proxy",
-            "category_score",
-            "description",
-            "identity_profile",
-            "product_identity",
-            "archetype_strategy",
-            "reference_features",
-            "layout_envelope",
-            "placement_contract",
-            "two_pass_strategy",
-            "identity_confidence",
-            "identity_strictness",
-            "anchor_eligible",
-            "pass_role",
-            "strategy_priority",
-        ):
-            if src.get(key) is not None:
-                item[key] = _copy_prompt_payload_value(src.get(key))
-        if not item.get("dims_mm") and isinstance(item.get("requested_dims_mm"), dict):
-            item["dims_mm"] = dict(item["requested_dims_mm"])
+        item = _build_main_prompt_item_payload(src)
         simple_items.append(item)
     simple_payload["items"] = simple_items
 
@@ -370,9 +366,9 @@ def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | 
             simple_payload["primary"] = dict(primary)
             simple_payload["primary_scale"] = dict(primary)
     elif isinstance(furniture_specs_json.get("primary"), dict):
-        simple_payload["primary"] = dict(furniture_specs_json.get("primary") or {})
+        simple_payload["primary"] = _build_main_prompt_item_payload(furniture_specs_json.get("primary") or {})
     elif isinstance(furniture_specs_json.get("primary_scale"), dict):
-        simple_payload["primary_scale"] = dict(furniture_specs_json.get("primary_scale") or {})
+        simple_payload["primary_scale"] = _build_main_prompt_item_payload(furniture_specs_json.get("primary_scale") or {})
 
     if furniture_specs_json.get("two_pass_strategy") is not None:
         simple_payload["two_pass_strategy"] = _copy_prompt_payload_value(furniture_specs_json.get("two_pass_strategy"))
@@ -405,29 +401,17 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
                 if value is not None:
                     dims_bits.append(f"{short}={value}mm")
 
-        identity_profile = item.get("identity_profile") or {}
-        product_identity = item.get("product_identity") or {}
         family = (
-            product_identity.get("family")
-            or identity_profile.get("family")
-            or item.get("category_canonical")
+            item.get("category_canonical")
             or item.get("category")
             or ""
         )
-        silhouette = str(identity_profile.get("silhouette_summary") or "").strip()
-        description = " ".join(str(item.get("description") or "").split())
-        if len(description) > 120:
-            description = description[:117].rstrip() + "..."
 
         bits = []
         if family:
-            bits.append(f"family={family}")
-        if silhouette:
-            bits.append(f"silhouette={silhouette}")
+            bits.append(f"category={family}")
         if dims_bits:
             bits.append(", ".join(dims_bits))
-        if description:
-            bits.append(description)
         rows.append(f"{index}. {label}{qty_text}: " + " | ".join(bits))
     text = "\n".join(rows).strip()
     return text or None
@@ -1212,10 +1196,10 @@ def run_render_room_workflow(
             room_dims_parsed=room_dims_parsed,
             wall_span_norm=wall_span_norm,
             size_hierarchy=size_hierarchy,
-            scale_plan=scale_plan_dict,
-            geometry_contract=geometry_contract_dict,
+            scale_plan=None,
+            geometry_contract=None,
             scene_contract=scene_contract_dict,
-            placement_plan=placement_plan_dict,
+            placement_plan=None,
             start_time=start_time,
             room_planes=room_planes,
             windows_present=windows_present,

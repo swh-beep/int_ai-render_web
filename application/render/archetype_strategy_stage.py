@@ -102,7 +102,7 @@ def _classify_strategy(item: dict) -> tuple[str, list[str]]:
         return "thin_floor_footprint_object", ["footprint_ratio", "floor_contact", "outline_preservation"]
     if max_dim > 0 and max_dim <= _SMALL_ABSOLUTE_MAX_MM:
         return "tiny_absolute_scale_object", ["absolute_scale", "anchor_ratio", "presence_without_oversizing"]
-    if family in _SEATING_FAMILIES and (opening_features or support_geometry):
+    if family in _SEATING_FAMILIES:
         return "topology_sensitive_seating", ["topology_preservation", "support_geometry", "material_identity"]
     if family in _SUPPORT_FAMILIES or support_geometry:
         return "support_geometry_object", ["support_geometry", "top_shape", "anchor_ratio"]

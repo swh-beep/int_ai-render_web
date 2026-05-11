@@ -103,7 +103,7 @@ def _build_detail_entries(
 ) -> list:
     details = []
 
-    for item in generated_paths:
+    for item in sorted(generated_paths, key=lambda row: int((row or {}).get("index") or 0)):
         path = item.get("path")
         if not path:
             continue

@@ -132,8 +132,13 @@ def get_local_job(job_id: str) -> Optional[LocalInlineJob]:
     )
 
 
-def enqueue_local_job(job_func: Callable[..., Any], *args: Any, **kwargs: Any) -> LocalInlineJob:
-    job_id = uuid.uuid4().hex
+def enqueue_local_job(
+    job_func: Callable[..., Any],
+    *args: Any,
+    job_id: str | None = None,
+    **kwargs: Any,
+) -> LocalInlineJob:
+    job_id = job_id or uuid.uuid4().hex
     enqueued_at = _utcnow_iso()
     set_local_job(
         job_id,
