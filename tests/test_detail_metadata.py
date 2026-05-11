@@ -216,6 +216,47 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail_styles[0]["target_label"], "Sofa")
         self.assertEqual(detail_styles[1]["target_label"], "Floor Lamp")
 
+    def test_construct_dynamic_styles_deduplicates_detection_fragments_with_same_label(self):
+        analyzed_items = [
+            {
+                "label": "Sofa",
+                "target_key": "detail_sofa_001",
+                "category_canonical": "main_sofa",
+                "box_2d": [506, 294, 706, 709],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 1,
+            },
+            {
+                "label": "Floor Lamp",
+                "target_key": "detail_floor-lamp_004",
+                "category_canonical": "floor_lamp",
+                "box_2d": [352, 122, 882, 230],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 2,
+            },
+            {
+                "label": "Floor Lamp",
+                "target_key": "detail_floor-lamp_008",
+                "category_canonical": "floor_lamp",
+                "box_2d": [399, 336, 550, 353],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 3,
+            },
+            {
+                "label": "Floor Lamp",
+                "target_key": "detail_floor-lamp_009",
+                "category_canonical": "floor_lamp",
+                "box_2d": [398, 664, 550, 682],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 4,
+            },
+        ]
+
+        styles = construct_dynamic_styles(analyzed_items)
+        detail_targets = [style.get("target_label") for style in styles]
+
+        self.assertEqual(detail_targets, ["Sofa", "Floor Lamp"])
+
     def test_construct_dynamic_styles_prefers_source_backed_products_over_generic_fresh_detections(self):
         analyzed_items = [
             {

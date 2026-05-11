@@ -423,7 +423,10 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
     return (
         f"Create a detailed editorial photograph focused on the {clean_label} area in this exact finished interior. "
         "Make it feel like a real interior magazine photo with natural light, shadows, depth, and material texture. "
-        "Do not change the room structure, furniture/decor shape, detail, count, color, material, scale, or placement. "
+        "The target and every visible surrounding furniture/decor item must remain the same original object from the input image. "
+        "Preserve all visible object shapes, silhouettes, details, counts, colors, materials, scale relationships, and placements exactly, including background or support furniture near the target. "
+        "Do not change the room structure, wall/floor/window positions, lighting direction, shadows, furniture/decor shape, detail, count, color, material, scale, or placement. "
+        "Do not redesign, simplify, replace, remove, add, duplicate, or rearrange any visible object. "
         "No text or watermark."
     )
 

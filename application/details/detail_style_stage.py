@@ -116,13 +116,14 @@ def _is_duplicate_detail_target(item, accepted_items) -> bool:
 
         accepted_label_key = _normalized_label((accepted or {}).get("label"))
         accepted_family_key = _detail_identity_family(accepted)
+        same_label = bool(label_key and accepted_label_key and label_key == accepted_label_key)
+        same_family = bool(family_key and accepted_family_key and family_key == accepted_family_key)
+        both_detection_only = not _is_source_backed_detail_target(item) and not _is_source_backed_detail_target(accepted)
+        if same_label and both_detection_only and (same_family or not family_key or not accepted_family_key):
+            return True
         if (
-            label_key
-            and accepted_label_key
-            and label_key == accepted_label_key
-            and family_key
-            and accepted_family_key
-            and family_key == accepted_family_key
+            same_label
+            and same_family
             and _box_iou(box, (accepted or {}).get("box_2d")) >= 0.45
         ):
             return True

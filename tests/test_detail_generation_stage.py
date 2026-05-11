@@ -197,6 +197,8 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         assert len(captured["content"]) == 3
         assert "focused on the Floor Lamp area" in captured["prompt"]
         assert "legacy prompt should not be used" not in captured["prompt"]
+        assert "every visible surrounding furniture/decor item" in captured["prompt"]
+        assert "background or support furniture near the target" in captured["prompt"]
         assert "Do not change the room structure" in captured["prompt"]
         assert captured["kwargs"]["log_tag"] == "Detail.Generate.GPTImage"
         assert output_path.exists()
