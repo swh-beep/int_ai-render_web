@@ -12,6 +12,13 @@ def build_kling_endpoint(model_name: str) -> str:
     return f"https://api.freepik.com/v1/ai/image-to-video/{safe_model}"
 
 
+def build_kling_status_endpoint(kling_endpoint: str) -> str:
+    endpoint = str(kling_endpoint or "").strip().rstrip("/")
+    if endpoint.endswith("/kling-v2-6-pro"):
+        return endpoint[: -len("-pro")]
+    return endpoint
+
+
 def create_kling_task(
     image_b64: str,
     prompt: str,
@@ -93,6 +100,7 @@ def poll_kling_task(
     slow_after_sec: int = 180,
 ) -> str:
     headers = {"x-freepik-api-key": freepik_api_key}
+    kling_status_endpoint = build_kling_status_endpoint(kling_endpoint)
     start = time.time()
     poll_count = 0
     clip_share_percent = 90 / max(1, total_clips)
@@ -106,7 +114,7 @@ def poll_kling_task(
         poll_count += 1
         try:
             with video_semaphore:
-                response = requests.get(f"{kling_endpoint}/{task_id}", headers=headers, timeout=60)
+                response = requests.get(f"{kling_status_endpoint}/{task_id}", headers=headers, timeout=60)
 
             if not response.ok:
                 if response.status_code >= 500:

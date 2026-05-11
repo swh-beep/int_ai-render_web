@@ -9,7 +9,12 @@ from unittest.mock import patch
 from api_models import SourceItem
 from application.video import source_generation_workflow
 from application.video.job_store import get_video_job, video_jobs, video_jobs_lock
-from infrastructure.ai.freepik_kling_client import build_kling_endpoint, create_kling_task, poll_kling_task
+from infrastructure.ai.freepik_kling_client import (
+    build_kling_endpoint,
+    build_kling_status_endpoint,
+    create_kling_task,
+    poll_kling_task,
+)
 
 
 class _DummyResponse:
@@ -27,6 +32,16 @@ class KlingClientTests(unittest.TestCase):
     def test_build_kling_endpoint_uses_clean_default_format(self):
         self.assertEqual(
             build_kling_endpoint("kling-v2-5-pro"),
+            "https://api.freepik.com/v1/ai/image-to-video/kling-v2-5-pro",
+        )
+
+    def test_build_kling_status_endpoint_uses_kling_2_6_status_slug(self):
+        self.assertEqual(
+            build_kling_status_endpoint("https://api.freepik.com/v1/ai/image-to-video/kling-v2-6-pro"),
+            "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6",
+        )
+        self.assertEqual(
+            build_kling_status_endpoint("https://api.freepik.com/v1/ai/image-to-video/kling-v2-5-pro"),
             "https://api.freepik.com/v1/ai/image-to-video/kling-v2-5-pro",
         )
 
@@ -80,6 +95,30 @@ class KlingClientTests(unittest.TestCase):
             timeout_sec=5,
         )
         self.assertEqual(url, "https://example.com/video.mp4")
+
+    @patch("infrastructure.ai.freepik_kling_client.requests.get")
+    def test_poll_kling_task_uses_kling_2_6_status_endpoint(self, mock_get):
+        mock_get.return_value = _DummyResponse(
+            status_code=200,
+            payload={"data": {"status": "COMPLETED", "generated": [{"url": "https://example.com/video.mp4"}]}},
+        )
+
+        url = poll_kling_task(
+            "task-123",
+            clip_index=0,
+            total_clips=1,
+            freepik_api_key="key",
+            kling_endpoint="https://api.freepik.com/v1/ai/image-to-video/kling-v2-6-pro",
+            video_semaphore=threading.Semaphore(1),
+            update_job_status=None,
+            timeout_sec=5,
+        )
+
+        self.assertEqual(url, "https://example.com/video.mp4")
+        self.assertEqual(
+            mock_get.call_args.args[0],
+            "https://api.freepik.com/v1/ai/image-to-video/kling-v2-6/task-123",
+        )
 
     @patch("infrastructure.ai.freepik_kling_client.requests.get")
     def test_poll_kling_task_raises_on_failed_status(self, mock_get):
