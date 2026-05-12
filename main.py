@@ -39,6 +39,7 @@ from application.http.queue_route_handlers import (
     handle_render_room_async,
     handle_upscale_async,
 )
+from application.marketing.routes import router as marketing_reels_router
 from application.http.local_job_store import enqueue_local_job, get_local_job
 from application.media.frontal_generation_stage import (
     generate_frontal_room_from_photos as generate_frontal_room_from_photos_stage,
@@ -144,7 +145,8 @@ from infrastructure.ai.provider_defaults import (
     resolve_runtime_image_provider,
     resolve_runtime_model_name,
 )
-from infrastructure.ai.freepik_kling_client import (
+from infrastructure.aws.ssm import create_ssm_client
+from infrastructure.ai.kling_client import (
     build_kling_endpoint,
     create_kling_task as create_kling_task_impl,
     poll_kling_task as poll_kling_task_impl,
@@ -236,6 +238,8 @@ os.chdir(BASE_DIR)
 OUTPUTS_DIR = BASE_DIR / "outputs"
 ASSETS_DIR = BASE_DIR / "assets"
 STATIC_DIR = BASE_DIR / "static"
+STUDIO_APP_DIST = BASE_DIR / "studio-app" / "dist"
+STUDIO_APP_ASSETS = STUDIO_APP_DIST / "assets"
 
 # ---------------------------------------------------------
 # 1. 환경 설정 및 초기화
@@ -407,6 +411,11 @@ AWS_REGION = os.getenv("AWS_REGION", "").strip()
 S3_PREFIX = os.getenv("S3_PREFIX", "").strip()
 S3_REQUIRED = os.getenv("S3_REQUIRED", "0").strip().lower() in ("1", "true", "yes", "y")
 JOB_RESULT_S3_PREFIX = os.getenv("JOB_RESULT_S3_PREFIX", "").strip()
+PUBLIC_ASSET_BASE_URL = os.getenv("PUBLIC_ASSET_BASE_URL", "").strip().rstrip("/")
+OUTPUTS_S3_PREFIX = os.getenv("OUTPUTS_S3_PREFIX", "outputs/").strip()
+OUTPUTS_PRESIGNED_UPLOAD_EXPIRES_SEC = max(60, int(os.getenv("OUTPUTS_PRESIGNED_UPLOAD_EXPIRES_SEC", "900") or "900"))
+OUTPUTS_PRESIGNED_READ_EXPIRES_SEC = max(300, int(os.getenv("OUTPUTS_PRESIGNED_READ_EXPIRES_SEC", "86400") or "86400"))
+OUTPUTS_PRESIGNED_UPLOAD_MAX_FILES = max(1, int(os.getenv("OUTPUTS_PRESIGNED_UPLOAD_MAX_FILES", "20") or "20"))
 DEFAULT_AUDIENCE = os.getenv("DEFAULT_AUDIENCE", "internal").strip().lower() or "internal"
 MOODBOARD_S3_PREFIX = os.getenv("MOODBOARD_S3_PREFIX", "moodboard/").strip()
 USE_S3_MOODBOARD = os.getenv("USE_S3_MOODBOARD", "0").strip().lower() in ("1", "true", "yes", "y")
@@ -466,6 +475,7 @@ OUTPUTS_VIDEO_ALLOWED_EXTS = {
     for ext in os.getenv("OUTPUTS_VIDEO_ALLOWED_EXTS", ".mp4,.mov,.webm").replace(";", ",").split(",")
     if ext.strip()
 }
+MARKETING_KLING_S3_PREFIX = os.getenv("MARKETING_KLING_S3_PREFIX", "marketing-kling/").strip()
 CORS_ALLOW_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").replace(";", ",").split(",")
@@ -510,7 +520,133 @@ def _normalize_s3_prefix(prefix: str) -> str:
     return normalize_s3_prefix(prefix)
 
 def _s3_public_url(key: str) -> str:
+    if PUBLIC_ASSET_BASE_URL:
+        return f"{PUBLIC_ASSET_BASE_URL}/{key.lstrip('/')}"
     return s3_public_url(S3_BUCKET, AWS_REGION, key)
+
+
+def _safe_s3_path_segment(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value).strip()).strip(".-_")
+
+
+def _normalize_outputs_folder_suffix(folder_suffix: str | None) -> str:
+    if not folder_suffix:
+        return ""
+    parts = []
+    for raw_part in str(folder_suffix).replace("\\", "/").split("/"):
+        safe_part = _safe_s3_path_segment(raw_part)
+        if safe_part:
+            parts.append(safe_part)
+    return "/".join(parts)
+
+
+def _normalize_marketing_kling_asset_type(asset_type: str | None) -> str:
+    if not asset_type:
+        return ""
+    parts = []
+    for raw_part in str(asset_type).replace("\\", "/").split("/"):
+        safe_part = _safe_s3_path_segment(raw_part)
+        if safe_part:
+            parts.append(safe_part)
+    return "/".join(parts)
+
+
+def _marketing_kling_s3_key(filename: str, group_id: str | None, asset_type: str | None) -> str:
+    safe_group_id = _safe_s3_path_segment(group_id)
+    safe_asset_type = _normalize_marketing_kling_asset_type(asset_type)
+    if not safe_group_id:
+        raise ValueError("group_id is required for marketing-kling assets")
+    if safe_asset_type not in {"images", "images/start", "images/end", "videos", "final"}:
+        raise ValueError("asset_type must be one of images, images/start, images/end, videos, final")
+    return (
+        f"{_normalize_s3_prefix(MARKETING_KLING_S3_PREFIX)}"
+        f"{safe_group_id}/{safe_asset_type}/{filename}"
+    )
+
+
+def _outputs_s3_key(
+    filename: str,
+    folder_suffix: str | None = None,
+    *,
+    purpose: str | None = None,
+    group_id: str | None = None,
+    asset_type: str | None = None,
+) -> str:
+    if (purpose or "").strip() == "marketing-kling":
+        return _marketing_kling_s3_key(filename, group_id, asset_type)
+    key_prefix = f"{_normalize_s3_prefix(S3_PREFIX)}{_normalize_s3_prefix(OUTPUTS_S3_PREFIX)}"
+    normalized_folder = _normalize_outputs_folder_suffix(folder_suffix)
+    if normalized_folder:
+        key_prefix = f"{key_prefix}{normalized_folder}/"
+    return f"{key_prefix}{filename}"
+
+
+def _build_presigned_output_upload(
+    file_spec: dict,
+    *,
+    index: int = 0,
+    folder_suffix: str | None = None,
+    purpose: str | None = None,
+    group_id: str | None = None,
+    asset_type: str | None = None,
+) -> tuple[dict | None, JSONResponse | None]:
+    filename_input = str(file_spec.get("filename") or f"upload_{index + 1}.png").strip()
+    content_type = str(file_spec.get("content_type") or mimetypes.guess_type(filename_input)[0] or "application/octet-stream").strip()
+    client_id = str(file_spec.get("client_id") or file_spec.get("id") or "").strip()
+    file_folder_suffix = str(file_spec.get("folder_suffix") or file_spec.get("folder") or folder_suffix or "").strip()
+    size = file_spec.get("size")
+    try:
+        size_int = int(size)
+    except Exception:
+        size_int = 0
+
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename_input)
+    ext = Path(safe).suffix.lower()
+    if ext not in OUTPUTS_ALLOWED_EXTS:
+        allowed = ", ".join(sorted(OUTPUTS_ALLOWED_EXTS))
+        return None, JSONResponse(content={"error": f"Unsupported file type. Allowed: {allowed}", "index": index}, status_code=400)
+    if size_int <= 0:
+        return None, JSONResponse(content={"error": "Empty file", "index": index}, status_code=400)
+    if size_int > OUTPUTS_UPLOAD_MAX_BYTES:
+        return None, JSONResponse(content={"error": f"File too large (max {OUTPUTS_UPLOAD_MAX_MB}MB)", "index": index}, status_code=413)
+
+    stamp = int(time.time())
+    uid = uuid.uuid4().hex[:8]
+    filename = f"upload_{stamp}_{uid}_{safe}"
+    try:
+        key = _outputs_s3_key(
+            filename,
+            file_folder_suffix,
+            purpose=str(file_spec.get("purpose") or purpose or "").strip(),
+            group_id=str(file_spec.get("group_id") or group_id or "").strip(),
+            asset_type=str(file_spec.get("asset_type") or asset_type or "").strip(),
+        )
+    except ValueError as exc:
+        return None, JSONResponse(content={"error": str(exc), "index": index}, status_code=400)
+    upload_url = _get_s3_client().generate_presigned_url(
+        "put_object",
+        Params={"Bucket": S3_BUCKET, "Key": key, "ContentType": content_type},
+        ExpiresIn=OUTPUTS_PRESIGNED_UPLOAD_EXPIRES_SEC,
+    )
+    read_url = _get_s3_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": S3_BUCKET, "Key": key},
+        ExpiresIn=OUTPUTS_PRESIGNED_READ_EXPIRES_SEC,
+    )
+    item = {
+        "client_id": client_id or None,
+        "filename": filename,
+        "object_key": key,
+        "upload_url": upload_url,
+        "read_url": read_url,
+        "public_url": _s3_public_url(key),
+        "content_type": content_type,
+        "expires_in": OUTPUTS_PRESIGNED_UPLOAD_EXPIRES_SEC,
+        "read_expires_in": OUTPUTS_PRESIGNED_READ_EXPIRES_SEC,
+    }
+    return item, None
 
 def _job_result_prefix(audience: Optional[str] = None) -> str:
     base = _normalize_s3_prefix(S3_PREFIX)
@@ -659,7 +795,79 @@ async def _store_output_upload(
             pass
         return JSONResponse(content={"error": "Empty file"}, status_code=400)
 
+    if _s3_enabled():
+        key = _outputs_s3_key(filename)
+        content_type, _ = mimetypes.guess_type(str(out_path))
+        extra = {"ContentType": content_type} if content_type else None
+        if extra:
+            _get_s3_client().upload_file(str(out_path), S3_BUCKET, key, ExtraArgs=extra)
+        else:
+            _get_s3_client().upload_file(str(out_path), S3_BUCKET, key)
+        return {
+            "filename": filename,
+            "url": _s3_public_url(key),
+            "object_key": key,
+            "local_url": f"/outputs/{filename}",
+        }
+
     return {"filename": filename, "url": f"/outputs/{filename}"}
+
+
+def _allowed_asset_exts(asset_type: str | None) -> set[str]:
+    if asset_type in {"videos", "final"}:
+        return OUTPUTS_VIDEO_ALLOWED_EXTS
+    return OUTPUTS_ALLOWED_EXTS
+
+
+def _publish_existing_output_asset(
+    *,
+    url: str,
+    purpose: str | None,
+    group_id: str | None,
+    asset_type: str | None,
+    folder_suffix: str | None = None,
+) -> dict | JSONResponse:
+    if not _s3_enabled():
+        return JSONResponse(content={"error": "S3 upload is not configured"}, status_code=501)
+    local_path = _resolve_public_file_path(url)
+    if local_path is None or not local_path.exists():
+        return JSONResponse(content={"error": "Only existing local /outputs or /assets files can be published"}, status_code=400)
+
+    ext = local_path.suffix.lower()
+    allowed_exts = _allowed_asset_exts(asset_type)
+    if ext not in allowed_exts:
+        allowed = ", ".join(sorted(allowed_exts))
+        return JSONResponse(content={"error": f"Unsupported file type. Allowed: {allowed}"}, status_code=400)
+
+    stamp = int(time.time())
+    uid = uuid.uuid4().hex[:8]
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", local_path.name)
+    filename = f"upload_{stamp}_{uid}_{safe_name}"
+    try:
+        key = _outputs_s3_key(
+            filename,
+            folder_suffix,
+            purpose=purpose,
+            group_id=group_id,
+            asset_type=asset_type,
+        )
+    except ValueError as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=400)
+
+    content_type, _ = mimetypes.guess_type(str(local_path))
+    extra = {"ContentType": content_type} if content_type else None
+    if extra:
+        _get_s3_client().upload_file(str(local_path), S3_BUCKET, key, ExtraArgs=extra)
+    else:
+        _get_s3_client().upload_file(str(local_path), S3_BUCKET, key)
+    return {
+        "filename": filename,
+        "url": _s3_public_url(key),
+        "public_url": _s3_public_url(key),
+        "object_key": key,
+        "local_url": url,
+        "content_type": content_type,
+    }
 
 
 def _resolve_public_file_path(url: str) -> Path | None:
@@ -847,6 +1055,7 @@ def _start_background_cleanup_worker():
 _start_background_cleanup_worker()
 
 app = FastAPI()
+app.include_router(marketing_reels_router)
 
 def async_wrap(func):
     if asyncio.iscoroutinefunction(func):
@@ -936,6 +1145,11 @@ async def log_requests(request, call_next):
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+app.mount(
+    "/app/assets",
+    StaticFiles(directory=str(STUDIO_APP_ASSETS), check_dir=False),
+    name="studio-app-assets",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1598,6 +1812,20 @@ def video_studio_page():
     # Standalone page so users can build videos from existing images without re-rendering
     return FileResponse(STATIC_DIR / "video_studio.html")
 
+@app.get("/marketing")
+def marketing_page():
+    return FileResponse(STATIC_DIR / "marketing.html")
+
+@app.get("/app/{full_path:path}")
+def studio_app_page(full_path: str):
+    index_path = STUDIO_APP_DIST / "index.html"
+    if not index_path.exists():
+        return JSONResponse(
+            {"detail": "Studio app build output not found. Run npm run build in studio-app."},
+            status_code=404,
+        )
+    return FileResponse(index_path)
+
 @app.get("/api/outputs/list")
 def api_outputs_list(request: Request, limit: int = 200):
     """List recently generated/uploaded images in /outputs for Video Studio selection."""
@@ -1631,6 +1859,81 @@ async def api_outputs_upload(request: Request, file: UploadFile = File(...)):
         allowed_exts=OUTPUTS_ALLOWED_EXTS,
         max_bytes=OUTPUTS_UPLOAD_MAX_BYTES,
         max_mb=OUTPUTS_UPLOAD_MAX_MB,
+    )
+
+
+@app.post("/api/outputs/presign-upload")
+async def api_outputs_presign_upload(request: Request):
+    """Create one or more browser upload URLs for public S3-backed output assets."""
+    guard = _require_outputs_api_access(request)
+    if guard is not None:
+        return guard
+    if not _s3_enabled():
+        return JSONResponse(content={"error": "S3 upload is not configured"}, status_code=501)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Invalid JSON body"}, status_code=400)
+
+    folder_suffix = str(payload.get("folder_suffix") or payload.get("folder") or "").strip()
+    purpose = str(payload.get("purpose") or "").strip()
+    group_id = str(payload.get("group_id") or "").strip()
+    asset_type = str(payload.get("asset_type") or "").strip()
+    raw_files = payload.get("files")
+    if raw_files is None:
+        raw_files = [payload]
+        single_mode = True
+    else:
+        single_mode = False
+        if not isinstance(raw_files, list):
+            return JSONResponse(content={"error": "files must be an array"}, status_code=400)
+
+    if not raw_files:
+        return JSONResponse(content={"error": "files is empty"}, status_code=400)
+    if len(raw_files) > OUTPUTS_PRESIGNED_UPLOAD_MAX_FILES:
+        return JSONResponse(
+            content={"error": f"Too many files (max {OUTPUTS_PRESIGNED_UPLOAD_MAX_FILES})"},
+            status_code=413,
+        )
+
+    items = []
+    for index, file_spec in enumerate(raw_files):
+        if not isinstance(file_spec, dict):
+            return JSONResponse(content={"error": "Each file entry must be an object", "index": index}, status_code=400)
+        item, error_response = _build_presigned_output_upload(
+            file_spec,
+            index=index,
+            folder_suffix=folder_suffix,
+            purpose=purpose,
+            group_id=group_id,
+            asset_type=asset_type,
+        )
+        if error_response is not None:
+            return error_response
+        items.append(item)
+
+    if single_mode:
+        return {**items[0], "items": items}
+    return {"items": items}
+
+
+@app.post("/api/outputs/publish")
+async def api_outputs_publish(request: Request):
+    """Publish an existing local output file to an S3 asset namespace."""
+    guard = _require_outputs_api_access(request)
+    if guard is not None:
+        return guard
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Invalid JSON body"}, status_code=400)
+    return _publish_existing_output_asset(
+        url=str(payload.get("url") or "").strip(),
+        purpose=str(payload.get("purpose") or "").strip(),
+        group_id=str(payload.get("group_id") or "").strip(),
+        asset_type=str(payload.get("asset_type") or "").strip(),
+        folder_suffix=str(payload.get("folder_suffix") or payload.get("folder") or "").strip(),
     )
 
 
@@ -1997,12 +2300,53 @@ def generate_moodboard_options(
 
 
 # =========================
-# Video MVP (Kling Image-to-Video via Freepik API)
+# Video MVP (Kling Official Image-to-Video API)
 # =========================
-# Use Freepik API key for Kling as well (same header: x-freepik-api-key)
-FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY")  # fallback for existing env
-KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-5-pro")  # e.g. kling-v2-1-pro, kling-v2-5-pro
-KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", build_kling_endpoint(KLING_MODEL))
+KLING_BASE_URL = os.getenv("KLING_BASE_URL", "https://api-singapore.klingai.com").strip()
+KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", build_kling_endpoint(KLING_BASE_URL)).strip()
+KLING_MODEL_NAME = (os.getenv("KLING_MODEL_NAME") or os.getenv("KLING_MODEL") or "kling-v3").strip()
+KLING_MODE = os.getenv("KLING_MODE", "std").strip()
+KLING_SOUND = os.getenv("KLING_SOUND", "off").strip()
+KLING_ACCESS_KEY_PARAM = os.getenv("KLING_ACCESS_KEY_PARAM", "").strip()
+KLING_SECRET_KEY_PARAM = os.getenv("KLING_SECRET_KEY_PARAM", "").strip()
+
+
+def _kling_profile_name() -> str:
+    return (os.getenv("SPRING_PROFILES_ACTIVE") or os.getenv("APP_PROFILE") or "qa").strip()
+
+
+def _default_kling_ssm_param(kind: str) -> str:
+    profile = "real" if _kling_profile_name() == "real" else "qa"
+    return f"/config/intea-api_{profile}/kling.{kind}.api.key"
+
+
+def _read_kling_ssm_parameter(name: str) -> str:
+    client = create_ssm_client()
+    response = client.get_parameter(Name=name, WithDecryption=True)
+    value = ((response.get("Parameter") or {}).get("Value") or "").strip()
+    if not value:
+        raise RuntimeError(f"SSM parameter is empty: {name}")
+    return value
+
+
+def _resolve_kling_credentials() -> tuple[str, str]:
+    access_key = (
+        os.getenv("KLING_ACCESS_API_KEY")
+        or os.getenv("KLING_ACCESS_KEY")
+        or os.getenv("KLING_AK")
+        or ""
+    ).strip()
+    secret_key = (
+        os.getenv("KLING_SECRET_API_KEY")
+        or os.getenv("KLING_SECRET_KEY")
+        or os.getenv("KLING_SK")
+        or ""
+    ).strip()
+    if not access_key:
+        access_key = _read_kling_ssm_parameter(KLING_ACCESS_KEY_PARAM or _default_kling_ssm_param("access"))
+    if not secret_key:
+        secret_key = _read_kling_ssm_parameter(KLING_SECRET_KEY_PARAM or _default_kling_ssm_param("secret"))
+    return access_key, secret_key
 
 # Concurrency controls (avoid 429 bursts)
 VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "5"))
@@ -2047,20 +2391,35 @@ def _safe_extract_json(text: str) -> Dict[str, Any]:
         pass
     return {}
 
-def _freepik_kling_create_task(image_b64: str, prompt: str, negative_prompt: str, duration: str, cfg_scale: float) -> str:
+def _kling_create_task(
+    image_url: str,
+    prompt: str,
+    negative_prompt: str,
+    duration: str,
+    cfg_scale: float,
+    end_image_url: str | None = None,
+    aspect_ratio: str = "9:16",
+) -> str:
+    access_key, secret_key = _resolve_kling_credentials()
     return create_kling_task_impl(
-        image_b64,
+        image_url,
         prompt,
         negative_prompt,
         duration,
         cfg_scale,
-        freepik_api_key=FREEPIK_API_KEY,
+        access_key=access_key,
+        secret_key=secret_key,
         kling_endpoint=KLING_ENDPOINT,
+        model_name=KLING_MODEL_NAME,
+        mode=KLING_MODE,
+        end_image_url=end_image_url,
+        aspect_ratio=aspect_ratio,
+        sound=KLING_SOUND,
         video_semaphore=_video_sem,
     )
 
 
-def _freepik_kling_poll(
+def _kling_poll(
     task_id: str,
     *,
     clip_index: int,
@@ -2069,11 +2428,13 @@ def _freepik_kling_poll(
     status_callback=None,
     timeout_sec: int = 1800,
 ) -> str:
+    access_key, secret_key = _resolve_kling_credentials()
     return poll_kling_task_impl(
         task_id,
         clip_index=clip_index,
         total_clips=total_clips,
-        freepik_api_key=FREEPIK_API_KEY,
+        access_key=access_key,
+        secret_key=secret_key,
         kling_endpoint=KLING_ENDPOINT,
         video_semaphore=_video_sem,
         update_job_status=update_job_status,
@@ -2146,14 +2507,16 @@ job_entrypoints_module.configure_job_entrypoints(
         queue_source_generation_job=queue_source_generation_job,
         queue_final_compile_job=queue_final_compile_job,
         get_video_job=get_video_job,
-        create_kling_task=lambda image_b64, prompt, negative_prompt, duration, cfg_scale: _freepik_kling_create_task(
-            image_b64,
+        create_kling_task=lambda image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio="9:16": _kling_create_task(
+            image_url,
             prompt,
             negative_prompt,
             duration,
             cfg_scale,
+            end_image_url=end_image_url,
+            aspect_ratio=aspect_ratio,
         ),
-        poll_kling_task=lambda task_id, **kwargs: _freepik_kling_poll(task_id, **kwargs),
+        poll_kling_task=lambda task_id, **kwargs: _kling_poll(task_id, **kwargs),
         video_target_fps=VIDEO_TARGET_FPS,
         video_max_concurrency=VIDEO_MAX_CONCURRENCY,
     )
@@ -2166,8 +2529,8 @@ async def api_generate_sources(req: SourceGenRequest):
         req,
         video_target_fps=VIDEO_TARGET_FPS,
         video_max_concurrency=VIDEO_MAX_CONCURRENCY,
-        create_kling_task=_freepik_kling_create_task,
-        poll_kling_task=_freepik_kling_poll,
+        create_kling_task=_kling_create_task,
+        poll_kling_task=_kling_poll,
     )
     return {"job_id": job_id}
 
@@ -2189,4 +2552,3 @@ if __name__ == "__main__":
     import uvicorn
     reload_flag = os.getenv("DEV_RELOAD", "0") == "1"
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=reload_flag, log_level="info")
-

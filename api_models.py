@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -97,15 +97,18 @@ class VideoCreateRequest(BaseModel):
 
 class SourceItem(BaseModel):
     url: str
+    end_url: Optional[str] = None
     motion: str = "static"
     effect: str = "none"
     custom_motion_prompt: Optional[str] = None
     custom_effect_prompt: Optional[str] = None
+    duration: Literal["3", "4", "5", "6", "7", "8", "9", "10"] = "5"
 
 
 class SourceGenRequest(BaseModel):
     items: List[SourceItem]
     cfg_scale: float = 0.5
+    aspect_ratio: Literal["9:16", "16:9"] = "9:16"
 
 
 class CompileClip(BaseModel):

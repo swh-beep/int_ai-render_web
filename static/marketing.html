@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marketing Reels Studio - AI Interior</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=20260501_0127">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="icon" href="/static/favicon-light.png">
+    <style>
+        :root {
+            --mk-bg: #f7f4ee;
+            --mk-surface: rgba(255, 255, 255, 0.76);
+            --mk-surface-strong: #ffffff;
+            --mk-line: rgba(37, 37, 37, 0.12);
+            --mk-ink: #252525;
+            --mk-muted: #625c53;
+            --mk-soft: #eee9e1;
+            --mk-accent: #6f5c43;
+            --mk-positive: #3d8b5f;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            overflow-x: hidden;
+            background: var(--mk-bg);
+            color: var(--mk-ink);
+            font-family: 'Outfit', 'Pretendard', sans-serif;
+        }
+
+        .marketing-shell {
+            min-height: 100vh;
+            padding: 72px 32px 72px 112px;
+        }
+
+        .marketing-header,
+        .marketing-section {
+            max-width: 1180px;
+            margin: 0 auto;
+        }
+
+        .marketing-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+            gap: 48px;
+            align-items: end;
+            padding-bottom: 44px;
+            border-bottom: 1px solid var(--mk-line);
+        }
+
+        .marketing-kicker,
+        .marketing-eyebrow {
+            margin: 0 0 12px;
+            color: #7b6f61;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .marketing-title {
+            margin: 0;
+            color: var(--mk-ink);
+            font-size: 4.4rem;
+            line-height: 0.95;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        .marketing-title em {
+            color: #aa9783;
+            font-family: Georgia, serif;
+            font-weight: 400;
+        }
+
+        .marketing-copy {
+            margin: 0;
+            color: var(--mk-muted);
+            font-size: 1rem;
+            line-height: 1.7;
+        }
+
+        .marketing-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 22px;
+        }
+
+        .metric-pill {
+            padding: 12px;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.48);
+        }
+
+        .metric-pill b {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 1.05rem;
+        }
+
+        .metric-pill span {
+            color: var(--mk-muted);
+            font-size: 0.78rem;
+        }
+
+        .marketing-section {
+            margin-top: 42px;
+        }
+
+        .section-heading {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
+            gap: 32px;
+            align-items: end;
+            margin-bottom: 18px;
+        }
+
+        .section-heading h2 {
+            margin: 0;
+            color: var(--mk-ink);
+            font-size: 2.1rem;
+            line-height: 1.1;
+            font-weight: 500;
+            letter-spacing: 0;
+        }
+
+        .section-heading p {
+            margin: 0;
+            color: var(--mk-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .reel-type-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .reel-type-card,
+        .marketing-panel,
+        .output-version {
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: var(--mk-surface);
+            box-shadow: 0 14px 34px rgba(37, 37, 37, 0.06);
+        }
+
+        .reel-type-card {
+            min-height: 238px;
+            padding: 22px;
+            cursor: pointer;
+            transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+        }
+
+        .reel-type-card:hover,
+        .reel-type-card.is-active {
+            border-color: rgba(111, 92, 67, 0.42);
+            background: var(--mk-surface-strong);
+            transform: translateY(-2px);
+        }
+
+        .reel-type-card .material-symbols-outlined {
+            color: var(--mk-accent);
+            font-size: 30px;
+        }
+
+        .reel-type-card h3 {
+            margin: 34px 0 10px;
+            color: var(--mk-ink);
+            font-size: 1.35rem;
+            font-weight: 500;
+            letter-spacing: 0;
+        }
+
+        .reel-type-card p,
+        .best-for {
+            color: var(--mk-muted);
+            font-size: 0.92rem;
+            line-height: 1.55;
+        }
+
+        .best-for {
+            margin-top: 18px;
+            padding: 12px;
+            border-radius: 8px;
+            background: var(--mk-soft);
+        }
+
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: minmax(320px, 0.92fr) minmax(360px, 1.1fr) minmax(280px, 0.78fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        .marketing-panel {
+            padding: 22px;
+        }
+
+        .marketing-panel h3 {
+            margin: 0 0 18px;
+            color: var(--mk-ink);
+            font-size: 1.28rem;
+            font-weight: 500;
+            letter-spacing: 0;
+        }
+
+        .brief-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .brief-field {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .brief-field.is-wide {
+            grid-column: 1 / -1;
+        }
+
+        .brief-label {
+            color: #9a8873;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .brief-input,
+        .brief-select,
+        .brief-textarea {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.7);
+            color: var(--mk-ink);
+            font: inherit;
+            font-size: 0.95rem;
+            letter-spacing: 0;
+        }
+
+        .brief-input,
+        .brief-select {
+            height: 44px;
+            padding: 0 12px;
+        }
+
+        .brief-textarea {
+            min-height: 112px;
+            padding: 12px;
+            resize: vertical;
+            line-height: 1.55;
+        }
+
+        .upload-box {
+            display: grid;
+            gap: 8px;
+            place-items: center;
+            min-height: 134px;
+            border: 1px dashed rgba(111, 92, 67, 0.4);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.54);
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .upload-box .material-symbols-outlined {
+            color: var(--mk-accent);
+            font-size: 32px;
+        }
+
+        .upload-box strong {
+            display: block;
+            font-weight: 600;
+        }
+
+        .upload-box span,
+        .upload-note {
+            color: var(--mk-muted);
+            font-size: 0.82rem;
+        }
+
+        .image-order-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .image-order-row {
+            display: grid;
+            grid-template-columns: 26px minmax(0, 1fr) 84px;
+            gap: 8px;
+            align-items: center;
+            padding: 9px 10px;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .image-order-name {
+            overflow: hidden;
+            color: var(--mk-muted);
+            font-size: 0.84rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .image-order-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 4px;
+        }
+
+        .small-icon-button {
+            display: grid;
+            place-items: center;
+            width: 24px;
+            height: 24px;
+            border: 1px solid var(--mk-line);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.72);
+            color: var(--mk-muted);
+            cursor: pointer;
+        }
+
+        .small-icon-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.42;
+        }
+
+        .small-icon-button .material-symbols-outlined {
+            font-size: 16px;
+        }
+
+        .cut-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .cut-row {
+            display: grid;
+            grid-template-columns: 30px minmax(0, 1fr) 34px;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .cut-index {
+            display: grid;
+            place-items: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 999px;
+            background: var(--mk-soft);
+            color: var(--mk-accent);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .icon-button {
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.62);
+            color: var(--mk-muted);
+            cursor: pointer;
+        }
+
+        .add-cut-btn,
+        .generate-btn,
+        .run-reel-btn,
+        .version-action {
+            border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font: inherit;
+            letter-spacing: 0;
+        }
+
+        .add-cut-btn {
+            width: 100%;
+            height: 40px;
+            margin-top: 10px;
+            background: var(--mk-soft);
+            color: var(--mk-ink);
+        }
+
+        .generate-btn {
+            width: 100%;
+            height: 52px;
+            margin-top: 16px;
+            background: #211d1a;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .run-reel-btn {
+            width: 100%;
+            min-height: 52px;
+            margin-top: 10px;
+            border: 1px solid rgba(111, 92, 67, 0.24);
+            background: var(--mk-accent);
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .run-reel-btn:disabled,
+        .generate-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.58;
+        }
+
+        .render-note {
+            margin: 10px 0 0;
+            color: var(--mk-muted);
+            text-align: center;
+            font-size: 0.78rem;
+        }
+
+        .storyboard-list,
+        .prompt-list,
+        .versions-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .storyboard-cut,
+        .prompt-item {
+            padding: 14px;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .storyboard-cut header,
+        .prompt-item header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+            color: #9a8873;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .storyboard-cut p,
+        .prompt-item p,
+        .copy-block p {
+            margin: 0;
+            color: var(--mk-muted);
+            font-size: 0.92rem;
+            line-height: 1.55;
+        }
+
+        .copy-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .copy-block {
+            padding: 12px;
+            border-radius: 8px;
+            background: var(--mk-soft);
+        }
+
+        .copy-block b {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--mk-accent);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .output-version {
+            overflow: hidden;
+            background: #ffffff;
+        }
+
+        .version-swatch {
+            display: grid;
+            place-items: end;
+            height: 158px;
+            padding: 12px;
+            background: linear-gradient(135deg, #eadcc7, #fff7ed 45%, #9f6a32);
+            color: #ffffff;
+        }
+
+        .version-swatch.is-editorial {
+            background: linear-gradient(135deg, #2b241f, #8a5b35 50%, #f2d2a4);
+        }
+
+        .version-swatch.is-social {
+            background: linear-gradient(135deg, #f6efe8, #c7a67d 52%, #4d3321);
+        }
+
+        .version-time {
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(37, 37, 37, 0.74);
+            font-size: 0.76rem;
+        }
+
+        .version-body {
+            padding: 14px;
+        }
+
+        .version-body h4 {
+            margin: 0 0 4px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .version-body p {
+            margin: 0 0 12px;
+            color: var(--mk-muted);
+            font-size: 0.84rem;
+        }
+
+        .version-action {
+            width: 100%;
+            height: 38px;
+            border: 1px solid var(--mk-line);
+            background: rgba(247, 244, 238, 0.78);
+            color: var(--mk-ink);
+        }
+
+        .queue-status,
+        .final-reel {
+            margin-top: 18px;
+            padding-top: 18px;
+            border-top: 1px solid var(--mk-line);
+        }
+
+        .queue-status h4,
+        .final-reel h4 {
+            margin: 0 0 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0;
+        }
+
+        .status-line {
+            margin: 0 0 10px;
+            color: var(--mk-muted);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .progress-track {
+            overflow: hidden;
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(37, 37, 37, 0.1);
+        }
+
+        .progress-bar {
+            width: 0;
+            height: 100%;
+            border-radius: inherit;
+            background: var(--mk-positive);
+            transition: width 0.25s ease;
+        }
+
+        .clip-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .clip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 10px;
+            border: 1px solid var(--mk-line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.6);
+            color: var(--mk-muted);
+            font-size: 0.82rem;
+        }
+
+        .clip-row a,
+        .final-actions a {
+            color: var(--mk-accent);
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .final-video {
+            width: 100%;
+            max-height: 360px;
+            border-radius: 8px;
+            background: #211d1a;
+        }
+
+        .final-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .is-hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 1180px) {
+            .workspace-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .marketing-shell {
+                padding: 86px 22px 48px;
+            }
+
+            .marketing-header,
+            .section-heading,
+            .brief-grid,
+            .copy-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .marketing-title {
+                font-size: 3.2rem;
+            }
+
+            .marketing-metrics,
+            .reel-type-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body data-page="marketing">
+    <nav class="side-nav">
+        <a href="/" class="nav-item" title="MAIN">
+            <span class="material-symbols-outlined">home</span>
+            <span class="nav-label">MAIN</span>
+        </a>
+        <a href="/image-studio" class="nav-item" title="IMAGE STUDIO">
+            <span class="material-symbols-outlined">photo_library</span>
+            <span class="nav-label">IMAGE STUDIO</span>
+        </a>
+        <a href="/video-studio" class="nav-item" title="VIDEO STUDIO">
+            <span class="material-symbols-outlined">video_library</span>
+            <span class="nav-label">VIDEO STUDIO</span>
+        </a>
+        <a href="/marketing" class="nav-item active" title="MARKETING">
+            <span class="material-symbols-outlined">campaign</span>
+            <span class="nav-label">MARKETING</span>
+        </a>
+    </nav>
+
+    <main class="marketing-shell">
+        <section class="marketing-header">
+            <div>
+                <p class="marketing-kicker">Marketing Studio</p>
+                <h1 class="marketing-title">Marketing <em>Reels Studio</em></h1>
+            </div>
+            <div>
+                <p class="marketing-copy">
+                    사진 자료와 프롬프트를 마케팅 릴스 브리프로 정리하고, 내부 검토용 최종 릴스까지 생성하는 작업장입니다.
+                    브라우저 세션 안에서만 실행되며 DB 저장은 하지 않습니다.
+                </p>
+                <div class="marketing-metrics" aria-label="Marketing reels status">
+                    <div class="metric-pill">
+                        <b>3-10</b>
+                        <span>photos per brief</span>
+                    </div>
+                    <div class="metric-pill">
+                        <b>2-3</b>
+                        <span>output versions</span>
+                    </div>
+                    <div class="metric-pill">
+                        <b>0</b>
+                        <span>DB writes in v1</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="marketing-section">
+            <div class="section-heading">
+                <div>
+                    <p class="marketing-eyebrow">01 — Content Type</p>
+                    <h2>어떤 릴스를 만들까요?</h2>
+                </div>
+                <p>목적과 톤에 맞는 유형을 선택하면, 아래 브리프와 스토리보드 미리보기에 반영됩니다.</p>
+            </div>
+
+            <section class="reel-type-grid" aria-label="Reels content types">
+                <button class="reel-type-card is-active" type="button" data-reel-type="popup">
+                    <span class="material-symbols-outlined">storefront</span>
+                    <h3>가구 Popup</h3>
+                    <p>팝업 매장 또는 신제품 런칭을 위한 임팩트 있는 짧은 릴스입니다.</p>
+                    <div class="best-for">Best for: 신상품 런칭 · 팝업 스토어 · 브랜드 캠페인</div>
+                </button>
+                <button class="reel-type-card" type="button" data-reel-type="cinematic">
+                    <span class="material-symbols-outlined">movie</span>
+                    <h3>Cinematic 영상</h3>
+                    <p>감성적이고 영화 같은 무드의 브랜딩 릴스를 구성합니다.</p>
+                    <div class="best-for">Best for: 브랜드 무드 · 시즌 캠페인 · 디렉터스 컷</div>
+                </button>
+                <button class="reel-type-card" type="button" data-reel-type="install">
+                    <span class="material-symbols-outlined">construction</span>
+                    <h3>가구 설치 영상</h3>
+                    <p>공간에 가구를 배치하고 완성되는 과정을 비포 · 애프터 흐름으로 보여줍니다.</p>
+                    <div class="best-for">Best for: 고객 사례 · 공간 솔루션 · 시공 포트폴리오</div>
+                </button>
+            </section>
+        </section>
+
+        <section class="marketing-section workspace-grid" aria-label="Marketing reels workspace">
+            <aside class="marketing-panel">
+                <h3>Campaign Brief</h3>
+                <form id="marketing-brief-form">
+                    <div class="brief-grid">
+                        <label class="brief-field is-wide">
+                            <span class="brief-label">콘텐츠 유형</span>
+                            <select class="brief-select" id="marketing-content-type">
+                                <option value="popup" selected>가구 Popup</option>
+                                <option value="cinematic">Cinematic 영상</option>
+                                <option value="install">가구 설치 영상</option>
+                            </select>
+                        </label>
+
+                        <label class="brief-field is-wide upload-box">
+                            <span class="material-symbols-outlined">add_photo_alternate</span>
+                            <strong>사진 업로드</strong>
+                            <span id="marketing-upload-count">0 / 10 selected</span>
+                            <span class="upload-note">공간 또는 제품 사진 3~10장 · JPG · PNG</span>
+                            <input id="marketing-image-input" type="file" accept="image/*" multiple hidden>
+                        </label>
+                        <div class="brief-field is-wide">
+                            <span class="brief-label">사진 순서</span>
+                            <div class="image-order-list" id="marketing-image-order-list" aria-live="polite"></div>
+                            <span class="upload-note">이 순서대로 Kling clip을 만들고 최종 릴스에 연결합니다.</span>
+                        </div>
+
+                        <div class="brief-field is-wide">
+                            <span class="brief-label">각 컷의 프롬프트</span>
+                            <div class="cut-list" id="marketing-cut-prompts">
+                                <div class="cut-row">
+                                    <span class="cut-index">1</span>
+                                    <input class="brief-input cut-prompt-input" name="cut_prompt_1"
+                                        value="오프닝 — 정면 클로즈업">
+                                    <button class="icon-button" type="button" aria-label="Remove cut" disabled>
+                                        <span class="material-symbols-outlined">remove</span>
+                                    </button>
+                                </div>
+                                <div class="cut-row">
+                                    <span class="cut-index">2</span>
+                                    <input class="brief-input cut-prompt-input" name="cut_prompt_2"
+                                        value="와이드 컷 — 공간감 강조">
+                                    <button class="icon-button" type="button" aria-label="Remove cut" disabled>
+                                        <span class="material-symbols-outlined">remove</span>
+                                    </button>
+                                </div>
+                                <div class="cut-row">
+                                    <span class="cut-index">3</span>
+                                    <input class="brief-input cut-prompt-input" name="cut_prompt_3"
+                                        value="디테일 텍스처 컷">
+                                    <button class="icon-button" type="button" aria-label="Remove cut" disabled>
+                                        <span class="material-symbols-outlined">remove</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <button class="add-cut-btn" id="marketing-add-cut" type="button">Add cut prompt</button>
+                        </div>
+
+                        <label class="brief-field is-wide">
+                            <span class="brief-label">글로벌 프롬프트</span>
+                            <textarea class="brief-textarea" id="marketing-global-prompt">따뜻한 자연광 속에서 절제된 가구의 디테일을 보여주는 시네마틱 릴스. 부드러운 카메라 무빙, 베이지와 오크 톤.</textarea>
+                        </label>
+
+                        <label class="brief-field">
+                            <span class="brief-label">톤 & 매너</span>
+                            <select class="brief-select" id="marketing-tone">
+                                <option selected>Editorial</option>
+                                <option>Energetic</option>
+                                <option>Calm</option>
+                                <option>Bold</option>
+                            </select>
+                        </label>
+                        <label class="brief-field">
+                            <span class="brief-label">플랫폼</span>
+                            <select class="brief-select" id="marketing-platform">
+                                <option selected>Instagram</option>
+                                <option>TikTok</option>
+                                <option>YouTube Shorts</option>
+                            </select>
+                        </label>
+                        <label class="brief-field">
+                            <span class="brief-label">타겟 오디언스</span>
+                            <input class="brief-input" id="marketing-audience" value="25-40 디자인 라이프스타일">
+                        </label>
+                        <label class="brief-field">
+                            <span class="brief-label">목적</span>
+                            <input class="brief-input" id="marketing-goal" value="신상 라운지 컬렉션 인지도 확대">
+                        </label>
+                        <label class="brief-field">
+                            <span class="brief-label">길이</span>
+                            <select class="brief-select" id="marketing-duration">
+                                <option>15초</option>
+                                <option selected>20초</option>
+                                <option>30초</option>
+                                <option>60초</option>
+                            </select>
+                        </label>
+                        <label class="brief-field">
+                            <span class="brief-label">언어</span>
+                            <select class="brief-select" id="marketing-language">
+                                <option selected>한국어</option>
+                                <option>English</option>
+                                <option>日本語</option>
+                            </select>
+                        </label>
+                    </div>
+                    <button class="generate-btn" id="marketing-generate-brief" type="button">릴스 브리프 생성하기</button>
+                    <button class="run-reel-btn" id="marketing-run-reel" type="button">Kling으로 릴스 생성하기</button>
+                    <p class="render-note">Uploads images · Calls Kling video MVP · No DB write</p>
+                </form>
+            </aside>
+
+            <section class="marketing-panel">
+                <h3>Storyboard Preview</h3>
+                <div class="storyboard-list" id="storyboard-cut-list">
+                    <article class="storyboard-cut">
+                        <header><span>Cut 1</span><span>06s</span></header>
+                        <p>오프닝 — 정면 클로즈업</p>
+                    </article>
+                    <article class="storyboard-cut">
+                        <header><span>Cut 2</span><span>07s</span></header>
+                        <p>와이드 컷 — 공간감 강조</p>
+                    </article>
+                    <article class="storyboard-cut">
+                        <header><span>Cut 3</span><span>08s</span></header>
+                        <p>디테일 텍스처 컷</p>
+                    </article>
+                </div>
+
+                <div class="copy-grid">
+                    <div class="copy-block">
+                        <b>Hook</b>
+                        <p id="storyboard-hook">3초 안에 시선을 머물게 하는 디자인</p>
+                    </div>
+                    <div class="copy-block">
+                        <b>Caption</b>
+                        <p id="storyboard-caption">빛이 머무는 자리에, 봄의 라운지.</p>
+                    </div>
+                    <div class="copy-block">
+                        <b>CTA</b>
+                        <p id="storyboard-cta">지금 쇼룸에서 직접 만나보세요.</p>
+                    </div>
+                </div>
+
+                <div style="height: 22px;"></div>
+
+                <h3>Prompt Library</h3>
+                <div class="prompt-list">
+                    <article class="prompt-item">
+                        <header><span>Editorial</span><span>Reusable</span></header>
+                        <p>"베이지톤 미니멀, 자연광, 부드러운 카메라 무빙"</p>
+                    </article>
+                    <article class="prompt-item">
+                        <header><span>Cinematic</span><span>Reusable</span></header>
+                        <p>"건축적 디테일과 그림자, 시네마틱 무드"</p>
+                    </article>
+                    <article class="prompt-item">
+                        <header><span>Popup</span><span>Reusable</span></header>
+                        <p>"팝업 매장 오프닝, 활기찬 컷 전환"</p>
+                    </article>
+                </div>
+            </section>
+
+            <aside class="marketing-panel">
+                <h3>Output Versions</h3>
+                <div class="versions-list">
+                    <article class="output-version">
+                        <div class="version-swatch"><span class="version-time">00:24</span></div>
+                        <div class="version-body">
+                            <h4>Version A</h4>
+                            <p>Cinematic warm · 추천</p>
+                            <button class="version-action" type="button">선택됨</button>
+                        </div>
+                    </article>
+                    <article class="output-version">
+                        <div class="version-swatch is-editorial"><span class="version-time">00:21</span></div>
+                        <div class="version-body">
+                            <h4>Version B</h4>
+                            <p>Editorial slow · 브랜드 무드</p>
+                            <button class="version-action" type="button">선택</button>
+                        </div>
+                    </article>
+                    <article class="output-version">
+                        <div class="version-swatch is-social"><span class="version-time">00:18</span></div>
+                        <div class="version-body">
+                            <h4>Version C</h4>
+                            <p>Punchy social · 짧은 전환</p>
+                            <button class="version-action" type="button">선택</button>
+                        </div>
+                    </article>
+                </div>
+
+                <section class="queue-status" aria-label="Generation Queue">
+                    <h4>Generation Queue</h4>
+                    <p class="status-line" id="marketing-status">이미지 3~10장을 선택하고 브리프를 만든 뒤 릴스 생성을 시작하세요.</p>
+                    <div class="progress-track" aria-label="Generation progress">
+                        <div class="progress-bar" id="marketing-progress"></div>
+                    </div>
+                    <div class="clip-list" id="marketing-result-clips"></div>
+                </section>
+
+                <section class="final-reel is-hidden" id="marketing-final-reel" aria-label="Final Reel">
+                    <h4>Final Reel</h4>
+                    <video class="final-video" id="marketing-final-video" controls playsinline></video>
+                    <div class="final-actions">
+                        <a id="marketing-download-link" href="#" download>Download final MP4</a>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+    <script src="/static/js/marketing.js?v=20260505_1"></script>
+</body>
+
+</html>

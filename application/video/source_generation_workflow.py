@@ -19,9 +19,14 @@ from application.video.video_support import (
     clip_url_to_image_bytes,
     download_to_path,
     ffmpeg_image_to_video,
-    image_url_to_b64,
     kling_prompts_dynamic,
 )
+
+
+def _aspect_dimensions(aspect_ratio: str | None) -> tuple[int, int]:
+    if aspect_ratio == "16:9":
+        return 1920, 1080
+    return 1080, 1920
 
 
 _source_worker_lock = threading.Lock()
@@ -62,8 +67,10 @@ def _build_clip_state(job_id: str, idx: int, item: SourceItem, source_hash: str)
     return {
         "index": idx,
         "url": item.url,
+        "end_url": item.end_url,
         "motion": item.motion,
         "effect": item.effect,
+        "duration": item.duration,
         "custom_motion_prompt": _normalize_prompt(item.custom_motion_prompt),
         "custom_effect_prompt": _normalize_prompt(item.custom_effect_prompt),
         "source_hash": source_hash,
@@ -80,6 +87,7 @@ def _build_clip_state(job_id: str, idx: int, item: SourceItem, source_hash: str)
 
 def _build_request_key(req: SourceGenRequest, *, job_id: str) -> tuple[str, list[dict]]:
     fingerprint_payload = {
+        "aspect_ratio": req.aspect_ratio or "9:16",
         "cfg_scale": round(float(req.cfg_scale), 4),
         "items": [],
     }
@@ -91,12 +99,15 @@ def _build_request_key(req: SourceGenRequest, *, job_id: str) -> tuple[str, list
         effect = item.effect or "none"
         custom_motion_prompt = _normalize_prompt(item.custom_motion_prompt)
         custom_effect_prompt = _normalize_prompt(item.custom_effect_prompt)
+        duration = item.duration or "5"
 
         fingerprint_payload["items"].append(
             {
                 "source_hash": source_hash,
+                "end_url": item.end_url or "",
                 "motion": motion,
                 "effect": effect,
+                "duration": duration,
                 "custom_motion_prompt": custom_motion_prompt or "",
                 "custom_effect_prompt": custom_effect_prompt or "",
             }
@@ -108,10 +119,12 @@ def _build_request_key(req: SourceGenRequest, *, job_id: str) -> tuple[str, list
                 idx,
                 SourceItem(
                     url=item.url,
+                    end_url=item.end_url,
                     motion=motion,
                     effect=effect,
                     custom_motion_prompt=custom_motion_prompt,
                     custom_effect_prompt=custom_effect_prompt,
+                    duration=duration,
                 ),
                 source_hash,
             )
@@ -181,6 +194,7 @@ def _process_clip_by_index(
     *,
     total_clips: int,
     cfg_scale: float,
+    aspect_ratio: str,
     video_target_fps: int,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
@@ -196,6 +210,7 @@ def _process_clip_by_index(
         current_items[idx],
         total_clips=total_clips,
         cfg_scale=cfg_scale,
+        aspect_ratio=aspect_ratio,
         video_target_fps=video_target_fps,
         create_kling_task=create_kling_task,
         poll_kling_task=poll_kling_task,
@@ -205,31 +220,37 @@ def _process_clip_by_index(
 def _materialize_clip(item_state: dict) -> SourceItem:
     return SourceItem(
         url=item_state["url"],
+        end_url=item_state.get("end_url"),
         motion=item_state.get("motion") or "static",
         effect=item_state.get("effect") or "none",
         custom_motion_prompt=item_state.get("custom_motion_prompt"),
         custom_effect_prompt=item_state.get("custom_effect_prompt"),
+        duration=item_state.get("duration") or "5",
     )
 
 
-def _seed_direct_job_state(job_id: str, items: list[SourceItem], cfg_scale: float) -> None:
+def _seed_direct_job_state(job_id: str, items: list[SourceItem], cfg_scale: float, aspect_ratio: str = "9:16") -> None:
     clip_states = [
         _build_clip_state(
             job_id,
             idx,
             SourceItem(
                 url=item.url,
+                end_url=item.end_url,
                 motion=item.motion or "static",
                 effect=item.effect or "none",
                 custom_motion_prompt=_normalize_prompt(item.custom_motion_prompt),
                 custom_effect_prompt=_normalize_prompt(item.custom_effect_prompt),
+                duration=item.duration or "5",
             ),
             hashlib.sha256(
                 json.dumps(
                     {
                         "url": item.url,
+                        "end_url": item.end_url or "",
                         "motion": item.motion or "static",
                         "effect": item.effect or "none",
+                        "duration": item.duration or "5",
                         "custom_motion_prompt": _normalize_prompt(item.custom_motion_prompt) or "",
                         "custom_effect_prompt": _normalize_prompt(item.custom_effect_prompt) or "",
                     },
@@ -245,6 +266,7 @@ def _seed_direct_job_state(job_id: str, items: list[SourceItem], cfg_scale: floa
         {
             "job_type": "source_generation",
             "cfg_scale": float(cfg_scale),
+            "aspect_ratio": aspect_ratio or "9:16",
             "status": "QUEUED",
             "progress": 0,
             "message": "Queued for generation...",
@@ -262,12 +284,14 @@ def _process_static_clip(
     out_path: Path,
     *,
     video_target_fps: int,
+    aspect_ratio: str,
 ) -> Path:
     update_video_job_item(job_id, idx, status="PROCESSING", provider_status="LOCAL_STATIC", last_error=None)
     temp_img = out_path.parent / f"temp_src_{job_id}_{idx}.png"
     try:
         download_to_path(item.url, temp_img)
-        ffmpeg_image_to_video(temp_img, out_path, 5.0, 1080, 1920, video_target_fps)
+        target_w, target_h = _aspect_dimensions(aspect_ratio)
+        ffmpeg_image_to_video(temp_img, out_path, float(item.duration or "5"), target_w, target_h, video_target_fps)
         update_video_job_item(job_id, idx, status="COMPLETED", output_url=f"/outputs/{out_path.name}")
         return out_path
     finally:
@@ -283,6 +307,7 @@ def _process_ai_clip(
     *,
     total_clips: int,
     cfg_scale: float,
+    aspect_ratio: str,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
 ) -> Path:
@@ -304,9 +329,18 @@ def _process_ai_clip(
             custom_motion_prompt=item.custom_motion_prompt,
             custom_effect_prompt=item.custom_effect_prompt,
         )
-        img_b64 = image_url_to_b64(item.url)
         attempt_count = int(item_state.get("attempt_count") or 0) + 1
-        task_id = create_kling_task(img_b64, prompts["prompt"], prompts["negative_prompt"], "5", cfg_scale)
+        task_kwargs = {"aspect_ratio": aspect_ratio or "9:16"}
+        if item.end_url:
+            task_kwargs["end_image_url"] = item.end_url
+        task_id = create_kling_task(
+            item.url,
+            prompts["prompt"],
+            prompts["negative_prompt"],
+            item.duration or "5",
+            cfg_scale,
+            **task_kwargs,
+        )
         update_video_job_item(
             job_id,
             idx,
@@ -354,6 +388,7 @@ def _process_clip(
     *,
     total_clips: int,
     cfg_scale: float,
+    aspect_ratio: str,
     video_target_fps: int,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
@@ -370,12 +405,20 @@ def _process_clip(
     is_static = (
         item.motion == "static"
         and item.effect == "none"
+        and not item.end_url
         and not item.custom_motion_prompt
         and not item.custom_effect_prompt
     )
 
     if is_static:
-        return _process_static_clip(job_id, idx, item, out_path, video_target_fps=video_target_fps)
+        return _process_static_clip(
+            job_id,
+            idx,
+            item,
+            out_path,
+            video_target_fps=video_target_fps,
+            aspect_ratio=aspect_ratio,
+        )
 
     return _process_ai_clip(
         job_id,
@@ -384,6 +427,7 @@ def _process_clip(
         out_path,
         total_clips=total_clips,
         cfg_scale=cfg_scale,
+        aspect_ratio=aspect_ratio,
         create_kling_task=create_kling_task,
         poll_kling_task=poll_kling_task,
     )
@@ -410,6 +454,7 @@ def run_source_generation_job(
         item_states = job.get("items") or []
         total_clips = len(item_states)
         cfg_scale = float(job.get("cfg_scale") or 0.5)
+        aspect_ratio = job.get("aspect_ratio") or "9:16"
         worker_count = _source_worker_count(total_clips, video_max_concurrency)
 
         update_video_job(
@@ -441,6 +486,7 @@ def run_source_generation_job(
                     idx,
                     total_clips=total_clips,
                     cfg_scale=cfg_scale,
+                    aspect_ratio=aspect_ratio,
                     video_target_fps=video_target_fps,
                     create_kling_task=create_kling_task,
                     poll_kling_task=poll_kling_task,
@@ -540,6 +586,7 @@ def queue_source_generation_job(
         "job_type": "source_generation",
         "request_key": request_key,
         "cfg_scale": float(req.cfg_scale),
+        "aspect_ratio": req.aspect_ratio or "9:16",
         "status": "QUEUED",
         "progress": 0,
         "message": "Queued for generation...",

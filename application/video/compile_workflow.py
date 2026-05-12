@@ -75,9 +75,9 @@ def run_final_compile_job(job_id: str, req: CompileRequest, *, video_target_fps:
             final_path = out_dir / f"proc_{job_id}_{i}.mp4"
 
             trim_start = max(0.0, clip.trim_start)
-            trim_end = min(5.0, clip.trim_end)
+            trim_end = max(trim_start + 0.1, clip.trim_end)
             if trim_end <= trim_start:
-                trim_end = 5.0
+                trim_end = trim_start + 5.0
 
             vf = _build_video_filter(
                 trim_start=trim_start,
@@ -149,4 +149,3 @@ def queue_final_compile_job(req: CompileRequest, *, video_target_fps: int) -> st
         kwargs={"video_target_fps": video_target_fps},
     ).start()
     return job_id
-
