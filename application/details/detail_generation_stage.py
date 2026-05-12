@@ -405,25 +405,28 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
 
     if is_overview:
         return (
-            "Create a high-angle interior editorial shot of this space. "
-            "Make it feel like a real photographed interior with natural light, shadows, and material texture. "
-            "Do not change the shape, details, count, color, material, placement of any furniture/decor, or the room structure. "
+            "Using the provided image as the only source, create a high-angle editorial photo of this exact space. "
+            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
+            "Only change camera framing/composition for a high-angle view. "
             "No text or watermark."
         )
 
     if is_side:
         side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
         return (
-            f"Create an interior editorial shot from the {side_text} area of this space. "
-            "Make it feel like a real photographed interior with natural light, shadows, and material texture. "
-            "Do not change the shape, details, count, color, material, placement of any furniture/decor, or the room structure. "
+            f"Using the provided image as the only source, create an editorial photo from the {side_text} area of this exact space. "
+            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
+            "Only change camera framing/composition to focus on that side area. "
             "No text or watermark."
         )
 
     return (
-        f"Create an interior editorial shot around the {clean_label} area. "
-        "Make it feel like a real photo. "
-        "Do not change furniture/decor shape, detail, count, color, material, placement, room structure, or nearby spatial relationships. "
+        f"Using the provided image as the only source, create an editorial photo from the {clean_label} side/area of this exact space. "
+        "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+        "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
+        "Only change camera framing/composition to focus on that area. "
         "No text or watermark."
     )
 

@@ -281,5 +281,5 @@ def call_gemini_with_failover(
                 )
                 time.sleep(1)
 
-    logger.error(f"[Gemini] fatal{tag}: all keys failed")
+    logger.error(f"[Gemini] fatal{tag}: attempts exhausted ({max_attempts})")
     return None

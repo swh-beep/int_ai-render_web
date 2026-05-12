@@ -255,13 +255,14 @@ def detect_furniture_boxes(
                 "Ignore walls, windows, and floors. Focus on movable objects."
             )
             detect_model = model_name or default_model_name
-            detect_timeout = max(10, int(timeout_sec or 120))
+            detect_timeout = max(60, int(timeout_sec or 120))
+            detect_max_attempts = max(3, int(max_attempts or 3))
             response = call_gemini_with_failover(
                 detect_model,
                 [prompt, img],
                 {
                     "timeout": detect_timeout,
-                    "max_attempts": max(1, int(max_attempts or 1)),
+                    "max_attempts": detect_max_attempts,
                 },
                 {},
                 log_tag="Analysis.DetectFurniture",
@@ -281,7 +282,7 @@ def detect_furniture_boxes(
     except Exception as exc:
         print(f"!! Detection Failed: {exc}", flush=True)
 
-    return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
+    return []
 
 
 def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):

@@ -195,12 +195,14 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         assert "thinking_level" not in captured["request_options"]
         assert "quality" not in captured["request_options"]
         assert len(captured["content"]) == 3
-        assert "around the Floor Lamp area" in captured["prompt"]
+        assert "Using the provided image as the only source" in captured["prompt"]
+        assert "from the Floor Lamp side/area" in captured["prompt"]
         assert "legacy prompt should not be used" not in captured["prompt"]
-        assert "Do not change furniture/decor shape, detail, count, color, material, placement" in captured["prompt"]
-        assert "nearby spatial relationships" in captured["prompt"]
+        assert "every visible furniture/decor item's position, shape, size, count, color, material" in captured["prompt"]
+        assert "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything" in captured["prompt"]
+        assert "Only change camera framing/composition" in captured["prompt"]
         assert "No text or watermark" in captured["prompt"]
-        assert len(captured["prompt"]) < 260
+        assert len(captured["prompt"]) < 520
         assert captured["kwargs"]["log_tag"] == "Detail.Generate.GPTImage"
         assert output_path.exists()
     finally:

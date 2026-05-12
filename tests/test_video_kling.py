@@ -9,6 +9,7 @@ from unittest.mock import patch
 from api_models import SourceItem
 from application.video import source_generation_workflow
 from application.video.job_store import get_video_job, video_jobs, video_jobs_lock
+from application.video.video_support import kling_prompts_dynamic
 from infrastructure.ai.freepik_kling_client import (
     build_kling_endpoint,
     build_kling_status_endpoint,
@@ -44,6 +45,18 @@ class KlingClientTests(unittest.TestCase):
             build_kling_status_endpoint("https://api.freepik.com/v1/ai/image-to-video/kling-v2-5-pro"),
             "https://api.freepik.com/v1/ai/image-to-video/kling-v2-5-pro",
         )
+
+    def test_orbit_prompts_are_arc_rotation_not_sideways_slide(self):
+        left = kling_prompts_dynamic("orbit_l_slow", "sunlight")
+        right = kling_prompts_dynamic("orbit_r_slow", "sunlight")
+
+        self.assertIn("camera orbit", left["prompt"])
+        self.assertIn("fixed central point", left["prompt"])
+        self.assertIn("gentle arc", left["prompt"])
+        self.assertIn("Do not pan, slide, truck sideways", left["prompt"])
+        self.assertIn("counterclockwise", left["prompt"])
+        self.assertIn("clockwise", right["prompt"])
+        self.assertIn("sideways slide", left["negative_prompt"])
 
     @patch("infrastructure.ai.freepik_kling_client.requests.post")
     def test_create_kling_task_raises_on_rate_limit(self, mock_post):

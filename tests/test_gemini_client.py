@@ -127,6 +127,41 @@ def test_call_gemini_with_failover_uses_high_thinking_for_detect_furniture(monke
     assert captured["config"]["thinking_config"]["thinking_level"] == "high"
 
 
+def test_call_gemini_with_failover_logs_attempts_exhausted_on_final_failure(monkeypatch):
+    messages = {"errors": [], "warnings": []}
+
+    class FailingModels:
+        def generate_content(self, *, model, contents, config=None):
+            raise RuntimeError("504 DEADLINE_EXCEEDED")
+
+    class FailingClient:
+        def __init__(self, *, api_key):
+            self.models = FailingModels()
+
+    monkeypatch.setattr("infrastructure.ai.gemini_client.genai.Client", FailingClient)
+    monkeypatch.setattr("infrastructure.ai.gemini_client.time.sleep", lambda *_args, **_kwargs: None)
+
+    response = call_gemini_with_failover(
+        "gemini-3.1-pro-preview",
+        ["prompt"],
+        {"timeout": 1, "max_attempts": 1},
+        {},
+        api_key_pool=["test-key-1234"],
+        quota_exceeded_keys=set(),
+        logger=SimpleNamespace(
+            info=lambda *a, **k: None,
+            warning=lambda message, *a, **k: messages["warnings"].append(str(message)),
+            error=lambda message, *a, **k: messages["errors"].append(str(message)),
+        ),
+        log_brief=True,
+        log_tag="RankBestVariant",
+    )
+
+    assert response is None
+    assert any("attempts exhausted (1)" in message for message in messages["errors"])
+    assert not any("all keys failed" in message for message in messages["errors"])
+
+
 def test_call_gemini_with_failover_uses_medium_thinking_for_non_furniture_analysis(monkeypatch):
     captured = {}
     _install_fake_genai_client(monkeypatch, captured)

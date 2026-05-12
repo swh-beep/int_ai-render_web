@@ -203,8 +203,8 @@ def rank_best_variant_flash(
             rank_model_name,
             content,
             {
-                "timeout": max(10, int(timeout_sec or 80)),
-                "max_attempts": max(1, int(max_attempts or 1)),
+                "timeout": max(10, int(timeout_sec or 60)),
+                "max_attempts": max(1, int(max_attempts or 3)),
             },
             {},
             log_tag="RankBestVariant",

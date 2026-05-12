@@ -40,9 +40,10 @@ def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):
 
     captured = {}
 
-    def fake_rank_call(model_name, content, *args, **kwargs):
+    def fake_rank_call(model_name, content, request_options, *args, **kwargs):
         captured["content"] = content
         captured["prompt"] = content[0]
+        captured["request_options"] = dict(request_options)
         return SimpleNamespace(text='{"best_index": 2, "reason": "Candidate 2 preserves the reference chair."}')
 
     best_idx = rank_best_variant_flash(
@@ -64,6 +65,8 @@ def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):
     assert best_idx == 1
     assert "PRODUCT REFERENCE CUTOUTS" in captured["prompt"]
     assert "product identity errors before photographic polish" in captured["prompt"]
+    assert captured["request_options"]["timeout"] == 60
+    assert captured["request_options"]["max_attempts"] == 3
     assert "Reference Product #1: Reference Chair" in captured["content"]
 
 

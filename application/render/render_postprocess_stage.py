@@ -44,7 +44,7 @@ def _reorder_generated_results(
     if not allow_failed_rerank:
         return reordered, False
     ranking_timeout_sec = _bounded_timeout_for_deadline(
-        18.0,
+        60.0,
         absolute_deadline_ts=absolute_deadline_ts,
         minimum_sec=8.0,
     )
@@ -59,7 +59,7 @@ def _reorder_generated_results(
                 candidates,
                 full_analyzed_data,
                 timeout_sec=ranking_timeout_sec,
-                max_attempts=1,
+                max_attempts=3,
             )
         except TypeError:
             best_idx = rank_best_variant(candidates, full_analyzed_data)
