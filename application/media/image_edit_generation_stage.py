@@ -321,7 +321,7 @@ def process_image_edit_logic(
             response = call_gemini_with_failover(
                 model_name,
                 content,
-                {"timeout": 90},
+                {"timeout": 150},
                 {},
                 log_tag="Edit.Generate",
             )
