@@ -483,6 +483,77 @@ describe("MarketingPage", () => {
     expect(marketingApi.markMarketingReelGroupFailed).not.toHaveBeenCalled();
   });
 
+  it("shows compile status API progress in the final merge step", async () => {
+    marketingApi.createMarketingReelGroup.mockImplementationOnce(async (payload) => ({
+      group_id: "group-1",
+      clips: payload.clips.map((clip, index) => ({
+        clip_id: `clip-${index + 1}`,
+        client_image_id: clip.clientImageId,
+      })),
+    }));
+    outputsApi.uploadOutputImageAssets.mockResolvedValueOnce(uploadedAssets([
+      "https://cdn.example/start-1.png",
+      "https://cdn.example/start-2.png",
+      "https://cdn.example/start-3.png",
+    ]));
+    marketingApi.updateMarketingClipSourceImages.mockImplementationOnce(async (_groupId, payload) => ({
+      group_id: "group-1",
+      clips: payload.clips,
+    }));
+    videoApi.requestSourceGeneration.mockResolvedValueOnce("source-job-1");
+    marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
+    videoApi.fetchVideoJobStatus
+      .mockResolvedValueOnce({
+        status: "COMPLETED",
+        progress: 100,
+        results: ["/outputs/clip-1.mp4", "/outputs/clip-2.mp4", "/outputs/clip-3.mp4"],
+      })
+      .mockResolvedValueOnce({
+        status: "RUNNING",
+        progress: 40,
+        message: "Merging clips...",
+      })
+      .mockResolvedValueOnce({
+        status: "COMPLETED",
+        progress: 100,
+        result_url: "/outputs/final.mp4",
+      });
+    outputsApi.publishOutputAsset
+      .mockResolvedValueOnce("https://cdn.example/clip-1.mp4")
+      .mockResolvedValueOnce("https://cdn.example/clip-2.mp4")
+      .mockResolvedValueOnce("https://cdn.example/clip-3.mp4")
+      .mockResolvedValueOnce("https://cdn.example/final.mp4");
+    marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
+    marketingApi.approveMarketingClipAttempt.mockResolvedValue({ group_id: "group-1" });
+    videoApi.requestCompile.mockResolvedValueOnce("compile-job-1");
+    marketingApi.patchMarketingFinalResult.mockResolvedValueOnce({ group_id: "group-1" });
+
+    render(<MarketingPage />);
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [
+          new File(["one"], "one.png", { type: "image/png" }),
+          new File(["two"], "two.png", { type: "image/png" }),
+          new File(["three"], "three.png", { type: "image/png" }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "승인" })).toHaveLength(3));
+    screen.getAllByRole("button", { name: "승인" }).forEach((button) => fireEvent.click(button));
+    await waitFor(() => expect(screen.getByRole("button", { name: "승인본으로 합치기 준비" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "승인본으로 합치기 준비" }));
+    await screen.findByRole("button", { name: "최종 영상 합치기" });
+    fireEvent.click(screen.getByRole("button", { name: "최종 영상 합치기" }));
+
+    await waitFor(() => expect(screen.getByText("최종 영상 합치기: Merging clips...")).toBeInTheDocument());
+    const finalStep = screen.getByRole("heading", { name: "3. 최종 합치기" }).closest("section") as HTMLElement;
+    expect(within(finalStep).getByLabelText("Final merge progress").querySelector(".progress-bar")).toHaveStyle({ width: "48%" });
+
+    await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalled(), { timeout: 3000 });
+  });
+
   it("uses an explicitly selected history clip as the regeneration reference", async () => {
     marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
       { group_id: "history-1", created_at: "2026-05-10", clip_count: 2, status: "COMPLETED" },

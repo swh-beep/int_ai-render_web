@@ -720,6 +720,7 @@ export function MarketingPage() {
     setActiveStep(3);
     try {
       const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, aspectRatio);
+      updateStatus("최종 영상 합치기 요청 중...", 20);
       const compileJobId = await requestCompile(compilePayload);
       const state = await pollJob(compileJobId, "최종 영상 합치기", 20, 70);
       if (!state.result_url) throw new Error(state.error ?? "최종 릴스 URL이 없습니다.");
@@ -1100,6 +1101,8 @@ export function MarketingPage() {
                   아직 승인되지 않은 clip이 있습니다: {blockers.map((clip) => clip.file.name).join(", ")}
                 </div>
               ) : null}
+              <div className="progress-track" aria-label="Final merge progress"><div className="progress-bar" style={{ width: `${progress}%` }} /></div>
+              <p className="status-line">{status}</p>
               <label className="brief-field final-title-field">
                 <span className="brief-label">History title</span>
                 <input
