@@ -402,11 +402,17 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
     focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
     is_overview = camera_mode == "overview_angle" or style_name == "High Angle Overview"
     is_side = camera_mode == "side_angle" or style_name.startswith("Side Composition")
+    relocation_guard = (
+        "The camera may naturally crop or hide objects, but it must never move any object into a new place. "
+        "If an object is not visible from the new camera angle, leave it out of frame instead of relocating it. "
+        "Lamps, side tables, chairs, artwork, and decor must stay anchored to their original wall, floor, window, and nearby-object relationships. "
+    )
 
     if is_overview:
         return (
             "Using the provided image as the only source, create a high-angle editorial photo of this exact space. "
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            f"{relocation_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
             "Only change camera framing/composition for a high-angle view. "
             "No text or watermark."
@@ -417,14 +423,17 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
         return (
             f"Using the provided image as the only source, create an editorial photo from the {side_text} area of this exact space. "
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            f"{relocation_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
             "Only change camera framing/composition to focus on that side area. "
             "No text or watermark."
         )
 
     return (
-        f"Using the provided image as the only source, create an editorial photo from the {clean_label} side/area of this exact space. "
+        f"Using the provided image as the only source, create a close-up editorial photograph of the {clean_label} area "
+        "with a slightly rotated camera angle and focused depth of field. "
         "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+        f"{relocation_guard}"
         "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
         "Only change camera framing/composition to focus on that area. "
         "No text or watermark."
