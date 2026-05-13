@@ -257,6 +257,47 @@ class DetailMetadataTests(unittest.TestCase):
 
         self.assertEqual(detail_targets, ["Sofa", "Floor Lamp"])
 
+    def test_construct_dynamic_styles_keeps_separate_generic_decor_targets(self):
+        analyzed_items = [
+            {
+                "label": "Sofa",
+                "target_key": "detail_sofa_001",
+                "category_canonical": "sofa",
+                "box_2d": [506, 294, 706, 709],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 1,
+            },
+            {
+                "label": "Decor",
+                "target_key": "detail_decor_002",
+                "category_canonical": "decor",
+                "box_2d": [120, 100, 210, 190],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 2,
+            },
+            {
+                "label": "Decor",
+                "target_key": "detail_decor_003",
+                "category_canonical": "decor",
+                "box_2d": [700, 780, 820, 900],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 3,
+            },
+            {
+                "label": "Decor",
+                "target_key": "detail_decor_004",
+                "category_canonical": "decor",
+                "box_2d": [125, 105, 208, 188],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 4,
+            },
+        ]
+
+        styles = construct_dynamic_styles(analyzed_items)
+        detail_targets = [style.get("target_label") for style in styles]
+
+        self.assertEqual(detail_targets, ["Sofa", "Decor", "Decor"])
+
     def test_construct_dynamic_styles_prefers_source_backed_products_over_generic_fresh_detections(self):
         analyzed_items = [
             {

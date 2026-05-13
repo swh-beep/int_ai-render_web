@@ -61,6 +61,23 @@ def _normalized_label(value) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+_GENERIC_DECOR_DETAIL_KEYS = {
+    "accessory",
+    "accessories",
+    "decor",
+    "decoration",
+    "decorative object",
+    "object",
+    "small accessory",
+    "small decor",
+    "small object",
+    "shelf decor",
+    "table decor",
+    "tabletop decor",
+    "wall decor",
+}
+
+
 def _detail_identity_family(item) -> str:
     if not isinstance(item, dict):
         return ""
@@ -73,6 +90,16 @@ def _detail_identity_family(item) -> str:
         or item.get("category")
         or ""
     )
+
+
+def _is_generic_decor_detail_target(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    keys = {
+        _normalized_label(item.get("label")),
+        _detail_identity_family(item),
+    }
+    return any(key in _GENERIC_DECOR_DETAIL_KEYS for key in keys if key)
 
 
 def _is_source_backed_detail_target(item) -> bool:
@@ -120,6 +147,8 @@ def _is_duplicate_detail_target(item, accepted_items) -> bool:
         same_family = bool(family_key and accepted_family_key and family_key == accepted_family_key)
         both_detection_only = not _is_source_backed_detail_target(item) and not _is_source_backed_detail_target(accepted)
         if same_label and both_detection_only and (same_family or not family_key or not accepted_family_key):
+            if _is_generic_decor_detail_target(item) and _is_generic_decor_detail_target(accepted):
+                return _box_iou(box, (accepted or {}).get("box_2d")) >= 0.35
             return True
         if (
             same_label
@@ -216,6 +245,7 @@ def construct_dynamic_styles(analyzed_items):
                 "target_label": label,
                 "target_key": item.get("target_key"),
                 "source_index": item.get("source_index"),
+                "detail_index": count + 1,
                 "prompt": (
                     f"Create a detailed editorial furniture-magazine photograph focused on the {label} area in this exact room. "
                     "Use the provided main image as the sole source of truth. Preserve the furniture shape, count, placement, "

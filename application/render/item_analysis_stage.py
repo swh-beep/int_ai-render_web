@@ -241,10 +241,13 @@ def detect_furniture_boxes(
         with Image.open(moodboard_path) as img:
             prompt = (
                 "OBJECT DETECTION TASK:\n"
-                "Identify ALL discrete furniture items in this image (Sofa, Chair, Table, Lamp, Rug, Ottoman, etc.).\n"
+                "Identify ALL discrete interior objects that could make useful detail-shot targets in this image, "
+                "including furniture, lighting, decor, and accessories.\n"
+                "Examples: sofas, chairs, tables, lamps, rugs, ottomans, mirrors, wall art, framed prints, posters, "
+                "vases, books, plants, candles, sculptures, trays, table decor, shelf decor, and small accessories.\n"
                 "**NOTE:** The background is a neutral grey (#D2D2D2) for contrast. Do not detect the background itself.\n"
                 "Return a JSON list where each item has:\n"
-                "- 'label': Name of the item.\n"
+                "- 'label': Specific name of the item. Use specific labels instead of generic 'Decor' whenever possible.\n"
                 "- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 scale.\n"
                 "\n"
                 "<CRITICAL: SORTING ORDER>\n"
@@ -252,7 +255,8 @@ def detect_furniture_boxes(
                 "1. Largest items first (e.g., Sofa, Bed, Large Rug, Wardrobe).\n"
                 "2. Medium items second (e.g., Armchair, Coffee Table, Console).\n"
                 "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
-                "Ignore walls, windows, and floors. Focus on movable objects."
+                "Ignore walls, windows, floors, ceiling, and built-in architecture. "
+                "But do detect discrete objects attached to a wall or placed on a shelf, table, or floor."
             )
             detect_model = model_name or default_model_name
             detect_timeout = max(60, int(timeout_sec or 120))

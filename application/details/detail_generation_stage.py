@@ -391,7 +391,35 @@ def _is_gpt_image_model_name(model_name: str | None) -> bool:
     return str(model_name or "").strip().lower().startswith("gpt-image-")
 
 
-def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str:
+_DETAIL_CAMERA_RECIPES = (
+    "Camera recipe: low close-up from the left side, with the target in the foreground and the same room context behind it.",
+    "Camera recipe: standing-height diagonal crop, with visible parallax from the source frame and a natural magazine composition.",
+    "Camera recipe: tight vertical foreground framing, allowing a nearby object edge to partially frame the target without moving it.",
+    "Camera recipe: shallow depth of field, with the target sharp in the foreground and the original background softly visible.",
+    "Camera recipe: over-the-edge composition, as if photographed across the nearest bed, table, shelf, or chair edge that already exists.",
+    "Camera recipe: window-side natural-light crop, using the original window direction and a closer editorial camera distance.",
+)
+
+
+def _coerce_positive_int(value) -> int | None:
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _detail_camera_recipe(style_config: dict, shot_index: int | None) -> str:
+    recipe_index = (
+        _coerce_positive_int((style_config or {}).get("detail_index"))
+        or _coerce_positive_int((style_config or {}).get("source_index"))
+        or _coerce_positive_int(shot_index)
+        or 1
+    )
+    return _DETAIL_CAMERA_RECIPES[(recipe_index - 1) % len(_DETAIL_CAMERA_RECIPES)]
+
+
+def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_index: int | None = None) -> str:
     style_name = str((style_config or {}).get("name") or "").strip()
     clean_label = str(target_label or "").strip()
     if not clean_label and style_name.startswith("Detail:"):
@@ -410,32 +438,38 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str) -> str
 
     if is_overview:
         return (
-            "Using the provided image as the only source, create a high-angle editorial photo of this exact space. "
-            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            "Using the provided image as the only source, create a varied high-angle editorial photo of this exact space. "
+            "Use a clearly different camera height, distance, and framing from the source image, as if photographed from a natural elevated in-room position. "
+            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
             f"{relocation_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Only change camera framing/composition for a high-angle view. "
+            "Only change camera position, framing, composition, distance, and focal depth for a high-angle view. "
             "No text or watermark."
         )
 
     if is_side:
         side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
         return (
-            f"Using the provided image as the only source, create an editorial photo from the {side_text} area of this exact space. "
-            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+            f"Using the provided image as the only source, create a varied editorial photo from the {side_text} area of this exact space. "
+            "Use a clearly different camera position, distance, height, and focal depth from the source image. "
+            "You may use foreground framing, partial occlusion, diagonal composition, or a closer side crop. "
+            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
             f"{relocation_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Only change camera framing/composition to focus on that side area. "
+            "Only change camera position, framing, composition, distance, and focal depth to focus on that side area. "
             "No text or watermark."
         )
 
+    camera_recipe = _detail_camera_recipe(style_config, shot_index)
     return (
-        f"Using the provided image as the only source, create a close-up editorial photograph of the {clean_label} area "
-        "with a slightly rotated camera angle and focused depth of field. "
-        "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships exactly unchanged. "
+        f"Using the provided image as the only source, create a varied editorial photo of {clean_label} area. "
+        "Use a clearly different camera position, distance, height, and focal depth from the source image. "
+        f"{camera_recipe} "
+        "You may use foreground framing, partial occlusion, shallow depth of field, diagonal composition, or a closer crop. "
+        "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
         f"{relocation_guard}"
         "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-        "Only change camera framing/composition to focus on that area. "
+        "Only change camera position, framing, composition, distance, and focal depth to focus on that area. "
         "No text or watermark."
     )
 
@@ -522,7 +556,7 @@ def generate_detail_view(
             response = call_gemini_with_failover(
                 model_name,
                 [
-                    _build_gpt_image_detail_prompt(style_config, style_target_label or style_name),
+                    _build_gpt_image_detail_prompt(style_config, style_target_label or style_name, index),
                     "Main furnished room image:",
                     img,
                 ],
