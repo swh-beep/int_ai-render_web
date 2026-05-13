@@ -156,7 +156,25 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["name"], "Detail: Accent Chair")
         self.assertEqual(styles[0]["ratio"], "4:5")
         self.assertIs(styles[0]["simple_scene_detail"], True)
+        self.assertEqual(styles[0]["target_category_canonical"], "")
         self.assertNotIn("TARGET COORDINATES", styles[0]["prompt"])
+
+    def test_construct_dynamic_styles_preserves_target_category_metadata(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Framed Art",
+                    "target_key": "art-key",
+                    "category": "wall_art",
+                    "category_canonical": "decor",
+                    "box_2d": [100, 100, 300, 300],
+                    "box_source": "detail_current_image_analysis",
+                }
+            ]
+        )
+
+        self.assertEqual(styles[0]["target_category"], "wall_art")
+        self.assertEqual(styles[0]["target_category_canonical"], "decor")
 
     def test_construct_dynamic_styles_returns_no_overview_or_side_angle_styles_without_targets(self):
         styles = construct_dynamic_styles([])

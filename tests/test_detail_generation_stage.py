@@ -191,6 +191,7 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         assert result["cutout_ref_count"] == 0
         assert captured["model_name"] == "gpt-image-2"
         assert captured["request_options"]["aspect_ratio"] == "4:5"
+        assert captured["request_options"]["timeout"] == 180.0
         assert captured["request_options"]["max_attempts"] == 1
         assert "thinking_level" not in captured["request_options"]
         assert "quality" not in captured["request_options"]
@@ -208,6 +209,56 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         assert "No text or watermark" in captured["prompt"]
         assert len(captured["prompt"]) < 1300
         assert captured["kwargs"]["log_tag"] == "Detail.Generate.GPTImage"
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_detail_view_uses_object_centered_prompt_for_small_decor(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    captured = {}
+
+    def _call_gpt_image(model_name, content, request_options, safety_settings, **kwargs):
+        captured["prompt"] = content[0]
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Framed Art",
+            "target_key": "art_01",
+            "target_label": "Framed Art",
+            "target_category_canonical": "decor",
+            "ratio": "4:5",
+            "simple_scene_detail": True,
+        },
+        "unitcase",
+        4,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: None,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gpt_image,
+        model_name="gpt-image-2",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert "create an editorial close-up photo centered on the Framed Art" in captured["prompt"]
+        assert "The Framed Art must be clearly visible and visually dominant" in captured["prompt"]
+        assert "Include only enough surrounding room context to prove it is the same space" in captured["prompt"]
+        assert "Do not let nearby larger furniture become the main subject" in captured["prompt"]
+        assert "Framed Art area" not in captured["prompt"]
         assert output_path.exists()
     finally:
         if output_path.exists():

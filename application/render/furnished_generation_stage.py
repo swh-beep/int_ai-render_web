@@ -1443,7 +1443,7 @@ def generate_furnished_room(
             "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
             "3. **LIGHT DIRECTION:** Keep shadows consistent with the existing key light direction.\n"
             "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-            "5. **WHITE BALANCE:** Neutral white balance (around 4000~5000K). **NO warm/yellow cast.**\n"
+            "5. **WHITE BALANCE:** Natural neutral white balance. Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color.\n"
             "6. **NO NEW OPENINGS:** Do not add new windows/doors or fake exterior light sources.\n\n"
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
             "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
@@ -1463,6 +1463,9 @@ def generate_furnished_room(
             "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
             "   - Lighting must feel natural and cohesive across all surfaces (especially floors); no artificial blotches.\n"
             "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
+            "<PHOTOREAL MATERIAL REALISM>\n"
+            "Preserve real material texture and tactile surface detail: leather grain, fabric weave, wood grain, glass reflections, and metal highlights.\n"
+            "Avoid clay-like, waxy, plastic, CGI, overly smooth, or over-airbrushed furniture surfaces.\n"
         )
 
         style_direction_context = (

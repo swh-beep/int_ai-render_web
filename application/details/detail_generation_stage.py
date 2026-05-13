@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw, ImageOps
 from application.render.postprocess_support import category_match_family
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
+DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
+
 
 def _normalize_ratio_string(value: str | None, default: str = "4:5") -> str:
     text = str(value or "").strip()
@@ -419,6 +421,61 @@ def _detail_camera_recipe(style_config: dict, shot_index: int | None) -> str:
     return _DETAIL_CAMERA_RECIPES[(recipe_index - 1) % len(_DETAIL_CAMERA_RECIPES)]
 
 
+_SMALL_DETAIL_TARGET_HINTS = {
+    "accessory",
+    "art",
+    "book",
+    "books",
+    "candle",
+    "candles",
+    "cushion",
+    "decor",
+    "decoration",
+    "decorative object",
+    "framed art",
+    "framed print",
+    "keyboard",
+    "laptop",
+    "mouse",
+    "object",
+    "painting",
+    "pillow",
+    "plant",
+    "poster",
+    "print",
+    "sculpture",
+    "shelf decor",
+    "small accessory",
+    "small decor",
+    "small object",
+    "table decor",
+    "tray",
+    "vase",
+    "wall art",
+    "wall decor",
+}
+
+
+def _normalized_prompt_key(value) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _is_small_decor_detail_target(style_config: dict, clean_label: str) -> bool:
+    keys = {
+        _normalized_prompt_key(clean_label),
+        _normalized_prompt_key((style_config or {}).get("target_category")),
+        _normalized_prompt_key((style_config or {}).get("target_category_canonical")),
+    }
+    for key in keys:
+        if not key:
+            continue
+        if key in _SMALL_DETAIL_TARGET_HINTS:
+            return True
+        if any(f" {hint} " in f" {key} " for hint in _SMALL_DETAIL_TARGET_HINTS):
+            return True
+    return False
+
+
 def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_index: int | None = None) -> str:
     style_name = str((style_config or {}).get("name") or "").strip()
     clean_label = str(target_label or "").strip()
@@ -461,6 +518,22 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
         )
 
     camera_recipe = _detail_camera_recipe(style_config, shot_index)
+    if _is_small_decor_detail_target(style_config, clean_label):
+        return (
+            f"Using the provided image as the only source, create an editorial close-up photo centered on the {clean_label}. "
+            f"The {clean_label} must be clearly visible and visually dominant in the frame. "
+            "Include only enough surrounding room context to prove it is the same space. "
+            "Use a clearly different camera position, distance, height, and focal depth from the source image. "
+            f"{camera_recipe} "
+            "You may use foreground framing, partial occlusion, shallow depth of field, diagonal composition, or a tighter crop. "
+            "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
+            f"{relocation_guard}"
+            f"Do not redesign, move, enlarge, duplicate, replace, or reinterpret the {clean_label}. "
+            "Do not let nearby larger furniture become the main subject. "
+            "Only change camera position, framing, composition, distance, and focal depth. "
+            "No text or watermark."
+        )
+
     return (
         f"Using the provided image as the only source, create a varied editorial photo of {clean_label} area. "
         "Use a clearly different camera position, distance, height, and focal depth from the source image. "
@@ -546,9 +619,13 @@ def generate_detail_view(
 
         requested_timeout_sec = style_config.get("timeout_sec")
         try:
-            request_timeout_sec = float(requested_timeout_sec) if requested_timeout_sec is not None else 120.0
+            request_timeout_sec = (
+                float(requested_timeout_sec)
+                if requested_timeout_sec is not None
+                else DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC
+            )
         except Exception:
-            request_timeout_sec = 120.0
+            request_timeout_sec = DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC
         if request_timeout_sec <= 0.0:
             return None
 
@@ -561,7 +638,7 @@ def generate_detail_view(
                     img,
                 ],
                 {
-                    "timeout": max(1.0, min(120.0, request_timeout_sec)),
+                    "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
                     "aspect_ratio": target_ratio,
                     "max_attempts": 1,
                 },
@@ -612,7 +689,7 @@ def generate_detail_view(
                     img,
                 ],
                 {
-                    "timeout": max(1.0, min(120.0, request_timeout_sec)),
+                    "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
                     "aspect_ratio": target_ratio,
                     "thinking_level": "high",
                     "include_thoughts": False,
@@ -885,7 +962,7 @@ def generate_detail_view(
             model_name,
             content,
             {
-                "timeout": max(1.0, min(120.0, request_timeout_sec)),
+                "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
                 "aspect_ratio": requested_ratio,
                 "thinking_level": "high",
                 "include_thoughts": False,

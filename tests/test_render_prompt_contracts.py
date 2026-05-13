@@ -169,6 +169,11 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "- Accent Chair: qty=2; category=chair" in prompt
         assert "- Rug: qty=1; category=rug" in prompt
         assert "Do not duplicate rugs, accent chairs, or tables beyond the listed qty." in prompt
+        assert "Preserve real material texture and tactile surface detail" in prompt
+        assert "leather grain, fabric weave, wood grain, glass reflections, and metal highlights" in prompt
+        assert "Avoid clay-like, waxy, plastic, CGI, overly smooth, or over-airbrushed furniture surfaces." in prompt
+        assert "Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color." in prompt
+        assert "**NO warm/yellow cast.**" not in prompt
         assert "OPENING LOCK" in prompt
         assert "AXIS ALIGNMENT" in prompt
         assert output_path.exists()

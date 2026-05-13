@@ -30,10 +30,10 @@ def polish_main_render(
     try:
         image = Image.open(source_path)
         prompt = (
-            "Naturally polish this image like a real interior magazine photograph. "
-            "Enhance the light, shadows, contrast, white balance, material texture, spatial depth, and lens feel so it looks photographed. "
-            "Reduce any artificial composite look and give it a refined high-end editorial tone. "
-            "Do not change the room structure, camera framing, furniture/decor count, shape, details, size, color, material, or placement."
+            "Retouch this as a real interior photograph, not a redraw. "
+            "Only adjust exposure, white balance, contrast, shadows, highlights, and subtle lens realism. "
+            "Preserve all furniture/decor shapes, edges, surface details, material texture, colors, placement, and room structure. "
+            "Do not smooth, repaint, restyle, or make surfaces look clay-like, waxy, plastic, CGI, or over-airbrushed."
         )
         response = repair_call(
             resolved_model,
