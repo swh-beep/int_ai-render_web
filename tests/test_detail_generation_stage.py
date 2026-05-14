@@ -197,10 +197,20 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         assert "quality" not in captured["request_options"]
         assert len(captured["content"]) == 3
         assert "Using the provided image as the only source" in captured["prompt"]
-        assert "varied editorial photo of Floor Lamp area" in captured["prompt"]
+        assert "distinct editorial detail photo around the Floor Lamp area, not another full-room view" in captured["prompt"]
+        assert (
+            "This shot must look visually distinct from the source image and from the other detail shots"
+            in captured["prompt"]
+        )
         assert "Use a clearly different camera position, distance, height, and focal depth" in captured["prompt"]
         assert "Camera recipe:" in captured["prompt"]
-        assert "partial occlusion, shallow depth of field, diagonal composition" in captured["prompt"]
+        assert "Follow the camera recipe exactly; do not fall back to a similar room overview" in captured["prompt"]
+        assert "The Floor Lamp area must be the visual anchor of the frame" in captured["prompt"]
+        assert "Do not invent blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips" in captured["prompt"]
+        assert "foreground framing" not in captured["prompt"]
+        assert "partial occlusion" not in captured["prompt"]
+        assert "partial foreground edge" not in captured["prompt"]
+        assert "shallow depth of field or diagonal composition" in captured["prompt"]
         assert "If an object is not visible from the new camera angle, leave it out of frame instead of relocating it" in captured["prompt"]
         assert "legacy prompt should not be used" not in captured["prompt"]
         assert "every visible furniture/decor item's position, shape, size, count, color, material" in captured["prompt"]
@@ -254,7 +264,15 @@ def test_generate_detail_view_uses_object_centered_prompt_for_small_decor(tmp_pa
 
     output_path = Path(result["path"])
     try:
-        assert "create an editorial close-up photo centered on the Framed Art" in captured["prompt"]
+        assert "create a distinct editorial close-up photo centered on the Framed Art, not another full-room view" in captured["prompt"]
+        assert (
+            "This shot must look visually distinct from the source image and from the other detail shots"
+            in captured["prompt"]
+        )
+        assert "Follow the camera recipe exactly; do not fall back to a similar room overview" in captured["prompt"]
+        assert "Do not invent blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips" in captured["prompt"]
+        assert "foreground framing" not in captured["prompt"]
+        assert "partial occlusion" not in captured["prompt"]
         assert "The Framed Art must be clearly visible and visually dominant" in captured["prompt"]
         assert "Include only enough surrounding room context to prove it is the same space" in captured["prompt"]
         assert "Do not let nearby larger furniture become the main subject" in captured["prompt"]

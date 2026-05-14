@@ -940,7 +940,7 @@ def run_render_room_workflow(
         start_time = bootstrap.start_time
         summary = bootstrap.summary
         summary_token = bootstrap.summary_token
-        absolute_deadline_ts = float(start_time) + max(1.0, float(deps.runtime.total_timeout_limit_sec or 600.0))
+        absolute_deadline_ts = float(start_time) + max(1.0, float(deps.runtime.total_timeout_limit_sec or 1800.0))
 
         audience_result = run_render_audience_stage(
             audience=request.audience,

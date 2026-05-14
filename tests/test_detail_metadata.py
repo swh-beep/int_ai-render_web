@@ -181,6 +181,50 @@ class DetailMetadataTests(unittest.TestCase):
 
         self.assertEqual(styles, [])
 
+    def test_construct_dynamic_styles_excludes_window_curtain_and_rug_targets(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Window",
+                    "target_key": "window-key",
+                    "category": "window",
+                    "category_canonical": "window",
+                    "box_2d": [10, 10, 300, 300],
+                    "box_source": "detail_current_image_analysis",
+                    "volume_rank": 1,
+                },
+                {
+                    "label": "Curtains",
+                    "target_key": "curtain-key",
+                    "category": "curtain",
+                    "category_canonical": "curtain",
+                    "box_2d": [10, 310, 900, 500],
+                    "box_source": "detail_current_image_analysis",
+                    "volume_rank": 2,
+                },
+                {
+                    "label": "Area Rug",
+                    "target_key": "rug-key",
+                    "category": "rug",
+                    "category_canonical": "rug",
+                    "box_2d": [700, 100, 990, 900],
+                    "box_source": "detail_current_image_analysis",
+                    "volume_rank": 3,
+                },
+                {
+                    "label": "Accent Chair",
+                    "target_key": "chair-key",
+                    "category": "chair",
+                    "category_canonical": "chair",
+                    "box_2d": [400, 500, 850, 850],
+                    "box_source": "detail_current_image_analysis",
+                    "volume_rank": 4,
+                },
+            ]
+        )
+
+        self.assertEqual([style["target_label"] for style in styles], ["Accent Chair"])
+
     def test_construct_internal_angle_styles_returns_internal_overview_and_side_slots(self):
         styles = construct_internal_angle_styles()
 

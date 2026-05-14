@@ -399,7 +399,7 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-TOTAL_TIMEOUT_LIMIT = max(60, int(os.getenv("TOTAL_TIMEOUT_LIMIT", "600")))
+TOTAL_TIMEOUT_LIMIT = max(60, int(os.getenv("TOTAL_TIMEOUT_LIMIT", "1800")))
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 LOCAL_INLINE_QUEUE_ENABLED = os.getenv("LOCAL_INLINE_QUEUE", "0").strip().lower() in ("1", "true", "yes", "y")
 
@@ -421,7 +421,7 @@ if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
 
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
-RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "600"))
+RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "1800"))
 RQ_VIDEO_JOB_TIMEOUT = int(os.getenv("RQ_VIDEO_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
 STAGING_JOB_TTL = int(os.getenv("STAGING_JOB_TTL", "86400"))

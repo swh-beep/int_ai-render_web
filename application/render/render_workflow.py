@@ -86,12 +86,12 @@ def run_render_with_details_job(
     render_job_runner: Callable[[dict, bool], dict],
     detail_job_runner: Callable[[dict], dict],
     persist_job_result: Callable[[dict, Optional[str]], None],
-    total_timeout_limit_sec: float = 600.0,
+    total_timeout_limit_sec: float = 1800.0,
     minimum_detail_budget_sec: float = 5.0,
     time_now: Callable[[], float] = time.time,
 ) -> dict:
     job_start_ts = float(time_now())
-    absolute_deadline_ts = job_start_ts + max(1.0, float(total_timeout_limit_sec or 600.0))
+    absolute_deadline_ts = job_start_ts + max(1.0, float(total_timeout_limit_sec or 1800.0))
     render_payload = payload.get("render") or {}
     audience = normalize_audience(render_payload.get("audience"))
     render_payload["audience"] = audience

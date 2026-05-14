@@ -78,6 +78,28 @@ _GENERIC_DECOR_DETAIL_KEYS = {
 }
 
 
+_EXCLUDED_DETAIL_TARGET_KEYS = {
+    "curtain",
+    "curtains",
+    "drape",
+    "drapes",
+    "window",
+    "windows",
+    "rug",
+    "rugs",
+    "area rug",
+    "carpet",
+    "carpets",
+    "mat",
+    "mats",
+    "커튼",
+    "창문",
+    "러그",
+    "카펫",
+    "카페트",
+}
+
+
 def _detail_identity_family(item) -> str:
     if not isinstance(item, dict):
         return ""
@@ -100,6 +122,25 @@ def _is_generic_decor_detail_target(item) -> bool:
         _detail_identity_family(item),
     }
     return any(key in _GENERIC_DECOR_DETAIL_KEYS for key in keys if key)
+
+
+def _is_excluded_detail_target(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    keys = {
+        _normalized_label(item.get("label")),
+        _normalized_label(item.get("category")),
+        _normalized_label(item.get("category_canonical")),
+        _detail_identity_family(item),
+    }
+    for key in keys:
+        if not key:
+            continue
+        if key in _EXCLUDED_DETAIL_TARGET_KEYS:
+            return True
+        if any(f" {excluded} " in f" {key} " for excluded in _EXCLUDED_DETAIL_TARGET_KEYS):
+            return True
+    return False
 
 
 def _is_source_backed_detail_target(item) -> bool:
@@ -234,6 +275,8 @@ def construct_dynamic_styles(analyzed_items):
     for item in detail_items:
         if count >= 20:
             break
+        if _is_excluded_detail_target(item):
+            continue
         if _is_duplicate_detail_target(item, accepted_detail_targets):
             continue
 
