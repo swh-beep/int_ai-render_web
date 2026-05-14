@@ -201,6 +201,10 @@ def _inject_requested_target_fallback(
     return [hydrated, *filtered_items], "requested_target_fallback"
 
 
+def _copy_cached_furniture_items(furniture_data) -> list[dict]:
+    return [dict(item) for item in (furniture_data or []) if isinstance(item, dict)]
+
+
 def run_regenerate_single_detail_job(
     payload: dict,
     *,
@@ -231,6 +235,7 @@ def run_regenerate_single_detail_job(
             style_index_mode = "auto"
 
         furniture_data = payload.get("furniture_data")
+        cached_items = _copy_cached_furniture_items(furniture_data)
         audience = payload.get("audience")
 
         aud = normalize_audience(audience)
@@ -242,24 +247,25 @@ def run_regenerate_single_detail_job(
             return {"error": "Original image not found"}
         resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
-        if furniture_data and len(furniture_data) > 0:
-            print(">> [Single Retry] Re-aligning cached furniture identity against the current render...", flush=True)
+        if cached_items:
+            print(">> [Single Retry] Using cached furniture targets for regeneration.", flush=True)
+            analyzed_items = cached_items
         else:
             print(">> [Single Retry] No cached furniture data. Re-analyzing the source image...", flush=True)
-        analyzed_items = prepare_detail_generation_items(
-            furniture_data=furniture_data,
-            moodboard_url=payload.get("moodboard_url"),
-            local_path=local_path,
-            materialize_input=materialize_input,
-            detect_furniture_boxes=detect_furniture_boxes,
-            canonical_category=canonical_category,
-            build_item_target_key=build_item_target_key,
-            max_concurrency_analysis=max_concurrency_analysis,
-            analyze_cropped_item=analyze_cropped_item,
-            attach_volume_ranks=attach_volume_ranks,
-            normalize_label_for_match=normalize_label_for_match,
-            simple_generation_mode=True,
-        )
+            analyzed_items = prepare_detail_generation_items(
+                furniture_data=furniture_data,
+                moodboard_url=payload.get("moodboard_url"),
+                local_path=local_path,
+                materialize_input=materialize_input,
+                detect_furniture_boxes=detect_furniture_boxes,
+                canonical_category=canonical_category,
+                build_item_target_key=build_item_target_key,
+                max_concurrency_analysis=max_concurrency_analysis,
+                analyze_cropped_item=analyze_cropped_item,
+                attach_volume_ranks=attach_volume_ranks,
+                normalize_label_for_match=normalize_label_for_match,
+                simple_generation_mode=True,
+            )
 
         try:
             analyzed_items = attach_volume_ranks(analyzed_items)

@@ -1089,6 +1089,9 @@ def setup_logging():
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,  # <-- 중요: uvicorn이 이미 로깅 잡았어도 덮어씀
     )
+    logging.getLogger("rq.worker").propagate = False
+    logging.getLogger("rq.registry").propagate = False
+    logging.getLogger("rq.queue").propagate = False
 
 setup_logging()
 logger = logging.getLogger("app")
@@ -2092,8 +2095,8 @@ FREEPIK_API_KEY = os.getenv("FREEPIK_API_KEY") or os.getenv("MAGNIFIC_API_KEY") 
 KLING_MODEL = os.getenv("KLING_MODEL", "kling-v2-6-pro")  # e.g. kling-v2-1-pro, kling-v2-6-pro
 KLING_ENDPOINT = os.getenv("KLING_ENDPOINT", build_kling_endpoint(KLING_MODEL))
 
-# Concurrency controls (Freepik docs explicitly call out 3 concurrent Kling jobs)
-VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "3"))
+# Concurrency controls for provider-side Kling clip generation.
+VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "4"))
 _video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
 
 VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "30"))

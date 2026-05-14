@@ -591,6 +591,69 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["style_name"], "Detail: Accent Chair")
         self.assertFalse(captured["prefer_crop_extract"])
 
+    def test_run_regenerate_single_detail_job_uses_cached_snapshot_without_current_image_analysis(self):
+        source_path = Path("outputs/test-regenerate-cached-no-analysis.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        detect_calls = []
+        analyze_calls = []
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "style_index": 4,
+                    "style_index_mode": "auto",
+                    "target_key": "chair_01",
+                    "target_label": "Accent Chair",
+                    "furniture_data": [
+                        {
+                            "label": "Accent Chair",
+                            "target_key": "chair_01",
+                            "box_2d": [120, 180, 820, 640],
+                            "description": "Cached accent chair target",
+                            "category_canonical": "chair",
+                        }
+                    ],
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: detect_calls.append(path) or [{"label": "Wrong Fresh Sofa", "box_2d": [10, 20, 300, 400]}],
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: analyze_calls.append((path, item)) or item,
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                construct_dynamic_styles=lambda items: [
+                    {"name": "High Angle Overview"},
+                    {"name": "Side Composition (Focus Left)"},
+                    {"name": "Side Composition (Focus Right)"},
+                    {
+                        "name": "Detail: Accent Chair",
+                        "target_key": items[0].get("target_key"),
+                        "target_label": items[0].get("label"),
+                    },
+                ],
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(detect_calls, [])
+        self.assertEqual(analyze_calls, [])
+        self.assertEqual(result["style_name"], "Detail: Accent Chair")
+        self.assertEqual(result["furniture_data"][0]["target_key"], "chair_01")
+
     def test_run_generate_details_job_blocks_source_reference_crop_targets(self):
         source_path = Path("outputs/test-detail-source-reference.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
