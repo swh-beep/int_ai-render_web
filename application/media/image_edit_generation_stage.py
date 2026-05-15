@@ -6,6 +6,72 @@ from typing import Any, Callable, Optional
 from PIL import Image, ImageOps
 
 
+def _split_instruction_clauses(text: str) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    parts = re.split(
+        r"[\n\r]+|[;]+|,\s+|\s+\band\b\s+|\s+\bbut\b\s+|\s+\bwhile\b\s+|[.!?]+",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def _extract_step_targets(step_kind: str, text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    step_keywords = {
+        "replace": ["replace", "swap", "change", "substitute"],
+        "remove": ["remove", "delete", "erase", "take out"],
+        "resize": [
+            "shrink",
+            "smaller",
+            "reduce",
+            "tiny",
+            "enlarge",
+            "bigger",
+            "larger",
+            "increase size",
+            "decrease size",
+        ],
+        "rearrange": ["swap", "swap with", "move", "relocate", "rearrange", "reposition"],
+    }
+    global_constraint_keywords = ["keep", "unchanged", "preserve", "same", "leave the rest"]
+
+    matched: list[str] = []
+    guardrails: list[str] = []
+    for clause in _split_instruction_clauses(cleaned):
+        lowered = clause.lower()
+        if any(keyword in lowered for keyword in step_keywords.get(step_kind, [])):
+            matched.append(clause)
+            continue
+        if any(keyword in lowered for keyword in global_constraint_keywords):
+            guardrails.append(clause)
+
+    if not matched:
+        return cleaned
+
+    ordered_targets = matched + [clause for clause in guardrails if clause not in matched]
+    return ". ".join(ordered_targets)
+
+
+def compose_step_instructions(step_kind: str, text: str, step_targets: str | None = None) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+    targets = (step_targets or "").strip()
+    return (
+        f"FULL USER REQUEST:\n{cleaned}\n\n"
+        + (f"PRIMARY TARGETS FOR THIS STEP:\n{targets}\n\n" if targets and targets != cleaned else "")
+        + f"CURRENT STEP: {step_kind}\n"
+        + "Execute this step first, but do NOT contradict the rest of the user's request.\n"
+        + "FINAL OUTPUT RULE: the returned image is invalid unless all requested changes are visible together."
+    )
+
+
 def process_image_edit_logic(
     photo_paths,
     instructions,
@@ -239,7 +305,10 @@ def process_image_edit_logic(
             elif step_kind == "remove":
                 step_focus = "STEP FOCUS: Remove the specified objects and inpaint the background cleanly."
             elif step_kind == "resize":
-                step_focus = "STEP FOCUS: Resize the specified objects as requested."
+                step_focus = (
+                    "STEP FOCUS: Resize only the specified existing objects. "
+                    "Keep the same object identity, support surface, and location."
+                )
             elif step_kind == "rearrange":
                 step_focus = "STEP FOCUS: Reposition the specified objects to new locations."
             elif step_kind == "decorate":
@@ -265,6 +334,17 @@ def process_image_edit_logic(
                     "3. **STYLE:** Match the lighting and shadow of the original photo perfectly.\n"
                     f"4. **USER PRIORITY:** {user_override}"
                 )
+            elif step_kind == "resize":
+                role = "Expert Scale-Controlled Interior Editor."
+                task = "Resize the specified existing objects without relocating them or changing the rest of the scene."
+                critical_rule = (
+                    "1. **SIZE-ONLY EDIT:** Change only the target object's size. Do NOT replace it with a different object.\n"
+                    "2. **POSITION LOCK:** Keep the object's anchor point, support surface, orientation, and perspective aligned with the original scene.\n"
+                    "3. **NO RELOCATION / NO DUPLICATES:** Do NOT move the object to a new spot, drop it onto the floor, or create extra copies.\n"
+                    "4. **VISIBLE SCALE DELTA:** If shrinking or enlarging, the size change must be clearly visible.\n"
+                    "5. **BACKGROUND REVEAL:** When shrinking, reveal the newly exposed wall/floor/background naturally.\n"
+                    f"6. **USER PRIORITY:** {user_override}\n"
+                )
             else:
                 role = "Expert AI Inpainter & Scene Reconstructor."
                 task = "Modify the scene by removing or replacing objects per the user's request."
@@ -276,9 +356,15 @@ def process_image_edit_logic(
                     f"5. **USER PRIORITY:** {user_override}\n"
                 )
 
-            step_instructions = _filter_instructions(step_kind, instructions)
+            step_targets = _extract_step_targets(step_kind, instructions)
+            step_instructions = compose_step_instructions(step_kind, instructions, step_targets)
             if step_kind == "resize":
-                step_instructions += " (IMPORTANT: The object MUST change size clearly. REVEAL wall/floor if shrinking.)"
+                step_instructions += (
+                    " (IMPORTANT: Resize only the object that should remain visible in the final scene. "
+                    "Do NOT resize objects already removed by other steps. "
+                    "Do NOT move the object to a new location or support surface. "
+                    "The size change MUST be obvious, and reveal wall/floor if shrinking.)"
+                )
             if step_kind == "remove":
                 step_instructions += " (IMPORTANT: Fully remove the object and inpaint the background.)"
             if step_kind == "replace" and ref_paths:

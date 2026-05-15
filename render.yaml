@@ -1,0 +1,137 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+#
+# Render Blueprint for the existing AI render services.
+# Secrets are intentionally marked `sync: false` so values are entered in
+# Render Dashboard and never committed to Git.
+#
+# Existing services are Python runtime in Singapore. Do not switch them to
+# Docker here unless you intentionally recreate/migrate the services, because
+# Render does not allow changing runtime or region after service creation.
+
+services:
+  - type: web
+    name: interiorteacher-ai_
+    runtime: python
+    repo: https://github.com/swh-beep/int_ai-render_web
+    branch: main
+    plan: pro
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    autoDeployTrigger: checksPass
+    disk:
+      name: disk
+      mountPath: /opt/render/project/src/outputs
+      sizeGB: 10
+    envVars:
+      - fromGroup: int-ai-render-shared
+
+  - type: worker
+    name: int_ai-render_worker
+    runtime: python
+    repo: https://github.com/swh-beep/int_ai-render_web
+    branch: main
+    plan: pro
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    numInstances: 3
+    autoDeployTrigger: checksPass
+    envVars:
+      - fromGroup: int-ai-render-shared
+
+envVarGroups:
+  - name: int-ai-render-shared
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: RQ_QUEUE_NAME
+        value: default
+      - key: RQ_QUEUE_RENDER
+        value: render
+      - key: RQ_QUEUE_UPSCALE
+        value: upscale
+      - key: RQ_QUEUE_VIDEO
+        value: video
+      - key: RQ_WORKERS
+        value: "1"
+      - key: RQ_JOB_TIMEOUT
+        value: "1800"
+      - key: RQ_RESULT_TTL
+        value: "86400"
+
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_PREFIX
+        value: outputs
+      - key: S3_REQUIRED
+        value: "1"
+      - key: USE_S3_MOODBOARD
+        value: "1"
+      - key: MOODBOARD_S3_PREFIX
+        value: moodboards
+
+      - key: EXTERNAL_INTEA_API_KEYS
+        sync: false
+      - key: INTERNAL_INTEA_API_KEYS
+        sync: false
+      - key: DEFAULT_AUDIENCE
+        value: external
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+
+      - key: MAGNIFIC_API_KEY
+        sync: false
+      - key: MAGNIFIC_ENDPOINT
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: FREEPIK_API_KEY
+        sync: false
+      - key: KLING_ENDPOINT
+        sync: false
+
+      - key: NANOBANANA_API_KEY
+        sync: false
+      - key: NANOBANANA_API_KEY_1
+        sync: false
+      - key: NANOBANANA_API_KEY_2
+        sync: false
+      - key: NANOBANANA_API_KEY_3
+        sync: false
+      - key: NANOBANANA_API_KEY_4
+        sync: false
+      - key: NANOBANANA_API_KEY_5
+        sync: false
+
+      - key: ANALYSIS_MODEL_NAME
+        value: gpt-5.5
+      - key: RANK_MODEL_NAME
+        value: gemini-3.1-pro-preview
+      - key: DETECT_FURNITURE_MODEL_NAME
+        value: gemini-3.1-pro-preview
+      - key: REMAP_MODEL_NAME
+        value: gemini-3.1-pro-preview
+      - key: ROOM_ONLY_MODEL_NAME
+        value: gemini-3.1-pro-preview
+      - key: REMAP_DETECT_RETRY
+        value: "3"
+      - key: REMAP_DETECT_TIMEOUT_SEC
+        value: "60"
+
+      - key: CART_MAX_ANALYSIS_WORKERS
+        value: "10"
+      - key: OUTPUTS_API_ENABLED
+        value: "1"
+      - key: DOWNLOAD_ALLOW_PUBLIC_CLOUD_HOSTS
+        value: "1"
+      - key: LOG_BRIEF
+        value: "1"
+      - key: LOG_SUMMARY
+        value: "1"

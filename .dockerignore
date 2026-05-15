@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tmp_codex_app
+outputs
+docs/superpowers
+tests/replay_cases
+.env

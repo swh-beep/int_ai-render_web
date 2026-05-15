@@ -132,9 +132,15 @@ from application.render.scale_guide_support import (
     create_scale_guide_overlay_with_model as create_scale_guide_overlay_with_model_support,
     room_dims_valid as room_dims_valid_support,
 )
-from application.video.compile_workflow import queue_final_compile_job
-from application.video.job_store import get_video_job, prune_video_jobs
-from application.video.source_generation_workflow import queue_source_generation_job
+from application.video.compile_workflow import queue_final_compile_job, run_final_compile_job
+from application.video.job_store import get_video_job, prune_video_jobs, update_video_job
+from application.video.queueing import (
+    build_video_status_payload,
+    enqueue_compile_rq_job,
+    enqueue_source_generation_rq_job,
+    publish_video_state_outputs,
+)
+from application.video.source_generation_workflow import queue_source_generation_job, run_source_generation_job
 from application.video.video_support import download_to_path as _download_to_path
 from dotenv import load_dotenv
 from infrastructure.ai.analysis_provider_dispatch import (
@@ -176,7 +182,7 @@ import gc
 from typing import Optional, List, Dict, Any
 from contextvars import ContextVar
 from redis import Redis
-from rq import Queue, Retry
+from rq import Queue, Retry, get_current_job
 from rq.job import Job
 from api_models import (
     CartItem,
@@ -409,6 +415,7 @@ def _split_queue_names(val: str) -> List[str]:
 _rq_name_raw = os.getenv("RQ_QUEUE_NAME", "").strip()
 _rq_render_raw = os.getenv("RQ_QUEUE_RENDER", "").strip()
 _rq_upscale_raw = os.getenv("RQ_QUEUE_UPSCALE", "").strip()
+_rq_video_raw = os.getenv("RQ_QUEUE_VIDEO", "").strip()
 
 _rq_name_parts = _split_queue_names(_rq_name_raw) if _rq_name_raw else []
 RQ_QUEUE_NAME = (_rq_name_parts[0] if _rq_name_parts else (_rq_name_raw or "default")).strip() or "default"
@@ -418,9 +425,12 @@ if not _rq_render_raw and _rq_name_parts:
     _rq_render_raw = _rq_name_parts[0]
 if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
     _rq_upscale_raw = _rq_name_parts[1]
+if not _rq_video_raw and len(_rq_name_parts) >= 3:
+    _rq_video_raw = _rq_name_parts[2]
 
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
+RQ_QUEUE_VIDEO = (_rq_video_raw or RQ_QUEUE_UPSCALE).strip() or RQ_QUEUE_UPSCALE
 RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "1800"))
 RQ_VIDEO_JOB_TIMEOUT = int(os.getenv("RQ_VIDEO_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
@@ -2253,30 +2263,93 @@ job_entrypoints_module.configure_job_entrypoints(
     )
 )
 
-@app.post("/video-mvp/generate-sources")
-@async_wrap
-async def api_generate_sources(req: SourceGenRequest):
-    job_id = queue_source_generation_job(
-        req,
+
+def _current_video_job_id(payload: dict) -> str:
+    job = get_current_job()
+    if job:
+        return str(job.id)
+    return str(payload.get("job_id") or uuid.uuid4().hex)
+
+
+def job_video_generate_sources(payload: dict) -> dict:
+    job_id = _current_video_job_id(payload)
+    req = SourceGenRequest(**payload)
+    run_source_generation_job(
+        job_id,
+        req.items,
+        req.cfg_scale,
         video_target_fps=VIDEO_TARGET_FPS,
         video_max_concurrency=VIDEO_MAX_CONCURRENCY,
         create_kling_task=_freepik_kling_create_task,
         poll_kling_task=_freepik_kling_poll,
     )
-    return {"job_id": job_id}
+    return _publish_video_job_state(
+        job_id,
+        get_video_job(job_id) or {"status": "FAILED", "error": "Video source job ended without state"},
+    )
+
+
+def job_video_compile(payload: dict) -> dict:
+    job_id = _current_video_job_id(payload)
+    req = CompileRequest(**payload)
+    run_final_compile_job(job_id, req, video_target_fps=VIDEO_TARGET_FPS)
+    return _publish_video_job_state(
+        job_id,
+        get_video_job(job_id) or {"status": "FAILED", "error": "Video compile job ended without state"},
+    )
+
+
+def _publish_video_job_state(job_id: str, state: dict) -> dict:
+    published = publish_video_state_outputs(state, resolve_output_url=_resolve_video_output_url)
+    update_video_job(job_id, **published)
+    return published
+
+
+def _resolve_video_output_url(output_url: str) -> str | None:
+    rel = output_url[len("/outputs/") :].lstrip("/\\")
+    local_path = Path("outputs") / rel
+    return resolve_image_url(
+        str(local_path),
+        s3_prefix_override=_build_s3_prefix("external", "videorendered", "rendered"),
+    )
+
+
+@app.post("/video-mvp/generate-sources")
+@async_wrap
+async def api_generate_sources(req: SourceGenRequest):
+    job_id, err = enqueue_source_generation_rq_job(
+        req,
+        enqueue_job=_enqueue_job,
+        queue_name=RQ_QUEUE_VIDEO,
+        job_func=job_video_generate_sources,
+    )
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return {"job_id": job_id, "status": "queued"}
 
 @app.post("/video-mvp/compile")
 @async_wrap
 async def api_compile_final(req: CompileRequest):
-    job_id = queue_final_compile_job(req, video_target_fps=VIDEO_TARGET_FPS)
-    return {"job_id": job_id}
+    job_id, err = enqueue_compile_rq_job(
+        req,
+        enqueue_job=_enqueue_job,
+        queue_name=RQ_QUEUE_VIDEO,
+        job_func=job_video_compile,
+    )
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return {"job_id": job_id, "status": "queued"}
 
 @app.get("/video-mvp/status/{job_id}")
 async def video_mvp_status(job_id: str):
-    st = get_video_job(job_id)
-    if not st:
-        return JSONResponse({"status": "NOT_FOUND", "message": "Job not found"}, status_code=404)
-    return st
+    payload, status_code = build_video_status_payload(
+        job_id,
+        fetch_job=_fetch_job,
+        load_memory_job=get_video_job,
+    )
+    if status_code != 200:
+        return JSONResponse(payload, status_code=status_code)
+    return payload
 
 
 if __name__ == "__main__":

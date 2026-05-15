@@ -559,6 +559,31 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
     )
 
 
+def _build_target_crop(original_image: Image.Image, target_box_2d) -> Image.Image | None:
+    if not isinstance(target_box_2d, (list, tuple)) or len(target_box_2d) != 4:
+        return None
+    try:
+        ymin, xmin, ymax, xmax = [float(value) for value in target_box_2d]
+    except Exception:
+        return None
+    if xmax <= xmin or ymax <= ymin:
+        return None
+
+    width, height = original_image.size
+    left = max(0, min(width - 1, int((xmin / 1000.0) * width)))
+    top = max(0, min(height - 1, int((ymin / 1000.0) * height)))
+    right = max(left + 1, min(width, int((xmax / 1000.0) * width)))
+    bottom = max(top + 1, min(height, int((ymax / 1000.0) * height)))
+
+    pad_x = max(8, int((right - left) * 0.18))
+    pad_y = max(8, int((bottom - top) * 0.18))
+    left = max(0, left - pad_x)
+    top = max(0, top - pad_y)
+    right = min(width, right + pad_x)
+    bottom = min(height, bottom + pad_y)
+    return original_image.crop((left, top, right, bottom))
+
+
 def generate_detail_view(
     original_image_path,
     style_config,
@@ -626,6 +651,7 @@ def generate_detail_view(
 
         style_target_key = str(style_config.get("target_key") or "").strip()
         style_target_label = str(style_config.get("target_label") or "").strip()
+        target_box_2d = style_config.get("target_box_2d")
         if not style_target_label and style_name.startswith("Detail:"):
             style_target_label = style_name.split("Detail:", 1)[1].strip()
 
@@ -789,6 +815,16 @@ def generate_detail_view(
                 "3. IMPORTANT: focus on the specified target area only and make it read like a dedicated editorial shot of that object in the room.\n"
             )
 
+        target_crop = _build_target_crop(img, target_box_2d)
+        if target_crop is not None:
+            extra_imgs.append(target_crop)
+            target_lock_block += (
+                "<PRIMARY TARGET SCALE LOCK>\n"
+                "- The attached in-room crop shows the target exactly as it appears in the main render.\n"
+                "- Match that target size, perspective, and surrounding context. Only tighten framing around it.\n"
+                "- Do NOT enlarge the target beyond what a real crop/zoom from the same scene would produce.\n\n"
+            )
+
         final_prompt = (
             f"{scene_lock_block}\n"
             f"{target_lock_block}"
@@ -809,7 +845,12 @@ def generate_detail_view(
         )
 
         safety_settings = allow_harassment_only_safety_settings()
-        content = [final_prompt, "Original Room Reality (scene anchor, keep layout stable):", img]
+        content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
+        if target_crop is not None:
+            content += [
+                "PRIMARY TARGET IN-ROOM CROP (match this target scale and perspective):",
+                target_crop,
+            ]
 
         if camera_mode == "side_angle" and focus_side in {"left", "right"}:
             try:

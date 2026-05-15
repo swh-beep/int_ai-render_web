@@ -291,6 +291,8 @@ def construct_dynamic_styles(analyzed_items):
                 "detail_index": count + 1,
                 "target_category": item.get("category") or "",
                 "target_category_canonical": item.get("category_canonical") or "",
+                "target_box_2d": item.get("box_2d"),
+                "target_box_source": item.get("box_source"),
                 "prompt": (
                     f"Create a detailed editorial furniture-magazine photograph focused on the {label} area in this exact room. "
                     "Use the provided main image as the sole source of truth. Preserve the furniture shape, count, placement, "
@@ -304,4 +306,3 @@ def construct_dynamic_styles(analyzed_items):
         accepted_detail_targets.append(item)
 
     return styles
-

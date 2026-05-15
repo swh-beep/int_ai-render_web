@@ -17,6 +17,7 @@ def _split_queue_names(val: str) -> list[str]:
 RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "").strip()
 RQ_QUEUE_RENDER = os.getenv("RQ_QUEUE_RENDER", "").strip()
 RQ_QUEUE_UPSCALE = os.getenv("RQ_QUEUE_UPSCALE", "").strip()
+RQ_QUEUE_VIDEO = os.getenv("RQ_QUEUE_VIDEO", "").strip()
 
 queue_names = []
 if RQ_QUEUE_NAME:
@@ -25,6 +26,8 @@ if RQ_QUEUE_RENDER:
     queue_names.append(RQ_QUEUE_RENDER)
 if RQ_QUEUE_UPSCALE:
     queue_names.append(RQ_QUEUE_UPSCALE)
+if RQ_QUEUE_VIDEO:
+    queue_names.append(RQ_QUEUE_VIDEO)
 
 if not queue_names:
     queue_names = ["default"]
