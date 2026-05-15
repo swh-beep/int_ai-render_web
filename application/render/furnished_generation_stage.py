@@ -1542,6 +1542,19 @@ def generate_furnished_room(
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
+                two_pass_summary = (
+                    furniture_specs_json.get("two_pass_strategy")
+                    if isinstance(furniture_specs_json.get("two_pass_strategy"), dict)
+                    else {}
+                )
+                pass2_detail_keys = {
+                    str(value or "").strip()
+                    for value in (two_pass_summary.get("pass2_detail_keys") or [])
+                    if str(value or "").strip()
+                }
+
+                def _cutout_item_key(row: dict) -> str:
+                    return str(row.get("target_key") or row.get("source_index") or row.get("label") or "").strip()
 
                 def _cutout_scale_priority(row: dict):
                     dm = (row or {}).get("dims_mm") or {}
@@ -1570,13 +1583,23 @@ def generate_furnished_room(
                         idx = int((row or {}).get("index") or 0)
                     except Exception:
                         idx = 0
-                    item_key = _item_target_key_for_prompt(row)
+                    item_key = _cutout_item_key(row)
                     is_primary_anchor = 1 if item_key and item_key in anchor_key_set else 0
                     return (is_primary_anchor, has_dims, vol, w, d, h, cat, -idx)
 
                 items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
-                items_for_cutout = items_for_cutout[:12]
-                for it in items_for_cutout:
+                first_pass_items = [
+                    item
+                    for item in items_for_cutout
+                    if _cutout_item_key(item) not in pass2_detail_keys
+                ]
+                reserve_items = [
+                    item
+                    for item in items_for_cutout
+                    if _cutout_item_key(item) in pass2_detail_keys
+                ]
+                first_pass_items = first_pass_items[:12]
+                for it in first_pass_items:
                     cp = it.get("crop_path")
                     if cp and os.path.exists(cp):
                         cutouts.append(it)
@@ -1621,6 +1644,42 @@ def generate_furnished_room(
                         cutout_img,
                     ]
                     reference_content += reference_entry
+                reserve_cutouts = []
+                for it in reserve_items[:4]:
+                    cp = it.get("crop_path")
+                    if cp and os.path.exists(cp):
+                        reserve_cutouts.append(it)
+                if reserve_cutouts:
+                    reference_content.append(
+                        "Do NOT insert these pass2 detail items yet. They are reserve references for later localized repair only."
+                    )
+                for it in reserve_cutouts:
+                    cp = it.get("crop_path")
+                    lbl = (it.get("label") or "").strip() or "Item"
+                    item_key = _cutout_item_key(it)
+                    category = _item_category_for_prompt(it)
+                    qty = int(it.get("qty") or 1)
+                    if qty < 1:
+                        qty = 1
+                    dims = normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
+                    w = dims.get("width_mm")
+                    d = dims.get("depth_mm")
+                    h = dims.get("height_mm")
+                    cutout_img = Image.open(cp)
+                    try:
+                        max_thumb = _reference_thumbnail_size(it)
+                        cutout_img.thumbnail((max_thumb, max_thumb), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    extra_imgs.append(cutout_img)
+                    reference_content += [
+                        (
+                            "Pass2 Detail Reserve Reference (DO NOT INSERT IN FIRST PASS; keep for targeted repair only). "
+                            + f"Label={lbl} | TargetKey={item_key} | Category={category} | Qty={qty} "
+                            + f"| W={w if w is not None else 'null'}mm D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm"
+                        ),
+                        cutout_img,
+                    ]
             if not reference_content and ref_path:
                 fallback_refs = ref_path if isinstance(ref_path, (list, tuple)) else [ref_path]
                 for index, raw_path in enumerate(fallback_refs, start=1):
@@ -1640,12 +1699,6 @@ def generate_furnished_room(
                     reference_content += fallback_entry
         except Exception:
             pass
-
-        if scale_guide_path and os.path.exists(scale_guide_path):
-            content.append(
-                "Internal QA note: a separate scale-guide artifact exists for validation only. "
-                "Do not render any grid, measurement line, or fluorescent overlay in the final image."
-            )
 
         remaining = max(30, total_timeout_limit - (time.time() - start_time))
         safety_settings = allow_all_safety_settings()

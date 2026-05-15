@@ -1007,13 +1007,13 @@ def test_scale_guide_leak_detector_matches_real_perspective_guide_artifact():
     assert furnished_generation_stage._has_scale_guide_leak(guide_path, guide_path) is True
 
 
-def test_scale_guide_leak_detector_does_not_flag_archived_clean_render():
-    guide_path = os.path.join("outputs", "scale_debug", "scale_guide_url.png")
-    clean_render_path = os.path.join("outputs", "scale_debug", "result_url.png")
+def test_scale_guide_leak_detector_does_not_flag_archived_clean_render(tmp_path):
+    guide_path = tmp_path / "scale_guide_url.png"
+    clean_render_path = tmp_path / "result_url.png"
+    _write_grid_image(guide_path)
+    clean_render_path.write_bytes(_make_png_bytes(160, 90))
 
-    assert os.path.exists(guide_path)
-    assert os.path.exists(clean_render_path)
-    assert furnished_generation_stage._has_scale_guide_leak(clean_render_path, guide_path) is False
+    assert furnished_generation_stage._has_scale_guide_leak(str(clean_render_path), str(guide_path)) is False
 
 
 def test_generate_furnished_room_does_not_retry_on_scale_guide_signature_when_guide_is_not_attached(tmp_path, monkeypatch):
