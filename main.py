@@ -694,7 +694,29 @@ async def _store_output_upload(
             pass
         return JSONResponse(content={"error": "Empty file"}, status_code=400)
 
-    return {"filename": filename, "url": f"/outputs/{filename}"}
+    try:
+        public_url = _resolve_video_studio_upload_url(out_path)
+    except Exception as exc:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return JSONResponse(
+            content={"error": f"Upload saved but could not be published for worker access: {exc}"},
+            status_code=500,
+        )
+
+    return {"filename": filename, "url": public_url, "local_url": f"/outputs/{filename}"}
+
+
+def _resolve_video_studio_upload_url(path: Path) -> str:
+    public_url = resolve_image_url(
+        str(path),
+        s3_prefix_override=_build_s3_prefix("external", "videorendered", "uploads"),
+    )
+    if public_url:
+        return public_url
+    return f"/outputs/{path.name}"
 
 
 def _resolve_public_file_path(url: str) -> Path | None:
@@ -1704,7 +1726,13 @@ def api_outputs_list(request: Request, limit: int = 200):
         if p.is_file() and p.suffix.lower() in exts:
             st = p.stat()
             rel = p.relative_to(OUTPUTS_DIR).as_posix()
-            items.append({"filename": rel, "url": f"/outputs/{rel}", "mtime": st.st_mtime})
+            try:
+                url = _resolve_video_studio_upload_url(p)
+            except Exception:
+                if S3_REQUIRED:
+                    continue
+                url = f"/outputs/{rel}"
+            items.append({"filename": rel, "url": url, "local_url": f"/outputs/{rel}", "mtime": st.st_mtime})
 
     items.sort(key=lambda x: x["mtime"], reverse=True)
     return {"items": items[:limit]}
