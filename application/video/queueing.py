@@ -86,8 +86,19 @@ def publish_video_state_outputs(
     published = dict(state)
     if isinstance(published.get("results"), list):
         published["results"] = [_publish_video_url(url, resolve_output_url) for url in published["results"]]
+    if isinstance(published.get("items"), list):
+        published["items"] = [_publish_video_item(item, resolve_output_url) for item in published["items"]]
     if published.get("result_url"):
         published["result_url"] = _publish_video_url(published["result_url"], resolve_output_url)
+    return published
+
+
+def _publish_video_item(item: Any, resolve_output_url: Callable[[str], str | None]) -> Any:
+    if not isinstance(item, dict):
+        return item
+    published = dict(item)
+    if published.get("output_url"):
+        published["output_url"] = _publish_video_url(published["output_url"], resolve_output_url)
     return published
 
 

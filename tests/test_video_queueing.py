@@ -144,6 +144,7 @@ class VideoQueueingTests(unittest.TestCase):
         state = {
             "status": "COMPLETED",
             "results": ["/outputs/source_a.mp4", None, "https://example.com/existing.mp4"],
+            "items": [{"output_url": "/outputs/source_a.mp4"}, {"output_url": "https://example.com/existing.mp4"}],
             "result_url": "/outputs/final.mp4",
         }
 
@@ -153,8 +154,10 @@ class VideoQueueingTests(unittest.TestCase):
             published["results"],
             ["https://cdn.example/source_a.mp4", None, "https://example.com/existing.mp4"],
         )
+        self.assertEqual(published["items"][0]["output_url"], "https://cdn.example/source_a.mp4")
+        self.assertEqual(published["items"][1]["output_url"], "https://example.com/existing.mp4")
         self.assertEqual(published["result_url"], "https://cdn.example/final.mp4")
-        self.assertEqual(resolved, ["/outputs/source_a.mp4", "/outputs/final.mp4"])
+        self.assertEqual(resolved, ["/outputs/source_a.mp4", "/outputs/source_a.mp4", "/outputs/final.mp4"])
         self.assertEqual(state["result_url"], "/outputs/final.mp4")
 
 

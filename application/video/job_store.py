@@ -37,6 +37,8 @@ def _local_output_path(output_url: str | None) -> Path | None:
 
 
 def _result_exists(output_url: str | None) -> bool:
+    if output_url and isinstance(output_url, str) and output_url.startswith(("http://", "https://")):
+        return True
     local_path = _local_output_path(output_url)
     return bool(local_path and local_path.exists())
 

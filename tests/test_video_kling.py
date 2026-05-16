@@ -187,6 +187,41 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
         finally:
             os.chdir(prev_cwd)
 
+    def test_run_source_generation_job_publishes_worker_output_url(self):
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp_root)
+        resolved = []
+
+        def resolve_output_url(url):
+            resolved.append(url)
+            return f"https://cdn.example/{url.rsplit('/', 1)[-1]}"
+
+        try:
+            with patch.object(source_generation_workflow, "image_url_to_b64", return_value="img-b64"), patch.object(
+                source_generation_workflow,
+                "download_to_path",
+                side_effect=lambda url, out_path: Path(out_path).write_bytes(b"fake-mp4"),
+            ):
+                source_generation_workflow.run_source_generation_job(
+                    "job-published",
+                    [SourceItem(url="https://example.com/image.png", motion="orbit_r_slow", effect="sunlight")],
+                    0.5,
+                    video_target_fps=12,
+                    video_max_concurrency=1,
+                    create_kling_task=lambda *args, **kwargs: "task-123",
+                    poll_kling_task=lambda *args, **kwargs: "https://example.com/generated.mp4",
+                    resolve_output_url=resolve_output_url,
+                )
+
+            state = get_video_job("job-published")
+            self.assertIsNotNone(state)
+            self.assertEqual(state.get("status"), "COMPLETED")
+            self.assertEqual(state.get("results"), ["https://cdn.example/source_job-published_0.mp4"])
+            self.assertEqual((state.get("items") or [{}])[0].get("output_url"), "https://cdn.example/source_job-published_0.mp4")
+            self.assertEqual(resolved, ["/outputs/source_job-published_0.mp4"])
+        finally:
+            os.chdir(prev_cwd)
+
     def test_run_source_generation_job_marks_failed_when_all_clips_fail(self):
         prev_cwd = os.getcwd()
         os.chdir(self.tmp_root)

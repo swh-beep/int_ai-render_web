@@ -2310,6 +2310,7 @@ def job_video_generate_sources(payload: dict) -> dict:
         video_max_concurrency=VIDEO_MAX_CONCURRENCY,
         create_kling_task=_freepik_kling_create_task,
         poll_kling_task=_freepik_kling_poll,
+        resolve_output_url=_resolve_video_output_url,
     )
     return _publish_video_job_state(
         job_id,
@@ -2320,7 +2321,7 @@ def job_video_generate_sources(payload: dict) -> dict:
 def job_video_compile(payload: dict) -> dict:
     job_id = _current_video_job_id(payload)
     req = CompileRequest(**payload)
-    run_final_compile_job(job_id, req, video_target_fps=VIDEO_TARGET_FPS)
+    run_final_compile_job(job_id, req, video_target_fps=VIDEO_TARGET_FPS, resolve_output_url=_resolve_video_output_url)
     return _publish_video_job_state(
         job_id,
         get_video_job(job_id) or {"status": "FAILED", "error": "Video compile job ended without state"},

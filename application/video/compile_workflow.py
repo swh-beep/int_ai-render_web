@@ -2,6 +2,7 @@ import threading
 import traceback
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from api_models import CompileRequest
 from application.video.job_store import set_video_job, update_video_job
@@ -54,7 +55,22 @@ def _build_video_filter(
     )
 
 
-def run_final_compile_job(job_id: str, req: CompileRequest, *, video_target_fps: int) -> None:
+def _publish_local_output_url(
+    local_url: str,
+    resolve_output_url: Callable[[str], str | None] | None,
+) -> str:
+    if not resolve_output_url:
+        return local_url
+    return resolve_output_url(local_url) or local_url
+
+
+def run_final_compile_job(
+    job_id: str,
+    req: CompileRequest,
+    *,
+    video_target_fps: int,
+    resolve_output_url: Callable[[str], str | None] | None = None,
+) -> None:
     try:
         set_video_job(job_id, {"status": "RUNNING", "message": "Compiling...", "progress": 0})
 
@@ -127,10 +143,13 @@ def run_final_compile_job(job_id: str, req: CompileRequest, *, video_target_fps:
             ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(final_out)]
         )
 
+        local_url = f"/outputs/{final_out.name}"
+        result_url = _publish_local_output_url(local_url, resolve_output_url)
+
         update_video_job(
             job_id,
             status="COMPLETED",
-            result_url=f"/outputs/{final_out.name}",
+            result_url=result_url,
             progress=100,
         )
     except Exception as exc:
