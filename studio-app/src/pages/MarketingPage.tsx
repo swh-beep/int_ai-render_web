@@ -2,20 +2,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   approveMarketingClipAttempt,
+  createMarketingClipGeneration,
   createMarketingClipAttempt,
   createMarketingReelGroup,
+  deleteClipPrompt,
+  deleteGlobalPrompt,
   deleteMarketingReelClip,
   getMarketingReelGroup,
+  listClipPrompts,
+  listGlobalPrompts,
   listMarketingReelGroups,
   markMarketingReelGroupFailed,
   patchMarketingFinalResult,
+  saveClipPrompt,
+  saveGlobalPrompt,
   updateMarketingReelGroupTitle,
   updateMarketingClipSourceImages,
   updateMarketingClipAttempt,
+  type MarketingClipPromptHistoryItem,
   type MarketingFinalResultPayload,
+  type MarketingGlobalPromptHistoryItem,
   type MarketingReelClipDetail,
   type MarketingReelGroupDetail,
   type MarketingReelGroupListItem,
+  type MarketingReelAttemptDetail,
 } from "../api/marketingReels";
 import { publishOutputAsset, uploadOutputImageAssets } from "../api/outputs";
 import {
@@ -27,26 +37,27 @@ import {
 } from "../api/videoMvp";
 import {
   allowedSourceDurationsSec,
-  allowedMarketingAspectRatios,
+  allowedMarketingAspectRatioOptions,
   buildCompilePayloadFromApprovedItems,
   buildKlingPrompt,
   buildSourceGenerationPayload,
   defaultSourceDurationSec,
   defaultMarketingAspectRatio,
   generationModeLabel,
+  getApprovedAttemptsInOrder,
   getCompileBlockers,
+  minimumImageCount,
   moveImage,
   normalizeMarketingAspectRatio,
   normalizeSourceDurationSec,
   removeImage,
   requiresEndFrame,
-  type ContentType,
+  type MarketingGenerationAspectRatio,
   type MarketingAspectRatio,
   type MarketingGenerationMode,
   type MarketingImageItem,
   type MarketingVideoAttempt,
   type SourceDurationSec,
-  typeCopy,
   validateImageSelection,
 } from "../domain/marketing";
 
@@ -60,16 +71,22 @@ type ClipDraft = MarketingImageItem & {
   endGenerationUrl?: string;
 };
 
-const contentTypeOptions: Array<{ value: ContentType; label: string }> = [
-  { value: "popup", label: "가구 Popup" },
-  { value: "cinematic", label: "Cinematic 영상" },
-  { value: "install", label: "가구 설치 영상" },
-];
+type ClipPromptSourceItem = MarketingClipPromptHistoryItem & {
+  source: "saved" | "history";
+  sourceLabel: string;
+  groupId?: string;
+  clipId?: string;
+};
 
 const aspectRatioLabels: Record<MarketingAspectRatio, string> = {
+  source: "이미지 비율대로",
   "9:16": "9:16 세로",
   "16:9": "16:9 가로",
 };
+
+const initialGlobalPrompt =
+  "따뜻한 자연광 속에서 절제된 가구의 디테일을 보여주는 시네마틱 릴스. 부드러운 카메라 무빙, 베이지와 오크 톤.";
+const initialMarketingStatus = "이미지 1~10장을 선택하고 1차 비디오 생성을 시작하세요.";
 
 function formatDateTitlePart(date = new Date()): string {
   const year = date.getFullYear();
@@ -78,6 +95,39 @@ function formatDateTitlePart(date = new Date()): string {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function formatHistoryDate(value: string | undefined): string {
+  if (!value) return "날짜 없음";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatHistoryRefreshTime(date: Date): string {
+  return date.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function historyDisplayTitle(item: MarketingReelGroupListItem): string {
+  return item.final_title?.trim() || `${item.clip_count} clips`;
+}
+
+function statusLabel(status: string): string {
+  const normalized = status.toUpperCase();
+  if (normalized === "COMPLETED") return "완료";
+  if (normalized === "REVIEWING") return "검수";
+  if (normalized === "GENERATING") return "생성중";
+  if (normalized === "COMPILING") return "합치는중";
+  if (normalized === "FAILED") return "실패";
+  return status || "상태 없음";
 }
 
 function makeId(prefix: string): string {
@@ -107,20 +157,35 @@ function toApiGenerationMode(mode: MarketingGenerationMode | undefined): "START_
   return requiresEndFrame(mode) ? "START_END" : "START_ONLY";
 }
 
+function fileFromRemoteUrl(url: string, fallbackName: string): File {
+  const name = decodeURIComponent(url.split("/").pop() || fallbackName);
+  return new File([""], name, { type: "image/png" });
+}
+
+function attemptFromDetail(attempt: MarketingReelAttemptDetail): MarketingVideoAttempt {
+  return {
+    attemptId: attempt.attempt_id,
+    sourceJobId: attempt.source_job_id,
+    index: attempt.source_job_item_index,
+    prompt: attempt.prompt,
+    status: attempt.status,
+    videoUrl: attempt.source_video_url,
+    downloadUrl: attempt.download_url,
+    durationSec: attempt.duration_sec,
+    error: attempt.error,
+    createdAt: attempt.created_at ?? new Date().toISOString(),
+  };
+}
+
 export function MarketingPage() {
   const objectUrlsRef = useRef(new Set<string>());
   const [activeStep, setActiveStep] = useState<Step>(1);
-  const [contentType, setContentType] = useState<ContentType>("popup");
   const [aspectRatio, setAspectRatio] = useState<MarketingAspectRatio>(defaultMarketingAspectRatio);
+  const [generationAspectRatio, setGenerationAspectRatio] = useState<MarketingGenerationAspectRatio>(defaultMarketingAspectRatio);
   const [clips, setClips] = useState<ClipDraft[]>([]);
-  const [globalPrompt, setGlobalPrompt] = useState(
-    "따뜻한 자연광 속에서 절제된 가구의 디테일을 보여주는 시네마틱 릴스. 부드러운 카메라 무빙, 베이지와 오크 톤.",
-  );
-  const [tone, setTone] = useState("Editorial");
-  const [platform, setPlatform] = useState("Instagram");
-  const [goal, setGoal] = useState("신상 라운지 컬렉션 인지도 확대");
+  const [globalPrompt, setGlobalPrompt] = useState(initialGlobalPrompt);
   const [groupId, setGroupId] = useState("");
-  const [status, setStatus] = useState("이미지 3~10장을 선택하고 1차 비디오 생성을 시작하세요.");
+  const [status, setStatus] = useState(initialMarketingStatus);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
@@ -130,7 +195,14 @@ export function MarketingPage() {
   const [selectedReference, setSelectedReference] = useState<MarketingReelGroupDetail | null>(null);
   const [selectedReferenceClipId, setSelectedReferenceClipId] = useState("");
   const [historyItems, setHistoryItems] = useState<MarketingReelGroupListItem[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyFilter, setHistoryFilter] = useState<"all" | "final" | "review">("all");
+  const [historyStatus, setHistoryStatus] = useState("");
+  const [historyToast, setHistoryToast] = useState("");
+  const [historyLastLoadedAt, setHistoryLastLoadedAt] = useState<Date | null>(null);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [selectedReferenceId, setSelectedReferenceId] = useState("");
   const [finalUrl, setFinalUrl] = useState("");
   const [finalTitle, setFinalTitle] = useState("");
   const [finalTitleEdited, setFinalTitleEdited] = useState(false);
@@ -138,13 +210,75 @@ export function MarketingPage() {
   const [historyTitleSaving, setHistoryTitleSaving] = useState(false);
   const [finalSaveError, setFinalSaveError] = useState("");
   const [lastFinalPersistPayload, setLastFinalPersistPayload] = useState<MarketingFinalResultPayload | null>(null);
+  const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
+  const [promptHistoryItems, setPromptHistoryItems] = useState<MarketingGlobalPromptHistoryItem[]>([]);
+  const [promptHistoryStatus, setPromptHistoryStatus] = useState("");
+  const [isPromptHistoryLoading, setIsPromptHistoryLoading] = useState(false);
+  const [isPromptSaving, setIsPromptSaving] = useState(false);
+  const [clipPromptMode, setClipPromptMode] = useState<"save" | "load" | null>(null);
+  const [clipPromptTargetId, setClipPromptTargetId] = useState("");
+  const [clipPromptItems, setClipPromptItems] = useState<MarketingClipPromptHistoryItem[]>([]);
+  const [historyClipPromptItems, setHistoryClipPromptItems] = useState<ClipPromptSourceItem[]>([]);
+  const [clipPromptTab, setClipPromptTab] = useState<"saved" | "history">("saved");
+  const [clipPromptStatus, setClipPromptStatus] = useState("");
+  const [clipPromptTitle, setClipPromptTitle] = useState("");
+  const [clipPromptQuery, setClipPromptQuery] = useState("");
+  const [isClipPromptLoading, setIsClipPromptLoading] = useState(false);
+  const [isClipPromptSaving, setIsClipPromptSaving] = useState(false);
 
   const activeClips = clips.filter((clip) => !clip.isDeleted);
   const blockers = getCompileBlockers(activeClips);
+  const approvedAttempts = getApprovedAttemptsInOrder(activeClips);
   const canCompile = activeClips.length > 0 && blockers.length === 0;
+  const isSingleApprovedClip = canCompile && approvedAttempts.length === 1;
   const hasStartedGeneration = Boolean(groupId) || clips.some((clip) => clip.attempts.length > 0);
   const isSequenceLocked = Boolean(groupId);
-  const copy = typeCopy[contentType];
+  const displayAspectRatio = aspectRatio === "source" ? generationAspectRatio : aspectRatio;
+  const filteredHistoryItems = useMemo(() => {
+    const normalizedQuery = historyQuery.trim().toLowerCase();
+    return historyItems.filter((item) => {
+      const normalizedStatus = item.status.toUpperCase();
+      const matchesFilter =
+        historyFilter === "all" ||
+        (historyFilter === "final" && Boolean(item.final_video_url)) ||
+        (historyFilter === "review" && !item.final_video_url && ["REVIEWING", "GENERATING", "COMPILING"].includes(normalizedStatus));
+      if (!matchesFilter) return false;
+      if (!normalizedQuery) return true;
+      return [
+        historyDisplayTitle(item),
+        item.status,
+        statusLabel(item.status),
+        item.created_at,
+        String(item.clip_count),
+      ].some((value) => value.toLowerCase().includes(normalizedQuery));
+    });
+  }, [historyFilter, historyItems, historyQuery]);
+  const finalHistoryCount = historyItems.filter((item) => Boolean(item.final_video_url)).length;
+  const reviewHistoryCount = historyItems.filter((item) => !item.final_video_url && ["REVIEWING", "GENERATING", "COMPILING"].includes(item.status.toUpperCase())).length;
+  const selectedClipPromptTarget = activeClips.find((clip) => clip.clientImageId === clipPromptTargetId);
+  const savedClipPromptItems: ClipPromptSourceItem[] = useMemo(() =>
+    clipPromptItems.map((item) => ({
+      ...item,
+      source: "saved",
+      sourceLabel: "저장한 Prompt",
+    })),
+  [clipPromptItems]);
+  const visibleClipPromptItems = clipPromptTab === "saved" ? savedClipPromptItems : historyClipPromptItems;
+  const filteredClipPromptItems = useMemo(() => {
+    const normalizedQuery = clipPromptQuery.trim().toLowerCase();
+    if (!normalizedQuery) return visibleClipPromptItems;
+    return visibleClipPromptItems.filter((item) =>
+      [item.title, item.prompt, item.created_at, item.sourceLabel].some((value) => value.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [clipPromptQuery, visibleClipPromptItems]);
+  const hasOpenModal = historyOpen || promptHistoryOpen || Boolean(clipPromptMode);
+  const hasWorkspaceState =
+    activeStep !== 1 ||
+    clips.length > 0 ||
+    Boolean(groupId) ||
+    Boolean(finalUrl) ||
+    progress > 0 ||
+    globalPrompt !== initialGlobalPrompt;
 
   const sourcePreviewPayload = useMemo(
     () =>
@@ -153,16 +287,11 @@ export function MarketingPage() {
         endImageUrls: activeClips.map((clip, index) => resolveEndImageUrlForPreview(clip, index)),
         cutPrompts: activeClips.map((clip) => clip.prompt),
         targetDurationsSec: activeClips.map((clip) => clip.targetDurationSec),
-        contentType,
-        aspectRatio,
+        aspectRatio: displayAspectRatio,
         globalPrompt,
-        tone,
-        platform,
-        audience: "",
-        goal,
         language: "한국어",
       }),
-    [activeClips, aspectRatio, contentType, globalPrompt, goal, platform, tone],
+    [activeClips, displayAspectRatio, globalPrompt],
   );
 
   useEffect(() => {
@@ -190,11 +319,110 @@ export function MarketingPage() {
     if (activeStep === 3 && !finalTitleEdited && !finalTitle.trim()) {
       setFinalTitle(buildDefaultFinalTitle());
     }
-  }, [activeStep, finalTitle, finalTitleEdited, goal, platform, contentType, aspectRatio, activeClips.length]);
+  }, [activeStep, finalTitle, finalTitleEdited, displayAspectRatio, activeClips.length]);
+
+  useEffect(() => {
+    if (!hasOpenModal) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [hasOpenModal]);
+
+  useEffect(() => {
+    if (!historyOpen) return undefined;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setHistoryOpen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [historyOpen]);
+
+  useEffect(() => {
+    if (!historyToast) return undefined;
+    const timer = window.setTimeout(() => setHistoryToast(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [historyToast]);
 
   function updateStatus(message: string, nextProgress: number) {
     setStatus(message);
     setProgress(Math.max(0, Math.min(100, nextProgress)));
+  }
+
+  function showHistoryToast(message: string) {
+    setHistoryToast(message);
+  }
+
+  function resetMarketingWorkspace() {
+    setActiveStep(1);
+    setAspectRatio(defaultMarketingAspectRatio);
+    setGenerationAspectRatio(defaultMarketingAspectRatio);
+    setClips([]);
+    setGlobalPrompt(initialGlobalPrompt);
+    setGroupId("");
+    setStatus(initialMarketingStatus);
+    setError("");
+    setProgress(0);
+    setIsBusy(false);
+    setRegeneratingClipId("");
+    setRegeneratingClipIds([]);
+    setRegeneratePrompt("");
+    setSelectedReference(null);
+    setSelectedReferenceClipId("");
+    setHistoryOpen(false);
+    setHistoryQuery("");
+    setHistoryFilter("all");
+    setHistoryStatus("");
+    setSelectedReferenceId("");
+    setFinalUrl("");
+    setFinalTitle("");
+    setFinalTitleEdited(false);
+    setHistoryTitleDraft("");
+    setHistoryTitleSaving(false);
+    setFinalSaveError("");
+    setLastFinalPersistPayload(null);
+    setPromptHistoryOpen(false);
+    setClipPromptMode(null);
+    setClipPromptTargetId("");
+    setHistoryClipPromptItems([]);
+    setClipPromptTab("saved");
+    setClipPromptStatus("");
+    setClipPromptTitle("");
+    setClipPromptQuery("");
+    showHistoryToast("새 작업을 시작할 수 있도록 초기화했습니다.");
+  }
+
+  async function resolveAspectRatioForGeneration(sourceClips: ClipDraft[] = activeClips): Promise<MarketingGenerationAspectRatio> {
+    if (aspectRatio !== "source") return aspectRatio;
+    const firstFile = sourceClips[0]?.file;
+    if (!firstFile) return defaultMarketingAspectRatio;
+    try {
+      const bitmap = await createImageBitmap(firstFile);
+      const resolved = bitmap.width >= bitmap.height ? "16:9" : "9:16";
+      bitmap.close();
+      return resolved;
+    } catch {
+      return new Promise((resolve) => {
+        const objectUrl = URL.createObjectURL(firstFile);
+        const image = new Image();
+        image.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(image.naturalWidth >= image.naturalHeight ? "16:9" : "9:16");
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(defaultMarketingAspectRatio);
+        };
+        image.src = objectUrl;
+      });
+    }
   }
 
   function setClipOrder(nextClips: ClipDraft[]) {
@@ -322,10 +550,7 @@ export function MarketingPage() {
   }
 
   function buildDefaultFinalTitle(): string {
-    const goalPart = goal.trim();
-    const contentTypeLabel = contentTypeOptions.find((option) => option.value === contentType)?.label ?? "Marketing Reel";
-    const base = goalPart || `${contentTypeLabel} ${platform}`;
-    return `${base} · ${aspectRatio} · ${activeClips.length} clips · ${formatDateTitlePart()}`;
+    return `Marketing Reel · ${aspectRatioLabels[displayAspectRatio]} · ${activeClips.length} clips · ${formatDateTitlePart()}`;
   }
 
   function getReferenceAttempt(clip: MarketingReelClipDetail) {
@@ -356,11 +581,12 @@ export function MarketingPage() {
     }
   }
 
-  async function persistAttempt(group: string, clip: ClipDraft, attempt: MarketingVideoAttempt, sourceJobItemIndex: number) {
+  async function persistAttempt(group: string, clip: ClipDraft, attempt: MarketingVideoAttempt, sourceJobItemIndex: number, clipGenerationId?: string) {
     if (!clip.clipId) return;
     await createMarketingClipAttempt(group, {
       attempt_id: attempt.attemptId,
       clip_id: clip.clipId,
+      clip_generation_id: clipGenerationId,
       source_job_id: attempt.sourceJobId,
       source_job_item_index: sourceJobItemIndex,
       prompt: attempt.prompt,
@@ -382,12 +608,14 @@ export function MarketingPage() {
     let sourceJobStarted = false;
     try {
       validateImageSelection(activeClips.map((clip) => clip.file));
+      const resolvedAspectRatio = await resolveAspectRatioForGeneration(activeClips);
+      setGenerationAspectRatio(resolvedAspectRatio);
       updateStatus("마케팅 비디오 그룹 생성 중...", 4);
       const group = await createMarketingReelGroup({
         globalPrompt,
-        platform,
-        tone,
-        goal,
+        platform: "",
+        tone: "",
+        goal: "",
         clips: activeClips.map((clip) => ({
           clientImageId: clip.clientImageId,
           sourceImageUrl: "",
@@ -496,23 +724,23 @@ export function MarketingPage() {
         endImageUrls: withClipIds.map((clip) => clip.endGenerationUrl ?? clip.endImageUrl),
         cutPrompts: withClipIds.map((clip) => clip.prompt),
         targetDurationsSec: withClipIds.map((clip) => clip.targetDurationSec),
-        contentType,
-        aspectRatio,
+        aspectRatio: resolvedAspectRatio,
         globalPrompt,
-        tone,
-        platform,
-        audience: "",
-        goal,
         language: "한국어",
       }));
       sourceJobStarted = true;
+      const generation = await createMarketingClipGeneration(group.group_id, {
+        generation_type: "INITIAL",
+        clip_ids: withClipIds.map((clip) => clip.clipId as string),
+        source_job_id: sourceJobId,
+      });
 
       const runningAttempts = withClipIds.map((clip, index) => makeAttempt({
-        clip,
-        sourceJobId,
-        sourceJobItemIndex: index,
-        prompt: buildKlingPrompt(
-          { cutPrompts: [], contentType, aspectRatio, globalPrompt, tone, platform, audience: "", goal, language: "한국어" },
+          clip,
+          sourceJobId,
+          sourceJobItemIndex: index,
+          prompt: buildKlingPrompt(
+          { cutPrompts: [], aspectRatio: resolvedAspectRatio, globalPrompt, language: "한국어" },
           clip.prompt || "premium furniture reel",
           index,
         ),
@@ -522,7 +750,10 @@ export function MarketingPage() {
       for (let index = 0; index < withClipIds.length; index += 1) {
         mergeAttempt(withClipIds[index].clientImageId, runningAttempts[index]);
         try {
-          await persistAttempt(group.group_id, withClipIds[index], runningAttempts[index], index);
+          await persistAttempt(group.group_id, withClipIds[index], {
+            ...runningAttempts[index],
+            attemptId: runningAttempts[index].attemptId,
+          }, index, generation.clip_generation_id);
           persistedAttemptIds.add(runningAttempts[index].attemptId);
         } catch {
           // If the RUNNING row fails to persist, the final state is created after polling.
@@ -563,7 +794,7 @@ export function MarketingPage() {
               error: completed.error,
             });
           } else {
-            await persistAttempt(group.group_id, withClipIds[index], completed, index);
+            await persistAttempt(group.group_id, withClipIds[index], completed, index, generation.clip_generation_id);
           }
           mergeAttempt(withClipIds[index].clientImageId, completed);
         } catch (caught) {
@@ -649,20 +880,22 @@ export function MarketingPage() {
     setRegeneratingClipIds((current) => (current.includes(clip.clientImageId) ? current : [...current, clip.clientImageId]));
     setError("");
     try {
+      const resolvedAspectRatio = await resolveAspectRatioForGeneration([clip]);
+      setGenerationAspectRatio(resolvedAspectRatio);
       const sourceJobId = await requestSourceGeneration(buildSourceGenerationPayload({
         imageUrls: [sourceGenerationUrl],
         endImageUrls: [endGenerationUrl],
         cutPrompts: [prompt],
         targetDurationsSec: [clip.targetDurationSec],
-        contentType,
-        aspectRatio,
+        aspectRatio: resolvedAspectRatio,
         globalPrompt,
-        tone,
-        platform,
-        audience: "",
-        goal,
         language: "한국어",
       }));
+      const generation = await createMarketingClipGeneration(groupId, {
+        generation_type: "REGENERATE",
+        clip_ids: [clip.clipId],
+        source_job_id: sourceJobId,
+      });
       const attempt = makeAttempt({
         clip,
         sourceJobId,
@@ -671,7 +904,7 @@ export function MarketingPage() {
         status: "RUNNING",
       });
       mergeAttempt(clip.clientImageId, attempt);
-      await persistAttempt(groupId, clip, attempt, 0);
+      await persistAttempt(groupId, clip, attempt, 0, generation.clip_generation_id);
       const state = await pollJob(sourceJobId, "선택 컷 재생성", 20, 70);
       const localVideoUrl = state.results?.[0] ?? undefined;
       let videoUrl: string | undefined;
@@ -719,7 +952,36 @@ export function MarketingPage() {
     setFinalSaveError("");
     setActiveStep(3);
     try {
-      const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, aspectRatio);
+      const resolvedAspectRatio = await resolveAspectRatioForGeneration(activeClips);
+      setGenerationAspectRatio(resolvedAspectRatio);
+      const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, resolvedAspectRatio);
+      if (approvedAttempts.length === 1) {
+        const [approvedAttempt] = approvedAttempts;
+        const finalVideoUrl = approvedAttempt.videoUrl;
+        if (!finalVideoUrl) throw new Error("승인된 단일 영상 URL이 없습니다.");
+        updateStatus("단일 승인 영상을 최종본으로 저장 중...", 45);
+        setFinalUrl(finalVideoUrl);
+        const persistPayload: MarketingFinalResultPayload = {
+          compile_job_id: `single-clip-${approvedAttempt.attemptId}`,
+          final_video_url: finalVideoUrl,
+          final_download_url: approvedAttempt.downloadUrl ?? downloadUrlForResult(finalVideoUrl),
+          final_title: finalTitle.trim() || buildDefaultFinalTitle(),
+          selected_attempt_ids: [approvedAttempt.attemptId],
+          compile_payload_summary: {
+            mode: "single_clip_passthrough",
+            ...compilePayload,
+          },
+        };
+        setLastFinalPersistPayload(persistPayload);
+        try {
+          await patchMarketingFinalResult(groupId, persistPayload);
+          setLastFinalPersistPayload(null);
+        } catch (caught) {
+          setFinalSaveError(caught instanceof Error ? caught.message : "히스토리 저장 실패");
+        }
+        updateStatus("단일 영상 최종본이 준비되었습니다.", 100);
+        return;
+      }
       updateStatus("최종 영상 합치기 요청 중...", 20);
       const compileJobId = await requestCompile(compilePayload);
       const state = await pollJob(compileJobId, "최종 영상 합치기", 20, 70);
@@ -735,6 +997,9 @@ export function MarketingPage() {
         final_video_url: finalVideoUrl,
         final_download_url: downloadUrlForResult(finalVideoUrl),
         final_title: finalTitle.trim() || buildDefaultFinalTitle(),
+        selected_attempt_ids: activeClips
+          .map((clip) => clip.approvedAttemptId)
+          .filter((attemptId): attemptId is string => Boolean(attemptId)),
         compile_payload_summary: compilePayload,
       };
       setLastFinalPersistPayload(persistPayload);
@@ -753,10 +1018,172 @@ export function MarketingPage() {
   }
 
   async function loadHistory() {
+    setIsHistoryLoading(true);
+    setHistoryStatus("");
     try {
-      setHistoryItems(await listMarketingReelGroups(20));
+      const nextItems = await listMarketingReelGroups(20);
+      setHistoryItems(nextItems);
+      setHistoryLastLoadedAt(new Date());
+      setSelectedReference((current) => {
+        if (!current) return current;
+        return nextItems.some((item) => item.group_id === current.group_id) ? current : null;
+      });
+      setHistoryStatus(nextItems.length > 0 ? `${nextItems.length}개 히스토리를 불러왔습니다.` : "저장된 히스토리가 없습니다.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setHistoryStatus(caught instanceof Error ? caught.message : "히스토리 조회 실패");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  function openHistoryModal() {
+    setHistoryOpen(true);
+    void loadHistory();
+  }
+
+  async function saveCurrentGlobalPrompt() {
+    const prompt = globalPrompt.trim();
+    if (!prompt) {
+      setPromptHistoryStatus("저장할 Global prompt를 입력하세요.");
+      return;
+    }
+    setIsPromptSaving(true);
+    setPromptHistoryStatus("");
+    try {
+      await saveGlobalPrompt(prompt);
+      setPromptHistoryStatus("Global prompt 저장 완료");
+    } catch (caught) {
+      setPromptHistoryStatus(caught instanceof Error ? caught.message : "Global prompt 저장 실패");
+    } finally {
+      setIsPromptSaving(false);
+    }
+  }
+
+  async function openGlobalPromptHistory() {
+    setPromptHistoryOpen(true);
+    setPromptHistoryStatus("");
+    setIsPromptHistoryLoading(true);
+    try {
+      setPromptHistoryItems(await listGlobalPrompts(30));
+    } catch (caught) {
+      setPromptHistoryStatus(caught instanceof Error ? caught.message : "Global prompt 내역 조회 실패");
+    } finally {
+      setIsPromptHistoryLoading(false);
+    }
+  }
+
+  async function deletePromptHistoryItem(promptId: string) {
+    setPromptHistoryStatus("");
+    try {
+      await deleteGlobalPrompt(promptId);
+      setPromptHistoryItems((current) => current.filter((item) => item.id !== promptId));
+      setPromptHistoryStatus("Global prompt 삭제 완료");
+    } catch (caught) {
+      setPromptHistoryStatus(caught instanceof Error ? caught.message : "Global prompt 삭제 실패");
+    }
+  }
+
+  async function loadClipPromptHistory() {
+    setClipPromptStatus("");
+    setIsClipPromptLoading(true);
+    try {
+      const [savedPrompts, groups] = await Promise.all([
+        listClipPrompts(50),
+        listMarketingReelGroups(20),
+      ]);
+      setClipPromptItems(savedPrompts);
+      const detailResults = await Promise.allSettled(groups.map((group) => getMarketingReelGroup(group.group_id)));
+      const groupById = new Map(groups.map((group) => [group.group_id, group]));
+      const nextHistoryPrompts = detailResults.flatMap((result) => {
+        if (result.status !== "fulfilled") return [];
+        const detail = result.value;
+        const group = groupById.get(detail.group_id);
+        const groupTitle = group ? historyDisplayTitle(group) : detail.final_title?.trim() || `${detail.clips.length} clips`;
+        return detail.clips
+          .filter((clip) => clip.initial_prompt.trim())
+          .map((clip): ClipPromptSourceItem => ({
+            id: `history-${detail.group_id}-${clip.clip_id}`,
+            title: `${groupTitle} · Clip ${clip.current_order}`,
+            prompt: clip.initial_prompt,
+            created_at: detail.created_at,
+            source: "history",
+            sourceLabel: `${statusLabel(detail.status)} · ${formatHistoryDate(detail.created_at)}`,
+            groupId: detail.group_id,
+            clipId: clip.clip_id,
+          }));
+      });
+      setHistoryClipPromptItems(nextHistoryPrompts);
+    } catch (caught) {
+      setClipPromptStatus(caught instanceof Error ? caught.message : "Clip prompt 내역 조회 실패");
+    } finally {
+      setIsClipPromptLoading(false);
+    }
+  }
+
+  function openClipPromptSave(clip: ClipDraft, index: number) {
+    setClipPromptTargetId(clip.clientImageId);
+    setClipPromptMode("save");
+    setClipPromptStatus("");
+    setClipPromptQuery("");
+    setClipPromptTitle(`${index + 1}. ${clip.file.name}`);
+  }
+
+  function openClipPromptHistory(clip: ClipDraft) {
+    setClipPromptTargetId(clip.clientImageId);
+    setClipPromptMode("load");
+    setClipPromptTab("saved");
+    setClipPromptStatus("");
+    setClipPromptQuery("");
+    void loadClipPromptHistory();
+  }
+
+  function closeClipPromptModal() {
+    setClipPromptMode(null);
+    setClipPromptTargetId("");
+    setClipPromptStatus("");
+    setClipPromptTitle("");
+    setClipPromptQuery("");
+  }
+
+  async function saveSelectedClipPrompt() {
+    if (!selectedClipPromptTarget) return;
+    if (!clipPromptTitle.trim()) {
+      setClipPromptStatus("제목을 입력하세요.");
+      return;
+    }
+    if (!selectedClipPromptTarget.prompt.trim()) {
+      setClipPromptStatus("저장할 prompt를 입력하세요.");
+      return;
+    }
+    setIsClipPromptSaving(true);
+    setClipPromptStatus("");
+    try {
+      const saved = await saveClipPrompt(clipPromptTitle, selectedClipPromptTarget.prompt);
+      setClipPromptItems((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      closeClipPromptModal();
+      showHistoryToast("Clip prompt를 저장했습니다.");
+    } catch (caught) {
+      setClipPromptStatus(caught instanceof Error ? caught.message : "Clip prompt 저장 실패");
+    } finally {
+      setIsClipPromptSaving(false);
+    }
+  }
+
+  function applyClipPrompt(item: ClipPromptSourceItem) {
+    if (!clipPromptTargetId) return;
+    updateClip(clipPromptTargetId, { prompt: item.prompt });
+    closeClipPromptModal();
+    showHistoryToast("Clip prompt를 적용했습니다.");
+  }
+
+  async function deleteClipPromptHistoryItem(promptId: string) {
+    setClipPromptStatus("");
+    try {
+      await deleteClipPrompt(promptId);
+      setClipPromptItems((current) => current.filter((item) => item.id !== promptId));
+      setClipPromptStatus("Clip prompt 삭제 완료");
+    } catch (caught) {
+      setClipPromptStatus(caught instanceof Error ? caught.message : "Clip prompt 삭제 실패");
     }
   }
 
@@ -773,14 +1200,73 @@ export function MarketingPage() {
   }
 
   async function selectReference(group: MarketingReelGroupListItem) {
+    setSelectedReferenceId(group.group_id);
+    setHistoryStatus("");
     try {
       const detail = await getMarketingReelGroup(group.group_id);
       setSelectedReference(detail);
       setHistoryTitleDraft(detail.final_title || "");
       setSelectedReferenceClipId("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setHistoryStatus(caught instanceof Error ? caught.message : "히스토리 상세 조회 실패");
+    } finally {
+      setSelectedReferenceId("");
     }
+  }
+
+  function clipsFromReference(detail: MarketingReelGroupDetail, includeAttempts: boolean): ClipDraft[] {
+    return detail.clips.map((clip) => {
+      const attempts = includeAttempts ? clip.attempts.map(attemptFromDetail) : [];
+      const selectedAttempt = attempts.find((attempt) => attempt.attemptId === clip.approved_attempt_id) ?? attempts.at(-1);
+      return {
+        clientImageId: clip.client_image_id,
+        file: fileFromRemoteUrl(clip.source_image_url, `clip-${clip.current_order}.png`),
+        previewUrl: clip.source_image_url,
+        clipId: includeAttempts ? clip.clip_id : undefined,
+        uploadedUrl: clip.source_image_url,
+        sourceImageUrl: clip.source_image_url,
+        sourceGenerationUrl: clip.source_image_url,
+        endUploadedUrl: clip.end_image_url ?? undefined,
+        endImageUrl: clip.end_image_url ?? undefined,
+        endGenerationUrl: clip.end_image_url ?? undefined,
+        endPreviewUrl: clip.end_image_url ?? undefined,
+        generationMode: clip.generation_mode,
+        order: clip.current_order,
+        prompt: clip.initial_prompt,
+        targetDurationSec: normalizeSourceDurationSec(clip.target_duration_sec),
+        attempts,
+        approvedAttemptId: includeAttempts ? clip.approved_attempt_id ?? selectedAttempt?.attemptId : undefined,
+        viewingAttemptId: selectedAttempt?.attemptId,
+      };
+    });
+  }
+
+  function importReferenceToStep1() {
+    if (!selectedReference) return;
+    setGlobalPrompt(selectedReference.global_prompt);
+    setGroupId("");
+    setFinalUrl("");
+    setFinalSaveError("");
+    setLastFinalPersistPayload(null);
+    setProgress(0);
+    setStatus("선택한 히스토리의 Step 1 설정을 가져왔습니다.");
+    setClips(clipsFromReference(selectedReference, false));
+    setActiveStep(1);
+    setHistoryOpen(false);
+    showHistoryToast("Step 1 설정을 복원했습니다.");
+  }
+
+  function loadReferenceToStep2() {
+    if (!selectedReference) return;
+    setGlobalPrompt(selectedReference.global_prompt);
+    setGroupId(selectedReference.group_id);
+    setFinalUrl(selectedReference.final_video_url ?? "");
+    setProgress(100);
+    setStatus("선택한 히스토리의 Step 2 결과를 불러왔습니다.");
+    setClips(clipsFromReference(selectedReference, true));
+    setActiveStep(2);
+    setHistoryOpen(false);
+    showHistoryToast("Step 2 결과를 열었습니다.");
   }
 
   async function saveSelectedReferenceTitle() {
@@ -816,9 +1302,16 @@ export function MarketingPage() {
           <h1>Marketing Reels Studio</h1>
           <p>이미지별 Kling 결과를 검수하고 승인본만 합치는 운영팀용 3-step 제작 도구입니다.</p>
         </div>
-        <button className="history-toggle" type="button" onClick={() => setHistoryOpen(!historyOpen)}>
-          {historyOpen ? "히스토리 닫기" : "히스토리 열기"}
-        </button>
+        <div className="marketing-tool-actions">
+          {hasWorkspaceState ? (
+            <button className="history-toggle secondary" type="button" disabled={isBusy} onClick={resetMarketingWorkspace}>
+              새 작업 시작
+            </button>
+          ) : null}
+          <button className="history-toggle" type="button" onClick={openHistoryModal}>
+            히스토리 열기
+          </button>
+        </div>
       </section>
 
       <nav className="marketing-stepper" aria-label="Marketing reels steps">
@@ -840,7 +1333,7 @@ export function MarketingPage() {
 
       {error ? <p className="marketing-alert" role="alert">{error}</p> : null}
 
-      <section className={`marketing-workflow-grid ${historyOpen ? "has-history" : ""}`}>
+      <section className="marketing-workflow-grid">
         <div className="marketing-workspace">
           {activeStep === 1 ? (
             <section className="marketing-panel workflow-panel">
@@ -849,7 +1342,7 @@ export function MarketingPage() {
                   <h2>1. 생성 전</h2>
                   <p>공간 사진을 올리고 이미지별 prompt와 source video 길이를 설정합니다.</p>
                 </div>
-                <button className="run-reel-btn" type="button" disabled={isBusy || isSequenceLocked || activeClips.length < 3} onClick={startSourceGeneration}>
+                <button className="run-reel-btn" type="button" disabled={isBusy || isSequenceLocked || activeClips.length < minimumImageCount} onClick={startSourceGeneration}>
                   1차 비디오 생성
                 </button>
               </header>
@@ -861,37 +1354,24 @@ export function MarketingPage() {
 
               <div className="brief-grid workflow-settings">
                 <label className="brief-field">
-                  <span className="brief-label">Content type</span>
-                  <select className="brief-select" aria-label="Content type" value={contentType} disabled={isSequenceLocked} onChange={(event) => setContentType(event.target.value as ContentType)}>
-                    {contentTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </label>
-                <label className="brief-field">
-                  <span className="brief-label">Tone</span>
-                  <select className="brief-select" value={tone} disabled={isSequenceLocked} onChange={(event) => setTone(event.target.value)}>
-                    <option>Editorial</option><option>Energetic</option><option>Calm</option><option>Bold</option>
-                  </select>
-                </label>
-                <label className="brief-field">
-                  <span className="brief-label">Platform</span>
-                  <select className="brief-select" value={platform} disabled={isSequenceLocked} onChange={(event) => setPlatform(event.target.value)}>
-                    <option>Instagram</option><option>TikTok</option><option>YouTube Shorts</option>
-                  </select>
-                </label>
-                <label className="brief-field">
                   <span className="brief-label">Video ratio</span>
                   <select className="brief-select" value={aspectRatio} disabled={isSequenceLocked} onChange={(event) => setAspectRatio(normalizeMarketingAspectRatio(event.target.value))}>
-                    {allowedMarketingAspectRatios.map((ratio) => <option key={ratio} value={ratio}>{aspectRatioLabels[ratio]}</option>)}
+                    {allowedMarketingAspectRatioOptions.map((ratio) => <option key={ratio} value={ratio}>{aspectRatioLabels[ratio]}</option>)}
                   </select>
-                </label>
-                <label className="brief-field">
-                  <span className="brief-label">Goal</span>
-                  <input className="brief-input" value={goal} disabled={isSequenceLocked} onChange={(event) => setGoal(event.target.value)} />
                 </label>
                 <label className="brief-field is-wide">
                   <span className="brief-label">Global prompt</span>
                   <textarea className="brief-textarea" value={globalPrompt} disabled={isSequenceLocked} onChange={(event) => setGlobalPrompt(event.target.value)} />
                 </label>
+                <div className="prompt-actions">
+                  <button type="button" disabled={isPromptSaving || isSequenceLocked} onClick={saveCurrentGlobalPrompt}>
+                    {isPromptSaving ? "저장 중..." : "Global prompt 저장"}
+                  </button>
+                  <button type="button" disabled={isSequenceLocked} onClick={openGlobalPromptHistory}>
+                    Global prompt 가져오기
+                  </button>
+                </div>
+                {promptHistoryStatus ? <p className="prompt-history-status" role="status">{promptHistoryStatus}</p> : null}
                 <label className="brief-field is-wide upload-field">
                   <span className="brief-label">Images</span>
                   <span className="upload-count">{activeClips.length} / 10 selected</span>
@@ -946,7 +1426,7 @@ export function MarketingPage() {
                     <div>
                       <header>
                         <b>{index + 1}. {clip.file.name}</b>
-                        <span>{generationModeLabel(clip.generationMode)} · {aspectRatio} · {clip.targetDurationSec}s</span>
+                        <span>{generationModeLabel(clip.generationMode)} · {aspectRatioLabels[displayAspectRatio]} · {clip.targetDurationSec}s</span>
                       </header>
                       <textarea
                         className="brief-textarea"
@@ -965,9 +1445,15 @@ export function MarketingPage() {
                         >
                           {allowedSourceDurationsSec.map((duration) => <option key={duration} value={duration}>{duration}초</option>)}
                         </select>
-                        <button type="button" disabled={isSequenceLocked || index === 0} onClick={() => setClipOrder(moveImage(activeClips, index, -1))}>위</button>
-                        <button type="button" disabled={isSequenceLocked || index === activeClips.length - 1} onClick={() => setClipOrder(moveImage(activeClips, index, 1))}>아래</button>
+                        <button className="icon-control-button" type="button" aria-label={`${index + 1}번 이미지 위로 이동`} title="위로 이동" disabled={isSequenceLocked || index === 0} onClick={() => setClipOrder(moveImage(activeClips, index, -1))}>
+                          <span className="material-symbols-outlined" aria-hidden="true">arrow_upward</span>
+                        </button>
+                        <button className="icon-control-button" type="button" aria-label={`${index + 1}번 이미지 아래로 이동`} title="아래로 이동" disabled={isSequenceLocked || index === activeClips.length - 1} onClick={() => setClipOrder(moveImage(activeClips, index, 1))}>
+                          <span className="material-symbols-outlined" aria-hidden="true">arrow_downward</span>
+                        </button>
                         <button type="button" disabled={isSequenceLocked} onClick={() => setClipOrder(removeImage(activeClips, index))}>삭제</button>
+                        <button type="button" disabled={isSequenceLocked || !clip.prompt.trim()} onClick={() => openClipPromptSave(clip, index)}>Prompt 저장</button>
+                        <button type="button" disabled={isSequenceLocked} onClick={() => openClipPromptHistory(clip)}>Prompt 가져오기</button>
                       </div>
                     </div>
                   </article>
@@ -984,7 +1470,7 @@ export function MarketingPage() {
                   <p>각 이미지의 생성 결과를 재생하고 좋은 attempt를 승인합니다.</p>
                 </div>
                 <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={() => setActiveStep(3)}>
-                  승인본으로 합치기 준비
+                  {isSingleApprovedClip ? "단일 영상 최종본 설정" : "승인본으로 합치기 준비"}
                 </button>
               </header>
 
@@ -1001,7 +1487,7 @@ export function MarketingPage() {
                   const isClipRegenerating = regeneratingClipIds.includes(clip.clientImageId);
                   return (
                     <article className="clip-review-card" key={clip.clientImageId}>
-                      <div className={`clip-review-media ratio-${aspectRatio.replace(":", "-")}`}>
+                      <div className={`clip-review-media ratio-${displayAspectRatio.replace(":", "-")}`}>
                         <div className="review-frame-stack">
                           <figure>
                             <span>Start Frame</span>
@@ -1025,7 +1511,7 @@ export function MarketingPage() {
                         </header>
                         <div className="clip-review-meta" aria-label={`Clip ${index + 1} 생성 설정`}>
                           <span>{generationModeLabel(clip.generationMode)}</span>
-                          <span>{aspectRatioLabels[aspectRatio]}</span>
+                          <span>{aspectRatioLabels[displayAspectRatio]}</span>
                           <span>{clip.targetDurationSec}초</span>
                         </div>
                         <p>{selectedAttempt?.prompt || clip.prompt || "프롬프트 없음"}</p>
@@ -1092,9 +1578,15 @@ export function MarketingPage() {
               <header className="workflow-panel-header">
                 <div>
                   <h2>3. 최종 합치기</h2>
-                  <p>승인한 source clips를 현재 순서대로 하나의 최종 영상으로 합칩니다.</p>
+                  <p>
+                    {isSingleApprovedClip
+                      ? "승인한 source clip 1개를 합치기 없이 최종 영상으로 저장합니다."
+                      : "승인한 source clips를 현재 순서대로 하나의 최종 영상으로 합칩니다."}
+                  </p>
                 </div>
-                <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={compileFinal}>최종 영상 합치기</button>
+                <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={compileFinal}>
+                  {isSingleApprovedClip ? "단일 영상 최종본으로 사용" : "최종 영상 합치기"}
+                </button>
               </header>
               {blockers.length ? (
                 <div className="marketing-alert" role="alert">
@@ -1124,7 +1616,7 @@ export function MarketingPage() {
               {finalUrl ? (
                 <section className="final-reel" aria-label="Final Reel">
                   <h3>Final Reel</h3>
-                  <video className={`final-video ratio-${aspectRatio.replace(":", "-")}`} src={finalUrl} controls playsInline />
+                  <video className={`final-video ratio-${displayAspectRatio.replace(":", "-")}`} src={finalUrl} controls playsInline />
                   <a className="download-link" href={downloadUrlForResult(finalUrl)} download>Download final MP4</a>
                   {finalSaveError ? (
                     <div className="marketing-alert final-save-alert" role="alert">
@@ -1139,24 +1631,89 @@ export function MarketingPage() {
         </div>
 
         {historyOpen ? (
-          <aside className="marketing-panel history-panel">
-            <header>
-              <h3>공용 히스토리</h3>
-              <button type="button" onClick={loadHistory}>새로고침</button>
+          <div className="history-modal-backdrop" role="presentation">
+            <aside className="marketing-panel history-panel" role="dialog" aria-modal="true" aria-label="공용 히스토리">
+            <header className="history-panel-header">
+              <div>
+                <h3>공용 히스토리</h3>
+                <p>
+                  {historyLastLoadedAt
+                    ? `${historyItems.length}개 저장됨 · 마지막 갱신 ${formatHistoryRefreshTime(historyLastLoadedAt)}`
+                    : "완성본과 Step 2 결과를 다시 여는 공간입니다."}
+                </p>
+              </div>
+              <div className="history-modal-actions">
+                <button type="button" disabled={isHistoryLoading} onClick={loadHistory}>
+                  {isHistoryLoading ? "불러오는 중" : "히스토리 새로고침"}
+                </button>
+                <button type="button" onClick={() => setHistoryOpen(false)}>닫기</button>
+              </div>
             </header>
+            <div className="history-toolbar">
+              <label className="history-search">
+                <span className="material-symbols-outlined" aria-hidden="true">search</span>
+                <input
+                  value={historyQuery}
+                  placeholder="제목, 상태, 날짜 검색"
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                />
+              </label>
+              <div className="history-filter-tabs" role="group" aria-label="히스토리 필터">
+                <button className={historyFilter === "all" ? "is-active" : ""} type="button" onClick={() => setHistoryFilter("all")}>
+                  전체 {historyItems.length}
+                </button>
+                <button className={historyFilter === "final" ? "is-active" : ""} type="button" onClick={() => setHistoryFilter("final")}>
+                  완성본 {finalHistoryCount}
+                </button>
+                <button className={historyFilter === "review" ? "is-active" : ""} type="button" onClick={() => setHistoryFilter("review")}>
+                  작업중 {reviewHistoryCount}
+                </button>
+              </div>
+            </div>
+            {historyStatus ? <p className="history-panel-status" role="status">{historyStatus}</p> : null}
             <div className="history-list">
-              {historyItems.length === 0 ? <p className="status-line">저장된 결과물을 불러오세요.</p> : historyItems.map((item) => (
-                <button key={item.group_id} type="button" onClick={() => selectReference(item)}>
-                  <span>{item.status}</span>
-                  <b>{item.final_title || `${item.clip_count} clips`}</b>
-                  {item.final_title ? <small>{item.clip_count} clips</small> : null}
-                  <small>{item.created_at}</small>
+              {isHistoryLoading ? <p className="status-line">히스토리를 불러오는 중...</p> : null}
+              {!isHistoryLoading && historyItems.length === 0 ? (
+                <div className="history-empty-state">
+                  <b>아직 불러온 히스토리가 없습니다.</b>
+                  <span>새로고침으로 저장된 릴스를 가져온 뒤 Step 1 설정이나 Step 2 결과를 다시 열 수 있습니다.</span>
+                </div>
+              ) : null}
+              {!isHistoryLoading && historyItems.length > 0 && filteredHistoryItems.length === 0 ? (
+                <div className="history-empty-state">
+                  <b>조건에 맞는 히스토리가 없습니다.</b>
+                  <span>검색어를 지우거나 필터를 전체로 바꿔보세요.</span>
+                </div>
+              ) : null}
+              {filteredHistoryItems.map((item) => (
+                <button
+                  className={selectedReference?.group_id === item.group_id ? "is-selected" : ""}
+                  key={item.group_id}
+                  type="button"
+                  aria-busy={selectedReferenceId === item.group_id}
+                  onClick={() => selectReference(item)}
+                >
+                  <span className={`history-status-pill status-${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>
+                  {item.representative_image_url ? (
+                    <img src={item.representative_image_url} alt={`${historyDisplayTitle(item)} 대표 이미지`} loading="lazy" />
+                  ) : (
+                    <span className="history-thumb-placeholder" aria-hidden="true">MP4</span>
+                  )}
+                  <b>{historyDisplayTitle(item)}</b>
+                  <small>{item.clip_count} clips · {formatHistoryDate(item.created_at)}</small>
+                  <small>{item.final_video_url ? "최종 영상 저장됨" : "Step 2 작업 상태"}</small>
                 </button>
               ))}
             </div>
             {selectedReference ? (
               <section className="history-detail">
-                <h4>선택한 레퍼런스</h4>
+                <div className="history-detail-heading">
+                  <div>
+                    <span className={`history-status-pill status-${selectedReference.status.toLowerCase()}`}>{statusLabel(selectedReference.status)}</span>
+                    <h4>히스토리 상세</h4>
+                    <p>{selectedReference.clips.length} clips · {formatHistoryDate(selectedReference.created_at)}</p>
+                  </div>
+                </div>
                 <div className="history-title-editor">
                   <label className="brief-field">
                     <span className="brief-label">History title</span>
@@ -1171,8 +1728,26 @@ export function MarketingPage() {
                     {historyTitleSaving ? "저장 중..." : "제목 저장"}
                   </button>
                 </div>
-                <p>{selectedReference.global_prompt}</p>
-                {selectedReference.final_video_url ? <video src={selectedReference.final_video_url} controls playsInline /> : null}
+                <div className="history-import-actions">
+                  <button type="button" onClick={importReferenceToStep1}>
+                    <span className="material-symbols-outlined" aria-hidden="true">edit_note</span>
+                    Step 1 설정으로 복원
+                  </button>
+                  <button type="button" onClick={loadReferenceToStep2}>
+                    <span className="material-symbols-outlined" aria-hidden="true">video_library</span>
+                    Step 2 결과 열기
+                  </button>
+                </div>
+                <div className="history-detail-summary">
+                  <span>Global prompt</span>
+                  <p>{selectedReference.global_prompt || "저장된 Global prompt가 없습니다."}</p>
+                </div>
+                {selectedReference.final_video_url ? (
+                  <div className="history-final-preview">
+                    <span>Final render</span>
+                    <video src={selectedReference.final_video_url} controls playsInline />
+                  </div>
+                ) : null}
                 <div className="history-reference-clips">
                   {selectedReference.clips.map((clip) => {
                     const referenceAttempt = getReferenceAttempt(clip);
@@ -1223,14 +1798,150 @@ export function MarketingPage() {
               <summary>Kling payload preview</summary>
               <pre>{JSON.stringify(sourcePreviewPayload, null, 2)}</pre>
             </details>
-            <div className="copy-stack">
-              <article><h4>Hook</h4><p>{copy.hook}</p></article>
-              <article><h4>Caption</h4><p>{copy.caption}</p></article>
-              <article><h4>CTA</h4><p>{copy.cta}</p></article>
-            </div>
-          </aside>
+            </aside>
+          </div>
+        ) : null}
+        {historyToast ? (
+          <div className="marketing-toast" role="status" aria-live="polite">
+            <span className="material-symbols-outlined" aria-hidden="true">check_circle</span>
+            {historyToast}
+          </div>
         ) : null}
       </section>
+      {promptHistoryOpen ? (
+        <div className="prompt-modal-backdrop" role="presentation">
+          <section className="prompt-modal" role="dialog" aria-modal="true" aria-label="Global prompt 내역">
+            <header>
+              <div>
+                <h2>Global prompt 내역</h2>
+                <p>저장된 문장을 선택하면 현재 입력창에 바로 적용됩니다.</p>
+              </div>
+              <button type="button" onClick={() => setPromptHistoryOpen(false)}>닫기</button>
+            </header>
+            {isPromptHistoryLoading ? <p className="status-line">불러오는 중...</p> : null}
+            {!isPromptHistoryLoading && promptHistoryItems.length === 0 ? (
+              <p className="status-line">저장된 Global prompt가 없습니다.</p>
+            ) : null}
+            <div className="prompt-history-list">
+              {promptHistoryItems.map((item) => (
+                <article className="prompt-history-item" key={item.id}>
+                  <button
+                    type="button"
+                    aria-label={`적용: ${item.global_prompt}`}
+                    onClick={() => {
+                      setGlobalPrompt(item.global_prompt);
+                      setPromptHistoryOpen(false);
+                    }}
+                  >
+                    <span>{item.global_prompt}</span>
+                    <small>{new Date(item.created_at).toLocaleString()}</small>
+                  </button>
+                  <button className="prompt-delete-button" type="button" onClick={() => deletePromptHistoryItem(item.id)}>
+                    삭제
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {clipPromptMode ? (
+        <div className="prompt-modal-backdrop" role="presentation">
+          <section className="prompt-modal clip-prompt-modal" role="dialog" aria-modal="true" aria-label="Clip prompt 내역">
+            <header>
+              <div>
+                <h2>{clipPromptMode === "save" ? "Clip prompt 저장" : "Clip prompt 가져오기"}</h2>
+                <p>{selectedClipPromptTarget ? selectedClipPromptTarget.file.name : "선택한 row"}에 적용할 Step 1 row prompt 히스토리입니다.</p>
+              </div>
+              <button type="button" onClick={closeClipPromptModal}>닫기</button>
+            </header>
+            <div className="clip-prompt-body">
+              {clipPromptMode === "save" ? (
+                <div className="clip-prompt-save-form">
+                  <label className="brief-field">
+                    <span className="brief-label">Title</span>
+                    <input
+                      className="brief-input"
+                      value={clipPromptTitle}
+                      placeholder="예: 커튼 클로즈업 오프닝"
+                      onChange={(event) => setClipPromptTitle(event.target.value)}
+                    />
+                  </label>
+                  <div className="history-detail-summary">
+                    <span>Prompt</span>
+                    <p>{selectedClipPromptTarget?.prompt || "저장할 prompt가 없습니다."}</p>
+                  </div>
+                  <button className="run-reel-btn" type="button" disabled={isClipPromptSaving} onClick={saveSelectedClipPrompt}>
+                    {isClipPromptSaving ? "저장 중..." : "저장"}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="clip-prompt-tabs" role="tablist" aria-label="Clip prompt 출처">
+                    <button
+                      className={clipPromptTab === "saved" ? "is-active" : ""}
+                      type="button"
+                      role="tab"
+                      aria-selected={clipPromptTab === "saved"}
+                      onClick={() => setClipPromptTab("saved")}
+                    >
+                      저장한 Prompt {clipPromptItems.length}
+                    </button>
+                    <button
+                      className={clipPromptTab === "history" ? "is-active" : ""}
+                      type="button"
+                      role="tab"
+                      aria-selected={clipPromptTab === "history"}
+                      onClick={() => setClipPromptTab("history")}
+                    >
+                      히스토리 Prompt {historyClipPromptItems.length}
+                    </button>
+                  </div>
+                  <label className="history-search clip-prompt-search">
+                    <span className="material-symbols-outlined" aria-hidden="true">search</span>
+                    <input
+                      value={clipPromptQuery}
+                      placeholder="제목, 출처 또는 prompt 검색"
+                      onChange={(event) => setClipPromptQuery(event.target.value)}
+                    />
+                  </label>
+                  {isClipPromptLoading ? <p className="status-line">불러오는 중...</p> : null}
+                  {!isClipPromptLoading && visibleClipPromptItems.length === 0 ? (
+                    <p className="status-line">
+                      {clipPromptTab === "saved" ? "저장된 Clip prompt가 없습니다." : "가져올 히스토리 prompt가 없습니다."}
+                    </p>
+                  ) : null}
+                  {!isClipPromptLoading && visibleClipPromptItems.length > 0 && filteredClipPromptItems.length === 0 ? (
+                    <p className="status-line">검색 결과가 없습니다.</p>
+                  ) : null}
+                  <div className="prompt-history-list">
+                    {filteredClipPromptItems.map((item) => (
+                      <article className="prompt-history-item" key={item.id}>
+                        <button
+                          type="button"
+                          aria-label={`적용: ${item.title}`}
+                          onClick={() => applyClipPrompt(item)}
+                        >
+                          <b>{item.title}</b>
+                          <small>{item.sourceLabel}</small>
+                          <span>{item.prompt}</span>
+                          <small>{new Date(item.created_at).toLocaleString()}</small>
+                        </button>
+                        {item.source === "saved" ? (
+                          <button className="prompt-delete-button" type="button" onClick={() => deleteClipPromptHistoryItem(item.id)}>
+                            삭제
+                          </button>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            {clipPromptStatus ? <p className="prompt-history-status" role="status">{clipPromptStatus}</p> : null}
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

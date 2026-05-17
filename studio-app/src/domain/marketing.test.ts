@@ -18,19 +18,17 @@ import {
 const imageFile = (name: string) => new File(["x"], name, { type: "image/png" });
 
 describe("marketing domain", () => {
-  it("validates that 3 to 10 images are selected", () => {
-    expect(() => validateImageSelection([])).toThrow("이미지는 3~10장을 선택해야 합니다.");
-    expect(() => validateImageSelection([imageFile("1.png"), imageFile("2.png")])).toThrow(
-      "이미지는 3~10장을 선택해야 합니다.",
-    );
+  it("validates that 1 to 10 images are selected", () => {
+    expect(() => validateImageSelection([])).toThrow("이미지는 1~10장을 선택해야 합니다.");
+    expect(validateImageSelection([imageFile("1.png")])).toHaveLength(1);
     expect(validateImageSelection(Array.from({ length: 3 }, (_, index) => imageFile(`${index}.png`)))).toHaveLength(3);
     expect(() => validateImageSelection(Array.from({ length: 11 }, (_, index) => imageFile(`${index}.png`)))).toThrow(
-      "이미지는 3~10장을 선택해야 합니다.",
+      "이미지는 1~10장을 선택해야 합니다.",
     );
   });
 
   it("rejects non-image files", () => {
-    const files = [imageFile("1.png"), imageFile("2.png"), new File(["x"], "notes.txt", { type: "text/plain" })];
+    const files = [new File(["x"], "notes.txt", { type: "text/plain" })];
 
     expect(() => validateImageSelection(files)).toThrow("이미지 파일만 업로드할 수 있습니다.");
   });
@@ -57,12 +55,7 @@ describe("marketing domain", () => {
       imageUrls: ["/outputs/a.png", "/outputs/b.png", "/outputs/c.png"],
       cutPrompts: ["opening", "wide", "detail"],
       targetDurationsSec: [3, 5, 10],
-      contentType: "cinematic",
       globalPrompt: "warm camera motion",
-      tone: "Editorial",
-      platform: "Instagram",
-      audience: "design buyers",
-      goal: "launch awareness",
       language: "한국어",
     });
 
@@ -77,9 +70,13 @@ describe("marketing domain", () => {
       duration: "3",
     });
     expect(payload.items.map((item) => item.duration)).toEqual(["3", "5", "10"]);
-    expect(payload.items[0].custom_motion_prompt).toContain("cinematic interior reel");
     expect(payload.items[0].custom_motion_prompt).toContain("cut 1: opening");
     expect(payload.items[0].custom_motion_prompt).toContain("global direction: warm camera motion");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("cinematic interior reel");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("tone:");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("platform:");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("audience:");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("goal:");
   });
 
   it("maps optional end frame URLs into Kling source generation payloads", () => {
@@ -88,12 +85,7 @@ describe("marketing domain", () => {
       endImageUrls: ["https://cdn.example/end-a.png", undefined],
       cutPrompts: ["install sofa", "camera move"],
       targetDurationsSec: [5, 7],
-      contentType: "install",
       globalPrompt: "show furniture appearing in the room",
-      tone: "Cinematic",
-      platform: "Instagram",
-      audience: "interior shoppers",
-      goal: "conversion",
       language: "한국어",
     });
 
@@ -113,13 +105,8 @@ describe("marketing domain", () => {
     const sourcePayload = buildSourceGenerationPayload({
       imageUrls: ["https://cdn.example/start-a.png"],
       cutPrompts: ["landscape camera move"],
-      contentType: "cinematic",
       aspectRatio: "16:9",
       globalPrompt: "wide shot",
-      tone: "Editorial",
-      platform: "YouTube Shorts",
-      audience: "design buyers",
-      goal: "launch awareness",
       language: "한국어",
     });
 

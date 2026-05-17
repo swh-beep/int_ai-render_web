@@ -1,6 +1,6 @@
-export type ContentType = "popup" | "cinematic" | "install";
 export type MarketingGenerationMode = "START_ONLY" | "START_END" | "NEXT_START_AS_END";
-export type MarketingAspectRatio = "9:16" | "16:9";
+export type MarketingGenerationAspectRatio = "9:16" | "16:9";
+export type MarketingAspectRatio = MarketingGenerationAspectRatio | "source";
 
 export type SourceGenerationPayload = {
   items: Array<{
@@ -13,7 +13,7 @@ export type SourceGenerationPayload = {
     duration: SourceDurationString;
   }>;
   cfg_scale: number;
-  aspect_ratio: MarketingAspectRatio;
+  aspect_ratio: MarketingGenerationAspectRatio;
 };
 
 export type CompilePayload = {
@@ -26,7 +26,7 @@ export type CompilePayload = {
     flip_horizontal: boolean;
   }>;
   include_intro_outro: false;
-  aspect_ratio: MarketingAspectRatio;
+  aspect_ratio: MarketingGenerationAspectRatio;
   aspect_mode: "crop";
 };
 
@@ -35,12 +35,7 @@ export type MarketingBrief = {
   endImageUrls?: Array<string | undefined>;
   cutPrompts: string[];
   targetDurationsSec?: SourceDurationSec[];
-  contentType: ContentType;
   globalPrompt: string;
-  tone: string;
-  platform: string;
-  audience: string;
-  goal: string;
   language: string;
   aspectRatio?: MarketingAspectRatio;
 };
@@ -81,39 +76,19 @@ export type MarketingImageItem = {
   isDeleted?: boolean;
 };
 
-export const minimumImageCount = 3;
+export const minimumImageCount = 1;
 export const maximumImageCount = 10;
 export const defaultSourceDurationSec: SourceDurationSec = 5;
 export const allowedSourceDurationsSec: SourceDurationSec[] = [3, 4, 5, 6, 7, 8, 9, 10];
-export const defaultMarketingAspectRatio: MarketingAspectRatio = "9:16";
-export const allowedMarketingAspectRatios: MarketingAspectRatio[] = ["9:16", "16:9"];
+export const defaultMarketingAspectRatio: MarketingGenerationAspectRatio = "9:16";
+export const allowedMarketingAspectRatios: MarketingGenerationAspectRatio[] = ["9:16", "16:9"];
+export const allowedMarketingAspectRatioOptions: MarketingAspectRatio[] = ["source", "9:16", "16:9"];
 
 export const defaultCutPrompts = ["오프닝 - 정면 클로즈업", "와이드 컷 - 공간감 강조", "디테일 텍스처 컷"];
 
-export const typeCopy: Record<ContentType, { hook: string; caption: string; cta: string; direction: string }> = {
-  popup: {
-    hook: "신제품이 공간의 첫인상을 바꾸는 순간",
-    caption: "팝업 쇼룸에서 만나는 새로운 컬렉션.",
-    cta: "런칭 일정과 쇼룸 정보를 확인하세요.",
-    direction: "furniture popup launch reel, energetic showroom reveal, premium product presence",
-  },
-  cinematic: {
-    hook: "3초 안에 시선을 머물게 하는 디자인",
-    caption: "빛이 머무는 자리에, 봄의 라운지.",
-    cta: "지금 쇼룸에서 직접 만나보세요.",
-    direction: "cinematic interior reel, warm editorial lighting, slow refined camera movement",
-  },
-  install: {
-    hook: "빈 공간이 완성되는 가장 자연스러운 흐름",
-    caption: "배치, 균형, 마감까지 한 장면으로 보여드립니다.",
-    cta: "공간 솔루션 상담을 시작하세요.",
-    direction: "furniture installation reel, before and after flow, practical spatial transformation",
-  },
-};
-
 export function validateImageSelection(files: File[]): File[] {
   if (files.length < minimumImageCount || files.length > maximumImageCount) {
-    throw new Error("이미지는 3~10장을 선택해야 합니다.");
+    throw new Error("이미지는 1~10장을 선택해야 합니다.");
   }
   if (files.some((file) => !file.type.startsWith("image/"))) {
     throw new Error("이미지 파일만 업로드할 수 있습니다.");
@@ -135,8 +110,14 @@ export function sourceDurationToPayload(value: SourceDurationSec): SourceDuratio
 }
 
 export function normalizeMarketingAspectRatio(value: unknown): MarketingAspectRatio {
-  return allowedMarketingAspectRatios.includes(value as MarketingAspectRatio)
+  return allowedMarketingAspectRatioOptions.includes(value as MarketingAspectRatio)
     ? value as MarketingAspectRatio
+    : defaultMarketingAspectRatio;
+}
+
+export function normalizeGenerationAspectRatio(value: unknown): MarketingGenerationAspectRatio {
+  return allowedMarketingAspectRatios.includes(value as MarketingGenerationAspectRatio)
+    ? value as MarketingGenerationAspectRatio
     : defaultMarketingAspectRatio;
 }
 
@@ -173,15 +154,9 @@ export function removeCutPrompt(prompts: string[], index: number): string[] {
 }
 
 export function buildKlingPrompt(brief: Omit<MarketingBrief, "imageUrls">, cutPrompt: string, index: number): string {
-  const copy = typeCopy[brief.contentType] ?? typeCopy.popup;
   return [
-    copy.direction,
     `cut ${index + 1}: ${cutPrompt}`,
     `global direction: ${brief.globalPrompt}`,
-    `tone: ${brief.tone}`,
-    `platform: ${brief.platform}`,
-    `audience: ${brief.audience}`,
-    `goal: ${brief.goal}`,
     `language: ${brief.language}`,
     "Keep the furniture, room layout, product shape, material, color, and perspective faithful to the source photo. Smooth professional marketing reel motion. No text overlays.",
   ]
@@ -207,7 +182,7 @@ export function buildSourceGenerationPayload(brief: MarketingBrief): SourceGener
       duration: sourceDurationToPayload(normalizeSourceDurationSec(brief.targetDurationsSec?.[index])),
     })),
     cfg_scale: 0.5,
-    aspect_ratio: normalizeMarketingAspectRatio(brief.aspectRatio),
+    aspect_ratio: normalizeGenerationAspectRatio(brief.aspectRatio),
   };
 }
 
@@ -234,7 +209,7 @@ export function getCompileBlockers(items: MarketingImageItem[]): MarketingImageI
 
 export function buildCompilePayloadFromApprovedItems(
   items: MarketingImageItem[],
-  aspectRatio: MarketingAspectRatio = defaultMarketingAspectRatio,
+  aspectRatio: MarketingGenerationAspectRatio = defaultMarketingAspectRatio,
 ): CompilePayload {
   const approvedAttempts = getApprovedAttemptsInOrder(items);
   return {
@@ -247,7 +222,7 @@ export function buildCompilePayloadFromApprovedItems(
       flip_horizontal: false,
     })),
     include_intro_outro: false,
-    aspect_ratio: normalizeMarketingAspectRatio(aspectRatio),
+    aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
     aspect_mode: "crop",
   };
 }
@@ -255,7 +230,7 @@ export function buildCompilePayloadFromApprovedItems(
 export function buildCompilePayload(
   sourceUrls: string[],
   targetDurationSec: number,
-  aspectRatio: MarketingAspectRatio = defaultMarketingAspectRatio,
+  aspectRatio: MarketingGenerationAspectRatio = defaultMarketingAspectRatio,
 ): CompilePayload {
   const clips: CompilePayload["clips"] = [];
   let remaining = targetDurationSec;
@@ -278,7 +253,7 @@ export function buildCompilePayload(
   return {
     clips,
     include_intro_outro: false,
-    aspect_ratio: normalizeMarketingAspectRatio(aspectRatio),
+    aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
     aspect_mode: "crop",
   };
 }

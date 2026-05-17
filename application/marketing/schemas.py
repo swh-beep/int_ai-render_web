@@ -7,6 +7,7 @@ DurationSec = Literal[3, 4, 5, 6, 7, 8, 9, 10]
 AttemptStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
 GroupStatus = Literal["DRAFT", "GENERATING", "REVIEWING", "COMPILING", "COMPLETED", "FAILED"]
 GenerationMode = Literal["START_ONLY", "START_END", "NEXT_START_AS_END"]
+ClipGenerationType = Literal["INITIAL", "REGENERATE", "PARTIAL"]
 
 
 class MarketingReelClipCreate(BaseModel):
@@ -30,7 +31,7 @@ class MarketingReelGroupCreate(BaseModel):
     platform: str = ""
     tone: str = ""
     goal: str = ""
-    clips: list[MarketingReelClipCreate] = Field(..., min_length=3, max_length=10)
+    clips: list[MarketingReelClipCreate] = Field(..., min_length=1, max_length=10)
 
     @model_validator(mode="after")
     def require_sequential_clip_order(self):
@@ -44,6 +45,7 @@ class MarketingReelGroupCreate(BaseModel):
 class MarketingClipAttemptPayload(BaseModel):
     attempt_id: str = Field(..., min_length=1)
     clip_id: str = Field(..., min_length=1)
+    clip_generation_id: str | None = None
     source_job_id: str = Field(..., min_length=1)
     source_job_item_index: int = Field(..., ge=0)
     prompt: str = ""
@@ -88,6 +90,12 @@ class MarketingClipSourceImagesUpdate(BaseModel):
     clips: list[MarketingClipSourceImageUpdate] = Field(..., min_length=1)
 
 
+class MarketingClipGenerationCreate(BaseModel):
+    generation_type: ClipGenerationType = "INITIAL"
+    clip_ids: list[str] = Field(..., min_length=1)
+    source_job_id: str | None = None
+
+
 class MarketingClipApprovalPayload(BaseModel):
     attempt_id: str = Field(..., min_length=1)
 
@@ -97,8 +105,35 @@ class MarketingFinalResultPayload(BaseModel):
     final_video_url: str = Field(..., min_length=1)
     final_download_url: str | None = None
     final_title: str | None = None
+    selected_attempt_ids: list[str] | None = None
     compile_payload_summary: Any = None
 
 
 class MarketingGroupTitleUpdate(BaseModel):
     final_title: str = Field(..., min_length=1, max_length=255)
+
+
+class MarketingGlobalPromptCreate(BaseModel):
+    global_prompt: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def normalize_prompt(self):
+        self.global_prompt = self.global_prompt.strip()
+        if not self.global_prompt:
+            raise ValueError("global_prompt is required")
+        return self
+
+
+class MarketingClipPromptCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    prompt: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def normalize_prompt(self):
+        self.title = self.title.strip()
+        self.prompt = self.prompt.strip()
+        if not self.title:
+            raise ValueError("title is required")
+        if not self.prompt:
+            raise ValueError("prompt is required")
+        return self

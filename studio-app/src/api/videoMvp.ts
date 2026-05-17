@@ -1,6 +1,6 @@
 import { readApiError } from "./outputs";
 import type { CompilePayload as AssembleCompilePayload, SourceClipPayload } from "../domain/videoStudio";
-import type { MarketingAspectRatio } from "../domain/marketing";
+import type { MarketingGenerationAspectRatio } from "../domain/marketing";
 
 export type MarketingSourceGenerationPayload = {
   items: Array<{
@@ -13,7 +13,7 @@ export type MarketingSourceGenerationPayload = {
     duration?: string;
   }>;
   cfg_scale: number;
-  aspect_ratio: MarketingAspectRatio;
+  aspect_ratio: MarketingGenerationAspectRatio;
 };
 
 export type MarketingCompilePayload = {

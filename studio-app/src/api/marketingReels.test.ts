@@ -2,13 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   approveMarketingClipAttempt,
+  createMarketingClipGeneration,
   createMarketingClipAttempt,
   createMarketingReelGroup,
+  deleteClipPrompt,
+  deleteGlobalPrompt,
   deleteMarketingReelClip,
   getMarketingReelGroup,
+  listClipPrompts,
   listMarketingReelGroups,
   markMarketingReelGroupFailed,
   patchMarketingFinalResult,
+  saveClipPrompt,
   updateMarketingClipSourceImages,
   updateMarketingClipAttempt,
 } from "./marketingReels";
@@ -74,6 +79,35 @@ describe("marketing reels api", () => {
     );
   });
 
+  it("deletes global prompt history items", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({ id: "prompt-1" }));
+
+    await expect(deleteGlobalPrompt("prompt-1")).resolves.toEqual({ id: "prompt-1" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/marketing/global-prompts/prompt-1", { method: "DELETE" });
+  });
+
+  it("saves, lists, and deletes clip prompt history items", async () => {
+    const item = { id: "clip-prompt-1", title: "Window shot", prompt: "slow push", created_at: "2026-05-17T00:00:00Z" };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(item))
+      .mockResolvedValueOnce(jsonResponse([item]))
+      .mockResolvedValueOnce(jsonResponse({ id: "clip-prompt-1" }));
+
+    await expect(saveClipPrompt("Window shot", "slow push")).resolves.toEqual(item);
+    await expect(listClipPrompts()).resolves.toEqual([item]);
+    await expect(deleteClipPrompt("clip-prompt-1")).resolves.toEqual({ id: "clip-prompt-1" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/marketing/clip-prompts",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "Window shot", prompt: "slow push" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/marketing/clip-prompts?limit=30", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/marketing/clip-prompts/clip-prompt-1", { method: "DELETE" });
+  });
+
   it("creates and updates clip attempts", async () => {
     const attempt = {
       attempt_id: "attempt-1",
@@ -101,6 +135,28 @@ describe("marketing reels api", () => {
       2,
       "/api/marketing/reel-groups/group-1/clip-attempts/attempt-1",
       expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("creates clip generations for full and single-clip runs", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({
+      group_id: "group-1",
+      clip_generation_id: "generation-1",
+      generation_type: "REGENERATE",
+      status: "RUNNING",
+      source_job_id: "job-1",
+      clip_ids: ["clip-1"],
+    }));
+
+    await createMarketingClipGeneration("group-1", {
+      generation_type: "REGENERATE",
+      clip_ids: ["clip-1"],
+      source_job_id: "job-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/marketing/reel-groups/group-1/clip-generations",
+      expect.objectContaining({ method: "POST", body: expect.stringContaining('"generation_type":"REGENERATE"') }),
     );
   });
 

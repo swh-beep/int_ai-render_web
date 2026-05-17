@@ -3,13 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const marketingApi = vi.hoisted(() => ({
   approveMarketingClipAttempt: vi.fn(),
+  createMarketingClipGeneration: vi.fn(),
   createMarketingClipAttempt: vi.fn(),
   createMarketingReelGroup: vi.fn(),
+  deleteClipPrompt: vi.fn(),
+  deleteGlobalPrompt: vi.fn(),
   deleteMarketingReelClip: vi.fn(),
   getMarketingReelGroup: vi.fn(),
+  listClipPrompts: vi.fn(),
+  listGlobalPrompts: vi.fn(),
   listMarketingReelGroups: vi.fn(),
   markMarketingReelGroupFailed: vi.fn(),
   patchMarketingFinalResult: vi.fn(),
+  saveClipPrompt: vi.fn(),
+  saveGlobalPrompt: vi.fn(),
   updateMarketingReelGroupTitle: vi.fn(),
   updateMarketingClipSourceImages: vi.fn(),
   updateMarketingClipAttempt: vi.fn(),
@@ -37,9 +44,28 @@ function uploadedAssets(urls: string[]) {
   return urls.map((url) => ({ publicUrl: url, readUrl: url }));
 }
 
+function openHistory() {
+  fireEvent.click(screen.getByRole("button", { name: "히스토리 열기" }));
+}
+
 describe("MarketingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    document.body.style.overflow = "";
+    document.body.style.paddingRight = "";
+    marketingApi.listMarketingReelGroups.mockReset();
+    marketingApi.getMarketingReelGroup.mockReset();
+    marketingApi.listClipPrompts.mockReset();
+    marketingApi.createMarketingClipGeneration.mockImplementation(async (_groupId, payload) => ({
+      group_id: _groupId,
+      clip_generation_id: "generation-1",
+      generation_type: payload.generation_type,
+      status: "RUNNING",
+      source_job_id: payload.source_job_id,
+      clip_ids: payload.clip_ids,
+    }));
+    marketingApi.listMarketingReelGroups.mockResolvedValue([]);
+    marketingApi.listClipPrompts.mockResolvedValue([]);
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: vi.fn((file: File) => `blob:${file.name}`),
@@ -47,11 +73,53 @@ describe("MarketingPage", () => {
     });
   });
 
-  it("keeps source generation disabled until at least three images are selected", () => {
+  it("keeps source generation disabled until at least one image is selected", () => {
     render(<MarketingPage />);
 
     expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeDisabled();
     expect(screen.getByText(/아직 선택된 사진이 없습니다./)).toBeInTheDocument();
+  });
+
+  it("allows a single image to start source generation and enter Step 2", async () => {
+    marketingApi.createMarketingReelGroup.mockImplementationOnce(async (payload) => ({
+      group_id: "group-1",
+      clips: payload.clips.map((clip, index) => ({
+        clip_id: `clip-${index + 1}`,
+        client_image_id: clip.clientImageId,
+      })),
+    }));
+    outputsApi.uploadOutputImageAssets.mockResolvedValueOnce(uploadedAssets(["https://cdn.example/start-1.png"]));
+    marketingApi.updateMarketingClipSourceImages.mockImplementationOnce(async (_groupId, payload) => ({
+      group_id: "group-1",
+      clips: payload.clips,
+    }));
+    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
+    videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
+      status: "COMPLETED",
+      progress: 100,
+      results: ["/outputs/clip-1.mp4"],
+    });
+    outputsApi.publishOutputAsset.mockResolvedValueOnce("https://cdn.example/clip-1.mp4");
+    marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
+    render(<MarketingPage />);
+
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [new File(["one"], "one.png", { type: "image/png" })],
+      },
+    });
+    expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
+
+    expect(await screen.findByText("Clip 1")).toBeInTheDocument();
+    await waitFor(() => expect(marketingApi.createMarketingReelGroup).toHaveBeenCalledWith(expect.objectContaining({
+      clips: [expect.objectContaining({ order: 1 })],
+    })));
+    expect(videoApi.requestSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ url: "https://cdn.example/start-1.png" })],
+    }));
+    expect(screen.queryByText("Clip 2")).not.toBeInTheDocument();
   });
 
   it("renders the three-step marketing workflow controls", () => {
@@ -66,13 +134,81 @@ describe("MarketingPage", () => {
     render(<MarketingPage />);
 
     expect(screen.getByRole("heading", { name: /Marketing Reels Studio/i })).toBeInTheDocument();
-    expect(screen.getByLabelText("Content type")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Content type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tone")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Platform")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Goal")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Video ratio")).getByRole("option", { name: "이미지 비율대로" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Global prompt 저장" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Global prompt 가져오기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "이전 Global prompt 가져오기" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("이미지 선택")).toBeInTheDocument();
-    expect(screen.getByText("공용 히스토리")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "히스토리 열기" })).toBeInTheDocument();
+    openHistory();
+    expect(screen.getByRole("dialog", { name: "공용 히스토리" })).toBeInTheDocument();
     expect(screen.getByText("Kling payload preview")).toBeInTheDocument();
-    expect(screen.getByText("Hook")).toBeInTheDocument();
-    expect(screen.getByText("Caption")).toBeInTheDocument();
-    expect(screen.getByText("CTA")).toBeInTheDocument();
+    expect(screen.queryByText("Hook")).not.toBeInTheDocument();
+    expect(screen.queryByText("Caption")).not.toBeInTheDocument();
+    expect(screen.queryByText("CTA")).not.toBeInTheDocument();
+  });
+
+  it("locks background scroll while the shared history modal is open", () => {
+    render(<MarketingPage />);
+
+    openHistory();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+
+    expect(screen.queryByRole("dialog", { name: "공용 히스토리" })).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("saves, loads, and deletes global prompt history from a modal", async () => {
+    marketingApi.saveGlobalPrompt.mockResolvedValueOnce({
+      id: "prompt-1",
+      global_prompt: "saved warm oak prompt",
+      created_at: "2026-05-15T00:00:00Z",
+    });
+    marketingApi.listGlobalPrompts.mockResolvedValueOnce([
+      {
+        id: "prompt-2",
+        global_prompt: "previous editorial prompt",
+        created_at: "2026-05-14T00:00:00Z",
+      },
+    ]);
+    marketingApi.deleteGlobalPrompt.mockResolvedValueOnce({ id: "prompt-2" });
+    render(<MarketingPage />);
+
+    fireEvent.change(screen.getByLabelText("Global prompt"), { target: { value: "saved warm oak prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Global prompt 저장" }));
+
+    await waitFor(() => expect(marketingApi.saveGlobalPrompt).toHaveBeenCalledWith("saved warm oak prompt"));
+    expect(await screen.findByText("Global prompt 저장 완료")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Global prompt 가져오기" }));
+    expect(await screen.findByRole("dialog", { name: "Global prompt 내역" })).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(marketingApi.deleteGlobalPrompt).toHaveBeenCalledWith("prompt-2"));
+    expect(screen.queryByText("previous editorial prompt")).not.toBeInTheDocument();
+    expect(screen.getByText("Global prompt 삭제 완료")).toBeInTheDocument();
+
+    marketingApi.listGlobalPrompts.mockResolvedValueOnce([
+      {
+        id: "prompt-3",
+        global_prompt: "previous editorial prompt",
+        created_at: "2026-05-14T00:00:00Z",
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(document.body.style.overflow).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Global prompt 가져오기" }));
+    fireEvent.click(await screen.findByRole("button", { name: /적용: previous editorial prompt/ }));
+
+    expect(screen.getByLabelText("Global prompt")).toHaveValue("previous editorial prompt");
+    expect(screen.queryByRole("dialog", { name: "Global prompt 내역" })).not.toBeInTheDocument();
   });
 
   it("renders start and end frame controls for each selected clip row", () => {
@@ -92,6 +228,150 @@ describe("MarketingPage", () => {
     expect(screen.getAllByText("End Frame")).toHaveLength(3);
     expect(screen.getAllByLabelText(/End Frame 선택/)).toHaveLength(3);
     expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeEnabled();
+  });
+
+  it("saves a Step 1 row prompt with a searchable title", async () => {
+    marketingApi.saveClipPrompt.mockResolvedValueOnce({
+      id: "clip-prompt-1",
+      title: "Window opening",
+      prompt: "slow push toward the curtain",
+      created_at: "2026-05-17T00:00:00Z",
+    });
+    render(<MarketingPage />);
+
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [
+          new File(["one"], "one.png", { type: "image/png" }),
+          new File(["two"], "two.png", { type: "image/png" }),
+          new File(["three"], "three.png", { type: "image/png" }),
+        ],
+      },
+    });
+    fireEvent.change(screen.getAllByPlaceholderText("이 이미지로 만들고 싶은 장면을 입력하세요.")[0], {
+      target: { value: "slow push toward the curtain" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Prompt 저장" })[0]);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Window opening" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(marketingApi.saveClipPrompt).toHaveBeenCalledWith("Window opening", "slow push toward the curtain"));
+    expect(screen.queryByRole("dialog", { name: "Clip prompt 내역" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Clip prompt를 저장했습니다.");
+  });
+
+  it("loads and applies a saved Step 1 row prompt by title search", async () => {
+    marketingApi.listClipPrompts.mockResolvedValueOnce([
+      {
+        id: "clip-prompt-1",
+        title: "Window opening",
+        prompt: "slow push toward the curtain",
+        created_at: "2026-05-17T00:00:00Z",
+      },
+      {
+        id: "clip-prompt-2",
+        title: "Kitchen pan",
+        prompt: "wide move across the island",
+        created_at: "2026-05-16T00:00:00Z",
+      },
+    ]);
+    render(<MarketingPage />);
+
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [
+          new File(["one"], "one.png", { type: "image/png" }),
+          new File(["two"], "two.png", { type: "image/png" }),
+          new File(["three"], "three.png", { type: "image/png" }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Prompt 가져오기" })[0]);
+
+    expect(await screen.findByRole("dialog", { name: "Clip prompt 내역" })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("제목, 출처 또는 prompt 검색"), { target: { value: "window" } });
+    expect(screen.getByRole("button", { name: /적용: Window opening/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /적용: Kitchen pan/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /적용: Window opening/ }));
+
+    expect(screen.getAllByPlaceholderText("이 이미지로 만들고 싶은 장면을 입력하세요.")[0]).toHaveValue("slow push toward the curtain");
+    expect(screen.getByRole("status")).toHaveTextContent("Clip prompt를 적용했습니다.");
+  });
+
+  it("loads Step 1 prompts from shared history into the row prompt picker", async () => {
+    marketingApi.listClipPrompts.mockResolvedValueOnce([]);
+    marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
+      {
+        group_id: "history-final",
+        created_at: "2026-05-10T00:00:00Z",
+        final_title: "Finished showroom reel",
+        clip_count: 2,
+        status: "COMPLETED",
+      },
+    ]);
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce({
+      group_id: "history-final",
+      status: "COMPLETED",
+      created_at: "2026-05-10T00:00:00Z",
+      updated_at: "2026-05-10T00:00:00Z",
+      final_title: "Finished showroom reel",
+      global_prompt: "warm showroom prompt",
+      platform: "Instagram",
+      tone: "Editorial",
+      goal: "awareness",
+      clips: [
+        {
+          clip_id: "clip-1",
+          client_image_id: "client-1",
+          source_image_url: "https://cdn.example/start-1.png",
+          generation_mode: "START_ONLY",
+          original_order: 1,
+          current_order: 1,
+          initial_prompt: "history window prompt",
+          target_duration_sec: 5,
+          approved_attempt_id: null,
+          deleted_at: null,
+          attempts: [],
+        },
+        {
+          clip_id: "clip-2",
+          client_image_id: "client-2",
+          source_image_url: "https://cdn.example/start-2.png",
+          generation_mode: "START_ONLY",
+          original_order: 2,
+          current_order: 2,
+          initial_prompt: "",
+          target_duration_sec: 5,
+          approved_attempt_id: null,
+          deleted_at: null,
+          attempts: [],
+        },
+      ],
+    });
+    render(<MarketingPage />);
+
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [
+          new File(["one"], "one.png", { type: "image/png" }),
+          new File(["two"], "two.png", { type: "image/png" }),
+          new File(["three"], "three.png", { type: "image/png" }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Prompt 가져오기" })[0]);
+
+    const dialog = await screen.findByRole("dialog", { name: "Clip prompt 내역" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: /히스토리 Prompt 1/ }));
+    expect(within(dialog).getByText(/완료/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /적용: Finished showroom reel · Clip 1/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /적용: Finished showroom reel · Clip 2/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /적용: Finished showroom reel · Clip 1/ }));
+
+    expect(screen.getAllByPlaceholderText("이 이미지로 만들고 싶은 장면을 입력하세요.")[0]).toHaveValue("history window prompt");
+    expect(screen.queryByRole("dialog", { name: "Clip prompt 내역" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Clip prompt를 적용했습니다.");
   });
 
   it("revokes preview object URLs when an image row is removed", async () => {
@@ -155,13 +435,198 @@ describe("MarketingPage", () => {
     });
 
     render(<MarketingPage />);
-    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    openHistory();
     fireEvent.click(await screen.findByText("1 clips"));
 
     expect(await screen.findByText("reference clip prompt")).toBeInTheDocument();
     expect(screen.getByText("approved reference prompt")).toBeInTheDocument();
     expect(screen.getByText("Start Frame")).toBeInTheDocument();
     expect(screen.getByText("End Frame")).toBeInTheDocument();
+  });
+
+  it("presents shared history as a searchable restore workspace", async () => {
+    marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
+      {
+        group_id: "history-final",
+        created_at: "2026-05-10T00:00:00Z",
+        final_title: "Finished showroom reel",
+        final_video_url: "https://cdn.example/final.mp4",
+        representative_image_url: "https://cdn.example/thumb.png",
+        clip_count: 3,
+        status: "COMPLETED",
+      },
+      {
+        group_id: "history-draft",
+        created_at: "2026-05-11T00:00:00Z",
+        final_title: "Draft review reel",
+        clip_count: 3,
+        status: "REVIEWING",
+      },
+    ]);
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce({
+      group_id: "history-final",
+      status: "COMPLETED",
+      created_at: "2026-05-10T00:00:00Z",
+      updated_at: "2026-05-10T00:00:00Z",
+      final_title: "Finished showroom reel",
+      final_video_url: "https://cdn.example/final.mp4",
+      global_prompt: "warm showroom prompt",
+      platform: "Instagram",
+      tone: "Editorial",
+      goal: "awareness",
+      clips: [],
+    });
+
+    render(<MarketingPage />);
+    openHistory();
+
+    expect(await screen.findByPlaceholderText("제목, 상태, 날짜 검색")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Finished showroom reel/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /히스토리 새로고침/ })).toBeInTheDocument();
+    expect(screen.getByText(/마지막 갱신/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("제목, 상태, 날짜 검색"), { target: { value: "showroom" } });
+
+    expect(screen.getByRole("button", { name: /Finished showroom reel/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Draft review reel/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Finished showroom reel/ }));
+
+    expect(await screen.findByRole("heading", { name: "히스토리 상세" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Step 1 설정으로 복원" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Step 2 결과 열기" })).toBeInTheDocument();
+    expect(screen.getByText("warm showroom prompt")).toBeInTheDocument();
+  });
+
+  it("imports a final history item back into Step 1 draft rows", async () => {
+    marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
+      { group_id: "history-1", created_at: "2026-05-10", clip_count: 3, status: "COMPLETED" },
+    ]);
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce({
+      group_id: "history-1",
+      status: "COMPLETED",
+      created_at: "2026-05-10",
+      updated_at: "2026-05-10",
+      final_video_url: "https://cdn.example/final.mp4",
+      global_prompt: "imported global prompt",
+      platform: "",
+      tone: "",
+      goal: "",
+      clips: [1, 2, 3].map((order) => ({
+        clip_id: `clip-${order}`,
+        client_image_id: `client-${order}`,
+        source_image_url: `https://cdn.example/start-${order}.png`,
+        generation_mode: "START_ONLY",
+        original_order: order,
+        current_order: order,
+        initial_prompt: `imported prompt ${order}`,
+        target_duration_sec: 5,
+        deleted_at: null,
+        attempts: [],
+      })),
+    });
+
+    render(<MarketingPage />);
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /3 clips/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Step 1 설정으로 복원" }));
+
+    expect(screen.queryByRole("dialog", { name: "공용 히스토리" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Step 1 설정을 복원했습니다.");
+    expect(screen.getByLabelText("Global prompt")).toHaveValue("imported global prompt");
+    expect(screen.getByDisplayValue("imported prompt 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeEnabled();
+  });
+
+  it("resets an imported history workspace back to the initial marketing state", async () => {
+    marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
+      { group_id: "history-1", created_at: "2026-05-10", clip_count: 3, status: "COMPLETED" },
+    ]);
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce({
+      group_id: "history-1",
+      status: "COMPLETED",
+      created_at: "2026-05-10",
+      updated_at: "2026-05-10",
+      final_video_url: "https://cdn.example/final.mp4",
+      global_prompt: "imported global prompt",
+      platform: "",
+      tone: "",
+      goal: "",
+      clips: [1, 2, 3].map((order) => ({
+        clip_id: `clip-${order}`,
+        client_image_id: `client-${order}`,
+        source_image_url: `https://cdn.example/start-${order}.png`,
+        generation_mode: "START_ONLY",
+        original_order: order,
+        current_order: order,
+        initial_prompt: `imported prompt ${order}`,
+        target_duration_sec: 5,
+        deleted_at: null,
+        attempts: [],
+      })),
+    });
+
+    render(<MarketingPage />);
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /3 clips/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Step 1 설정으로 복원" }));
+
+    expect(screen.getByDisplayValue("imported prompt 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "새 작업 시작" }));
+
+    expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeDisabled();
+    expect(screen.getByText(/아직 선택된 사진이 없습니다./)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("imported prompt 1")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Global prompt")).toHaveValue(
+      "따뜻한 자연광 속에서 절제된 가구의 디테일을 보여주는 시네마틱 릴스. 부드러운 카메라 무빙, 베이지와 오크 톤.",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("새 작업을 시작할 수 있도록 초기화했습니다.");
+  });
+
+  it("loads a previous generation directly into Step 2 review", async () => {
+    marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
+      { group_id: "history-1", created_at: "2026-05-10", clip_count: 3, status: "REVIEWING" },
+    ]);
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce({
+      group_id: "history-1",
+      status: "REVIEWING",
+      created_at: "2026-05-10",
+      updated_at: "2026-05-10",
+      global_prompt: "loaded generation prompt",
+      platform: "",
+      tone: "",
+      goal: "",
+      clips: [1, 2, 3].map((order) => ({
+        clip_id: `clip-${order}`,
+        client_image_id: `client-${order}`,
+        source_image_url: `https://cdn.example/start-${order}.png`,
+        generation_mode: "START_ONLY",
+        original_order: order,
+        current_order: order,
+        initial_prompt: `loaded prompt ${order}`,
+        target_duration_sec: 5,
+        deleted_at: null,
+        attempts: [{
+          attempt_id: `attempt-${order}`,
+          clip_id: `clip-${order}`,
+          source_job_id: "job-1",
+          source_job_item_index: order - 1,
+          prompt: `loaded prompt ${order}`,
+          duration_sec: 5,
+          status: "COMPLETED",
+          source_video_url: `https://cdn.example/clip-${order}.mp4`,
+        }],
+      })),
+    });
+
+    render(<MarketingPage />);
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /3 clips/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Step 2 결과 열기" }));
+
+    expect(screen.queryByRole("dialog", { name: "공용 히스토리" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Step 2 결과를 열었습니다.");
+    expect(screen.getByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
+    expect(screen.getAllByText("loaded prompt 1").length).toBeGreaterThan(0);
   });
 
   it("updates a selected history title", async () => {
@@ -187,8 +652,8 @@ describe("MarketingPage", () => {
     });
 
     render(<MarketingPage />);
-    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
-    fireEvent.click(await screen.findByText("old title"));
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /old title/ }));
     fireEvent.change(await screen.findByDisplayValue("old title"), { target: { value: "new title" } });
     fireEvent.click(screen.getByRole("button", { name: "제목 저장" }));
 
@@ -298,12 +763,12 @@ describe("MarketingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /1생성 전/i }));
 
     await waitFor(() => expect(screen.getByText(/생성 그룹이 만들어진 뒤에는/)).toBeInTheDocument());
-    expect(screen.getByLabelText("Content type")).toBeDisabled();
-    expect(screen.getByDisplayValue("신상 라운지 컬렉션 인지도 확대")).toBeDisabled();
+    expect(screen.queryByLabelText("Content type")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Video ratio")).toBeDisabled();
     expect(screen.getByDisplayValue(/따뜻한 자연광 속에서/)).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "삭제" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
-    expect(screen.getAllByRole("button", { name: "위" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
-    expect(screen.getAllByRole("button", { name: "아래" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    expect(screen.getAllByRole("button", { name: /이미지 위로 이동/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
+    expect(screen.getAllByRole("button", { name: /이미지 아래로 이동/ }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
 
   it("unlocks Step 1 for a fresh retry when setup fails before source generation starts", async () => {
@@ -554,6 +1019,57 @@ describe("MarketingPage", () => {
     await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalled(), { timeout: 3000 });
   });
 
+  it("uses a single approved clip as the final video without calling compile", async () => {
+    marketingApi.createMarketingReelGroup.mockImplementationOnce(async (payload) => ({
+      group_id: "group-1",
+      clips: payload.clips.map((clip, index) => ({
+        clip_id: `clip-${index + 1}`,
+        client_image_id: clip.clientImageId,
+      })),
+    }));
+    outputsApi.uploadOutputImageAssets.mockResolvedValueOnce(uploadedAssets(["https://cdn.example/start-1.png"]));
+    marketingApi.updateMarketingClipSourceImages.mockImplementationOnce(async (_groupId, payload) => ({
+      group_id: "group-1",
+      clips: payload.clips,
+    }));
+    videoApi.requestSourceGeneration.mockResolvedValueOnce("source-job-1");
+    marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
+    videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
+      status: "COMPLETED",
+      progress: 100,
+      results: ["/outputs/clip-1.mp4"],
+    });
+    outputsApi.publishOutputAsset.mockResolvedValueOnce("https://cdn.example/clip-1.mp4");
+    marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
+    marketingApi.approveMarketingClipAttempt.mockResolvedValue({ group_id: "group-1" });
+    marketingApi.patchMarketingFinalResult.mockResolvedValueOnce({ group_id: "group-1" });
+
+    render(<MarketingPage />);
+    fireEvent.change(screen.getByLabelText("이미지 선택"), {
+      target: {
+        files: [new File(["one"], "one.png", { type: "image/png" })],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
+
+    const approveButton = await screen.findByRole("button", { name: "승인" });
+    fireEvent.click(approveButton);
+    await waitFor(() => expect(screen.getByRole("button", { name: "단일 영상 최종본 설정" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "단일 영상 최종본 설정" }));
+    expect(await screen.findByText("승인한 source clip 1개를 합치기 없이 최종 영상으로 저장합니다.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "단일 영상 최종본으로 사용" }));
+
+    await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalledWith("group-1", expect.objectContaining({
+      compile_job_id: expect.stringMatching(/^single-clip-/),
+      final_video_url: "https://cdn.example/clip-1.mp4",
+      selected_attempt_ids: [expect.any(String)],
+      compile_payload_summary: expect.objectContaining({ mode: "single_clip_passthrough" }),
+    })));
+    expect(videoApi.requestCompile).not.toHaveBeenCalled();
+    expect(screen.getByText("단일 영상 최종본이 준비되었습니다.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Final Reel")).toBeInTheDocument();
+  });
+
   it("uses an explicitly selected history clip as the regeneration reference", async () => {
     marketingApi.listMarketingReelGroups.mockResolvedValueOnce([
       { group_id: "history-1", created_at: "2026-05-10", clip_count: 2, status: "COMPLETED" },
@@ -649,8 +1165,8 @@ describe("MarketingPage", () => {
     marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
 
     render(<MarketingPage />);
-    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
-    fireEvent.click(await screen.findByText("2 clips"));
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /2 clips/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Clip 2 레퍼런스로 선택" }));
 
     fireEvent.change(screen.getByLabelText("이미지 선택"), {
@@ -725,8 +1241,8 @@ describe("MarketingPage", () => {
     });
 
     render(<MarketingPage />);
-    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
-    fireEvent.click(await screen.findByText("1 clips"));
+    openHistory();
+    fireEvent.click(await screen.findByRole("button", { name: /1 clips/ }));
 
     expect(await screen.findByText("playable attempt prompt")).toBeInTheDocument();
     expect(screen.queryByText("stale approved prompt")).not.toBeInTheDocument();

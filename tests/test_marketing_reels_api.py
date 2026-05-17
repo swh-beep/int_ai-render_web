@@ -70,11 +70,12 @@ def _post_group_with_clip_count(client: TestClient, count: int):
     return response
 
 
-def test_group_create_requires_three_to_ten_clips():
+def test_group_create_requires_one_to_ten_clips():
     client = _client()
 
-    assert _post_group_with_clip_count(client, 1).status_code == 422
-    assert _post_group_with_clip_count(client, 2).status_code == 422
+    assert _post_group_with_clip_count(client, 0).status_code == 422
+    assert _post_group_with_clip_count(client, 1).status_code == 200
+    assert _post_group_with_clip_count(client, 2).status_code == 200
     assert _post_group_with_clip_count(client, 3).status_code == 200
     assert _post_group_with_clip_count(client, 10).status_code == 200
     assert _post_group_with_clip_count(client, 11).status_code == 422
@@ -135,6 +136,87 @@ def test_marketing_db_health_returns_service_unavailable_on_config_error():
 
     assert response.status_code == 503
     assert "MARKETING_DB_PASSWORD" in response.json()["detail"]
+
+
+def test_global_prompt_history_can_be_saved_and_listed():
+    client = _client()
+
+    save_response = client.post(
+        "/api/marketing/global-prompts",
+        json={"global_prompt": "warm oak showroom reel"},
+    )
+    list_response = client.get("/api/marketing/global-prompts")
+
+    assert save_response.status_code == 200
+    saved = save_response.json()
+    assert saved["global_prompt"] == "warm oak showroom reel"
+    assert saved["id"]
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["global_prompt"] == "warm oak showroom reel"
+
+
+def test_clip_prompt_history_can_be_saved_listed_and_deleted_without_global_leakage():
+    client = _client()
+
+    global_response = client.post(
+        "/api/marketing/global-prompts",
+        json={"global_prompt": "shared global prompt"},
+    )
+    save_response = client.post(
+        "/api/marketing/clip-prompts",
+        json={"title": "Window opening shot", "prompt": "slow push toward sheer curtain"},
+    )
+    list_response = client.get("/api/marketing/clip-prompts")
+    global_list_response = client.get("/api/marketing/global-prompts")
+
+    assert global_response.status_code == 200
+    assert save_response.status_code == 200
+    saved = save_response.json()
+    assert saved["title"] == "Window opening shot"
+    assert saved["prompt"] == "slow push toward sheer curtain"
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["title"] == "Window opening shot"
+    assert list_response.json()[0]["prompt"] == "slow push toward sheer curtain"
+    assert global_list_response.status_code == 200
+    assert [item["global_prompt"] for item in global_list_response.json()] == ["shared global prompt"]
+
+    delete_response = client.delete(f"/api/marketing/clip-prompts/{saved['id']}")
+    assert delete_response.status_code == 200
+    assert client.get("/api/marketing/clip-prompts").json() == []
+
+
+def test_clip_prompt_history_rejects_blank_title_or_prompt():
+    client = _client()
+
+    blank_title = client.post("/api/marketing/clip-prompts", json={"title": "   ", "prompt": "valid"})
+    blank_prompt = client.post("/api/marketing/clip-prompts", json={"title": "Valid", "prompt": "   "})
+
+    assert blank_title.status_code == 422
+    assert blank_prompt.status_code == 422
+
+
+def test_global_prompt_history_can_be_deleted():
+    client = _client()
+    saved = client.post(
+        "/api/marketing/global-prompts",
+        json={"global_prompt": "prompt to delete"},
+    ).json()
+
+    delete_response = client.delete(f"/api/marketing/global-prompts/{saved['id']}")
+    list_response = client.get("/api/marketing/global-prompts")
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"id": saved["id"]}
+    assert list_response.status_code == 200
+    assert list_response.json() == []
+
+
+def test_global_prompt_history_rejects_blank_prompt():
+    client = _client()
+
+    response = client.post("/api/marketing/global-prompts", json={"global_prompt": "   "})
+
+    assert response.status_code == 422
 
 
 def test_group_create_requires_sequential_clip_order():
@@ -211,6 +293,86 @@ def test_marketing_video_group_attempt_approval_and_final_flow():
     assert detail["clips"][0]["approved_attempt_id"] == "attempt-1"
     assert detail["clips"][0]["attempts"][0]["source_video_url"] == "/outputs/a.mp4"
 
+
+def test_clip_generation_tracks_requested_drafts_and_attempts():
+    client = _client()
+    group_id, clip_ids = _create_group_with_clips(client, 3)
+
+    response = client.post(
+        f"/api/marketing/reel-groups/{group_id}/clip-generations",
+        json={
+            "generation_type": "REGENERATE",
+            "clip_ids": [clip_ids[1]],
+            "source_job_id": "job-regenerate-1",
+        },
+    )
+
+    assert response.status_code == 200
+    generation = response.json()
+    assert generation["generation_type"] == "REGENERATE"
+    assert generation["clip_ids"] == [clip_ids[1]]
+
+    attempt_payload = {
+        "attempt_id": "attempt-regenerated",
+        "clip_id": clip_ids[1],
+        "clip_generation_id": generation["clip_generation_id"],
+        "source_job_id": "job-regenerate-1",
+        "source_job_item_index": 0,
+        "prompt": "changed single clip",
+        "duration_sec": 5,
+        "status": "COMPLETED",
+        "source_video_url": "/outputs/regenerated.mp4",
+    }
+    attempt_response = client.post(f"/api/marketing/reel-groups/{group_id}/clip-attempts", json=attempt_payload)
+
+    assert attempt_response.status_code == 200
+    assert attempt_response.json()["clip_generation_id"] == generation["clip_generation_id"]
+    detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+    assert detail["generations"][0]["clip_generation_id"] == generation["clip_generation_id"]
+    assert detail["generations"][0]["clip_ids"] == [clip_ids[1]]
+
+
+def test_final_composition_preserves_selected_attempt_order():
+    client = _client()
+    group_id, clip_ids = _create_group_with_clips(client, 3)
+    generation = client.post(
+        f"/api/marketing/reel-groups/{group_id}/clip-generations",
+        json={"generation_type": "INITIAL", "clip_ids": clip_ids, "source_job_id": "job-1"},
+    ).json()
+    for index, clip_id in enumerate(clip_ids):
+        attempt_id = f"attempt-{index + 1}"
+        assert client.post(
+            f"/api/marketing/reel-groups/{group_id}/clip-attempts",
+            json={
+                "attempt_id": attempt_id,
+                "clip_id": clip_id,
+                "clip_generation_id": generation["clip_generation_id"],
+                "source_job_id": "job-1",
+                "source_job_item_index": index,
+                "prompt": f"clip {index + 1}",
+                "duration_sec": 5,
+                "status": "COMPLETED",
+                "source_video_url": f"/outputs/{attempt_id}.mp4",
+            },
+        ).status_code == 200
+        assert client.patch(
+            f"/api/marketing/reel-groups/{group_id}/clips/{clip_id}/approval",
+            json={"attempt_id": attempt_id},
+        ).status_code == 200
+
+    response = client.patch(
+        f"/api/marketing/reel-groups/{group_id}/final",
+        json={
+            "compile_job_id": "compile-ordered",
+            "final_video_url": "/outputs/final.mp4",
+            "selected_attempt_ids": ["attempt-2", "attempt-1", "attempt-3"],
+            "compile_payload_summary": {"clips": 3},
+        },
+    )
+
+    assert response.status_code == 200
+    detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+    assert detail["compositions"][0]["selected_attempt_ids"] == ["attempt-2", "attempt-1", "attempt-3"]
 
 def test_attempt_and_final_writes_are_idempotent():
     client = _client()
@@ -589,43 +751,24 @@ def test_next_start_end_patch_persists_generation_mode_with_resolved_end_url():
     assert patched["end_image_url"].endswith("/images/start/b.png")
 
 
-def test_ensure_schema_adds_missing_start_end_frame_columns_to_existing_clip_table():
+def test_ensure_schema_creates_clip_domain_tables_for_local_tests():
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE marketing_video_groups (id VARCHAR(36) PRIMARY KEY)"))
-        conn.execute(
-            text(
-                "CREATE TABLE marketing_video_clips ("
-                "id VARCHAR(36) PRIMARY KEY, "
-                "group_id VARCHAR(36) NOT NULL, "
-                "client_image_id VARCHAR(120) NOT NULL, "
-                "source_image_url TEXT NOT NULL, "
-                "original_order INTEGER NOT NULL, "
-                "current_order INTEGER NOT NULL, "
-                "initial_prompt TEXT NOT NULL DEFAULT '', "
-                "target_duration_sec INTEGER NOT NULL DEFAULT 5, "
-                "approved_attempt_id VARCHAR(120), "
-                "deleted_at DATETIME, "
-                "created_at DATETIME NOT NULL, "
-                "updated_at DATETIME NOT NULL)"
-            )
-        )
-
     repo = MarketingReelsRepository(engine)
     repo.ensure_schema()
 
     with engine.begin() as conn:
-        clip_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(marketing_video_clips)")).all()}
-        group_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(marketing_video_groups)")).all()}
+        tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'")).all()}
+        draft_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(clip_drafts)")).all()}
+        attempt_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(clip_attempts)")).all()}
 
-    assert "end_image_url" in clip_columns
-    assert "generation_mode" in clip_columns
-    assert "final_title" in group_columns
+    assert {"clip_groups", "clip_drafts", "clip_generations", "clip_attempts", "clip_compositions"}.issubset(tables)
+    assert {"end_image_url", "generation_mode", "version"}.issubset(draft_columns)
+    assert {"clip_generation_id", "based_on_draft_version"}.issubset(attempt_columns)
 
 
 def test_start_only_patch_clears_stale_end_image_url():

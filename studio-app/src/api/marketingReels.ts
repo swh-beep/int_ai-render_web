@@ -2,6 +2,8 @@ import { readApiError } from "./outputs";
 import type { MarketingGenerationMode, SourceDurationSec } from "../domain/marketing";
 
 const basePath = "/api/marketing/reel-groups";
+const globalPromptsPath = "/api/marketing/global-prompts";
+const clipPromptsPath = "/api/marketing/clip-prompts";
 
 export type MarketingReelClipCreateInput = {
   clientImageId: string;
@@ -29,6 +31,7 @@ export type MarketingReelGroupCreateResponse = {
 export type MarketingClipAttemptPayload = {
   attempt_id: string;
   clip_id: string;
+  clip_generation_id?: string;
   source_job_id: string;
   source_job_item_index: number;
   prompt: string;
@@ -52,6 +55,8 @@ export type MarketingClipApprovalResponse = {
 export type MarketingReelAttemptDetail = {
   attempt_id: string;
   clip_id: string;
+  clip_generation_id?: string;
+  based_on_draft_version?: number;
   source_job_id: string;
   source_job_item_index: number;
   prompt: string;
@@ -103,6 +108,7 @@ export type MarketingFinalResultPayload = {
   final_video_url: string;
   final_download_url?: string;
   final_title?: string;
+  selected_attempt_ids?: string[];
   compile_payload_summary: unknown;
 };
 
@@ -129,11 +135,54 @@ export type MarketingReelGroupDetail = {
   tone: string;
   goal: string;
   clips: MarketingReelClipDetail[];
+  generations?: MarketingClipGenerationDetail[];
+  compositions?: MarketingClipCompositionDetail[];
+};
+
+export type MarketingClipGenerationDetail = {
+  clip_generation_id: string;
+  group_id: string;
+  generation_type: "INITIAL" | "REGENERATE" | "PARTIAL";
+  status: string;
+  source_job_id?: string | null;
+  clip_ids: string[];
+  error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MarketingClipCompositionDetail = {
+  clip_composition_id: string;
+  group_id: string;
+  compile_job_id: string;
+  status: string;
+  title?: string | null;
+  final_video_url: string;
+  final_download_url?: string | null;
+  selected_attempt_ids: string[];
+  compile_payload_summary?: unknown;
+  error?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type MarketingGroupTitleUpdateResponse = {
   group_id: string;
   final_title: string;
+};
+
+export type MarketingGlobalPromptHistoryItem = {
+  id: string;
+  title?: string | null;
+  global_prompt: string;
+  created_at: string;
+};
+
+export type MarketingClipPromptHistoryItem = {
+  id: string;
+  title: string;
+  prompt: string;
+  created_at: string;
 };
 
 async function parseJsonResponse<T>(response: Response, fallback: string): Promise<T> {
@@ -164,9 +213,59 @@ export async function createMarketingReelGroup(payload: MarketingReelGroupCreate
   return parseJsonResponse<MarketingReelGroupCreateResponse>(response, `마케팅 릴스 그룹 생성 실패 (${response.status})`);
 }
 
+export async function saveGlobalPrompt(globalPrompt: string): Promise<MarketingGlobalPromptHistoryItem> {
+  const response = await fetch(globalPromptsPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ global_prompt: globalPrompt }),
+  });
+  return parseJsonResponse<MarketingGlobalPromptHistoryItem>(response, `Global prompt 저장 실패 (${response.status})`);
+}
+
+export async function listGlobalPrompts(limit = 30): Promise<MarketingGlobalPromptHistoryItem[]> {
+  const response = await fetch(`${globalPromptsPath}?limit=${encodeURIComponent(String(limit))}`, { cache: "no-store" });
+  return parseJsonResponse<MarketingGlobalPromptHistoryItem[]>(response, `Global prompt 내역 조회 실패 (${response.status})`);
+}
+
+export async function deleteGlobalPrompt(promptId: string): Promise<{ id: string }> {
+  const response = await fetch(`${globalPromptsPath}/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+  return parseJsonResponse<{ id: string }>(response, `Global prompt 삭제 실패 (${response.status})`);
+}
+
+export async function saveClipPrompt(title: string, prompt: string): Promise<MarketingClipPromptHistoryItem> {
+  const response = await fetch(clipPromptsPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, prompt }),
+  });
+  return parseJsonResponse<MarketingClipPromptHistoryItem>(response, `Clip prompt 저장 실패 (${response.status})`);
+}
+
+export async function listClipPrompts(limit = 30): Promise<MarketingClipPromptHistoryItem[]> {
+  const response = await fetch(`${clipPromptsPath}?limit=${encodeURIComponent(String(limit))}`, { cache: "no-store" });
+  return parseJsonResponse<MarketingClipPromptHistoryItem[]>(response, `Clip prompt 내역 조회 실패 (${response.status})`);
+}
+
+export async function deleteClipPrompt(promptId: string): Promise<{ id: string }> {
+  const response = await fetch(`${clipPromptsPath}/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+  return parseJsonResponse<{ id: string }>(response, `Clip prompt 삭제 실패 (${response.status})`);
+}
+
 export async function markMarketingReelGroupFailed(groupId: string): Promise<{ group_id: string }> {
   const response = await fetch(`${basePath}/${encodeURIComponent(groupId)}/failed`, { method: "PATCH" });
   return parseJsonResponse<{ group_id: string }>(response, `마케팅 릴스 그룹 실패 처리 실패 (${response.status})`);
+}
+
+export async function createMarketingClipGeneration(
+  groupId: string,
+  payload: { generation_type: "INITIAL" | "REGENERATE" | "PARTIAL"; clip_ids: string[]; source_job_id?: string },
+): Promise<{ group_id: string; clip_generation_id: string; generation_type: string; status: string; source_job_id?: string; clip_ids: string[] }> {
+  const response = await fetch(`${basePath}/${encodeURIComponent(groupId)}/clip-generations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse(response, `clip generation 저장 실패 (${response.status})`);
 }
 
 export async function deleteMarketingReelClip(
