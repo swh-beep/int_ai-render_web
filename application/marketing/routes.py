@@ -7,6 +7,8 @@ from sqlalchemy import text
 from application.marketing.db import MarketingDatabaseConfigError, get_marketing_engine
 from application.marketing.repository import MarketingReelsRepository
 from application.marketing.schemas import (
+    MarketingAudioPromptCreate,
+    MarketingAudioSettingsUpdate,
     MarketingClipApprovalPayload,
     MarketingClipAttemptPayload,
     MarketingClipAttemptUpdate,
@@ -24,6 +26,7 @@ health_router = APIRouter(prefix="/api/marketing", tags=["marketing"])
 reel_groups_router = APIRouter(prefix="/api/marketing/reel-groups", tags=["marketing-reels"])
 global_prompts_router = APIRouter(prefix="/api/marketing/global-prompts", tags=["marketing-prompts"])
 clip_prompts_router = APIRouter(prefix="/api/marketing/clip-prompts", tags=["marketing-prompts"])
+audio_prompts_router = APIRouter(prefix="/api/marketing/audio-prompts", tags=["marketing-prompts"])
 
 
 @lru_cache(maxsize=1)
@@ -189,6 +192,14 @@ def update_reel_group_title(group_id: str, payload: MarketingGroupTitleUpdate):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@reel_groups_router.patch("/{group_id}/audio-settings")
+def update_reel_group_audio_settings(group_id: str, payload: MarketingAudioSettingsUpdate):
+    try:
+        return _repo_or_503().update_group_audio_settings(group_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @reel_groups_router.get("")
 def list_reel_groups(limit: int = 20):
     return _repo_or_503().list_groups(limit)
@@ -238,8 +249,27 @@ def delete_clip_prompt(prompt_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@audio_prompts_router.post("")
+def create_audio_prompt(payload: MarketingAudioPromptCreate):
+    return _repo_or_503().create_audio_prompt(payload)
+
+
+@audio_prompts_router.get("")
+def list_audio_prompts(limit: int = 30):
+    return _repo_or_503().list_audio_prompts(limit)
+
+
+@audio_prompts_router.delete("/{prompt_id}")
+def delete_audio_prompt(prompt_id: str):
+    try:
+        return _repo_or_503().delete_audio_prompt(prompt_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 router = APIRouter()
 router.include_router(health_router)
 router.include_router(reel_groups_router)
 router.include_router(global_prompts_router)
 router.include_router(clip_prompts_router)
+router.include_router(audio_prompts_router)

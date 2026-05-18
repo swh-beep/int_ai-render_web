@@ -27,6 +27,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
 from application.marketing.schemas import (
+    MarketingAudioPromptCreate,
+    MarketingAudioSettingsUpdate,
     MarketingClipApprovalPayload,
     MarketingClipAttemptPayload,
     MarketingClipAttemptUpdate,
@@ -48,6 +50,9 @@ marketing_video_groups = Table(
     Column("status", String(24), nullable=False, default="DRAFT"),
     Column("global_prompt", Text, nullable=False, default=""),
     Column("aspect_ratio", String(16), nullable=False, default="9:16"),
+    Column("video_quality", String(16), nullable=False, default="720p"),
+    Column("audio_enabled", Integer, nullable=False, default=0),
+    Column("audio_prompt", Text, nullable=False, default=""),
     Column("title", String(255)),
     Column("platform", String(64), nullable=False, default=""),
     Column("tone", String(64), nullable=False, default=""),
@@ -157,6 +162,7 @@ marketing_global_prompts = Table(
     Column("title", String(255)),
     Column("global_prompt", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("deleted_at", DateTime(timezone=True)),
 )
 
 
@@ -175,6 +181,7 @@ class MarketingReelsRepository:
     def ensure_schema(self) -> None:
         metadata.create_all(self.engine)
         self._ensure_clip_frame_columns()
+        self._ensure_group_setting_columns()
         self._ensure_group_final_title_column()
         self._ensure_prompt_history_columns()
 
@@ -209,7 +216,29 @@ class MarketingReelsRepository:
             return
 
         with self.engine.begin() as conn:
-            conn.execute(text("ALTER TABLE marketing_video_groups ADD COLUMN final_title VARCHAR(255) NULL"))
+            conn.execute(text(f"ALTER TABLE {marketing_video_groups.name} ADD COLUMN final_title VARCHAR(255) NULL"))
+
+    def _ensure_group_setting_columns(self) -> None:
+        inspector = inspect(self.engine)
+        if not inspector.has_table(marketing_video_groups.name):
+            return
+
+        existing_columns = {column["name"] for column in inspector.get_columns(marketing_video_groups.name)}
+        statements = []
+        if "aspect_ratio" not in existing_columns:
+            statements.append(f"ALTER TABLE {marketing_video_groups.name} ADD COLUMN aspect_ratio VARCHAR(16) NOT NULL DEFAULT '9:16'")
+        if "video_quality" not in existing_columns:
+            statements.append(f"ALTER TABLE {marketing_video_groups.name} ADD COLUMN video_quality VARCHAR(16) NOT NULL DEFAULT '720p'")
+        if "audio_enabled" not in existing_columns:
+            statements.append(f"ALTER TABLE {marketing_video_groups.name} ADD COLUMN audio_enabled INTEGER NOT NULL DEFAULT 0")
+        if "audio_prompt" not in existing_columns:
+            statements.append(f"ALTER TABLE {marketing_video_groups.name} ADD COLUMN audio_prompt TEXT NOT NULL DEFAULT ''")
+        if not statements:
+            return
+
+        with self.engine.begin() as conn:
+            for statement in statements:
+                conn.execute(text(statement))
 
     def _ensure_prompt_history_columns(self) -> None:
         inspector = inspect(self.engine)
@@ -225,6 +254,8 @@ class MarketingReelsRepository:
             )
         if "title" not in existing_columns:
             statements.append("ALTER TABLE marketing_global_prompts ADD COLUMN title VARCHAR(255) NULL")
+        if "deleted_at" not in existing_columns:
+            statements.append("ALTER TABLE marketing_global_prompts ADD COLUMN deleted_at DATETIME NULL")
         if not statements:
             return
 
@@ -284,6 +315,10 @@ class MarketingReelsRepository:
                     id=group_id,
                     status="DRAFT",
                     global_prompt=payload.global_prompt,
+                    aspect_ratio=payload.aspect_ratio,
+                    video_quality=payload.video_quality,
+                    audio_enabled=1 if payload.audio_enabled else 0,
+                    audio_prompt=payload.audio_prompt,
                     platform=payload.platform,
                     tone=payload.tone,
                     goal=payload.goal,
@@ -310,7 +345,14 @@ class MarketingReelsRepository:
                         updated_at=now,
                     )
                 )
-        return {"group_id": group_id, "clips": clip_rows}
+        return {
+            "group_id": group_id,
+            "aspect_ratio": payload.aspect_ratio,
+            "video_quality": payload.video_quality,
+            "audio_enabled": bool(payload.audio_enabled),
+            "audio_prompt": payload.audio_prompt,
+            "clips": clip_rows,
+        }
 
     def mark_group_failed(self, group_id: str) -> None:
         with self.engine.begin() as conn:
@@ -668,6 +710,8 @@ class MarketingReelsRepository:
                     marketing_video_groups.c.id,
                     marketing_video_groups.c.status,
                     marketing_video_groups.c.created_at,
+                    marketing_video_groups.c.aspect_ratio,
+                    marketing_video_groups.c.video_quality,
                     marketing_video_groups.c.final_title,
                     marketing_video_groups.c.final_video_url,
                     marketing_video_clips.c.source_image_url,
@@ -705,6 +749,8 @@ class MarketingReelsRepository:
                         "group_id": row["id"],
                         "status": row["status"],
                         "created_at": _iso(row["created_at"]),
+                        "aspect_ratio": row["aspect_ratio"] or "9:16",
+                        "video_quality": row["video_quality"] or "720p",
                         "final_title": row["final_title"],
                         "final_video_url": row["final_video_url"],
                         "representative_image_url": row["source_image_url"],
@@ -776,6 +822,10 @@ class MarketingReelsRepository:
             "status": group["status"],
             "created_at": _iso(group["created_at"]),
             "updated_at": _iso(group["updated_at"]),
+            "aspect_ratio": group["aspect_ratio"] or "9:16",
+            "video_quality": group["video_quality"] or "720p",
+            "audio_enabled": bool(group["audio_enabled"]),
+            "audio_prompt": group["audio_prompt"] or "",
             "final_video_url": group["final_video_url"],
             "final_download_url": group["final_download_url"],
             "final_title": group["final_title"],
@@ -800,6 +850,25 @@ class MarketingReelsRepository:
             raise KeyError("Attempt not found")
         return _attempt_to_dict(attempt)
 
+    def update_group_audio_settings(self, group_id: str, payload: MarketingAudioSettingsUpdate) -> dict[str, Any]:
+        now = utcnow()
+        with self.engine.begin() as conn:
+            self._require_group(conn, group_id)
+            conn.execute(
+                update(marketing_video_groups)
+                .where(marketing_video_groups.c.id == group_id)
+                .values(
+                    audio_enabled=1 if payload.audio_enabled else 0,
+                    audio_prompt=payload.audio_prompt,
+                    updated_at=now,
+                )
+            )
+        return {
+            "group_id": group_id,
+            "audio_enabled": bool(payload.audio_enabled),
+            "audio_prompt": payload.audio_prompt,
+        }
+
     def create_global_prompt(self, payload: MarketingGlobalPromptCreate) -> dict[str, Any]:
         now = utcnow()
         prompt_id = new_id()
@@ -811,6 +880,7 @@ class MarketingReelsRepository:
                     title=None,
                     global_prompt=payload.global_prompt,
                     created_at=now,
+                    deleted_at=None,
                 )
             )
         return {"id": prompt_id, "title": None, "global_prompt": payload.global_prompt, "created_at": _iso(now)}
@@ -820,7 +890,10 @@ class MarketingReelsRepository:
         with self.engine.begin() as conn:
             rows = conn.execute(
                 select(marketing_global_prompts)
-                .where(marketing_global_prompts.c.prompt_type == "GLOBAL")
+                .where(and_(
+                    marketing_global_prompts.c.prompt_type == "GLOBAL",
+                    marketing_global_prompts.c.deleted_at.is_(None),
+                ))
                 .order_by(desc(marketing_global_prompts.c.created_at))
                 .limit(safe_limit)
             ).mappings().all()
@@ -835,14 +908,18 @@ class MarketingReelsRepository:
         ]
 
     def delete_global_prompt(self, prompt_id: str) -> dict[str, str]:
+        now = utcnow()
         with self.engine.begin() as conn:
             result = conn.execute(
-                marketing_global_prompts.delete().where(
+                update(marketing_global_prompts)
+                .where(
                     and_(
                         marketing_global_prompts.c.id == prompt_id,
                         marketing_global_prompts.c.prompt_type == "GLOBAL",
+                        marketing_global_prompts.c.deleted_at.is_(None),
                     )
                 )
+                .values(deleted_at=now)
             )
             if result.rowcount == 0:
                 raise KeyError("Global prompt not found")
@@ -859,6 +936,7 @@ class MarketingReelsRepository:
                     title=payload.title,
                     global_prompt=payload.prompt,
                     created_at=now,
+                    deleted_at=None,
                 )
             )
         return {"id": prompt_id, "title": payload.title, "prompt": payload.prompt, "created_at": _iso(now)}
@@ -894,6 +972,62 @@ class MarketingReelsRepository:
             )
             if result.rowcount == 0:
                 raise KeyError("Clip prompt not found")
+        return {"id": prompt_id}
+
+    def create_audio_prompt(self, payload: MarketingAudioPromptCreate) -> dict[str, Any]:
+        now = utcnow()
+        prompt_id = new_id()
+        with self.engine.begin() as conn:
+            conn.execute(
+                insert(marketing_global_prompts).values(
+                    id=prompt_id,
+                    prompt_type="AUDIO",
+                    title=payload.title,
+                    global_prompt=payload.prompt,
+                    created_at=now,
+                    deleted_at=None,
+                )
+            )
+        return {"id": prompt_id, "title": payload.title, "prompt": payload.prompt, "created_at": _iso(now)}
+
+    def list_audio_prompts(self, limit: int = 30) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(100, int(limit or 30)))
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(marketing_global_prompts)
+                .where(and_(
+                    marketing_global_prompts.c.prompt_type == "AUDIO",
+                    marketing_global_prompts.c.deleted_at.is_(None),
+                ))
+                .order_by(desc(marketing_global_prompts.c.created_at))
+                .limit(safe_limit)
+            ).mappings().all()
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"] or "제목 없음",
+                "prompt": row["global_prompt"],
+                "created_at": _iso(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def delete_audio_prompt(self, prompt_id: str) -> dict[str, str]:
+        now = utcnow()
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                update(marketing_global_prompts)
+                .where(
+                    and_(
+                        marketing_global_prompts.c.id == prompt_id,
+                        marketing_global_prompts.c.prompt_type == "AUDIO",
+                        marketing_global_prompts.c.deleted_at.is_(None),
+                    )
+                )
+                .values(deleted_at=now)
+            )
+            if result.rowcount == 0:
+                raise KeyError("Audio prompt not found")
         return {"id": prompt_id}
 
 

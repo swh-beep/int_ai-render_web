@@ -10,6 +10,10 @@ from application.marketing.repository import MarketingReelsRepository, create_sq
 
 def _client():
     repo = create_sqlite_memory_repository()
+    return _client_for_repo(repo)
+
+
+def _client_for_repo(repo: MarketingReelsRepository):
     routes.reset_marketing_repository_cache()
     routes.get_marketing_repository = lambda: repo
     app = FastAPI()
@@ -155,6 +159,50 @@ def test_global_prompt_history_can_be_saved_and_listed():
     assert list_response.json()[0]["global_prompt"] == "warm oak showroom reel"
 
 
+def test_audio_prompt_history_can_be_saved_listed_and_soft_deleted_without_global_leakage():
+    repo = create_sqlite_memory_repository()
+    client = _client_for_repo(repo)
+
+    global_response = client.post(
+        "/api/marketing/global-prompts",
+        json={"global_prompt": "shared global prompt"},
+    )
+    clip_response = client.post(
+        "/api/marketing/clip-prompts",
+        json={"title": "Window opening shot", "prompt": "slow push toward sheer curtain"},
+    )
+    save_response = client.post(
+        "/api/marketing/audio-prompts",
+        json={"title": "Soft room tone", "prompt": "subtle interior ambience, no speech"},
+    )
+    list_response = client.get("/api/marketing/audio-prompts")
+    global_list_response = client.get("/api/marketing/global-prompts")
+    clip_list_response = client.get("/api/marketing/clip-prompts")
+
+    assert global_response.status_code == 200
+    assert clip_response.status_code == 200
+    assert save_response.status_code == 200
+    saved = save_response.json()
+    assert saved["title"] == "Soft room tone"
+    assert saved["prompt"] == "subtle interior ambience, no speech"
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["title"] == "Soft room tone"
+    assert list_response.json()[0]["prompt"] == "subtle interior ambience, no speech"
+    assert [item["global_prompt"] for item in global_list_response.json()] == ["shared global prompt"]
+    assert [item["prompt"] for item in clip_list_response.json()] == ["slow push toward sheer curtain"]
+
+    delete_response = client.delete(f"/api/marketing/audio-prompts/{saved['id']}")
+    assert delete_response.status_code == 200
+    assert client.get("/api/marketing/audio-prompts").json() == []
+    with repo.engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT deleted_at FROM marketing_global_prompts WHERE id = :id"),
+            {"id": saved["id"]},
+        ).mappings().one()
+    assert row["deleted_at"] is not None
+    assert client.delete(f"/api/marketing/audio-prompts/{saved['id']}").status_code == 404
+
+
 def test_clip_prompt_history_can_be_saved_listed_and_deleted_without_global_leakage():
     client = _client()
 
@@ -195,8 +243,9 @@ def test_clip_prompt_history_rejects_blank_title_or_prompt():
     assert blank_prompt.status_code == 422
 
 
-def test_global_prompt_history_can_be_deleted():
-    client = _client()
+def test_global_prompt_history_can_be_soft_deleted():
+    repo = create_sqlite_memory_repository()
+    client = _client_for_repo(repo)
     saved = client.post(
         "/api/marketing/global-prompts",
         json={"global_prompt": "prompt to delete"},
@@ -209,6 +258,13 @@ def test_global_prompt_history_can_be_deleted():
     assert delete_response.json() == {"id": saved["id"]}
     assert list_response.status_code == 200
     assert list_response.json() == []
+    with repo.engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT deleted_at FROM marketing_global_prompts WHERE id = :id"),
+            {"id": saved["id"]},
+        ).mappings().one()
+    assert row["deleted_at"] is not None
+    assert client.delete(f"/api/marketing/global-prompts/{saved['id']}").status_code == 404
 
 
 def test_global_prompt_history_rejects_blank_prompt():
@@ -243,6 +299,122 @@ def test_group_create_requires_sequential_clip_order():
 
     assert duplicate_response.status_code == 422
     assert gapped_response.status_code == 422
+
+
+def test_group_create_detail_and_list_preserve_aspect_ratio_and_video_quality():
+    client = _client()
+    response = client.post(
+        "/api/marketing/reel-groups",
+        json={
+            "global_prompt": "wide reel",
+            "platform": "Instagram",
+            "tone": "Editorial",
+            "goal": "awareness",
+            "aspect_ratio": "16:9",
+            "video_quality": "1080p",
+            "clips": [
+                {
+                    "client_image_id": "client-wide",
+                    "source_image_url": "/outputs/wide.png",
+                    "order": 1,
+                    "prompt": "wide opening",
+                    "duration_sec": 5,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    group_id = response.json()["group_id"]
+    clip_id = response.json()["clips"][0]["clip_id"]
+    assert response.json()["aspect_ratio"] == "16:9"
+    assert response.json()["video_quality"] == "1080p"
+    assert client.patch(
+        f"/api/marketing/reel-groups/{group_id}/clips/source-images",
+        json={
+            "clips": [
+                {
+                    "clip_id": clip_id,
+                    "source_image_url": "/outputs/wide.png",
+                }
+            ]
+        },
+    ).status_code == 200
+    assert client.post(
+        f"/api/marketing/reel-groups/{group_id}/clip-attempts",
+        json={
+            "attempt_id": "attempt-wide",
+            "clip_id": clip_id,
+            "source_job_id": "job-wide",
+            "source_job_item_index": 0,
+            "prompt": "wide opening",
+            "duration_sec": 5,
+            "status": "COMPLETED",
+            "source_video_url": "/outputs/wide.mp4",
+        },
+    ).status_code == 200
+    assert client.get(f"/api/marketing/reel-groups/{group_id}").json()["aspect_ratio"] == "16:9"
+    assert client.get(f"/api/marketing/reel-groups/{group_id}").json()["video_quality"] == "1080p"
+    listed = client.get("/api/marketing/reel-groups?limit=1").json()[0]
+    assert listed["aspect_ratio"] == "16:9"
+    assert listed["video_quality"] == "1080p"
+
+
+def test_group_create_detail_and_update_persist_audio_settings():
+    client = _client()
+    response = client.post(
+        "/api/marketing/reel-groups",
+        json={
+            "global_prompt": "wide reel",
+            "audio_enabled": True,
+            "audio_prompt": "subtle interior ambience, no speech",
+            "platform": "Instagram",
+            "tone": "Editorial",
+            "goal": "awareness",
+            "aspect_ratio": "16:9",
+            "video_quality": "1080p",
+            "clips": [
+                {
+                    "client_image_id": "client-audio",
+                    "source_image_url": "/outputs/audio.png",
+                    "order": 1,
+                    "prompt": "audio opening",
+                    "duration_sec": 5,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    group_id = response.json()["group_id"]
+    assert response.json()["audio_enabled"] is True
+    assert response.json()["audio_prompt"] == "subtle interior ambience, no speech"
+    detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+    assert detail["audio_enabled"] is True
+    assert detail["audio_prompt"] == "subtle interior ambience, no speech"
+
+    update_response = client.patch(
+        f"/api/marketing/reel-groups/{group_id}/audio-settings",
+        json={"audio_enabled": False, "audio_prompt": "keep this saved prompt"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["audio_enabled"] is False
+    assert update_response.json()["audio_prompt"] == "keep this saved prompt"
+    updated_detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+    assert updated_detail["audio_enabled"] is False
+    assert updated_detail["audio_prompt"] == "keep this saved prompt"
+
+
+def test_group_aspect_ratio_defaults_to_vertical_for_legacy_payloads():
+    client = _client()
+    group_id, _ = _create_group(client)
+
+    detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+
+    assert detail["aspect_ratio"] == "9:16"
+    assert detail["video_quality"] == "720p"
+    assert detail["audio_enabled"] is False
+    assert detail["audio_prompt"] == ""
 
 
 def test_marketing_video_group_attempt_approval_and_final_flow():
@@ -769,6 +941,49 @@ def test_ensure_schema_creates_clip_domain_tables_for_local_tests():
     assert {"clip_groups", "clip_drafts", "clip_generations", "clip_attempts", "clip_compositions"}.issubset(tables)
     assert {"end_image_url", "generation_mode", "version"}.issubset(draft_columns)
     assert {"clip_generation_id", "based_on_draft_version"}.issubset(attempt_columns)
+
+
+def test_ensure_schema_adds_audio_columns_to_legacy_clip_groups():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(text(
+            """
+            CREATE TABLE clip_groups (
+                id VARCHAR(36) PRIMARY KEY,
+                status VARCHAR(24) NOT NULL DEFAULT 'DRAFT',
+                global_prompt TEXT NOT NULL DEFAULT '',
+                platform VARCHAR(64) NOT NULL DEFAULT '',
+                tone VARCHAR(64) NOT NULL DEFAULT '',
+                goal VARCHAR(255) NOT NULL DEFAULT '',
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        ))
+        conn.execute(text(
+            """
+            CREATE TABLE marketing_global_prompts (
+                id VARCHAR(36) PRIMARY KEY,
+                global_prompt TEXT NOT NULL,
+                created_at DATETIME NOT NULL
+            )
+            """
+        ))
+
+    repo = MarketingReelsRepository(engine)
+    repo.ensure_schema()
+
+    with engine.begin() as conn:
+        group_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(clip_groups)")).all()}
+        prompt_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(marketing_global_prompts)")).all()}
+
+    assert {"aspect_ratio", "video_quality", "audio_enabled", "audio_prompt"}.issubset(group_columns)
+    assert {"prompt_type", "title", "deleted_at"}.issubset(prompt_columns)
 
 
 def test_start_only_patch_clears_stale_end_image_url():

@@ -8,6 +8,8 @@ AttemptStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
 GroupStatus = Literal["DRAFT", "GENERATING", "REVIEWING", "COMPILING", "COMPLETED", "FAILED"]
 GenerationMode = Literal["START_ONLY", "START_END", "NEXT_START_AS_END"]
 ClipGenerationType = Literal["INITIAL", "REGENERATE", "PARTIAL"]
+AspectRatio = Literal["9:16", "16:9"]
+VideoQuality = Literal["720p", "1080p"]
 
 
 class MarketingReelClipCreate(BaseModel):
@@ -28,13 +30,18 @@ class MarketingReelClipCreate(BaseModel):
 
 class MarketingReelGroupCreate(BaseModel):
     global_prompt: str = ""
+    audio_enabled: bool = False
+    audio_prompt: str = ""
     platform: str = ""
     tone: str = ""
     goal: str = ""
+    aspect_ratio: AspectRatio = "9:16"
+    video_quality: VideoQuality = "720p"
     clips: list[MarketingReelClipCreate] = Field(..., min_length=1, max_length=10)
 
     @model_validator(mode="after")
     def require_sequential_clip_order(self):
+        self.audio_prompt = (self.audio_prompt or "").strip()
         expected_orders = list(range(1, len(self.clips) + 1))
         actual_orders = [clip.order for clip in self.clips]
         if sorted(actual_orders) != expected_orders:
@@ -113,6 +120,16 @@ class MarketingGroupTitleUpdate(BaseModel):
     final_title: str = Field(..., min_length=1, max_length=255)
 
 
+class MarketingAudioSettingsUpdate(BaseModel):
+    audio_enabled: bool
+    audio_prompt: str = ""
+
+    @model_validator(mode="after")
+    def normalize_audio_prompt(self):
+        self.audio_prompt = (self.audio_prompt or "").strip()
+        return self
+
+
 class MarketingGlobalPromptCreate(BaseModel):
     global_prompt: str = Field(..., min_length=1)
 
@@ -137,3 +154,7 @@ class MarketingClipPromptCreate(BaseModel):
         if not self.prompt:
             raise ValueError("prompt is required")
         return self
+
+
+class MarketingAudioPromptCreate(MarketingClipPromptCreate):
+    pass
