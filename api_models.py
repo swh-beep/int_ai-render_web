@@ -109,6 +109,8 @@ class SourceGenRequest(BaseModel):
     items: List[SourceItem]
     cfg_scale: float = 0.5
     aspect_ratio: Literal["9:16", "16:9"] = "9:16"
+    video_quality: Literal["720p", "1080p"] = "720p"
+    sound: Literal["off", "on"] = "off"
 
 
 class CompileClip(BaseModel):
@@ -127,3 +129,5 @@ class CompileRequest(BaseModel):
     outro_url: Optional[str] = None
     aspect_ratio: str = "9:16"
     aspect_mode: str = "crop"
+    video_quality: Literal["720p", "1080p"] = "1080p"
+    preserve_audio: bool = False

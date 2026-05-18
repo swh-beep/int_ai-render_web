@@ -23,10 +23,11 @@ from application.video.video_support import (
 )
 
 
-def _aspect_dimensions(aspect_ratio: str | None) -> tuple[int, int]:
+def _aspect_dimensions(aspect_ratio: str | None, video_quality: str | None = "720p") -> tuple[int, int]:
+    base_height = 1080 if video_quality == "1080p" else 720
     if aspect_ratio == "16:9":
-        return 1920, 1080
-    return 1080, 1920
+        return int(base_height * 16 / 9), base_height
+    return base_height, int(base_height * 16 / 9)
 
 
 _source_worker_lock = threading.Lock()
@@ -89,6 +90,8 @@ def _build_request_key(req: SourceGenRequest, *, job_id: str) -> tuple[str, list
     fingerprint_payload = {
         "aspect_ratio": req.aspect_ratio or "9:16",
         "cfg_scale": round(float(req.cfg_scale), 4),
+        "video_quality": req.video_quality or "720p",
+        "sound": req.sound or "off",
         "items": [],
     }
     clip_states: list[dict] = []
@@ -195,6 +198,8 @@ def _process_clip_by_index(
     total_clips: int,
     cfg_scale: float,
     aspect_ratio: str,
+    video_quality: str,
+    sound: str,
     video_target_fps: int,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
@@ -211,6 +216,8 @@ def _process_clip_by_index(
         total_clips=total_clips,
         cfg_scale=cfg_scale,
         aspect_ratio=aspect_ratio,
+        video_quality=video_quality,
+        sound=sound,
         video_target_fps=video_target_fps,
         create_kling_task=create_kling_task,
         poll_kling_task=poll_kling_task,
@@ -229,7 +236,14 @@ def _materialize_clip(item_state: dict) -> SourceItem:
     )
 
 
-def _seed_direct_job_state(job_id: str, items: list[SourceItem], cfg_scale: float, aspect_ratio: str = "9:16") -> None:
+def _seed_direct_job_state(
+    job_id: str,
+    items: list[SourceItem],
+    cfg_scale: float,
+    aspect_ratio: str = "9:16",
+    video_quality: str = "720p",
+    sound: str = "off",
+) -> None:
     clip_states = [
         _build_clip_state(
             job_id,
@@ -267,6 +281,8 @@ def _seed_direct_job_state(job_id: str, items: list[SourceItem], cfg_scale: floa
             "job_type": "source_generation",
             "cfg_scale": float(cfg_scale),
             "aspect_ratio": aspect_ratio or "9:16",
+            "video_quality": video_quality or "720p",
+            "sound": sound or "off",
             "status": "QUEUED",
             "progress": 0,
             "message": "Queued for generation...",
@@ -285,12 +301,13 @@ def _process_static_clip(
     *,
     video_target_fps: int,
     aspect_ratio: str,
+    video_quality: str,
 ) -> Path:
     update_video_job_item(job_id, idx, status="PROCESSING", provider_status="LOCAL_STATIC", last_error=None)
     temp_img = out_path.parent / f"temp_src_{job_id}_{idx}.png"
     try:
         download_to_path(item.url, temp_img)
-        target_w, target_h = _aspect_dimensions(aspect_ratio)
+        target_w, target_h = _aspect_dimensions(aspect_ratio, video_quality)
         ffmpeg_image_to_video(temp_img, out_path, float(item.duration or "5"), target_w, target_h, video_target_fps)
         update_video_job_item(job_id, idx, status="COMPLETED", output_url=f"/outputs/{out_path.name}")
         return out_path
@@ -308,6 +325,8 @@ def _process_ai_clip(
     total_clips: int,
     cfg_scale: float,
     aspect_ratio: str,
+    video_quality: str,
+    sound: str,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
 ) -> Path:
@@ -330,7 +349,11 @@ def _process_ai_clip(
             custom_effect_prompt=item.custom_effect_prompt,
         )
         attempt_count = int(item_state.get("attempt_count") or 0) + 1
-        task_kwargs = {"aspect_ratio": aspect_ratio or "9:16"}
+        task_kwargs = {
+            "aspect_ratio": aspect_ratio or "9:16",
+            "quality": video_quality or "720p",
+            "sound": sound or "off",
+        }
         if item.end_url:
             task_kwargs["end_image_url"] = item.end_url
         task_id = create_kling_task(
@@ -389,6 +412,8 @@ def _process_clip(
     total_clips: int,
     cfg_scale: float,
     aspect_ratio: str,
+    video_quality: str,
+    sound: str,
     video_target_fps: int,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
@@ -418,6 +443,7 @@ def _process_clip(
             out_path,
             video_target_fps=video_target_fps,
             aspect_ratio=aspect_ratio,
+            video_quality=video_quality,
         )
 
     return _process_ai_clip(
@@ -428,6 +454,8 @@ def _process_clip(
         total_clips=total_clips,
         cfg_scale=cfg_scale,
         aspect_ratio=aspect_ratio,
+        video_quality=video_quality,
+        sound=sound,
         create_kling_task=create_kling_task,
         poll_kling_task=poll_kling_task,
     )
@@ -437,6 +465,7 @@ def run_source_generation_job(
     job_id: str,
     items: list[SourceItem] | None = None,
     cfg_scale: float | None = None,
+    sound: str | None = None,
     *,
     video_target_fps: int,
     video_max_concurrency: int,
@@ -446,7 +475,12 @@ def run_source_generation_job(
     try:
         job = get_video_job(job_id)
         if not job and items is not None:
-            _seed_direct_job_state(job_id, items, float(cfg_scale if cfg_scale is not None else 0.5))
+            _seed_direct_job_state(
+                job_id,
+                items,
+                float(cfg_scale if cfg_scale is not None else 0.5),
+                sound=sound or "off",
+            )
             job = get_video_job(job_id)
         if not job:
             return
@@ -455,6 +489,8 @@ def run_source_generation_job(
         total_clips = len(item_states)
         cfg_scale = float(job.get("cfg_scale") or 0.5)
         aspect_ratio = job.get("aspect_ratio") or "9:16"
+        video_quality = job.get("video_quality") or "720p"
+        sound = job.get("sound") or "off"
         worker_count = _source_worker_count(total_clips, video_max_concurrency)
 
         update_video_job(
@@ -487,6 +523,8 @@ def run_source_generation_job(
                     total_clips=total_clips,
                     cfg_scale=cfg_scale,
                     aspect_ratio=aspect_ratio,
+                    video_quality=video_quality,
+                    sound=sound,
                     video_target_fps=video_target_fps,
                     create_kling_task=create_kling_task,
                     poll_kling_task=poll_kling_task,
@@ -587,6 +625,8 @@ def queue_source_generation_job(
         "request_key": request_key,
         "cfg_scale": float(req.cfg_scale),
         "aspect_ratio": req.aspect_ratio or "9:16",
+        "video_quality": req.video_quality or "720p",
+        "sound": req.sound or "off",
         "status": "QUEUED",
         "progress": 0,
         "message": "Queued for generation...",

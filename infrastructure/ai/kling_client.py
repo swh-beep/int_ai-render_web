@@ -44,6 +44,15 @@ def encode_kling_jwt(access_key: str, secret_key: str, *, now: Optional[int] = N
     return f"{encoded_header}.{encoded_payload}.{_base64url(signature)}"
 
 
+def quality_to_mode(quality: str | None) -> str | None:
+    normalized = (quality or "").strip().lower()
+    if normalized == "720p":
+        return "std"
+    if normalized == "1080p":
+        return "pro"
+    return None
+
+
 def create_kling_task(
     image_url: str,
     prompt: str,
@@ -59,19 +68,29 @@ def create_kling_task(
     video_semaphore: Semaphore,
     end_image_url: str | None = None,
     aspect_ratio: str = "9:16",
+    quality: str | None = None,
     sound: str = "off",
 ) -> str:
     if not image_url:
         raise RuntimeError("Kling image URL is empty.")
+
+    normalized_model = (model_name or DEFAULT_KLING_MODEL_NAME).strip().lower()
+    normalized_sound = (sound or "off").strip().lower() or "off"
+    normalized_mode = (quality_to_mode(quality) or mode or DEFAULT_KLING_MODE).strip().lower() or DEFAULT_KLING_MODE
+    if normalized_sound == "on" and normalized_model == "kling-v2-6":
+        if normalized_mode != "pro":
+            raise ValueError("Kling v2.6 audio requires pro mode.")
+        if end_image_url:
+            raise ValueError("Kling v2.6 native audio is not available with end frame.")
 
     payload = {
         "model_name": (model_name or DEFAULT_KLING_MODEL_NAME).strip() or DEFAULT_KLING_MODEL_NAME,
         "image": image_url,
         "prompt": prompt or "",
         "duration": str(duration or "5"),
-        "mode": (mode or DEFAULT_KLING_MODE).strip() or DEFAULT_KLING_MODE,
+        "mode": normalized_mode,
         "aspect_ratio": (aspect_ratio or "9:16").strip() or "9:16",
-        "sound": (sound or "off").strip() or "off",
+        "sound": normalized_sound,
     }
     if end_image_url:
         payload["image_tail"] = end_image_url

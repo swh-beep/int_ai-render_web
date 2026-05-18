@@ -2399,6 +2399,8 @@ def _kling_create_task(
     cfg_scale: float,
     end_image_url: str | None = None,
     aspect_ratio: str = "9:16",
+    quality: str | None = None,
+    sound: str | None = None,
 ) -> str:
     access_key, secret_key = _resolve_kling_credentials()
     return create_kling_task_impl(
@@ -2414,7 +2416,8 @@ def _kling_create_task(
         mode=KLING_MODE,
         end_image_url=end_image_url,
         aspect_ratio=aspect_ratio,
-        sound=KLING_SOUND,
+        quality=quality,
+        sound=sound or KLING_SOUND,
         video_semaphore=_video_sem,
     )
 
@@ -2507,7 +2510,7 @@ job_entrypoints_module.configure_job_entrypoints(
         queue_source_generation_job=queue_source_generation_job,
         queue_final_compile_job=queue_final_compile_job,
         get_video_job=get_video_job,
-        create_kling_task=lambda image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio="9:16": _kling_create_task(
+        create_kling_task=lambda image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio="9:16", quality=None, sound=None: _kling_create_task(
             image_url,
             prompt,
             negative_prompt,
@@ -2515,6 +2518,8 @@ job_entrypoints_module.configure_job_entrypoints(
             cfg_scale,
             end_image_url=end_image_url,
             aspect_ratio=aspect_ratio,
+            quality=quality,
+            sound=sound,
         ),
         poll_kling_task=lambda task_id, **kwargs: _kling_poll(task_id, **kwargs),
         video_target_fps=VIDEO_TARGET_FPS,

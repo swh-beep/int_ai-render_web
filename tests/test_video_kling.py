@@ -92,6 +92,44 @@ class KlingClientTests(unittest.TestCase):
         self.assertNotIn("x-freepik-api-key", kwargs["headers"])
 
     @patch("infrastructure.ai.kling_client.requests.post")
+    def test_create_kling_task_posts_sound_on_when_requested(self, mock_post):
+        mock_post.return_value = _DummyResponse(status_code=200, payload={"data": {"task_id": "task-audio"}})
+        create_kling_task(
+            "https://bucket.s3.ap-northeast-2.amazonaws.com/source.png",
+            "prompt",
+            "neg",
+            "5",
+            0.5,
+            access_key="ak",
+            secret_key="sk",
+            kling_endpoint="https://api-singapore.klingai.com/v1/videos/image2video",
+            model_name="kling-v3",
+            mode="std",
+            sound="on",
+            video_semaphore=threading.Semaphore(1),
+        )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["sound"], "on")
+
+    def test_create_kling_task_rejects_v26_audio_with_end_frame(self):
+        with self.assertRaisesRegex(ValueError, "audio.*end frame|end frame.*audio"):
+            create_kling_task(
+                "https://bucket.s3.ap-northeast-2.amazonaws.com/start.png",
+                "prompt",
+                "neg",
+                "5",
+                0.5,
+                access_key="ak",
+                secret_key="sk",
+                kling_endpoint="https://api-singapore.klingai.com/v1/videos/image2video",
+                model_name="kling-v2-6",
+                mode="pro",
+                sound="on",
+                video_semaphore=threading.Semaphore(1),
+                end_image_url="https://bucket.s3.ap-northeast-2.amazonaws.com/end.png",
+            )
+
+    @patch("infrastructure.ai.kling_client.requests.post")
     def test_create_kling_task_posts_landscape_aspect_ratio(self, mock_post):
         mock_post.return_value = _DummyResponse(status_code=200, payload={"data": {"task_id": "task-landscape"}})
         create_kling_task(
@@ -110,6 +148,26 @@ class KlingClientTests(unittest.TestCase):
         )
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["aspect_ratio"], "16:9")
+
+    @patch("infrastructure.ai.kling_client.requests.post")
+    def test_create_kling_task_maps_1080p_quality_to_pro_mode(self, mock_post):
+        mock_post.return_value = _DummyResponse(status_code=200, payload={"data": {"task_id": "task-pro"}})
+        create_kling_task(
+            "https://bucket.s3.ap-northeast-2.amazonaws.com/source.png",
+            "prompt",
+            "neg",
+            "5",
+            0.5,
+            access_key="ak",
+            secret_key="sk",
+            kling_endpoint="https://api-singapore.klingai.com/v1/videos/image2video",
+            model_name="kling-v3",
+            mode="std",
+            quality="1080p",
+            video_semaphore=threading.Semaphore(1),
+        )
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["mode"], "pro")
 
     @patch("infrastructure.ai.kling_client.requests.post")
     def test_create_kling_task_posts_end_frame_as_image_tail_in_std_mode(self, mock_post):
@@ -232,10 +290,11 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
         try:
             captured = {}
 
-            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, aspect_ratio=None):
+            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, aspect_ratio=None, quality=None, sound="off"):
                 captured["image_url"] = image_url
                 captured["duration"] = duration
                 captured["aspect_ratio"] = aspect_ratio
+                captured["quality"] = quality
                 return "task-duration"
 
             with patch.object(
@@ -256,9 +315,42 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
             self.assertEqual(captured.get("duration"), "7")
             self.assertEqual(captured.get("image_url"), "https://example.com/image.png")
             self.assertEqual(captured.get("aspect_ratio"), "9:16")
+            self.assertEqual(captured.get("quality"), "720p")
             state = get_video_job("job-duration")
             self.assertIsNotNone(state)
             self.assertEqual(state.get("status"), "COMPLETED")
+        finally:
+            os.chdir(prev_cwd)
+
+    def test_run_source_generation_job_passes_sound_to_kling(self):
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp_root)
+        try:
+            captured = {}
+
+            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, aspect_ratio=None, quality=None, sound="off"):
+                captured["sound"] = sound
+                captured["quality"] = quality
+                return "task-audio"
+
+            with patch.object(
+                source_generation_workflow,
+                "download_to_path",
+                side_effect=lambda url, out_path: Path(out_path).write_bytes(b"fake-mp4"),
+            ):
+                source_generation_workflow.run_source_generation_job(
+                    "job-audio",
+                    [SourceItem(url="https://example.com/image.png", motion="orbit_r_slow", effect="sunlight")],
+                    0.5,
+                    sound="on",
+                    video_target_fps=12,
+                    video_max_concurrency=1,
+                    create_kling_task=create_task,
+                    poll_kling_task=lambda *args, **kwargs: "https://example.com/generated.mp4",
+                )
+
+            self.assertEqual(captured.get("sound"), "on")
+            self.assertEqual(captured.get("quality"), "720p")
         finally:
             os.chdir(prev_cwd)
 
@@ -268,10 +360,11 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
         try:
             captured = {}
 
-            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio=None):
+            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio=None, quality=None, sound="off"):
                 captured["image_url"] = image_url
                 captured["end_image_url"] = end_image_url
                 captured["aspect_ratio"] = aspect_ratio
+                captured["quality"] = quality
                 return "task-end-frame"
 
             with patch.object(
@@ -299,6 +392,7 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
             self.assertEqual(captured.get("image_url"), "https://example.com/start.png")
             self.assertEqual(captured.get("end_image_url"), "https://example.com/end.png")
             self.assertEqual(captured.get("aspect_ratio"), "9:16")
+            self.assertEqual(captured.get("quality"), "720p")
             state = get_video_job("job-end-frame")
             self.assertIsNotNone(state)
             self.assertEqual(state.get("status"), "COMPLETED")
@@ -311,10 +405,11 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
         try:
             captured = {}
 
-            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio=None):
+            def create_task(image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio=None, quality=None, sound="off"):
                 captured["image_url"] = image_url
                 captured["end_image_url"] = end_image_url
                 captured["aspect_ratio"] = aspect_ratio
+                captured["quality"] = quality
                 return "task-start-end-static"
 
             with patch.object(
@@ -335,6 +430,7 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
             self.assertEqual(captured.get("image_url"), "https://example.com/start.png")
             self.assertEqual(captured.get("end_image_url"), "https://example.com/end.png")
             self.assertEqual(captured.get("aspect_ratio"), "9:16")
+            self.assertEqual(captured.get("quality"), "720p")
             mock_static_video.assert_not_called()
             state = get_video_job("job-start-end-static")
             self.assertIsNotNone(state)
@@ -438,3 +534,24 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(state)
         self.assertEqual(state.get("aspect_ratio"), "16:9")
         mock_start.assert_called_once()
+
+    def test_queue_source_generation_job_stores_video_quality(self):
+        with patch.object(source_generation_workflow, "clip_url_to_image_bytes", return_value=b"fake-image"), patch.object(
+            source_generation_workflow,
+            "_start_source_generation_worker",
+        ):
+            job_id = source_generation_workflow.queue_source_generation_job(
+                SourceGenRequest(
+                    items=[SourceItem(url="https://example.com/image.png", motion="orbit_r_slow", effect="sunlight")],
+                    cfg_scale=0.5,
+                    video_quality="1080p",
+                ),
+                video_target_fps=12,
+                video_max_concurrency=1,
+                create_kling_task=lambda *args, **kwargs: "task-123",
+                poll_kling_task=lambda *args, **kwargs: "https://example.com/generated.mp4",
+            )
+
+        state = get_video_job(job_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.get("video_quality"), "1080p")
