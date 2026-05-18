@@ -1861,6 +1861,39 @@ body[data-page="video-studio"] .card-sub-2 {
   font-size: 0.9rem;
 }
 
+.audio-prompt-toggle-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--mk-muted);
+  font-size: 0.92rem;
+}
+
+.audio-toggle {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--mk-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--mk-ink);
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.audio-toggle.is-on {
+  border-color: rgba(64, 111, 76, 0.46);
+  background: rgba(94, 141, 105, 0.14);
+  color: #315f3b;
+}
+
+.audio-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .brief-label {
   color: #9a8873;
   font-size: 0.78rem;
@@ -2079,6 +2112,94 @@ body[data-page="video-studio"] .card-sub-2 {
   padding: 0 12px;
 }
 
+.frame-preview-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(18, 17, 16, 0.76);
+  overscroll-behavior: contain;
+}
+
+.frame-preview-modal {
+  display: grid;
+  width: min(1320px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: #111;
+  color: #fff;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.36);
+}
+
+.frame-preview-modal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 0;
+}
+
+.frame-preview-modal h2,
+.frame-preview-modal p {
+  margin: 0;
+}
+
+.frame-preview-modal h2 {
+  font-size: 1.12rem;
+  font-weight: 700;
+}
+
+.frame-preview-modal p {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.86rem;
+}
+
+.frame-preview-modal header button,
+.frame-preview-nav {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+}
+
+.frame-preview-modal header button {
+  padding: 0 12px;
+}
+
+.frame-preview-stage {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  gap: 14px;
+  align-items: center;
+  padding: 0 18px 18px;
+}
+
+.frame-preview-stage img {
+  width: 100%;
+  max-height: calc(100vh - 180px);
+  object-fit: contain;
+}
+
+.frame-preview-nav {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+
 .clip-prompt-modal {
   display: grid;
   width: min(760px, 100%);
@@ -2236,12 +2357,16 @@ body[data-page="video-studio"] .card-sub-2 {
 }
 
 .marketing-workflow-shell {
-  max-width: 1480px;
+  width: min(1320px, calc(100vw - 224px));
+  max-width: none;
+  margin: 0 auto;
+  padding: 72px 0;
 }
 
 .marketing-tool-header {
   display: flex;
-  max-width: 1320px;
+  width: 100%;
+  max-width: none;
   align-items: end;
   justify-content: space-between;
   gap: 24px;
@@ -2292,7 +2417,8 @@ body[data-page="video-studio"] .card-sub-2 {
 
 .marketing-stepper {
   display: grid;
-  max-width: 1320px;
+  width: 100%;
+  max-width: none;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 0 auto 16px;
@@ -2335,7 +2461,8 @@ body[data-page="video-studio"] .card-sub-2 {
 }
 
 .marketing-alert {
-  max-width: 1320px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto 14px;
   padding: 12px 14px;
   border: 1px solid rgba(180, 77, 77, 0.35);
@@ -2352,7 +2479,8 @@ body[data-page="video-studio"] .card-sub-2 {
 
 .marketing-workflow-grid {
   display: grid;
-  max-width: 1320px;
+  width: 100%;
+  max-width: none;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin: 0 auto;
@@ -2386,6 +2514,13 @@ body[data-page="video-studio"] .card-sub-2 {
   margin-top: 0;
 }
 
+.step-audio-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .workflow-settings {
   margin-bottom: 18px;
 }
@@ -2408,8 +2543,9 @@ body[data-page="video-studio"] .card-sub-2 {
 
 .image-editor-card {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 0.92fr) minmax(280px, 1fr);
   gap: 14px;
+  align-items: start;
   padding: 14px;
   border: 1px solid var(--mk-line);
   border-radius: 8px;
@@ -2442,10 +2578,20 @@ body[data-page="video-studio"] .card-sub-2 {
 .image-editor-card img,
 .frame-empty {
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 9 / 16;
   border-radius: 8px;
-  object-fit: cover;
+  object-fit: contain;
   background: var(--mk-soft);
+}
+
+.image-editor-card .ratio-16-9,
+.frame-empty.ratio-16-9 {
+  aspect-ratio: 16 / 9;
+}
+
+.image-editor-card .ratio-9-16,
+.frame-empty.ratio-9-16 {
+  aspect-ratio: 9 / 16;
 }
 
 .frame-empty {
@@ -2500,13 +2646,14 @@ body[data-page="video-studio"] .card-sub-2 {
 .frame-file-button:has(input:disabled),
 .frame-clear-button:disabled,
 .frame-next-button:disabled,
+.clip-duration-setting:has(select:disabled),
 .clip-controls button:disabled {
   opacity: 0.52;
   cursor: not-allowed;
 }
 
 .image-editor-card header,
-.clip-review-body header,
+.clip-review-info-row header,
 .history-panel-header {
   display: flex;
   align-items: center;
@@ -2521,6 +2668,38 @@ body[data-page="video-studio"] .card-sub-2 {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+.clip-duration-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(111, 92, 67, 0.28);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(240, 229, 215, 0.82), rgba(255, 255, 255, 0.74));
+}
+
+.clip-duration-copy {
+  min-width: 0;
+}
+
+.clip-duration-copy .brief-label {
+  margin-bottom: 4px;
+  color: #6f5c43;
+}
+
+.clip-duration-copy small {
+  color: var(--mk-muted);
+  line-height: 1.45;
+}
+
+.clip-duration-select {
+  width: auto;
+  min-width: 120px;
+  flex: 0 0 auto;
 }
 
 .clip-controls button,
@@ -2558,37 +2737,67 @@ body[data-page="video-studio"] .card-sub-2 {
 
 .clip-review-card {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
   gap: 16px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--mk-line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.58);
 }
 
-.clip-review-media {
+.clip-review-media-row {
   display: grid;
-  grid-template-columns: minmax(0, 0.46fr) minmax(0, 0.54fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
 }
 
-.review-frame-stack {
-  display: grid;
-  gap: 10px;
+.clip-review-media-slot {
+  min-width: 0;
+  margin: 0;
 }
 
-.review-frame-stack img,
-.clip-review-media video,
+.frame-preview-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.frame-preview-trigger:focus-visible {
+  outline: 2px solid rgba(111, 92, 67, 0.65);
+  outline-offset: 3px;
+}
+
+.clip-review-media-slot span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--mk-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.clip-review-media-slot img,
+.clip-review-media-slot video,
+.clip-review-media-slot .frame-empty,
 .video-placeholder {
   width: 100%;
   aspect-ratio: 9 / 16;
   border-radius: 8px;
-  object-fit: cover;
+  object-fit: contain;
   background: #111;
 }
 
-.clip-review-media.ratio-16-9 video,
-.clip-review-media.ratio-16-9 .video-placeholder,
+.clip-review-media-slot .frame-empty {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: #181818;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.clip-review-media-slot .ratio-16-9,
 .final-video.ratio-16-9 {
   aspect-ratio: 16 / 9;
 }
@@ -2599,7 +2808,7 @@ body[data-page="video-studio"] .card-sub-2 {
   color: #fff;
 }
 
-.clip-review-body h3 {
+.clip-review-info-row h3 {
   margin: 0;
 }
 
@@ -2623,7 +2832,7 @@ body[data-page="video-studio"] .card-sub-2 {
   font-weight: 800;
 }
 
-.clip-review-body p {
+.clip-review-info-row p {
   color: var(--mk-muted);
   line-height: 1.55;
 }
@@ -3113,6 +3322,10 @@ body[data-page="video-studio"] .card-sub-2 {
     display: grid;
   }
 
+  .clip-review-media-row {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
   .reel-type-grid {
     grid-template-columns: 1fr;
   }
@@ -3148,6 +3361,30 @@ body[data-page="video-studio"] .card-sub-2 {
 }
 
 @media (max-width: 720px) {
+  .frame-preview-modal-backdrop {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .frame-preview-modal {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+
+  .frame-preview-stage {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .frame-preview-stage img {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    max-height: calc(100vh - 220px);
+  }
+
+  .frame-preview-nav {
+    width: 100%;
+  }
+
   .marketing-toast {
     right: 16px;
     bottom: 16px;
@@ -3168,6 +3405,11 @@ body[data-page="video-studio"] .card-sub-2 {
     padding: 32px 16px 48px;
   }
 
+  .marketing-workflow-shell {
+    width: 100%;
+    margin: 0;
+  }
+
   .marketing-title {
     font-size: 3rem;
   }
@@ -3176,7 +3418,7 @@ body[data-page="video-studio"] .card-sub-2 {
   .brief-grid,
   .marketing-stepper,
   .image-editor-card,
-  .clip-review-media,
+  .clip-review-media-row,
   .reference-grid {
     grid-template-columns: 1fr;
   }
@@ -3185,7 +3427,21 @@ body[data-page="video-studio"] .card-sub-2 {
     display: grid;
   }
 
+  .step-audio-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
   .workflow-panel-header .run-reel-btn {
+    width: 100%;
+  }
+
+  .clip-duration-setting {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .clip-duration-select {
     width: 100%;
   }
 }

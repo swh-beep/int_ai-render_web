@@ -1,6 +1,6 @@
 import { readApiError } from "./outputs";
 import type { CompilePayload as AssembleCompilePayload, SourceClipPayload } from "../domain/videoStudio";
-import type { MarketingGenerationAspectRatio } from "../domain/marketing";
+import type { MarketingGenerationAspectRatio, MarketingVideoQuality } from "../domain/marketing";
 
 export type MarketingSourceGenerationPayload = {
   items: Array<{
@@ -14,6 +14,8 @@ export type MarketingSourceGenerationPayload = {
   }>;
   cfg_scale: number;
   aspect_ratio: MarketingGenerationAspectRatio;
+  video_quality: MarketingVideoQuality;
+  sound?: "off" | "on";
 };
 
 export type MarketingCompilePayload = {
@@ -27,6 +29,8 @@ export type MarketingCompilePayload = {
   }>;
   include_intro_outro: boolean;
   aspect_ratio: string;
+  video_quality?: MarketingVideoQuality;
+  preserve_audio?: boolean;
   aspect_mode: string;
 };
 

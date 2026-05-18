@@ -61,6 +61,7 @@ describe("marketing domain", () => {
 
     expect(payload.cfg_scale).toBe(0.5);
     expect(payload.aspect_ratio).toBe("9:16");
+    expect(payload.video_quality).toBe("720p");
     expect(payload.items).toHaveLength(3);
     expect(payload.items[0]).toMatchObject({
       url: "/outputs/a.png",
@@ -112,6 +113,46 @@ describe("marketing domain", () => {
 
     expect(sourcePayload.aspect_ratio).toBe("16:9");
     expect(buildCompilePayload(["/outputs/a.mp4"], 5, "16:9").aspect_ratio).toBe("16:9");
+  });
+
+  it("maps selected video quality into source generation payloads", () => {
+    const payload = buildSourceGenerationPayload({
+      imageUrls: ["https://cdn.example/start-a.png"],
+      cutPrompts: ["camera move"],
+      videoQuality: "1080p",
+      globalPrompt: "crisp product motion",
+      language: "한국어",
+    });
+
+    expect(payload.video_quality).toBe("1080p");
+  });
+
+  it("merges audio prompt into Kling prompt only when audio is enabled", () => {
+    const payload = buildSourceGenerationPayload({
+      imageUrls: ["https://cdn.example/start-a.png"],
+      cutPrompts: ["camera move"],
+      globalPrompt: "crisp product motion",
+      audioEnabled: true,
+      audioPrompt: "subtle interior ambience, no speech",
+      language: "한국어",
+    });
+
+    expect(payload.sound).toBe("on");
+    expect(payload.items[0].custom_motion_prompt).toContain("Audio: subtle interior ambience, no speech");
+  });
+
+  it("does not merge audio prompt when audio is disabled", () => {
+    const payload = buildSourceGenerationPayload({
+      imageUrls: ["https://cdn.example/start-a.png"],
+      cutPrompts: ["camera move"],
+      globalPrompt: "crisp product motion",
+      audioEnabled: false,
+      audioPrompt: "subtle interior ambience, no speech",
+      language: "한국어",
+    });
+
+    expect(payload.sound).toBe("off");
+    expect(payload.items[0].custom_motion_prompt).not.toContain("Audio:");
   });
 
   it("normalizes invalid source durations to the 5 second default", () => {
@@ -177,8 +218,10 @@ describe("marketing domain", () => {
     ];
 
     expect(getCompileBlockers(items)).toHaveLength(0);
-    const payload = buildCompilePayloadFromApprovedItems(items, "16:9");
+    const payload = buildCompilePayloadFromApprovedItems(items, "16:9", "1080p", true);
     expect(payload.aspect_ratio).toBe("16:9");
+    expect(payload.video_quality).toBe("1080p");
+    expect(payload.preserve_audio).toBe(true);
     expect(payload.clips).toEqual([
       { video_url: "/outputs/b.mp4", speed: 1, trim_start: 0, trim_end: 4, reverse: false, flip_horizontal: false },
       { video_url: "/outputs/a.mp4", speed: 1, trim_start: 0, trim_end: 7, reverse: false, flip_horizontal: false },

@@ -1,6 +1,7 @@
 export type MarketingGenerationMode = "START_ONLY" | "START_END" | "NEXT_START_AS_END";
 export type MarketingGenerationAspectRatio = "9:16" | "16:9";
 export type MarketingAspectRatio = MarketingGenerationAspectRatio | "source";
+export type MarketingVideoQuality = "720p" | "1080p";
 
 export type SourceGenerationPayload = {
   items: Array<{
@@ -14,6 +15,8 @@ export type SourceGenerationPayload = {
   }>;
   cfg_scale: number;
   aspect_ratio: MarketingGenerationAspectRatio;
+  video_quality: MarketingVideoQuality;
+  sound: "off" | "on";
 };
 
 export type CompilePayload = {
@@ -27,6 +30,8 @@ export type CompilePayload = {
   }>;
   include_intro_outro: false;
   aspect_ratio: MarketingGenerationAspectRatio;
+  video_quality: MarketingVideoQuality;
+  preserve_audio: boolean;
   aspect_mode: "crop";
 };
 
@@ -36,8 +41,11 @@ export type MarketingBrief = {
   cutPrompts: string[];
   targetDurationsSec?: SourceDurationSec[];
   globalPrompt: string;
+  audioEnabled?: boolean;
+  audioPrompt?: string;
   language: string;
   aspectRatio?: MarketingAspectRatio;
+  videoQuality?: MarketingVideoQuality;
 };
 
 export type SourceDurationSec = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
@@ -83,6 +91,8 @@ export const allowedSourceDurationsSec: SourceDurationSec[] = [3, 4, 5, 6, 7, 8,
 export const defaultMarketingAspectRatio: MarketingGenerationAspectRatio = "9:16";
 export const allowedMarketingAspectRatios: MarketingGenerationAspectRatio[] = ["9:16", "16:9"];
 export const allowedMarketingAspectRatioOptions: MarketingAspectRatio[] = ["source", "9:16", "16:9"];
+export const defaultMarketingVideoQuality: MarketingVideoQuality = "720p";
+export const allowedMarketingVideoQualities: MarketingVideoQuality[] = ["720p", "1080p"];
 
 export const defaultCutPrompts = ["오프닝 - 정면 클로즈업", "와이드 컷 - 공간감 강조", "디테일 텍스처 컷"];
 
@@ -121,6 +131,12 @@ export function normalizeGenerationAspectRatio(value: unknown): MarketingGenerat
     : defaultMarketingAspectRatio;
 }
 
+export function normalizeMarketingVideoQuality(value: unknown): MarketingVideoQuality {
+  return allowedMarketingVideoQualities.includes(value as MarketingVideoQuality)
+    ? value as MarketingVideoQuality
+    : defaultMarketingVideoQuality;
+}
+
 export function requiresEndFrame(mode: MarketingGenerationMode | undefined): boolean {
   return mode === "START_END" || mode === "NEXT_START_AS_END";
 }
@@ -154,10 +170,14 @@ export function removeCutPrompt(prompts: string[], index: number): string[] {
 }
 
 export function buildKlingPrompt(brief: Omit<MarketingBrief, "imageUrls">, cutPrompt: string, index: number): string {
+  const audioPrompt = brief.audioEnabled && brief.audioPrompt?.trim()
+    ? `Audio: ${brief.audioPrompt.trim()}`
+    : "";
   return [
     `cut ${index + 1}: ${cutPrompt}`,
     `global direction: ${brief.globalPrompt}`,
     `language: ${brief.language}`,
+    audioPrompt,
     "Keep the furniture, room layout, product shape, material, color, and perspective faithful to the source photo. Smooth professional marketing reel motion. No text overlays.",
   ]
     .filter(Boolean)
@@ -183,6 +203,8 @@ export function buildSourceGenerationPayload(brief: MarketingBrief): SourceGener
     })),
     cfg_scale: 0.5,
     aspect_ratio: normalizeGenerationAspectRatio(brief.aspectRatio),
+    video_quality: normalizeMarketingVideoQuality(brief.videoQuality),
+    sound: brief.audioEnabled ? "on" : "off",
   };
 }
 
@@ -210,6 +232,8 @@ export function getCompileBlockers(items: MarketingImageItem[]): MarketingImageI
 export function buildCompilePayloadFromApprovedItems(
   items: MarketingImageItem[],
   aspectRatio: MarketingGenerationAspectRatio = defaultMarketingAspectRatio,
+  videoQuality: MarketingVideoQuality = defaultMarketingVideoQuality,
+  preserveAudio = false,
 ): CompilePayload {
   const approvedAttempts = getApprovedAttemptsInOrder(items);
   return {
@@ -223,6 +247,8 @@ export function buildCompilePayloadFromApprovedItems(
     })),
     include_intro_outro: false,
     aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
+    video_quality: normalizeMarketingVideoQuality(videoQuality),
+    preserve_audio: preserveAudio,
     aspect_mode: "crop",
   };
 }
@@ -231,6 +257,7 @@ export function buildCompilePayload(
   sourceUrls: string[],
   targetDurationSec: number,
   aspectRatio: MarketingGenerationAspectRatio = defaultMarketingAspectRatio,
+  videoQuality: MarketingVideoQuality = defaultMarketingVideoQuality,
 ): CompilePayload {
   const clips: CompilePayload["clips"] = [];
   let remaining = targetDurationSec;
@@ -254,6 +281,8 @@ export function buildCompilePayload(
     clips,
     include_intro_outro: false,
     aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
+    video_quality: normalizeMarketingVideoQuality(videoQuality),
+    preserve_audio: false,
     aspect_mode: "crop",
   };
 }

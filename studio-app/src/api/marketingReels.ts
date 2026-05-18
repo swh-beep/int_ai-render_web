@@ -1,9 +1,10 @@
 import { readApiError } from "./outputs";
-import type { MarketingGenerationMode, SourceDurationSec } from "../domain/marketing";
+import type { MarketingGenerationAspectRatio, MarketingGenerationMode, MarketingVideoQuality, SourceDurationSec } from "../domain/marketing";
 
 const basePath = "/api/marketing/reel-groups";
 const globalPromptsPath = "/api/marketing/global-prompts";
 const clipPromptsPath = "/api/marketing/clip-prompts";
+const audioPromptsPath = "/api/marketing/audio-prompts";
 
 export type MarketingReelClipCreateInput = {
   clientImageId: string;
@@ -17,6 +18,10 @@ export type MarketingReelClipCreateInput = {
 
 export type MarketingReelGroupCreatePayload = {
   globalPrompt: string;
+  audioEnabled?: boolean;
+  audioPrompt?: string;
+  aspectRatio: MarketingGenerationAspectRatio;
+  videoQuality: MarketingVideoQuality;
   platform: string;
   tone: string;
   goal: string;
@@ -25,6 +30,10 @@ export type MarketingReelGroupCreatePayload = {
 
 export type MarketingReelGroupCreateResponse = {
   group_id: string;
+  aspect_ratio: MarketingGenerationAspectRatio;
+  video_quality: MarketingVideoQuality;
+  audio_enabled?: boolean;
+  audio_prompt?: string;
   clips: Array<{ clip_id: string; client_image_id: string }>;
 };
 
@@ -115,6 +124,10 @@ export type MarketingFinalResultPayload = {
 export type MarketingReelGroupListItem = {
   group_id: string;
   created_at: string;
+  aspect_ratio?: MarketingGenerationAspectRatio;
+  video_quality?: MarketingVideoQuality;
+  audio_enabled?: boolean;
+  audio_prompt?: string;
   final_title?: string;
   final_video_url?: string;
   representative_image_url?: string;
@@ -125,6 +138,10 @@ export type MarketingReelGroupListItem = {
 export type MarketingReelGroupDetail = {
   group_id: string;
   status: string;
+  aspect_ratio?: MarketingGenerationAspectRatio;
+  video_quality?: MarketingVideoQuality;
+  audio_enabled?: boolean;
+  audio_prompt?: string;
   created_at: string;
   updated_at: string;
   final_video_url?: string;
@@ -185,6 +202,13 @@ export type MarketingClipPromptHistoryItem = {
   created_at: string;
 };
 
+export type MarketingAudioPromptHistoryItem = MarketingClipPromptHistoryItem;
+
+export type MarketingAudioSettingsPayload = {
+  audioEnabled: boolean;
+  audioPrompt: string;
+};
+
 async function parseJsonResponse<T>(response: Response, fallback: string): Promise<T> {
   if (!response.ok) throw new Error(await readApiError(response, fallback));
   return response.json() as Promise<T>;
@@ -196,6 +220,10 @@ export async function createMarketingReelGroup(payload: MarketingReelGroupCreate
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       global_prompt: payload.globalPrompt,
+      audio_enabled: Boolean(payload.audioEnabled),
+      audio_prompt: payload.audioPrompt ?? "",
+      aspect_ratio: payload.aspectRatio,
+      video_quality: payload.videoQuality,
       platform: payload.platform,
       tone: payload.tone,
       goal: payload.goal,
@@ -249,6 +277,40 @@ export async function listClipPrompts(limit = 30): Promise<MarketingClipPromptHi
 export async function deleteClipPrompt(promptId: string): Promise<{ id: string }> {
   const response = await fetch(`${clipPromptsPath}/${encodeURIComponent(promptId)}`, { method: "DELETE" });
   return parseJsonResponse<{ id: string }>(response, `Clip prompt 삭제 실패 (${response.status})`);
+}
+
+export async function updateMarketingAudioSettings(
+  groupId: string,
+  payload: MarketingAudioSettingsPayload,
+): Promise<{ group_id: string; audio_enabled: boolean; audio_prompt: string }> {
+  const response = await fetch(`${basePath}/${encodeURIComponent(groupId)}/audio-settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      audio_enabled: payload.audioEnabled,
+      audio_prompt: payload.audioPrompt,
+    }),
+  });
+  return parseJsonResponse(response, `음성 설정 저장 실패 (${response.status})`);
+}
+
+export async function saveAudioPrompt(title: string, prompt: string): Promise<MarketingAudioPromptHistoryItem> {
+  const response = await fetch(audioPromptsPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, prompt }),
+  });
+  return parseJsonResponse<MarketingAudioPromptHistoryItem>(response, `음성 프롬프트 저장 실패 (${response.status})`);
+}
+
+export async function listAudioPrompts(limit = 30): Promise<MarketingAudioPromptHistoryItem[]> {
+  const response = await fetch(`${audioPromptsPath}?limit=${encodeURIComponent(String(limit))}`, { cache: "no-store" });
+  return parseJsonResponse<MarketingAudioPromptHistoryItem[]>(response, `음성 프롬프트 내역 조회 실패 (${response.status})`);
+}
+
+export async function deleteAudioPrompt(promptId: string): Promise<{ id: string }> {
+  const response = await fetch(`${audioPromptsPath}/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+  return parseJsonResponse<{ id: string }>(response, `음성 프롬프트 삭제 실패 (${response.status})`);
 }
 
 export async function markMarketingReelGroupFailed(groupId: string): Promise<{ group_id: string }> {

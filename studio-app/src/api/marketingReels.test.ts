@@ -5,15 +5,19 @@ import {
   createMarketingClipGeneration,
   createMarketingClipAttempt,
   createMarketingReelGroup,
+  deleteAudioPrompt,
   deleteClipPrompt,
   deleteGlobalPrompt,
   deleteMarketingReelClip,
   getMarketingReelGroup,
   listClipPrompts,
+  listAudioPrompts,
   listMarketingReelGroups,
   markMarketingReelGroupFailed,
   patchMarketingFinalResult,
+  saveAudioPrompt,
   saveClipPrompt,
+  updateMarketingAudioSettings,
   updateMarketingClipSourceImages,
   updateMarketingClipAttempt,
 } from "./marketingReels";
@@ -35,6 +39,10 @@ describe("marketing reels api", () => {
     await expect(
       createMarketingReelGroup({
         globalPrompt: "warm",
+        audioEnabled: true,
+        audioPrompt: "soft room tone",
+        aspectRatio: "9:16",
+        videoQuality: "720p",
         platform: "Instagram",
         tone: "Editorial",
         goal: "awareness",
@@ -50,6 +58,14 @@ describe("marketing reels api", () => {
       "/api/marketing/reel-groups",
       expect.objectContaining({ method: "POST", body: expect.stringContaining('"client_image_id":"client-1"') }),
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/marketing/reel-groups",
+      expect.objectContaining({ method: "POST", body: expect.stringContaining('"audio_enabled":true') }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/marketing/reel-groups",
+      expect.objectContaining({ method: "POST", body: expect.stringContaining('"audio_prompt":"soft room tone"') }),
+    );
   });
 
   it("creates a reel group with start/end frame clip inputs", async () => {
@@ -57,6 +73,8 @@ describe("marketing reels api", () => {
 
     await createMarketingReelGroup({
       globalPrompt: "warm",
+      aspectRatio: "16:9",
+      videoQuality: "1080p",
       platform: "Instagram",
       tone: "Editorial",
       goal: "awareness",
@@ -76,6 +94,14 @@ describe("marketing reels api", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/marketing/reel-groups",
       expect.objectContaining({ body: expect.stringContaining('"generation_mode":"START_END"') }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/marketing/reel-groups",
+      expect.objectContaining({ body: expect.stringContaining('"aspect_ratio":"16:9"') }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/marketing/reel-groups",
+      expect.objectContaining({ body: expect.stringContaining('"video_quality":"1080p"') }),
     );
   });
 
@@ -106,6 +132,42 @@ describe("marketing reels api", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/marketing/clip-prompts?limit=30", { cache: "no-store" });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/marketing/clip-prompts/clip-prompt-1", { method: "DELETE" });
+  });
+
+  it("saves group audio settings and audio prompt history", async () => {
+    const item = { id: "audio-prompt-1", title: "Soft", prompt: "soft ambience", created_at: "2026-05-17T00:00:00Z" };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({
+        group_id: "group-1",
+        audio_enabled: true,
+        audio_prompt: "soft ambience",
+      }))
+      .mockResolvedValueOnce(jsonResponse(item))
+      .mockResolvedValueOnce(jsonResponse([item]))
+      .mockResolvedValueOnce(jsonResponse({ id: "audio-prompt-1" }));
+
+    await updateMarketingAudioSettings("group-1", { audioEnabled: true, audioPrompt: "soft ambience" });
+    await expect(saveAudioPrompt("Soft", "soft ambience")).resolves.toEqual(item);
+    await expect(listAudioPrompts()).resolves.toEqual([item]);
+    await expect(deleteAudioPrompt("audio-prompt-1")).resolves.toEqual({ id: "audio-prompt-1" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/marketing/reel-groups/group-1/audio-settings",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_enabled: true, audio_prompt: "soft ambience" }),
+      },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/marketing/audio-prompts",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "Soft", prompt: "soft ambience" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/marketing/audio-prompts?limit=30", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/marketing/audio-prompts/audio-prompt-1", { method: "DELETE" });
   });
 
   it("creates and updates clip attempts", async () => {

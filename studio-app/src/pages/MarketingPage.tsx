@@ -5,20 +5,25 @@ import {
   createMarketingClipGeneration,
   createMarketingClipAttempt,
   createMarketingReelGroup,
+  deleteAudioPrompt,
   deleteClipPrompt,
   deleteGlobalPrompt,
   deleteMarketingReelClip,
   getMarketingReelGroup,
+  listAudioPrompts,
   listClipPrompts,
   listGlobalPrompts,
   listMarketingReelGroups,
   markMarketingReelGroupFailed,
   patchMarketingFinalResult,
+  saveAudioPrompt,
   saveClipPrompt,
   saveGlobalPrompt,
+  updateMarketingAudioSettings,
   updateMarketingReelGroupTitle,
   updateMarketingClipSourceImages,
   updateMarketingClipAttempt,
+  type MarketingAudioPromptHistoryItem,
   type MarketingClipPromptHistoryItem,
   type MarketingFinalResultPayload,
   type MarketingGlobalPromptHistoryItem,
@@ -38,17 +43,21 @@ import {
 import {
   allowedSourceDurationsSec,
   allowedMarketingAspectRatioOptions,
+  allowedMarketingVideoQualities,
   buildCompilePayloadFromApprovedItems,
   buildKlingPrompt,
   buildSourceGenerationPayload,
   defaultSourceDurationSec,
   defaultMarketingAspectRatio,
+  defaultMarketingVideoQuality,
   generationModeLabel,
   getApprovedAttemptsInOrder,
   getCompileBlockers,
   minimumImageCount,
   moveImage,
+  normalizeGenerationAspectRatio,
   normalizeMarketingAspectRatio,
+  normalizeMarketingVideoQuality,
   normalizeSourceDurationSec,
   removeImage,
   requiresEndFrame,
@@ -56,6 +65,7 @@ import {
   type MarketingAspectRatio,
   type MarketingGenerationMode,
   type MarketingImageItem,
+  type MarketingVideoQuality,
   type MarketingVideoAttempt,
   type SourceDurationSec,
   validateImageSelection,
@@ -65,6 +75,8 @@ type Step = 1 | 2 | 3;
 
 type ClipDraft = MarketingImageItem & {
   previewUrl: string;
+  sourcePreviewAspectRatio?: MarketingGenerationAspectRatio;
+  endPreviewAspectRatio?: MarketingGenerationAspectRatio;
   clipId?: string;
   viewingAttemptId?: string;
   sourceGenerationUrl?: string;
@@ -78,14 +90,27 @@ type ClipPromptSourceItem = MarketingClipPromptHistoryItem & {
   clipId?: string;
 };
 
+type ReviewFramePreview = {
+  id: string;
+  clipIndex: number;
+  frameType: "Start Frame" | "End Frame" | "End Frame (Next Start)";
+  url: string;
+};
+
 const aspectRatioLabels: Record<MarketingAspectRatio, string> = {
   source: "이미지 비율대로",
   "9:16": "9:16 세로",
   "16:9": "16:9 가로",
 };
+const videoQualityLabels: Record<MarketingVideoQuality, string> = {
+  "720p": "720p",
+  "1080p": "1080p",
+};
 
 const initialGlobalPrompt =
   "따뜻한 자연광 속에서 절제된 가구의 디테일을 보여주는 시네마틱 릴스. 부드러운 카메라 무빙, 베이지와 오크 톤.";
+const initialAudioPrompt =
+  "Generate natural motion-synced audio: subtle room tone and soft movement accents that follow the camera movement and scene transitions. Avoid narration, dialogue, loud music, and exaggerated sound effects. Keep the audio clean, premium, and unobtrusive.";
 const initialMarketingStatus = "이미지 1~10장을 선택하고 1차 비디오 생성을 시작하세요.";
 
 function formatDateTitlePart(date = new Date()): string {
@@ -182,8 +207,11 @@ export function MarketingPage() {
   const [activeStep, setActiveStep] = useState<Step>(1);
   const [aspectRatio, setAspectRatio] = useState<MarketingAspectRatio>(defaultMarketingAspectRatio);
   const [generationAspectRatio, setGenerationAspectRatio] = useState<MarketingGenerationAspectRatio>(defaultMarketingAspectRatio);
+  const [videoQuality, setVideoQuality] = useState<MarketingVideoQuality>(defaultMarketingVideoQuality);
   const [clips, setClips] = useState<ClipDraft[]>([]);
   const [globalPrompt, setGlobalPrompt] = useState(initialGlobalPrompt);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioPrompt, setAudioPrompt] = useState(initialAudioPrompt);
   const [groupId, setGroupId] = useState("");
   const [status, setStatus] = useState(initialMarketingStatus);
   const [error, setError] = useState("");
@@ -215,6 +243,11 @@ export function MarketingPage() {
   const [promptHistoryStatus, setPromptHistoryStatus] = useState("");
   const [isPromptHistoryLoading, setIsPromptHistoryLoading] = useState(false);
   const [isPromptSaving, setIsPromptSaving] = useState(false);
+  const [audioPromptHistoryOpen, setAudioPromptHistoryOpen] = useState(false);
+  const [audioPromptItems, setAudioPromptItems] = useState<MarketingAudioPromptHistoryItem[]>([]);
+  const [audioPromptStatus, setAudioPromptStatus] = useState("");
+  const [isAudioPromptLoading, setIsAudioPromptLoading] = useState(false);
+  const [isAudioPromptSaving, setIsAudioPromptSaving] = useState(false);
   const [clipPromptMode, setClipPromptMode] = useState<"save" | "load" | null>(null);
   const [clipPromptTargetId, setClipPromptTargetId] = useState("");
   const [clipPromptItems, setClipPromptItems] = useState<MarketingClipPromptHistoryItem[]>([]);
@@ -225,6 +258,7 @@ export function MarketingPage() {
   const [clipPromptQuery, setClipPromptQuery] = useState("");
   const [isClipPromptLoading, setIsClipPromptLoading] = useState(false);
   const [isClipPromptSaving, setIsClipPromptSaving] = useState(false);
+  const [activeFramePreviewId, setActiveFramePreviewId] = useState<string | null>(null);
 
   const activeClips = clips.filter((clip) => !clip.isDeleted);
   const blockers = getCompileBlockers(activeClips);
@@ -271,14 +305,37 @@ export function MarketingPage() {
       [item.title, item.prompt, item.created_at, item.sourceLabel].some((value) => value.toLowerCase().includes(normalizedQuery)),
     );
   }, [clipPromptQuery, visibleClipPromptItems]);
-  const hasOpenModal = historyOpen || promptHistoryOpen || Boolean(clipPromptMode);
+  const reviewFramePreviews = useMemo<ReviewFramePreview[]>(() => {
+    return activeClips.flatMap((clip, index) => {
+      const endPreviewUrl = resolveEndPreviewUrl(clip, index);
+      const frames: ReviewFramePreview[] = [{
+        id: `${clip.clientImageId}:start`,
+        clipIndex: index,
+        frameType: "Start Frame",
+        url: clip.previewUrl,
+      }];
+      if (endPreviewUrl) {
+        frames.push({
+          id: `${clip.clientImageId}:end`,
+          clipIndex: index,
+          frameType: clip.generationMode === "NEXT_START_AS_END" ? "End Frame (Next Start)" : "End Frame",
+          url: endPreviewUrl,
+        });
+      }
+      return frames;
+    });
+  }, [activeClips]);
+  const activeFramePreview = reviewFramePreviews.find((frame) => frame.id === activeFramePreviewId);
+  const hasOpenModal = historyOpen || promptHistoryOpen || audioPromptHistoryOpen || Boolean(clipPromptMode) || Boolean(activeFramePreview);
   const hasWorkspaceState =
     activeStep !== 1 ||
     clips.length > 0 ||
     Boolean(groupId) ||
     Boolean(finalUrl) ||
     progress > 0 ||
-    globalPrompt !== initialGlobalPrompt;
+    globalPrompt !== initialGlobalPrompt ||
+    audioEnabled ||
+    audioPrompt !== initialAudioPrompt;
 
   const sourcePreviewPayload = useMemo(
     () =>
@@ -288,10 +345,13 @@ export function MarketingPage() {
         cutPrompts: activeClips.map((clip) => clip.prompt),
         targetDurationsSec: activeClips.map((clip) => clip.targetDurationSec),
         aspectRatio: displayAspectRatio,
+        videoQuality,
         globalPrompt,
+        audioEnabled,
+        audioPrompt,
         language: "한국어",
       }),
-    [activeClips, displayAspectRatio, globalPrompt],
+    [activeClips, audioEnabled, audioPrompt, displayAspectRatio, globalPrompt, videoQuality],
   );
 
   useEffect(() => {
@@ -346,6 +406,22 @@ export function MarketingPage() {
   }, [historyOpen]);
 
   useEffect(() => {
+    if (!activeFramePreview) return undefined;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setActiveFramePreviewId(null);
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        navigateFramePreview(event.key === "ArrowRight" ? 1 : -1);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeFramePreview, reviewFramePreviews]);
+
+  useEffect(() => {
     if (!historyToast) return undefined;
     const timer = window.setTimeout(() => setHistoryToast(""), 3200);
     return () => window.clearTimeout(timer);
@@ -354,6 +430,14 @@ export function MarketingPage() {
   function updateStatus(message: string, nextProgress: number) {
     setStatus(message);
     setProgress(Math.max(0, Math.min(100, nextProgress)));
+  }
+
+  function navigateFramePreview(direction: -1 | 1) {
+    if (!reviewFramePreviews.length) return;
+    const currentIndex = reviewFramePreviews.findIndex((frame) => frame.id === activeFramePreviewId);
+    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (safeIndex + direction + reviewFramePreviews.length) % reviewFramePreviews.length;
+    setActiveFramePreviewId(reviewFramePreviews[nextIndex].id);
   }
 
   function showHistoryToast(message: string) {
@@ -366,6 +450,8 @@ export function MarketingPage() {
     setGenerationAspectRatio(defaultMarketingAspectRatio);
     setClips([]);
     setGlobalPrompt(initialGlobalPrompt);
+    setAudioEnabled(false);
+    setAudioPrompt(initialAudioPrompt);
     setGroupId("");
     setStatus(initialMarketingStatus);
     setError("");
@@ -389,6 +475,8 @@ export function MarketingPage() {
     setFinalSaveError("");
     setLastFinalPersistPayload(null);
     setPromptHistoryOpen(false);
+    setAudioPromptHistoryOpen(false);
+    setAudioPromptStatus("");
     setClipPromptMode(null);
     setClipPromptTargetId("");
     setHistoryClipPromptItems([]);
@@ -397,6 +485,42 @@ export function MarketingPage() {
     setClipPromptTitle("");
     setClipPromptQuery("");
     showHistoryToast("새 작업을 시작할 수 있도록 초기화했습니다.");
+  }
+
+  function restoreCurrentDataToStep1Draft() {
+    setGroupId("");
+    setFinalUrl("");
+    setFinalTitle("");
+    setFinalTitleEdited(false);
+    setFinalSaveError("");
+    setLastFinalPersistPayload(null);
+    setProgress(0);
+    setError("");
+    setRegeneratingClipId("");
+    setRegeneratingClipIds([]);
+    setRegeneratePrompt("");
+    setSelectedReference(null);
+    setSelectedReferenceClipId("");
+    setSelectedReferenceId("");
+    setClips(activeClips.map((clip, index) => ({
+      ...clip,
+      clipId: undefined,
+      order: index + 1,
+      attempts: [],
+      approvedAttemptId: undefined,
+      viewingAttemptId: undefined,
+      isDeleted: undefined,
+    })));
+    setActiveStep(1);
+    setStatus("현재 데이터로 Step 1 설정을 수정할 수 있습니다.");
+    showHistoryToast("현재 데이터로 새 작업을 시작합니다.");
+  }
+
+  function selectWorkflowStep(step: Step) {
+    setActiveStep(step);
+    if (step === 1 && hasStartedGeneration) {
+      window.alert("이 데이터로 작업 시작 버튼 선택시 설정을 수정할 수 있습니다");
+    }
   }
 
   async function resolveAspectRatioForGeneration(sourceClips: ClipDraft[] = activeClips): Promise<MarketingGenerationAspectRatio> {
@@ -425,6 +549,47 @@ export function MarketingPage() {
     }
   }
 
+  async function detectImageAspectRatio(file: File): Promise<MarketingGenerationAspectRatio> {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const resolved = bitmap.width >= bitmap.height ? "16:9" : "9:16";
+      bitmap.close();
+      return resolved;
+    } catch {
+      return new Promise((resolve) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(image.naturalWidth >= image.naturalHeight ? "16:9" : "9:16");
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(defaultMarketingAspectRatio);
+        };
+        image.src = objectUrl;
+      });
+    }
+  }
+
+  function rememberSourcePreviewAspectRatio(clientImageId: string, file: File) {
+    void detectImageAspectRatio(file).then((sourcePreviewAspectRatio) => {
+      setClips((current) => current.map((clip) => {
+        if (clip.clientImageId !== clientImageId || clip.file !== file) return clip;
+        return { ...clip, sourcePreviewAspectRatio };
+      }));
+    });
+  }
+
+  function rememberEndPreviewAspectRatio(clientImageId: string, file: File) {
+    void detectImageAspectRatio(file).then((endPreviewAspectRatio) => {
+      setClips((current) => current.map((clip) => {
+        if (clip.clientImageId !== clientImageId || clip.endFile !== file) return clip;
+        return { ...clip, endPreviewAspectRatio };
+      }));
+    });
+  }
+
   function setClipOrder(nextClips: ClipDraft[]) {
     if (isSequenceLocked) return;
     setClips(nextClips.map((clip, index) => ({
@@ -443,7 +608,7 @@ export function MarketingPage() {
   function handleFiles(nextFiles: FileList | null) {
     const selected = Array.from(nextFiles ?? []);
     const incoming = selected.filter((file) => file.type.startsWith("image/"));
-    const limited = [...clips, ...incoming.map((file, index) => ({
+    const incomingClips = incoming.map((file, index) => ({
       clientImageId: makeId("image"),
       file,
       previewUrl: createPreviewUrl(file),
@@ -452,8 +617,10 @@ export function MarketingPage() {
       prompt: "",
       targetDurationSec: defaultSourceDurationSec,
       attempts: [],
-    }))].slice(0, 10);
+    }));
+    const limited = [...clips, ...incomingClips].slice(0, 10);
     setClipOrder(limited);
+    incomingClips.forEach((clip) => rememberSourcePreviewAspectRatio(clip.clientImageId, clip.file));
     if (incoming.length !== selected.length) {
       setError("이미지 파일만 업로드할 수 있습니다.");
     } else if (clips.length + incoming.length > 10) {
@@ -468,16 +635,23 @@ export function MarketingPage() {
   }
 
   function updateEndFrame(clientImageId: string, file: File | null) {
-    updateClip(clientImageId, file ? {
-      endFile: file,
-      endPreviewUrl: createPreviewUrl(file),
-      endUploadedUrl: undefined,
-      endImageUrl: undefined,
-      endGenerationUrl: undefined,
-      generationMode: "START_END",
-    } : {
+    if (file) {
+      updateClip(clientImageId, {
+        endFile: file,
+        endPreviewUrl: createPreviewUrl(file),
+        endPreviewAspectRatio: undefined,
+        endUploadedUrl: undefined,
+        endImageUrl: undefined,
+        endGenerationUrl: undefined,
+        generationMode: "START_END",
+      });
+      rememberEndPreviewAspectRatio(clientImageId, file);
+      return;
+    }
+    updateClip(clientImageId, {
       endFile: undefined,
       endPreviewUrl: undefined,
+      endPreviewAspectRatio: undefined,
       endUploadedUrl: undefined,
       endImageUrl: undefined,
       endGenerationUrl: undefined,
@@ -490,6 +664,7 @@ export function MarketingPage() {
       updateClip(clientImageId, {
         endFile: undefined,
         endPreviewUrl: undefined,
+        endPreviewAspectRatio: undefined,
         endUploadedUrl: undefined,
         endImageUrl: undefined,
         endGenerationUrl: undefined,
@@ -513,6 +688,17 @@ export function MarketingPage() {
       return activeClips[index + 1]?.previewUrl;
     }
     return clip.endPreviewUrl ?? clip.endImageUrl;
+  }
+
+  function resolveEndPreviewAspectRatio(clip: ClipDraft, index: number): MarketingGenerationAspectRatio | undefined {
+    if (clip.generationMode === "NEXT_START_AS_END") {
+      return activeClips[index + 1]?.sourcePreviewAspectRatio;
+    }
+    return clip.endPreviewAspectRatio;
+  }
+
+  function frameRatioClass(ratio?: MarketingGenerationAspectRatio) {
+    return `ratio-${(ratio ?? displayAspectRatio).replace(":", "-")}`;
   }
 
   function mergeAttempt(clientImageId: string, attempt: MarketingVideoAttempt) {
@@ -613,6 +799,10 @@ export function MarketingPage() {
       updateStatus("마케팅 비디오 그룹 생성 중...", 4);
       const group = await createMarketingReelGroup({
         globalPrompt,
+        audioEnabled,
+        audioPrompt,
+        aspectRatio: resolvedAspectRatio,
+        videoQuality,
         platform: "",
         tone: "",
         goal: "",
@@ -725,7 +915,10 @@ export function MarketingPage() {
         cutPrompts: withClipIds.map((clip) => clip.prompt),
         targetDurationsSec: withClipIds.map((clip) => clip.targetDurationSec),
         aspectRatio: resolvedAspectRatio,
+        videoQuality,
         globalPrompt,
+        audioEnabled,
+        audioPrompt,
         language: "한국어",
       }));
       sourceJobStarted = true;
@@ -740,7 +933,7 @@ export function MarketingPage() {
           sourceJobId,
           sourceJobItemIndex: index,
           prompt: buildKlingPrompt(
-          { cutPrompts: [], aspectRatio: resolvedAspectRatio, globalPrompt, language: "한국어" },
+          { cutPrompts: [], aspectRatio: resolvedAspectRatio, globalPrompt, audioEnabled, audioPrompt, language: "한국어" },
           clip.prompt || "premium furniture reel",
           index,
         ),
@@ -888,7 +1081,10 @@ export function MarketingPage() {
         cutPrompts: [prompt],
         targetDurationsSec: [clip.targetDurationSec],
         aspectRatio: resolvedAspectRatio,
+        videoQuality,
         globalPrompt,
+        audioEnabled,
+        audioPrompt,
         language: "한국어",
       }));
       const generation = await createMarketingClipGeneration(groupId, {
@@ -954,7 +1150,7 @@ export function MarketingPage() {
     try {
       const resolvedAspectRatio = await resolveAspectRatioForGeneration(activeClips);
       setGenerationAspectRatio(resolvedAspectRatio);
-      const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, resolvedAspectRatio);
+      const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, resolvedAspectRatio, videoQuality, audioEnabled);
       if (approvedAttempts.length === 1) {
         const [approvedAttempt] = approvedAttempts;
         const finalVideoUrl = approvedAttempt.videoUrl;
@@ -1080,6 +1276,73 @@ export function MarketingPage() {
       setPromptHistoryStatus("Global prompt 삭제 완료");
     } catch (caught) {
       setPromptHistoryStatus(caught instanceof Error ? caught.message : "Global prompt 삭제 실패");
+    }
+  }
+
+  async function saveCurrentAudioPrompt() {
+    const prompt = audioPrompt.trim();
+    if (!prompt) {
+      setAudioPromptStatus("저장할 음성 프롬프트를 입력하세요.");
+      return;
+    }
+    setIsAudioPromptSaving(true);
+    setAudioPromptStatus("");
+    try {
+      const title = prompt.length > 40 ? `${prompt.slice(0, 40)}...` : prompt;
+      const saved = await saveAudioPrompt(title, prompt);
+      setAudioPromptItems((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setAudioPromptStatus("음성 프롬프트 저장 완료");
+    } catch (caught) {
+      setAudioPromptStatus(caught instanceof Error ? caught.message : "음성 프롬프트 저장 실패");
+    } finally {
+      setIsAudioPromptSaving(false);
+    }
+  }
+
+  async function openAudioPromptHistory() {
+    setAudioPromptHistoryOpen(true);
+    setAudioPromptStatus("");
+    setIsAudioPromptLoading(true);
+    try {
+      setAudioPromptItems(await listAudioPrompts(30));
+    } catch (caught) {
+      setAudioPromptStatus(caught instanceof Error ? caught.message : "음성 프롬프트 내역 조회 실패");
+    } finally {
+      setIsAudioPromptLoading(false);
+    }
+  }
+
+  async function deleteAudioPromptHistoryItem(promptId: string) {
+    setAudioPromptStatus("");
+    try {
+      await deleteAudioPrompt(promptId);
+      setAudioPromptItems((current) => current.filter((item) => item.id !== promptId));
+      setAudioPromptStatus("음성 프롬프트 삭제 완료");
+    } catch (caught) {
+      setAudioPromptStatus(caught instanceof Error ? caught.message : "음성 프롬프트 삭제 실패");
+    }
+  }
+
+  async function toggleReviewAudioEnabled() {
+    const nextAudioEnabled = !audioEnabled;
+    const previousAudioEnabled = audioEnabled;
+    setAudioEnabled(nextAudioEnabled);
+    setError("");
+    try {
+      if (groupId) {
+        await updateMarketingAudioSettings(groupId, {
+          audioEnabled: nextAudioEnabled,
+          audioPrompt,
+        });
+      }
+      setStatus(
+        nextAudioEnabled
+          ? "음성 유지가 켜졌습니다. 기존 생성 영상에 오디오가 없다면 필요한 컷을 재생성하세요."
+          : "음성 유지가 꺼졌습니다. 최종 합치기에서 오디오를 제거합니다.",
+      );
+    } catch (caught) {
+      setAudioEnabled(previousAudioEnabled);
+      setError(caught instanceof Error ? caught.message : "음성 설정 저장 실패");
     }
   }
 
@@ -1243,7 +1506,14 @@ export function MarketingPage() {
 
   function importReferenceToStep1() {
     if (!selectedReference) return;
+    const restoredAspectRatio = normalizeGenerationAspectRatio(selectedReference.aspect_ratio);
+    const restoredVideoQuality = normalizeMarketingVideoQuality(selectedReference.video_quality);
     setGlobalPrompt(selectedReference.global_prompt);
+    setAudioEnabled(Boolean(selectedReference.audio_enabled));
+    setAudioPrompt(selectedReference.audio_prompt || initialAudioPrompt);
+    setAspectRatio(restoredAspectRatio);
+    setGenerationAspectRatio(restoredAspectRatio);
+    setVideoQuality(restoredVideoQuality);
     setGroupId("");
     setFinalUrl("");
     setFinalSaveError("");
@@ -1258,7 +1528,14 @@ export function MarketingPage() {
 
   function loadReferenceToStep2() {
     if (!selectedReference) return;
+    const restoredAspectRatio = normalizeGenerationAspectRatio(selectedReference.aspect_ratio);
+    const restoredVideoQuality = normalizeMarketingVideoQuality(selectedReference.video_quality);
     setGlobalPrompt(selectedReference.global_prompt);
+    setAudioEnabled(Boolean(selectedReference.audio_enabled));
+    setAudioPrompt(selectedReference.audio_prompt || initialAudioPrompt);
+    setAspectRatio(restoredAspectRatio);
+    setGenerationAspectRatio(restoredAspectRatio);
+    setVideoQuality(restoredVideoQuality);
     setGroupId(selectedReference.group_id);
     setFinalUrl(selectedReference.final_video_url ?? "");
     setProgress(100);
@@ -1308,6 +1585,11 @@ export function MarketingPage() {
               새 작업 시작
             </button>
           ) : null}
+          {hasStartedGeneration ? (
+            <button className="history-toggle secondary" type="button" disabled={isBusy} onClick={restoreCurrentDataToStep1Draft}>
+              이 데이터로 작업 시작
+            </button>
+          ) : null}
           <button className="history-toggle" type="button" onClick={openHistoryModal}>
             히스토리 열기
           </button>
@@ -1323,7 +1605,7 @@ export function MarketingPage() {
               className={activeStep === step ? "is-active" : ""}
               type="button"
               disabled={(step === 2 || step === 3) && !hasStartedGeneration}
-              onClick={() => setActiveStep(step)}
+              onClick={() => selectWorkflowStep(step)}
             >
               <span>{step}</span>{label}
             </button>
@@ -1340,7 +1622,7 @@ export function MarketingPage() {
               <header className="workflow-panel-header">
                 <div>
                   <h2>1. 생성 전</h2>
-                  <p>공간 사진을 올리고 이미지별 prompt와 source video 길이를 설정합니다.</p>
+                  <p>공간 사진을 올리고 이미지별 prompt와 영상 길이를 설정합니다.</p>
                 </div>
                 <button className="run-reel-btn" type="button" disabled={isBusy || isSequenceLocked || activeClips.length < minimumImageCount} onClick={startSourceGeneration}>
                   1차 비디오 생성
@@ -1359,6 +1641,12 @@ export function MarketingPage() {
                     {allowedMarketingAspectRatioOptions.map((ratio) => <option key={ratio} value={ratio}>{aspectRatioLabels[ratio]}</option>)}
                   </select>
                 </label>
+                <label className="brief-field">
+                  <span className="brief-label">Video quality</span>
+                  <select className="brief-select" value={videoQuality} disabled={isSequenceLocked} onChange={(event) => setVideoQuality(normalizeMarketingVideoQuality(event.target.value))}>
+                    {allowedMarketingVideoQualities.map((quality) => <option key={quality} value={quality}>{videoQualityLabels[quality]}</option>)}
+                  </select>
+                </label>
                 <label className="brief-field is-wide">
                   <span className="brief-label">Global prompt</span>
                   <textarea className="brief-textarea" value={globalPrompt} disabled={isSequenceLocked} onChange={(event) => setGlobalPrompt(event.target.value)} />
@@ -1372,6 +1660,39 @@ export function MarketingPage() {
                   </button>
                 </div>
                 {promptHistoryStatus ? <p className="prompt-history-status" role="status">{promptHistoryStatus}</p> : null}
+                <div className="audio-prompt-toggle-row">
+                  <button
+                    className={`audio-toggle ${audioEnabled ? "is-on" : ""}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={audioEnabled}
+                    aria-label="음성 생성"
+                    disabled={isSequenceLocked}
+                    onClick={() => setAudioEnabled((current) => !current)}
+                  >
+                    음성 {audioEnabled ? "ON" : "OFF"}
+                  </button>
+                  <span>ON이면 Kling 요청에 sound=on을 전달하고 음성 프롬프트를 최종 prompt에 함께 보냅니다.</span>
+                </div>
+                <label className="brief-field is-wide">
+                  <span className="brief-label">음성 프롬프트</span>
+                  <textarea
+                    className="brief-textarea"
+                    value={audioPrompt}
+                    disabled={isSequenceLocked || !audioEnabled}
+                    placeholder={initialAudioPrompt}
+                    onChange={(event) => setAudioPrompt(event.target.value)}
+                  />
+                </label>
+                <div className="prompt-actions">
+                  <button type="button" disabled={isAudioPromptSaving || isSequenceLocked || !audioEnabled} onClick={saveCurrentAudioPrompt}>
+                    {isAudioPromptSaving ? "저장 중..." : "음성 프롬프트 저장"}
+                  </button>
+                  <button type="button" disabled={isSequenceLocked} onClick={openAudioPromptHistory}>
+                    음성 프롬프트 가져오기
+                  </button>
+                </div>
+                {audioPromptStatus ? <p className="prompt-history-status" role="status">{audioPromptStatus}</p> : null}
                 <label className="brief-field is-wide upload-field">
                   <span className="brief-label">Images</span>
                   <span className="upload-count">{activeClips.length} / 10 selected</span>
@@ -1382,20 +1703,38 @@ export function MarketingPage() {
               <div className="image-editor-list">
                 {activeClips.length === 0 ? (
                   <div className="empty-state">아직 선택된 사진이 없습니다.</div>
-                ) : activeClips.map((clip, index) => (
-                  <article className="image-editor-card" key={clip.clientImageId}>
-                    <div className="frame-pair-editor">
-                      <figure>
-                        <span>Start Frame</span>
-                        <img src={clip.previewUrl} alt={`${index + 1}번 Start Frame 미리보기`} />
-                      </figure>
-                      <figure>
-                        <span>End Frame</span>
-                        {resolveEndPreviewUrl(clip, index) ? (
-                          <img src={resolveEndPreviewUrl(clip, index)} alt={`${index + 1}번 End Frame 미리보기`} />
-                        ) : (
-                          <div className="frame-empty">Optional</div>
-                        )}
+                ) : activeClips.map((clip, index) => {
+                  const startFrameRatioClass = frameRatioClass(clip.sourcePreviewAspectRatio);
+                  const endPreviewUrl = resolveEndPreviewUrl(clip, index);
+                  const endFrameRatioClass = frameRatioClass(resolveEndPreviewAspectRatio(clip, index) ?? clip.sourcePreviewAspectRatio);
+                  return (
+                    <article className="image-editor-card" key={clip.clientImageId}>
+                      <div className="frame-pair-editor">
+                        <figure>
+                          <span>Start Frame</span>
+                          <button
+                            className="frame-preview-trigger"
+                            type="button"
+                            aria-label={`Clip ${index + 1} Start Frame 확대`}
+                            onClick={() => setActiveFramePreviewId(`${clip.clientImageId}:start`)}
+                          >
+                            <img className={startFrameRatioClass} src={clip.previewUrl} alt={`${index + 1}번 Start Frame 미리보기`} />
+                          </button>
+                        </figure>
+                        <figure>
+                          <span>End Frame</span>
+                          {endPreviewUrl ? (
+                            <button
+                              className="frame-preview-trigger"
+                              type="button"
+                              aria-label={`Clip ${index + 1} End Frame 확대`}
+                              onClick={() => setActiveFramePreviewId(`${clip.clientImageId}:end`)}
+                            >
+                              <img className={endFrameRatioClass} src={endPreviewUrl} alt={`${index + 1}번 End Frame 미리보기`} />
+                            </button>
+                          ) : (
+                            <div className={`frame-empty ${endFrameRatioClass}`}>Optional</div>
+                          )}
                         {clip.generationMode !== "NEXT_START_AS_END" ? (
                           <button
                             className="frame-next-button"
@@ -1426,7 +1765,7 @@ export function MarketingPage() {
                     <div>
                       <header>
                         <b>{index + 1}. {clip.file.name}</b>
-                        <span>{generationModeLabel(clip.generationMode)} · {aspectRatioLabels[displayAspectRatio]} · {clip.targetDurationSec}s</span>
+                        <span>{generationModeLabel(clip.generationMode)} · {aspectRatioLabels[displayAspectRatio]} · {videoQualityLabels[videoQuality]} · 영상 {clip.targetDurationSec}초</span>
                       </header>
                       <textarea
                         className="brief-textarea"
@@ -1435,16 +1774,22 @@ export function MarketingPage() {
                         disabled={isSequenceLocked}
                         onChange={(event) => updateClip(clip.clientImageId, { prompt: event.target.value })}
                       />
-                      <div className="clip-controls">
+                      <label className="clip-duration-setting">
+                        <span className="clip-duration-copy">
+                          <span className="brief-label">영상 길이</span>
+                          <small>이 이미지로 생성할 비디오 길이를 선택합니다.</small>
+                        </span>
                         <select
-                          className="brief-select"
-                          aria-label={`${index + 1}번 이미지 duration`}
+                          className="brief-select clip-duration-select"
+                          aria-label={`${index + 1}번 이미지 영상 길이`}
                           value={clip.targetDurationSec}
                           disabled={isSequenceLocked}
                           onChange={(event) => updateClip(clip.clientImageId, { targetDurationSec: normalizeSourceDurationSec(event.target.value) })}
                         >
                           {allowedSourceDurationsSec.map((duration) => <option key={duration} value={duration}>{duration}초</option>)}
                         </select>
+                      </label>
+                      <div className="clip-controls">
                         <button className="icon-control-button" type="button" aria-label={`${index + 1}번 이미지 위로 이동`} title="위로 이동" disabled={isSequenceLocked || index === 0} onClick={() => setClipOrder(moveImage(activeClips, index, -1))}>
                           <span className="material-symbols-outlined" aria-hidden="true">arrow_upward</span>
                         </button>
@@ -1455,9 +1800,10 @@ export function MarketingPage() {
                         <button type="button" disabled={isSequenceLocked || !clip.prompt.trim()} onClick={() => openClipPromptSave(clip, index)}>Prompt 저장</button>
                         <button type="button" disabled={isSequenceLocked} onClick={() => openClipPromptHistory(clip)}>Prompt 가져오기</button>
                       </div>
-                    </div>
-                  </article>
-                ))}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </section>
           ) : null}
@@ -1469,9 +1815,22 @@ export function MarketingPage() {
                   <h2>2. 비디오 확인</h2>
                   <p>각 이미지의 생성 결과를 재생하고 좋은 attempt를 승인합니다.</p>
                 </div>
-                <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={() => setActiveStep(3)}>
-                  {isSingleApprovedClip ? "단일 영상 최종본 설정" : "승인본으로 합치기 준비"}
-                </button>
+                <div className="step-audio-actions">
+                  <button
+                    className={`audio-toggle ${audioEnabled ? "is-on" : ""}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={audioEnabled}
+                    aria-label="최종 합치기 음성 유지"
+                    disabled={isBusy}
+                    onClick={toggleReviewAudioEnabled}
+                  >
+                    음성 {audioEnabled ? "ON" : "OFF"}
+                  </button>
+                  <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={() => setActiveStep(3)}>
+                    {isSingleApprovedClip ? "단일 영상 최종본 설정" : "승인본으로 합치기 준비"}
+                  </button>
+                </div>
               </header>
 
               <div className="progress-track" aria-label="Generation progress"><div className="progress-bar" style={{ width: `${progress}%` }} /></div>
@@ -1485,24 +1844,47 @@ export function MarketingPage() {
                     clip.attempts.at(-1);
                   const isRegenerating = regeneratingClipId === clip.clientImageId;
                   const isClipRegenerating = regeneratingClipIds.includes(clip.clientImageId);
+                  const endPreviewUrl = resolveEndPreviewUrl(clip, index);
+                  const mediaRatioClass = `ratio-${displayAspectRatio.replace(":", "-")}`;
                   return (
                     <article className="clip-review-card" key={clip.clientImageId}>
-                      <div className={`clip-review-media ratio-${displayAspectRatio.replace(":", "-")}`}>
-                        <div className="review-frame-stack">
-                          <figure>
-                            <span>Start Frame</span>
-                            <img src={clip.previewUrl} alt={`${index + 1}번 Start Frame`} />
-                          </figure>
-                          {resolveEndPreviewUrl(clip, index) ? (
-                            <figure>
-                              <span>{clip.generationMode === "NEXT_START_AS_END" ? "End Frame (Next Start)" : "End Frame"}</span>
-                              <img src={resolveEndPreviewUrl(clip, index)} alt={`${index + 1}번 End Frame`} />
-                            </figure>
-                          ) : null}
-                        </div>
-                        {selectedAttempt?.videoUrl ? <video src={selectedAttempt.videoUrl} controls playsInline /> : <div className="video-placeholder">{selectedAttempt?.status ?? "대기"}</div>}
+                      <div className="clip-review-media-row">
+                        <figure className="clip-review-media-slot">
+                          <span>Start Frame</span>
+                          <button
+                            className="frame-preview-trigger"
+                            type="button"
+                            aria-label={`Clip ${index + 1} Start Frame 확대`}
+                            onClick={() => setActiveFramePreviewId(`${clip.clientImageId}:start`)}
+                          >
+                            <img className={mediaRatioClass} src={clip.previewUrl} alt={`${index + 1}번 Start Frame`} />
+                          </button>
+                        </figure>
+                        <figure className={`clip-review-media-slot${endPreviewUrl ? "" : " frame-placeholder"}`}>
+                          <span>{clip.generationMode === "NEXT_START_AS_END" ? "End Frame (Next Start)" : "End Frame"}</span>
+                          {endPreviewUrl ? (
+                            <button
+                              className="frame-preview-trigger"
+                              type="button"
+                              aria-label={`Clip ${index + 1} End Frame 확대`}
+                              onClick={() => setActiveFramePreviewId(`${clip.clientImageId}:end`)}
+                            >
+                              <img className={mediaRatioClass} src={endPreviewUrl} alt={`${index + 1}번 End Frame`} />
+                            </button>
+                          ) : (
+                            <div className={`frame-empty ${mediaRatioClass}`}>End Frame 없음</div>
+                          )}
+                        </figure>
+                        <figure className="clip-review-media-slot">
+                          <span>Video</span>
+                          {selectedAttempt?.videoUrl ? (
+                            <video className={mediaRatioClass} src={selectedAttempt.videoUrl} controls playsInline />
+                          ) : (
+                            <div className={`video-placeholder ${mediaRatioClass}`}>{selectedAttempt?.status ?? "대기"}</div>
+                          )}
+                        </figure>
                       </div>
-                      <div className="clip-review-body">
+                      <div className="clip-review-info-row">
                         <header>
                           <h3>Clip {index + 1}</h3>
                           <span className={`status-badge status-${(selectedAttempt?.status ?? "QUEUED").toLowerCase()}`}>
@@ -1512,6 +1894,7 @@ export function MarketingPage() {
                         <div className="clip-review-meta" aria-label={`Clip ${index + 1} 생성 설정`}>
                           <span>{generationModeLabel(clip.generationMode)}</span>
                           <span>{aspectRatioLabels[displayAspectRatio]}</span>
+                          <span>{videoQualityLabels[videoQuality]}</span>
                           <span>{clip.targetDurationSec}초</span>
                         </div>
                         <p>{selectedAttempt?.prompt || clip.prompt || "프롬프트 없음"}</p>
@@ -1742,6 +2125,10 @@ export function MarketingPage() {
                   <span>Global prompt</span>
                   <p>{selectedReference.global_prompt || "저장된 Global prompt가 없습니다."}</p>
                 </div>
+                <div className="history-detail-summary">
+                  <span>Audio</span>
+                  <p>{selectedReference.audio_enabled ? selectedReference.audio_prompt || "음성 생성 ON" : "음성 생성 OFF"}</p>
+                </div>
                 {selectedReference.final_video_url ? (
                   <div className="history-final-preview">
                     <span>Final render</span>
@@ -1808,6 +2195,33 @@ export function MarketingPage() {
           </div>
         ) : null}
       </section>
+      {activeFramePreview ? (
+        <div className="frame-preview-modal-backdrop" role="presentation">
+          <section className="frame-preview-modal" role="dialog" aria-modal="true" aria-label="Frame preview">
+            <header>
+              <div>
+                <h2>{`Clip ${activeFramePreview.clipIndex + 1} · ${activeFramePreview.frameType}`}</h2>
+                <p>{`${reviewFramePreviews.findIndex((frame) => frame.id === activeFramePreview.id) + 1} / ${reviewFramePreviews.length}`}</p>
+              </div>
+              <button type="button" aria-label="프레임 미리보기 닫기" onClick={() => setActiveFramePreviewId(null)}>
+                닫기
+              </button>
+            </header>
+            <div className="frame-preview-stage">
+              <button className="frame-preview-nav" type="button" aria-label="이전 프레임" onClick={() => navigateFramePreview(-1)}>
+                <span className="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+              </button>
+              <img
+                src={activeFramePreview.url}
+                alt={`Clip ${activeFramePreview.clipIndex + 1} ${activeFramePreview.frameType} 확대`}
+              />
+              <button className="frame-preview-nav" type="button" aria-label="다음 프레임" onClick={() => navigateFramePreview(1)}>
+                <span className="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {promptHistoryOpen ? (
         <div className="prompt-modal-backdrop" role="presentation">
           <section className="prompt-modal" role="dialog" aria-modal="true" aria-label="Global prompt 내역">
@@ -1837,6 +2251,45 @@ export function MarketingPage() {
                     <small>{new Date(item.created_at).toLocaleString()}</small>
                   </button>
                   <button className="prompt-delete-button" type="button" onClick={() => deletePromptHistoryItem(item.id)}>
+                    삭제
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {audioPromptHistoryOpen ? (
+        <div className="prompt-modal-backdrop" role="presentation">
+          <section className="prompt-modal" role="dialog" aria-modal="true" aria-label="음성 프롬프트 내역">
+            <header>
+              <div>
+                <h2>음성 프롬프트 내역</h2>
+                <p>저장된 음성 지시문을 선택하면 음성 토글이 켜지고 현재 입력창에 적용됩니다.</p>
+              </div>
+              <button type="button" onClick={() => setAudioPromptHistoryOpen(false)}>닫기</button>
+            </header>
+            {isAudioPromptLoading ? <p className="status-line">불러오는 중...</p> : null}
+            {!isAudioPromptLoading && audioPromptItems.length === 0 ? (
+              <p className="status-line">저장된 음성 프롬프트가 없습니다.</p>
+            ) : null}
+            <div className="prompt-history-list">
+              {audioPromptItems.map((item) => (
+                <article className="prompt-history-item" key={item.id}>
+                  <button
+                    type="button"
+                    aria-label={`적용: ${item.prompt}`}
+                    onClick={() => {
+                      setAudioPrompt(item.prompt);
+                      setAudioEnabled(true);
+                      setAudioPromptHistoryOpen(false);
+                    }}
+                  >
+                    <b>{item.title}</b>
+                    <span>{item.prompt}</span>
+                    <small>{new Date(item.created_at).toLocaleString()}</small>
+                  </button>
+                  <button className="prompt-delete-button" type="button" onClick={() => deleteAudioPromptHistoryItem(item.id)}>
                     삭제
                   </button>
                 </article>
