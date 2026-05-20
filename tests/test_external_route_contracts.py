@@ -47,7 +47,7 @@ def _external_deps():
         job_render_with_details=lambda payload: payload,
         build_external_render_video_job=lambda req: {
             "render_job_id": req.render_job_id,
-            "clip_count": req.clip_count,
+            "clip_count": 7,
             "audience": "external",
         },
         job_generate_render_video=lambda payload: payload,
@@ -68,6 +68,23 @@ class _FakeFinishedJob:
         self.exc_info = exc_info
         self.is_finished = not is_failed
         self.is_failed = is_failed
+        self._status = status
+
+    def get_status(self):
+        return self._status
+
+
+class _FakePendingJob:
+    def __init__(self, *, status: str = "started"):
+        now = datetime(2026, 4, 15, 12, 0, 0, tzinfo=timezone.utc)
+        self.id = "job-xyz"
+        self.enqueued_at = now
+        self.started_at = now
+        self.ended_at = None
+        self.result = None
+        self.exc_info = None
+        self.is_finished = False
+        self.is_failed = False
         self._status = status
 
     def get_status(self):
@@ -107,6 +124,19 @@ def _external_cart_finished_result_payload():
     payload.pop("resolved", None)
     payload["cart_kept"] = [{"id": "chair-1", "category": "chair"}]
     payload["cart_dropped"] = [{"id": "lamp-1", "drop_reason": "max_items_exceeded"}]
+    return payload
+
+
+def _external_finished_result_payload_many_sources():
+    payload = _external_finished_result_payload()
+    payload["details"]["details"] = [
+        {"url": "https://cdn.example/detail-1.png"},
+        {"url": "https://cdn.example/detail-2.png"},
+        {"url": "https://cdn.example/detail-3.png"},
+        {"url": "https://cdn.example/detail-4.png"},
+        {"url": "https://cdn.example/detail-5.png"},
+        {"url": "https://cdn.example/detail-6.png"},
+    ]
     return payload
 
 
@@ -209,6 +239,30 @@ class ExternalRouteContractsTests(unittest.TestCase):
                 "status": "queued",
                 "render_job_id": "job-xyz",
                 "clip_count": 3,
+            },
+        )
+
+    def test_external_render_video_route_uses_all_available_external_sources_up_to_seven(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(_external_finished_result_payload_many_sources())
+        deps.enqueue_job = lambda job_func, payload, queue_name=None, **kwargs: (SimpleNamespace(id="job-video"), None)
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/video",
+                json={"render_job_id": "job-xyz", "clip_count": 4},
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "job_id": "job-video",
+                "status": "queued",
+                "render_job_id": "job-xyz",
+                "clip_count": 7,
             },
         )
 
@@ -328,6 +382,40 @@ class ExternalRouteContractsTests(unittest.TestCase):
         self.assertTrue(body["result"]["render"]["geometry_contract"]["strict_scale_ready"])
         self.assertEqual(body["result"]["render"]["placement_plan"]["anchor_item_key"], "sofa-1")
         self.assertEqual(body["result"]["details"]["selected_item_review"][0]["target_key"], "sofa-1")
+
+    def test_external_cart_job_status_uses_complete_s3_result_when_redis_job_is_stale(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakePendingJob(status="started")
+        deps.load_job_result_s3 = lambda job_id: _external_cart_finished_result_payload()
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "finished")
+        self.assertEqual(body["result_source"], "s3")
+        self.assertEqual(body["stale_job_status"], "started")
+        self.assertEqual(body["result"]["cart_kept"][0]["id"], "chair-1")
+
+    def test_job_status_does_not_treat_detail_only_s3_payload_as_complete_running_render(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakePendingJob(status="started")
+        deps.load_job_result_s3 = lambda job_id: {
+            "details": {"details": [{"url": "https://cdn.example/detail-only.png"}]},
+            "message": "Detail views generated successfully",
+        }
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "started")
+        self.assertNotIn("result", body)
+        self.assertNotIn("result_source", body)
 
 
 if __name__ == "__main__":

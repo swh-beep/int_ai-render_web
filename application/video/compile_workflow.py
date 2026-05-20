@@ -3,6 +3,7 @@ import traceback
 import uuid
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from api_models import CompileRequest
 from application.video.job_store import set_video_job, update_video_job
@@ -45,11 +46,10 @@ def _build_video_filter(
     safe_mode = (aspect_mode or "crop").strip().lower()
     if safe_mode == "fill":
         return (
-            f"[0:v]{base_chain},split=2[bg][fg];"
-            f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-            f"crop={target_w}:{target_h},boxblur=12:1[bgv];"
-            f"[fg]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[fgv];"
-            f"[bgv][fgv]overlay=(W-w)/2:(H-h)/2,setsar=1,fps={video_target_fps}[vout]"
+            f"[0:v]{base_chain},"
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps={video_target_fps}[vout]"
         )
     return (
         f"[0:v]{base_chain},"
@@ -196,7 +196,22 @@ def _has_audio_stream(path: Path) -> bool:
     return "audio" in result.stdout
 
 
-def run_final_compile_job(job_id: str, req: CompileRequest, *, video_target_fps: int) -> None:
+def _publish_local_output_url(
+    local_url: str,
+    resolve_output_url: Callable[[str], str | None] | None,
+) -> str:
+    if not resolve_output_url:
+        return local_url
+    return resolve_output_url(local_url) or local_url
+
+
+def run_final_compile_job(
+    job_id: str,
+    req: CompileRequest,
+    *,
+    video_target_fps: int,
+    resolve_output_url: Callable[[str], str | None] | None = None,
+) -> None:
     try:
         set_video_job(job_id, {"status": "RUNNING", "message": "Compiling...", "progress": 0})
 
@@ -270,10 +285,13 @@ def run_final_compile_job(job_id: str, req: CompileRequest, *, video_target_fps:
             ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(final_out)]
         )
 
+        local_url = f"/outputs/{final_out.name}"
+        result_url = _publish_local_output_url(local_url, resolve_output_url)
+
         update_video_job(
             job_id,
             status="COMPLETED",
-            result_url=f"/outputs/{final_out.name}",
+            result_url=result_url,
             progress=100,
         )
     except Exception as exc:

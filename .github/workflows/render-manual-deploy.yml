@@ -1,0 +1,67 @@
+name: Render Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Service to deploy
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - web
+          - worker
+      clear_cache:
+        description: Clear Render build cache before deploy
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_WEB_SERVICE_ID: ${{ secrets.RENDER_WEB_SERVICE_ID }}
+      RENDER_WORKER_SERVICE_ID: ${{ secrets.RENDER_WORKER_SERVICE_ID }}
+
+    steps:
+      - name: Validate secrets
+        shell: bash
+        run: |
+          test -n "$RENDER_API_KEY" || { echo "Missing RENDER_API_KEY"; exit 1; }
+          if [[ "${{ inputs.target }}" == "web" || "${{ inputs.target }}" == "both" ]]; then
+            test -n "$RENDER_WEB_SERVICE_ID" || { echo "Missing RENDER_WEB_SERVICE_ID"; exit 1; }
+          fi
+          if [[ "${{ inputs.target }}" == "worker" || "${{ inputs.target }}" == "both" ]]; then
+            test -n "$RENDER_WORKER_SERVICE_ID" || { echo "Missing RENDER_WORKER_SERVICE_ID"; exit 1; }
+          fi
+
+      - name: Trigger web deploy
+        if: ${{ inputs.target == 'web' || inputs.target == 'both' }}
+        shell: bash
+        run: |
+          CLEAR_CACHE="do_not_clear"
+          if [[ "${{ inputs.clear_cache }}" == "true" ]]; then
+            CLEAR_CACHE="clear"
+          fi
+          curl -fsS -X POST "https://api.render.com/v1/services/${RENDER_WEB_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"clearCache\":\"${CLEAR_CACHE}\"}"
+
+      - name: Trigger worker deploy
+        if: ${{ inputs.target == 'worker' || inputs.target == 'both' }}
+        shell: bash
+        run: |
+          CLEAR_CACHE="do_not_clear"
+          if [[ "${{ inputs.clear_cache }}" == "true" ]]; then
+            CLEAR_CACHE="clear"
+          fi
+          curl -fsS -X POST "https://api.render.com/v1/services/${RENDER_WORKER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"clearCache\":\"${CLEAR_CACHE}\"}"

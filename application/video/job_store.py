@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from rq import get_current_job
+
 
 VIDEO_JOB_STORE_PATH = Path(".video_state") / "video_jobs.json"
 
@@ -35,6 +37,8 @@ def _local_output_path(output_url: str | None) -> Path | None:
 
 
 def _result_exists(output_url: str | None) -> bool:
+    if output_url and isinstance(output_url, str) and output_url.startswith(("http://", "https://")):
+        return True
     local_path = _local_output_path(output_url)
     return bool(local_path and local_path.exists())
 
@@ -93,6 +97,8 @@ def set_video_job(job_id: str, state: Dict[str, Any]) -> None:
         next_state["updated_at"] = now
         video_jobs[job_id] = next_state
         _save_video_jobs_locked()
+        sync_state = copy.deepcopy(next_state)
+    _sync_current_rq_job(job_id, sync_state, replace=True)
 
 
 def update_video_job(job_id: str, **fields: Any) -> None:
@@ -103,6 +109,8 @@ def update_video_job(job_id: str, **fields: Any) -> None:
         video_jobs[job_id].update(copy.deepcopy(fields))
         video_jobs[job_id]["updated_at"] = now
         _save_video_jobs_locked()
+        sync_state = copy.deepcopy(video_jobs[job_id])
+    _sync_current_rq_job(job_id, sync_state, replace=True)
 
 
 def update_video_job_item(job_id: str, index: int, **fields: Any) -> None:
@@ -121,13 +129,14 @@ def update_video_job_item(job_id: str, index: int, **fields: Any) -> None:
         item_state.update(copy.deepcopy(fields))
         job["updated_at"] = now
         _save_video_jobs_locked()
+        sync_state = copy.deepcopy(job)
+    _sync_current_rq_job(job_id, sync_state, replace=True)
 
 
 def get_video_job(job_id: str) -> Optional[Dict[str, Any]]:
     with video_jobs_lock:
         state = video_jobs.get(job_id)
         return copy.deepcopy(state) if state is not None else None
-
 
 def list_video_jobs_by_request_key(
     request_key: str,
@@ -208,3 +217,14 @@ def prune_video_jobs(limit: int) -> int:
         if removed:
             _save_video_jobs_locked()
         return removed
+
+
+def _sync_current_rq_job(job_id: str, state: Dict[str, Any], *, replace: bool) -> None:
+    job = get_current_job()
+    if not job or str(job.id) != str(job_id):
+        return
+    current = {} if replace else dict((job.meta or {}).get("video_state") or {})
+    current.update(state)
+    current["job_id"] = job_id
+    job.meta["video_state"] = current
+    job.save_meta()

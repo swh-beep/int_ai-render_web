@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from fastapi import UploadFile
 from PIL import Image
@@ -171,6 +172,39 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
         self.assertEqual(items[1]["target_key"], "internal_item-1_002")
         self.assertIn("internal/mainrendered/user-photos", prefixes)
         self.assertIn("internal/customize/item-images", prefixes)
+
+    def test_build_internal_itemized_async_render_job_payload_can_defer_input_publish(self):
+        resolve_image_url = MagicMock(side_effect=AssertionError("resolve_image_url should not run pre-enqueue"))
+        build_s3_prefix = MagicMock(side_effect=AssertionError("build_s3_prefix should not run pre-enqueue"))
+
+        payload = build_internal_itemized_async_render_job_payload(
+            raw_path="outputs/raw_room.png",
+            item_specs=[
+                {
+                    "client_id": "item-1",
+                    "name": "Chair",
+                    "category": "chair",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 500, "depth_mm": 500, "height_mm": 900},
+                    "upload_index": 0,
+                }
+            ],
+            item_paths=["outputs/item_1.png"],
+            room="livingroom",
+            style="Customize",
+            variant="1",
+            dimensions="3000 x 3500 x 2400 mm",
+            placement="Keep the chair on the left wall",
+            resolve_image_url=resolve_image_url,
+            build_s3_prefix=build_s3_prefix,
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
+            publish_inputs=False,
+        )
+
+        self.assertEqual(payload["file_path"], "outputs/raw_room.png")
+        self.assertEqual(payload["moodboard_items"][0]["path"], "outputs/item_1.png")
+        resolve_image_url.assert_not_called()
+        build_s3_prefix.assert_not_called()
 
     def test_build_internal_itemized_async_render_job_payload_uses_category_label_when_name_missing(self):
         payload = build_internal_itemized_async_render_job_payload(

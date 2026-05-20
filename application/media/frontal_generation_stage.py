@@ -17,6 +17,7 @@ def generate_frontal_room_from_photos(
     model_name: str,
     allow_all_safety_settings: Callable[[], Any],
     standardize_image: Callable[[str], str | None],
+    call_generation_with_failover: Callable[..., Any] | None = None,
 ):
     input_images = []
     try:
@@ -58,10 +59,11 @@ def generate_frontal_room_from_photos(
         generation_prompt = build_frontal_generation_prompt(spatial_blueprint)
         content_list = [generation_prompt] + input_images
         safety_settings = allow_all_safety_settings()
-        response = call_gemini_with_failover(
+        generation_caller = call_generation_with_failover or call_gemini_with_failover
+        response = generation_caller(
             model_name,
             content_list,
-            {"timeout": 100},
+            {"timeout": 100, "aspect_ratio": "16:9", "max_attempts": 1},
             safety_settings,
             log_tag="Frontal.Generate",
         )

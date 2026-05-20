@@ -50,7 +50,7 @@ def test_call_openai_image_returns_gemini_like_response_for_edits(monkeypatch):
         response = call_openai_image(
             "gpt-image-2",
             ["edit", img],
-            {"timeout": 20},
+            {"timeout": 20, "aspect_ratio": "4:5", "quality": "auto"},
             {},
             api_key="test-key",
             logger=SimpleNamespace(info=lambda *a, **k: None, error=lambda *a, **k: None),
@@ -65,7 +65,43 @@ def test_call_openai_image_returns_gemini_like_response_for_edits(monkeypatch):
     assert response.parts
     assert captured["url"].endswith("/v1/images/edits")
     assert captured["data"]["model"] == "gpt-image-2"
+    assert captured["data"]["size"] == "1600x2000"
+    assert "quality" not in captured["data"]
     assert captured["files"][0][0] == "image[]"
+
+
+def test_call_openai_image_keeps_explicit_non_auto_quality(monkeypatch):
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "data": [
+                    {"b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6M2ioAAAAASUVORK5CYII="}
+                ]
+            }
+
+    captured = {}
+
+    def fake_post(url, headers=None, data=None, files=None, timeout=None, json=None):
+        captured["json"] = json
+        return DummyResponse()
+
+    monkeypatch.setattr("infrastructure.ai.openai_image_client.requests.post", fake_post)
+
+    response = call_openai_image(
+        "gpt-image-2",
+        ["generate"],
+        {"timeout": 20, "aspect_ratio": "16:9", "quality": "medium"},
+        {},
+        api_key="test-key",
+        logger=SimpleNamespace(info=lambda *a, **k: None, error=lambda *a, **k: None),
+        log_brief=True,
+    )
+
+    assert response is not None
+    assert captured["json"]["size"] == "2048x1152"
+    assert captured["json"]["quality"] == "medium"
 
 
 def test_call_openai_image_requires_key():

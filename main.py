@@ -41,6 +41,11 @@ from application.http.queue_route_handlers import (
 )
 from application.marketing.routes import router as marketing_reels_router
 from application.http.local_job_store import enqueue_local_job, get_local_job
+from application.http.staging_job_store import (
+    get_staging_job_state,
+    set_staging_job_state,
+    update_staging_job_state,
+)
 from application.media.frontal_generation_stage import (
     generate_frontal_room_from_photos as generate_frontal_room_from_photos_stage,
 )
@@ -49,6 +54,7 @@ from application.media.image_edit_generation_stage import (
 )
 from application.render.empty_room_generation_stage import generate_empty_room as generate_empty_room_stage
 from application.render.furnished_generation_stage import generate_furnished_room as generate_furnished_room_stage
+from application.render.main_render_polish_stage import polish_main_render as polish_main_render_stage
 from application.render.dimension_support import (
     available_dim_axes as available_dim_axes_support,
     dims_has_positive_values as dims_has_positive_values_support,
@@ -127,9 +133,15 @@ from application.render.scale_guide_support import (
     create_scale_guide_overlay_with_model as create_scale_guide_overlay_with_model_support,
     room_dims_valid as room_dims_valid_support,
 )
-from application.video.compile_workflow import queue_final_compile_job
-from application.video.job_store import get_video_job, prune_video_jobs
-from application.video.source_generation_workflow import queue_source_generation_job
+from application.video.compile_workflow import queue_final_compile_job, run_final_compile_job
+from application.video.job_store import get_video_job, prune_video_jobs, update_video_job
+from application.video.queueing import (
+    build_video_status_payload,
+    enqueue_compile_rq_job,
+    enqueue_source_generation_rq_job,
+    publish_video_state_outputs,
+)
+from application.video.source_generation_workflow import queue_source_generation_job, run_source_generation_job
 from application.video.video_support import download_to_path as _download_to_path
 from dotenv import load_dotenv
 from infrastructure.ai.analysis_provider_dispatch import (
@@ -172,7 +184,7 @@ import gc
 from typing import Optional, List, Dict, Any
 from contextvars import ContextVar
 from redis import Redis
-from rq import Queue, Retry
+from rq import Queue, Retry, get_current_job
 from rq.job import Job
 from api_models import (
     CartItem,
@@ -204,10 +216,12 @@ from render_route_services import (
     build_image_edit_job_payload,
     build_internal_render_job_payload,
     build_internal_itemized_async_render_job_payload,
+    prepare_internal_item_upload_paths,
     build_regenerate_detail_job_payload,
     build_upscale_job_payload,
     persist_internal_media_uploads,
     persist_internal_item_uploads,
+    persist_internal_item_source_uploads,
     persist_internal_room_upload,
 )
 from request_helpers import apply_cart_limits, build_cart_summary, require_role
@@ -286,6 +300,22 @@ APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
 MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
+DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3-pro-image-preview"
+
+
+def _default_direct_gemini_image_model_name() -> str:
+    configured_model = (
+        os.getenv("GEMINI_IMAGE_MODEL_NAME")
+        or os.getenv("MAIN_IMAGE_MODEL_NAME")
+        or ""
+    ).strip()
+    normalized = configured_model.lower()
+    if configured_model and not normalized.startswith(("gpt-", "dall-e-", "chatgpt-")):
+        return configured_model
+    return DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME
+
+
+GEMINI_IMAGE_MODEL_NAME = _default_direct_gemini_image_model_name()
 PROVIDER_DEFAULTS = resolve_provider_defaults(os.environ)
 FORCE_GEMINI_ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.force_gemini_analysis_provider
 FORCE_GEMINI_IMAGE_PROVIDERS = PROVIDER_DEFAULTS.force_gemini_image_providers
@@ -293,8 +323,8 @@ CONFIGURED_ANALYSIS_PROVIDER = os.getenv("ANALYSIS_PROVIDER", "gemini").strip().
 OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").strip() or "gpt-5.4"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
-CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
-CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", CONFIGURED_MAIN_IMAGE_PROVIDER).strip().lower() or CONFIGURED_MAIN_IMAGE_PROVIDER
+CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
+CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
 ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.analysis_provider
 MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_API_KEY)
 REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_API_KEY)
@@ -318,7 +348,7 @@ def _default_main_image_model_name() -> str:
         provider=MAIN_IMAGE_PROVIDER,
         configured_model_name=os.getenv("MAIN_IMAGE_MODEL_NAME"),
         default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
-        default_gemini_model_name=MODEL_NAME,
+        default_gemini_model_name=GEMINI_IMAGE_MODEL_NAME,
     )
 
 
@@ -327,7 +357,7 @@ def _default_repair_image_model_name() -> str:
         provider=REPAIR_IMAGE_PROVIDER,
         configured_model_name=os.getenv("REPAIR_IMAGE_MODEL_NAME"),
         default_openai_model_name=OPENAI_IMAGE_MODEL_NAME,
-        default_gemini_model_name=MODEL_NAME,
+        default_gemini_model_name=GEMINI_IMAGE_MODEL_NAME,
     )
 
 
@@ -379,7 +409,7 @@ print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
-TOTAL_TIMEOUT_LIMIT = max(60, int(os.getenv("TOTAL_TIMEOUT_LIMIT", "600")))
+TOTAL_TIMEOUT_LIMIT = max(60, int(os.getenv("TOTAL_TIMEOUT_LIMIT", "1800")))
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 LOCAL_INLINE_QUEUE_ENABLED = os.getenv("LOCAL_INLINE_QUEUE", "0").strip().lower() in ("1", "true", "yes", "y")
 
@@ -389,6 +419,7 @@ def _split_queue_names(val: str) -> List[str]:
 _rq_name_raw = os.getenv("RQ_QUEUE_NAME", "").strip()
 _rq_render_raw = os.getenv("RQ_QUEUE_RENDER", "").strip()
 _rq_upscale_raw = os.getenv("RQ_QUEUE_UPSCALE", "").strip()
+_rq_video_raw = os.getenv("RQ_QUEUE_VIDEO", "").strip()
 
 _rq_name_parts = _split_queue_names(_rq_name_raw) if _rq_name_raw else []
 RQ_QUEUE_NAME = (_rq_name_parts[0] if _rq_name_parts else (_rq_name_raw or "default")).strip() or "default"
@@ -398,12 +429,16 @@ if not _rq_render_raw and _rq_name_parts:
     _rq_render_raw = _rq_name_parts[0]
 if not _rq_upscale_raw and len(_rq_name_parts) >= 2:
     _rq_upscale_raw = _rq_name_parts[1]
+if not _rq_video_raw and len(_rq_name_parts) >= 3:
+    _rq_video_raw = _rq_name_parts[2]
 
 RQ_QUEUE_RENDER = (_rq_render_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
 RQ_QUEUE_UPSCALE = (_rq_upscale_raw or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
-RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "600"))
+RQ_QUEUE_VIDEO = (_rq_video_raw or RQ_QUEUE_UPSCALE).strip() or RQ_QUEUE_UPSCALE
+RQ_JOB_TIMEOUT = int(os.getenv("RQ_JOB_TIMEOUT", "1800"))
 RQ_VIDEO_JOB_TIMEOUT = int(os.getenv("RQ_VIDEO_JOB_TIMEOUT", "3600"))
 RQ_RESULT_TTL = int(os.getenv("RQ_RESULT_TTL", "604800"))
+STAGING_JOB_TTL = int(os.getenv("STAGING_JOB_TTL", "86400"))
 RQ_RETRY_MAX = int(os.getenv("RQ_RETRY_MAX", "2"))
 RQ_RETRY_INTERVALS = os.getenv("RQ_RETRY_INTERVALS", "30,90").strip()
 S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
@@ -795,22 +830,29 @@ async def _store_output_upload(
             pass
         return JSONResponse(content={"error": "Empty file"}, status_code=400)
 
-    if _s3_enabled():
-        key = _outputs_s3_key(filename)
-        content_type, _ = mimetypes.guess_type(str(out_path))
-        extra = {"ContentType": content_type} if content_type else None
-        if extra:
-            _get_s3_client().upload_file(str(out_path), S3_BUCKET, key, ExtraArgs=extra)
-        else:
-            _get_s3_client().upload_file(str(out_path), S3_BUCKET, key)
-        return {
-            "filename": filename,
-            "url": _s3_public_url(key),
-            "object_key": key,
-            "local_url": f"/outputs/{filename}",
-        }
+    try:
+        public_url = _resolve_video_studio_upload_url(out_path)
+    except Exception as exc:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return JSONResponse(
+            content={"error": f"Upload saved but could not be published for worker access: {exc}"},
+            status_code=500,
+        )
 
-    return {"filename": filename, "url": f"/outputs/{filename}"}
+    return {"filename": filename, "url": public_url, "local_url": f"/outputs/{filename}"}
+
+
+def _resolve_video_studio_upload_url(path: Path) -> str:
+    public_url = resolve_image_url(
+        str(path),
+        s3_prefix_override=_build_s3_prefix("external", "videorendered", "uploads"),
+    )
+    if public_url:
+        return public_url
+    return f"/outputs/{path.name}"
 
 
 def _allowed_asset_exts(asset_type: str | None) -> set[str]:
@@ -962,6 +1004,7 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
     retry = None
     job_timeout = kwargs.pop("job_timeout", RQ_JOB_TIMEOUT)
     result_ttl = kwargs.pop("result_ttl", RQ_RESULT_TTL)
+    custom_job_id = kwargs.pop("job_id", None)
     if q:
         try:
             if RQ_RETRY_MAX > 0:
@@ -982,21 +1025,21 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
         except Exception:
             retry = None
         try:
-            job = q.enqueue(
-                func,
-                *args,
-                **kwargs,
-                job_timeout=job_timeout,
-                result_ttl=result_ttl,
-                retry=retry,
-            )
+            enqueue_kwargs = {
+                "job_timeout": job_timeout,
+                "result_ttl": result_ttl,
+                "retry": retry,
+            }
+            if custom_job_id:
+                enqueue_kwargs["job_id"] = str(custom_job_id)
+            job = q.enqueue(func, *args, **kwargs, **enqueue_kwargs)
             return job, None
         except Exception as exc:
             if not LOCAL_INLINE_QUEUE_ENABLED:
                 return None, str(exc)
     if LOCAL_INLINE_QUEUE_ENABLED:
         try:
-            return enqueue_local_job(func, *args, **kwargs), None
+            return enqueue_local_job(func, *args, job_id=str(custom_job_id) if custom_job_id else None, **kwargs), None
         except Exception as exc:
             return None, str(exc)
     return None, "REDIS_URL not configured"
@@ -1013,6 +1056,33 @@ def _fetch_job(job_id: str):
         return Job.fetch(job_id, connection=conn)
     except Exception:
         return None
+
+
+def _set_staging_job(job_id: str, state: dict) -> None:
+    set_staging_job_state(
+        job_id,
+        state,
+        redis_conn=_get_redis_conn(),
+        ttl_sec=STAGING_JOB_TTL,
+    )
+
+
+def _update_staging_job(job_id: str, fields: dict) -> None:
+    update_staging_job_state(
+        job_id,
+        fields,
+        redis_conn=_get_redis_conn(),
+        ttl_sec=STAGING_JOB_TTL,
+    )
+
+
+def _get_staging_job(job_id: str) -> Optional[dict]:
+    return get_staging_job_state(job_id, redis_conn=_get_redis_conn())
+
+
+def _start_background_task(task):
+    thread = threading.Thread(target=task, name=f"staging-job-{uuid.uuid4().hex[:8]}", daemon=True)
+    thread.start()
 
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1101,6 +1171,9 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
 
 def job_render_with_details(payload: dict) -> dict:
     return job_entrypoints_module.job_render_with_details(payload)
+
+def job_render_with_extra(payload: dict) -> dict:
+    return job_entrypoints_module.job_render_with_extra(payload)
 
 def job_generate_render_video(payload: dict) -> dict:
     return job_entrypoints_module.job_generate_render_video(payload)
@@ -1247,6 +1320,9 @@ def setup_logging():
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,  # <-- 중요: uvicorn이 이미 로깅 잡았어도 덮어씀
     )
+    logging.getLogger("rq.worker").propagate = False
+    logging.getLogger("rq.registry").propagate = False
+    logging.getLogger("rq.queue").propagate = False
 
 setup_logging()
 logger = logging.getLogger("app")
@@ -1462,7 +1538,7 @@ def create_scale_guide_overlay_with_model(
         room_dims_valid_fn=_room_dims_valid,
         allow_all_safety_settings=allow_all_safety_settings,
         call_gemini_with_failover=call_gemini_with_failover,
-        model_name=MODEL_NAME,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
         logger=logger,
     )
 
@@ -1724,6 +1800,7 @@ def generate_furnished_room(
     windows_present=None,
     room_analysis_text=None,
     enable_scale_check=False,
+    max_generation_attempts=None,
 ):
     return generate_furnished_room_stage(
         room_path,
@@ -1748,6 +1825,7 @@ def generate_furnished_room(
         windows_present=windows_present,
         room_analysis_text=room_analysis_text,
         enable_scale_check=enable_scale_check,
+        max_generation_attempts=max_generation_attempts,
         total_timeout_limit=TOTAL_TIMEOUT_LIMIT,
         detect_windows_present=detect_windows_present,
         logger=logger,
@@ -1765,6 +1843,26 @@ def generate_furnished_room(
         repair_model_name=REPAIR_IMAGE_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
+    )
+
+
+def polish_main_image(
+    source_path,
+    unique_id,
+    timeout_sec: float = 90.0,
+    **_kwargs,
+):
+    return polish_main_render_stage(
+        source_path,
+        unique_id=unique_id,
+        allow_all_safety_settings=allow_all_safety_settings,
+        call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+        repair_model_name=REPAIR_IMAGE_MODEL_NAME,
+        call_gemini_with_failover=call_gemini_with_failover,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
+        match_aspect_to_target=match_aspect_to_target,
+        logger=logger,
+        timeout_sec=timeout_sec,
     )
 
 
@@ -1841,7 +1939,13 @@ def api_outputs_list(request: Request, limit: int = 200):
         if p.is_file() and p.suffix.lower() in exts:
             st = p.stat()
             rel = p.relative_to(OUTPUTS_DIR).as_posix()
-            items.append({"filename": rel, "url": f"/outputs/{rel}", "mtime": st.st_mtime})
+            try:
+                url = _resolve_video_studio_upload_url(p)
+            except Exception:
+                if S3_REQUIRED:
+                    continue
+                url = f"/outputs/{rel}"
+            items.append({"filename": rel, "url": url, "local_url": f"/outputs/{rel}", "mtime": st.st_mtime})
 
     items.sort(key=lambda x: x["mtime"], reverse=True)
     return {"items": items[:limit]}
@@ -2007,6 +2111,7 @@ def render_room(
     placement: str = Form(""),
     audience: str = Form(""),
     moodboard_items: Optional[List[Dict[str, Any]]] = None,
+    simple_generation_mode: bool = False,
 ):
     try:
         payload = run_render_room_workflow(
@@ -2020,6 +2125,7 @@ def render_room(
                 placement=placement,
                 audience=audience,
                 moodboard_items=moodboard_items,
+                simple_generation_mode=bool(simple_generation_mode),
             ),
             RenderWorkflowDependencies(
                 runtime=RenderWorkflowRuntime(
@@ -2070,6 +2176,7 @@ def render_room(
                 generation=RenderWorkflowGenerationServices(
                     generate_empty_room=generate_empty_room,
                     generate_furnished_room=generate_furnished_room,
+                    polish_main_image=polish_main_image,
                 ),
                 postprocess=RenderWorkflowPostprocessServices(
                     rank_best_variant=_rank_best_variant_flash,
@@ -2111,6 +2218,8 @@ def _queue_route_deps() -> QueueRouteDependencies:
         parse_internal_render_items_form=parse_internal_render_items_form,
         persist_internal_room_upload=persist_internal_room_upload,
         persist_internal_item_uploads=persist_internal_item_uploads,
+        persist_internal_item_source_uploads=persist_internal_item_source_uploads,
+        prepare_internal_item_upload_paths=prepare_internal_item_upload_paths,
         persist_internal_media_uploads=persist_internal_media_uploads,
         build_internal_render_job_payload=build_internal_render_job_payload,
         build_internal_itemized_async_render_job_payload=build_internal_itemized_async_render_job_payload,
@@ -2127,6 +2236,7 @@ def _queue_route_deps() -> QueueRouteDependencies:
         rq_video_job_timeout=RQ_VIDEO_JOB_TIMEOUT,
         job_render=job_render,
         job_render_with_details=job_render_with_details,
+        job_render_with_extra=job_render_with_extra,
         job_generate_render_video=job_generate_render_video,
         job_image_edit=job_image_edit,
         job_frontal_view=job_frontal_view,
@@ -2135,6 +2245,10 @@ def _queue_route_deps() -> QueueRouteDependencies:
         job_generate_empty_room=job_generate_empty_room,
         job_regenerate_single_detail=job_regenerate_single_detail,
         job_generate_details=job_generate_details,
+        set_staging_job=_set_staging_job,
+        update_staging_job=_update_staging_job,
+        get_staging_job=_get_staging_job,
+        start_background_task=_start_background_task,
     )
 
 @app.get("/download")
@@ -2292,7 +2406,7 @@ def generate_moodboard_options(
         build_prompt=build_moodboard_generation_prompt,
         allow_all_safety_settings=allow_all_safety_settings,
         call_gemini_with_failover=call_gemini_with_failover,
-        model_name=MODEL_NAME,
+        model_name=GEMINI_IMAGE_MODEL_NAME,
     )
     if result.get("error"):
         return JSONResponse(content=result, status_code=500)
@@ -2348,8 +2462,8 @@ def _resolve_kling_credentials() -> tuple[str, str]:
         secret_key = _read_kling_ssm_parameter(KLING_SECRET_KEY_PARAM or _default_kling_ssm_param("secret"))
     return access_key, secret_key
 
-# Concurrency controls (avoid 429 bursts)
-VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "5"))
+# Concurrency controls for provider-side Kling clip generation.
+VIDEO_MAX_CONCURRENCY = int(os.getenv("VIDEO_MAX_CONCURRENCY", "4"))
 _video_sem = threading.Semaphore(VIDEO_MAX_CONCURRENCY)
 
 VIDEO_TARGET_FPS = int(os.getenv("VIDEO_TARGET_FPS", "30"))
@@ -2450,6 +2564,7 @@ job_entrypoints_module.configure_job_entrypoints(
         normalize_audience=_normalize_audience,
         save_job_result=_save_job_result_s3,
         materialize_input=_materialize_input,
+        normalize_item_image=lambda local_path, unique_id, index: _normalize_item_image(local_path, unique_id, index, max_size=1024),
         build_s3_prefix=_build_s3_prefix,
         resolve_image_url=resolve_image_url,
         render_room=render_room,
@@ -2464,8 +2579,8 @@ job_entrypoints_module.configure_job_entrypoints(
             index,
             build_image_edit_step_prompt=build_image_edit_step_prompt,
             pad_image_to_target_canvas=pad_image_to_target_canvas,
-            call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
+            call_gemini_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+            model_name=REPAIR_IMAGE_MODEL_NAME,
             match_aspect_to_target=match_aspect_to_target,
             mask_path=mask_path,
         ),
@@ -2477,9 +2592,10 @@ job_entrypoints_module.configure_job_entrypoints(
             build_frontal_generation_prompt=build_frontal_generation_prompt,
             call_gemini_with_failover=call_gemini_with_failover,
             analysis_model_name=ANALYSIS_MODEL_NAME,
-            model_name=MODEL_NAME,
+            model_name=REPAIR_IMAGE_MODEL_NAME,
             allow_all_safety_settings=allow_all_safety_settings,
             standardize_image=standardize_image,
+            call_generation_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
         ),
         log_section=log_section,
         detect_furniture_boxes=detect_furniture_boxes,
@@ -2488,17 +2604,18 @@ job_entrypoints_module.configure_job_entrypoints(
         analyze_cropped_item=analyze_cropped_item,
         attach_volume_ranks=_attach_volume_ranks,
         construct_dynamic_styles=construct_dynamic_styles_stage,
-        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None: generate_detail_view_stage(
+        generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: generate_detail_view_stage(
             original_image_path,
             style_config,
             unique_id,
             index,
             furniture_data,
+            **kwargs,
             materialize_input=_materialize_input,
             normalize_label_for_match=_normalize_label_for_match,
             allow_harassment_only_safety_settings=allow_harassment_only_safety_settings,
-            call_gemini_with_failover=call_gemini_with_failover,
-            model_name=MODEL_NAME,
+            call_gemini_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
+            model_name=REPAIR_IMAGE_MODEL_NAME,
         ),
         normalize_label_for_match=_normalize_label_for_match,
         volume_ranking_snapshot=_volume_ranking_snapshot,
@@ -2527,30 +2644,95 @@ job_entrypoints_module.configure_job_entrypoints(
     )
 )
 
-@app.post("/video-mvp/generate-sources")
-@async_wrap
-async def api_generate_sources(req: SourceGenRequest):
-    job_id = queue_source_generation_job(
-        req,
+
+def _current_video_job_id(payload: dict) -> str:
+    job = get_current_job()
+    if job:
+        return str(job.id)
+    return str(payload.get("job_id") or uuid.uuid4().hex)
+
+
+def job_video_generate_sources(payload: dict) -> dict:
+    job_id = _current_video_job_id(payload)
+    req = SourceGenRequest(**payload)
+    run_source_generation_job(
+        job_id,
+        req.items,
+        req.cfg_scale,
+        sound=req.sound,
         video_target_fps=VIDEO_TARGET_FPS,
         video_max_concurrency=VIDEO_MAX_CONCURRENCY,
         create_kling_task=_kling_create_task,
         poll_kling_task=_kling_poll,
+        resolve_output_url=_resolve_video_output_url,
     )
-    return {"job_id": job_id}
+    return _publish_video_job_state(
+        job_id,
+        get_video_job(job_id) or {"status": "FAILED", "error": "Video source job ended without state"},
+    )
+
+
+def job_video_compile(payload: dict) -> dict:
+    job_id = _current_video_job_id(payload)
+    req = CompileRequest(**payload)
+    run_final_compile_job(job_id, req, video_target_fps=VIDEO_TARGET_FPS, resolve_output_url=_resolve_video_output_url)
+    return _publish_video_job_state(
+        job_id,
+        get_video_job(job_id) or {"status": "FAILED", "error": "Video compile job ended without state"},
+    )
+
+
+def _publish_video_job_state(job_id: str, state: dict) -> dict:
+    published = publish_video_state_outputs(state, resolve_output_url=_resolve_video_output_url)
+    update_video_job(job_id, **published)
+    return published
+
+
+def _resolve_video_output_url(output_url: str) -> str | None:
+    rel = output_url[len("/outputs/") :].lstrip("/\\")
+    local_path = Path("outputs") / rel
+    return resolve_image_url(
+        str(local_path),
+        s3_prefix_override=_build_s3_prefix("external", "videorendered", "rendered"),
+    )
+
+
+@app.post("/video-mvp/generate-sources")
+@async_wrap
+async def api_generate_sources(req: SourceGenRequest):
+    job_id, err = enqueue_source_generation_rq_job(
+        req,
+        enqueue_job=_enqueue_job,
+        queue_name=RQ_QUEUE_VIDEO,
+        job_func=job_video_generate_sources,
+    )
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return {"job_id": job_id, "status": "queued"}
 
 @app.post("/video-mvp/compile")
 @async_wrap
 async def api_compile_final(req: CompileRequest):
-    job_id = queue_final_compile_job(req, video_target_fps=VIDEO_TARGET_FPS)
-    return {"job_id": job_id}
+    job_id, err = enqueue_compile_rq_job(
+        req,
+        enqueue_job=_enqueue_job,
+        queue_name=RQ_QUEUE_VIDEO,
+        job_func=job_video_compile,
+    )
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return {"job_id": job_id, "status": "queued"}
 
 @app.get("/video-mvp/status/{job_id}")
 async def video_mvp_status(job_id: str):
-    st = get_video_job(job_id)
-    if not st:
-        return JSONResponse({"status": "NOT_FOUND", "message": "Job not found"}, status_code=404)
-    return st
+    payload, status_code = build_video_status_payload(
+        job_id,
+        fetch_job=_fetch_job,
+        load_memory_job=get_video_job,
+    )
+    if status_code != 200:
+        return JSONResponse(payload, status_code=status_code)
+    return payload
 
 
 if __name__ == "__main__":

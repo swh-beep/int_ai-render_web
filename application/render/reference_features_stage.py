@@ -122,6 +122,16 @@ def _normalize_dims_mm(dims_mm: dict | None) -> dict[str, int | None]:
     }
 
 
+def _append_unique(target: list[str], *values: str, limit: int = 8) -> None:
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in target:
+            continue
+        target.append(text)
+        if len(target) >= limit:
+            return
+
+
 def should_extract_reference_features(
     *,
     label: str,
@@ -204,10 +214,45 @@ def _normalize_crop_for_prompt(crop_path: str) -> Image.Image:
         return normalized.copy()
 
 
-def _fallback_reference_features(*, label: str, category: str | None, description: str) -> dict:
+def _fallback_reference_features(
+    *,
+    label: str,
+    category: str | None,
+    description: str,
+    dims_mm: dict | None = None,
+) -> dict:
     text_blob = " ".join([str(label or ""), str(category or ""), str(description or "")]).strip()
     material_cues = _extract_keyword_cues(text_blob, _MATERIAL_CUE_KEYWORDS)
     silhouette_cues = _extract_keyword_cues(text_blob, _SHAPE_CUE_KEYWORDS)
+    preserve_rules: list[str] = []
+    family = category_match_family(category or label)
+    dims = _normalize_dims_mm(dims_mm)
+    max_dim = max([value or 0 for value in dims.values()])
+
+    if family == "mirror":
+        _append_unique(material_cues, "mirror", "reflective")
+        _append_unique(silhouette_cues, "wall-mounted")
+        _append_unique(preserve_rules, "wall-mounted reflective surface", "do not render as artwork")
+    elif family == "rug":
+        _append_unique(material_cues, "textile")
+        _append_unique(silhouette_cues, "flat")
+        _append_unique(preserve_rules, "flat floor textile", "not a raised platform")
+    elif family == "ceiling_light":
+        _append_unique(preserve_rules, "ceiling suspended", "do not place on floor or table")
+    elif family == "wall_light":
+        _append_unique(preserve_rules, "wall attached", "do not place on floor or table")
+    elif family == "floor_lamp":
+        _append_unique(preserve_rules, "floor standing")
+    elif family == "table_lamp":
+        _append_unique(preserve_rules, "surface scale", "do not enlarge into floor lamp")
+
+    if family in {"table", "desk"} and any(token in text_blob.lower() for token in ("glass", "transparent")):
+        _append_unique(material_cues, "glass")
+        _append_unique(preserve_rules, "transparent tabletop")
+
+    if max_dim > 0 and max_dim <= 250:
+        _append_unique(preserve_rules, "tiny absolute scale", "do not upscale into anchor furniture")
+
     reflective_surface = any(
         token in material_cues for token in ("mirror", "reflective", "glass", "chrome")
     ) or str(category or "").strip().lower() == "mirror"
@@ -215,7 +260,7 @@ def _fallback_reference_features(*, label: str, category: str | None, descriptio
         "silhouette_cues": silhouette_cues,
         "material_cues": material_cues,
         "distinctive_parts": [],
-        "preserve_rules": [],
+        "preserve_rules": preserve_rules,
         "reflective_surface": reflective_surface,
     }
 
@@ -235,7 +280,7 @@ def extract_reference_features(
     extraction_reason: str = "",
     absolute_deadline_ts: float | None = None,
 ) -> dict:
-    fallback = _fallback_reference_features(label=label, category=category, description=description)
+    fallback = _fallback_reference_features(label=label, category=category, description=description, dims_mm=dims_mm)
     if not allow_model_call:
         return fallback
     if not crop_path or not os.path.exists(crop_path):

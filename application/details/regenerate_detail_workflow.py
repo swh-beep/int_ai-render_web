@@ -2,11 +2,12 @@ import os
 import uuid
 from typing import Callable, Optional
 
-from application.details.detail_analysis_stage import load_analyzed_items
+from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.regenerate_detail_resolution import (
     attach_regenerated_target_metadata,
     resolve_regeneration_style,
 )
+from application.details.detail_style_stage import with_internal_angle_styles
 
 
 def _normalize_box(box) -> list[float] | None:
@@ -151,9 +152,7 @@ def _inject_requested_target_fallback(
         if req_target_key:
             hydrated["target_key"] = str(req_target_key).strip()
         if normalized_box is not None:
-            hydrated["box_2d"] = list(normalized_box)
-            hydrated["source_box_2d"] = list(normalized_box)
-            hydrated["box_source"] = "requested_target_box"
+            hydrated["requested_target_box_2d"] = list(normalized_box)
         next_items = [hydrated]
         replaced = False
         for item in analyzed_items or []:
@@ -192,9 +191,7 @@ def _inject_requested_target_fallback(
     )
 
     if normalized_box is not None:
-        hydrated["box_2d"] = list(normalized_box)
-        hydrated["source_box_2d"] = list(normalized_box)
-        hydrated["box_source"] = "requested_target_box"
+        hydrated["requested_target_box_2d"] = list(normalized_box)
 
     filtered_items = []
     for item in analyzed_items or []:
@@ -202,6 +199,10 @@ def _inject_requested_target_fallback(
             continue
         filtered_items.append(item)
     return [hydrated, *filtered_items], "requested_target_fallback"
+
+
+def _copy_cached_furniture_items(furniture_data) -> list[dict]:
+    return [dict(item) for item in (furniture_data or []) if isinstance(item, dict)]
 
 
 def run_regenerate_single_detail_job(
@@ -234,6 +235,7 @@ def run_regenerate_single_detail_job(
             style_index_mode = "auto"
 
         furniture_data = payload.get("furniture_data")
+        cached_items = _copy_cached_furniture_items(furniture_data)
         audience = payload.get("audience")
 
         aud = normalize_audience(audience)
@@ -245,13 +247,13 @@ def run_regenerate_single_detail_job(
             return {"error": "Original image not found"}
         resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
 
-        if furniture_data and len(furniture_data) > 0:
-            print(">> [Single Retry] Using cached furniture data!", flush=True)
-            analyzed_items = furniture_data
+        if cached_items:
+            print(">> [Single Retry] Using cached furniture targets for regeneration.", flush=True)
+            analyzed_items = cached_items
         else:
             print(">> [Single Retry] No cached furniture data. Re-analyzing the source image...", flush=True)
-            analyzed_items = load_analyzed_items(
-                furniture_data=None,
+            analyzed_items = prepare_detail_generation_items(
+                furniture_data=furniture_data,
                 moodboard_url=payload.get("moodboard_url"),
                 local_path=local_path,
                 materialize_input=materialize_input,
@@ -261,6 +263,8 @@ def run_regenerate_single_detail_job(
                 max_concurrency_analysis=max_concurrency_analysis,
                 analyze_cropped_item=analyze_cropped_item,
                 attach_volume_ranks=attach_volume_ranks,
+                normalize_label_for_match=normalize_label_for_match,
+                simple_generation_mode=True,
             )
 
         try:
@@ -295,6 +299,8 @@ def run_regenerate_single_detail_job(
         )
 
         dynamic_styles = construct_dynamic_styles(analyzed_items)
+        if aud == "internal":
+            dynamic_styles = with_internal_angle_styles(dynamic_styles)
         if not dynamic_styles:
             return {"error": "No styles available"}
 
@@ -310,7 +316,14 @@ def run_regenerate_single_detail_job(
             return {"error": "No matching style for regeneration"}
 
         unique_id = uuid.uuid4().hex[:6]
-        result = generate_detail_view(local_path, style, unique_id, int(resolved_style_index or 1), analyzed_items)
+        result = generate_detail_view(
+            local_path,
+            style,
+            unique_id,
+            int(resolved_style_index or 1),
+            analyzed_items,
+            prefer_crop_extract=False,
+        )
         if not result:
             return {"error": "Generation failed"}
 
@@ -338,6 +351,7 @@ def run_regenerate_single_detail_job(
         output["resolved_by"] = resolution_chain or None
         if isinstance(result, dict):
             output["style_name"] = result.get("style_name") or style.get("name")
+            output["aspect_ratio"] = result.get("aspect_ratio") or style.get("ratio")
             output["cutout_ref_count"] = int(result.get("cutout_ref_count") or 0)
             labels = list(result.get("cutout_ref_labels") or [])
             if labels:

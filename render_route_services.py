@@ -45,6 +45,10 @@ def persist_internal_room_upload(file: UploadFile) -> str:
 
 
 def persist_internal_item_uploads(item_images: list[UploadFile]) -> list[str]:
+    return prepare_internal_item_upload_paths(persist_internal_item_source_uploads(item_images))
+
+
+def persist_internal_item_source_uploads(item_images: list[UploadFile]) -> list[str]:
     unique_id = uuid.uuid4().hex[:8]
     timestamp = int(time.time())
     saved_paths: list[str] = []
@@ -56,10 +60,18 @@ def persist_internal_item_uploads(item_images: list[UploadFile]) -> list[str]:
             unique_id=unique_id,
             timestamp=timestamp,
         )
-        final_path = os.path.join(
-            "outputs",
-            f"cart_item_{timestamp}_{unique_id}_{_safe_upload_name(upload, f'cart_item_{idx}.png')}",
-        )
+        saved_paths.append(raw_path)
+    return saved_paths
+
+
+def prepare_internal_item_upload_paths(raw_paths: list[str]) -> list[str]:
+    unique_id = uuid.uuid4().hex[:8]
+    timestamp = int(time.time())
+    saved_paths: list[str] = []
+    for idx, raw_path in enumerate(raw_paths, start=1):
+        basename = os.path.basename(str(raw_path)) or f"cart_item_{idx}.png"
+        safe_name = "".join([c for c in basename if c.isalnum() or c in "._-"]) or f"cart_item_{idx}.png"
+        final_path = os.path.join("outputs", f"cart_item_{timestamp}_{unique_id}_{safe_name}")
         prepared_path = prepare_direct_item_image(raw_path, output_path=final_path, max_size=1024)
         if prepared_path:
             try:
@@ -156,6 +168,7 @@ def build_internal_async_render_job_payload(
         "dimensions": dimensions,
         "placement": placement,
         "audience": audience,
+        "simple_generation_mode": True,
     }
 
 
@@ -172,6 +185,7 @@ def build_internal_itemized_async_render_job_payload(
     resolve_image_url: Callable[[str | None, str | None], str | None],
     build_s3_prefix: Callable[[str, str, str | None], str],
     build_item_target_key: Callable[..., str],
+    publish_inputs: bool = True,
 ) -> dict:
     audience = "internal"
     validated_specs: list[dict] = []
@@ -208,16 +222,20 @@ def build_internal_itemized_async_render_job_payload(
             }
         )
 
-    file_ref = resolve_image_url(raw_path, build_s3_prefix(audience, "mainrendered", "user-photos"))
+    file_ref = (
+        resolve_image_url(raw_path, build_s3_prefix(audience, "mainrendered", "user-photos"))
+        if publish_inputs
+        else None
+    )
 
     moodboard_items = []
-    item_prefix = build_s3_prefix(audience, "customize", "item-images")
+    item_prefix = build_s3_prefix(audience, "customize", "item-images") if publish_inputs else None
     for spec in validated_specs:
         item_path = item_paths[spec["upload_index"]]
         if not item_path:
             raise ValueError(f"Item {spec['payload_index']} has invalid upload_index")
 
-        item_ref = resolve_image_url(item_path, item_prefix)
+        item_ref = resolve_image_url(item_path, item_prefix) if publish_inputs else None
 
         moodboard_items.append(
             {
@@ -247,6 +265,7 @@ def build_internal_itemized_async_render_job_payload(
         "dimensions": dimensions,
         "placement": placement,
         "audience": audience,
+        "simple_generation_mode": True,
     }
 
 
@@ -298,6 +317,7 @@ def build_internal_render_job_payload(req: InternalRenderRequest) -> dict:
         "dimensions": req.dimensions or "",
         "placement": req.placement or "",
         "audience": "internal",
+        "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     return {"render": payload}
 
@@ -329,8 +349,10 @@ def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tup
         "dimensions": resolved["dimensions"],
         "placement": resolved["placement"],
         "audience": "external",
+        "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {
+        "require_details": True,
         "render": payload,
         "extra": {
             "preset_id": req.preset_id,
@@ -357,31 +379,11 @@ def build_external_cart_job(
     if not kept:
         raise ValueError("No items after applying limits")
 
-    unique_id = uuid.uuid4().hex[:8]
     item_refs = []
     for idx, it in enumerate(kept):
         img_url = it.get("image_url") or it.get("image")
         if not img_url:
             continue
-        local_src = materialize_input(img_url, f"cart_item_{idx}")
-        norm_path = normalize_item_image(local_src, unique_id, idx + 1) if local_src else None
-        if not norm_path:
-            continue
-        ref_url = resolve_image_url(norm_path, build_s3_prefix("external", "customize"))
-        if ref_url and isinstance(ref_url, str) and ref_url.startswith("http"):
-            try:
-                if os.path.exists(norm_path):
-                    os.remove(norm_path)
-            except Exception:
-                pass
-        try:
-            if local_src and os.path.exists(local_src):
-                abs_src = os.path.abspath(local_src)
-                abs_out = os.path.abspath("outputs") + os.sep
-                if abs_src.startswith(abs_out) and os.path.basename(local_src).startswith("cart_item_"):
-                    os.remove(local_src)
-        except Exception:
-            pass
         label = it.get("name") or it.get("category") or it.get("id") or "Item"
         try:
             qty_val = int(it.get("qty") or 1)
@@ -392,13 +394,14 @@ def build_external_cart_job(
         item_refs.append(
             {
                 "label": label,
-                "path": ref_url or norm_path,
+                "path": img_url,
                 "dims_mm": it.get("dims_mm"),
                 "options": it.get("options"),
                 "qty": qty_val,
                 "category": it.get("category"),
                 "item_id": it.get("id"),
                 "payload_index": idx + 1,
+                "worker_preprocess": "external_cart_item_v1",
                 "target_key": build_item_target_key(
                     "cart",
                     idx + 1,
@@ -429,8 +432,10 @@ def build_external_cart_job(
         "dimensions": req.dimensions or "",
         "placement": placement,
         "audience": "external",
+        "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {
+        "require_details": True,
         "render": payload,
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }
@@ -442,9 +447,10 @@ def build_external_render_video_job(req: ExternalRenderVideoRequest) -> dict:
     if not render_job_id:
         raise ValueError("render_job_id is required")
 
-    clip_count = int(req.clip_count or 4)
-    if clip_count < 4 or clip_count > 6:
-        raise ValueError("clip_count must be between 4 and 6")
+    requested_clip_count = int(req.clip_count or 7)
+    if requested_clip_count < 4 or requested_clip_count > 7:
+        raise ValueError("clip_count must be between 4 and 7")
+    clip_count = 7
 
     cfg_scale = float(req.cfg_scale or 0.5)
     if cfg_scale <= 0:
@@ -464,6 +470,7 @@ def build_detail_generation_job_payload(req: DetailRequest) -> dict:
         "moodboard_url": req.moodboard_url,
         "furniture_data": req.furniture_data,
         "audience": req.audience,
+        "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
 
 

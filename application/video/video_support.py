@@ -223,10 +223,22 @@ def kling_prompts_dynamic(
 
     motion_map = {
         "static": "Static camera shot, extremely subtle movement.",
-        "orbit_r_slow": "Slow orbit rotation to the right, keeping the subject centered, smooth movement.",
-        "orbit_l_slow": "Slow orbit rotation to the left, keeping the subject centered, smooth movement.",
-        "orbit_r_fast": "Fast orbit rotation to the right, dynamic camera movement.",
-        "orbit_l_fast": "Fast orbit rotation to the left, dynamic camera movement.",
+        "orbit_r_slow": (
+            "Slow clockwise camera orbit to the right around a fixed central point in the room, moving in a gentle arc while keeping the subject centered. "
+            "Do not pan, slide, truck sideways, dolly left/right, or translate the camera laterally."
+        ),
+        "orbit_l_slow": (
+            "Slow counterclockwise camera orbit to the left around a fixed central point in the room, moving in a gentle arc while keeping the subject centered. "
+            "Do not pan, slide, truck sideways, dolly left/right, or translate the camera laterally."
+        ),
+        "orbit_r_fast": (
+            "Fast clockwise camera orbit to the right around a fixed central point in the room, moving in a dynamic arc while keeping the subject centered. "
+            "Do not pan, slide, truck sideways, dolly left/right, or translate the camera laterally."
+        ),
+        "orbit_l_fast": (
+            "Fast counterclockwise camera orbit to the left around a fixed central point in the room, moving in a dynamic arc while keeping the subject centered. "
+            "Do not pan, slide, truck sideways, dolly left/right, or translate the camera laterally."
+        ),
         "zoom_in_slow": "Slow camera dolly-in at eye-level. Move straight forward without shaking or walking bob. Smooth cinematic push.",
         "zoom_out_slow": "Slow camera dolly-out at eye-level. Move straight backward without shaking or walking bob. Smooth cinematic pull.",
         "zoom_in_fast": "Fast camera dolly-in at eye-level. Rapid straight movement towards the subject.",
@@ -248,6 +260,7 @@ def kling_prompts_dynamic(
     negative_prompt = (
         "human, person, walking, shaking camera, shaky footage, "
         "changing furniture, melting objects, distorted geometry, "
+        "sideways slide, lateral pan, truck left, truck right, "
         "text, watermark, logo, frame borders, low quality, cartoon"
     )
     return {"prompt": final_prompt, "negative_prompt": negative_prompt}

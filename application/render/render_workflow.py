@@ -28,6 +28,11 @@ def _normalize_detail_result(details_result: Any) -> dict:
     return _best_effort_empty_details("Detail generation skipped")
 
 
+def _detail_failure_message(details_result: dict) -> str:
+    message = str(details_result.get("message") or details_result.get("error") or "").strip()
+    return message or "Required detail generation produced no detail images"
+
+
 def run_render_job(
     payload: dict,
     *,
@@ -64,6 +69,7 @@ def run_render_job(
             placement=prepared.placement,
             audience=prepared.audience,
             moodboard_items=resources.local_items,
+            simple_generation_mode=bool(payload.get("simple_generation_mode")),
         )
         result = json_from_response(response)
         if persist_result:
@@ -80,16 +86,17 @@ def run_render_with_details_job(
     render_job_runner: Callable[[dict, bool], dict],
     detail_job_runner: Callable[[dict], dict],
     persist_job_result: Callable[[dict, Optional[str]], None],
-    total_timeout_limit_sec: float = 600.0,
+    total_timeout_limit_sec: float = 1800.0,
     minimum_detail_budget_sec: float = 5.0,
     time_now: Callable[[], float] = time.time,
 ) -> dict:
     job_start_ts = float(time_now())
-    absolute_deadline_ts = job_start_ts + max(1.0, float(total_timeout_limit_sec or 600.0))
+    absolute_deadline_ts = job_start_ts + max(1.0, float(total_timeout_limit_sec or 1800.0))
     render_payload = payload.get("render") or {}
     audience = normalize_audience(render_payload.get("audience"))
     render_payload["audience"] = audience
     extra = payload.get("extra") or {}
+    require_details = bool(payload.get("require_details"))
 
     render_result = render_job_runner(render_payload, False)
     if "error" in render_result:
@@ -107,14 +114,29 @@ def run_render_with_details_job(
         return result
 
     details_payload = build_detail_payload(render_result, audience=audience)
-    remaining_detail_budget_sec = max(0.0, absolute_deadline_ts - float(time_now()))
-    details_payload["absolute_deadline_ts"] = absolute_deadline_ts
-    details_payload["detail_budget_sec"] = remaining_detail_budget_sec
-    details_payload["minimum_detail_budget_sec"] = float(minimum_detail_budget_sec)
-    if remaining_detail_budget_sec < float(minimum_detail_budget_sec):
-        details_result = _best_effort_empty_details("Detail generation skipped due to deadline budget exhaustion")
-    else:
+    if require_details:
+        details_payload["require_details"] = True
         details_result = _normalize_detail_result(detail_job_runner(details_payload))
+    else:
+        remaining_detail_budget_sec = max(0.0, absolute_deadline_ts - float(time_now()))
+        details_payload["absolute_deadline_ts"] = absolute_deadline_ts
+        details_payload["detail_budget_sec"] = remaining_detail_budget_sec
+        details_payload["minimum_detail_budget_sec"] = float(minimum_detail_budget_sec)
+        if remaining_detail_budget_sec < float(minimum_detail_budget_sec):
+            details_result = _best_effort_empty_details("Detail generation skipped due to deadline budget exhaustion")
+        else:
+            details_result = _normalize_detail_result(detail_job_runner(details_payload))
+
+    if require_details and not details_result.get("details"):
+        result = {
+            "error": f"Required detail generation failed: {_detail_failure_message(details_result)}",
+            "render": render_result,
+            "details": details_result,
+            **extra,
+        }
+        persist_job_result(result, audience=audience)
+        return result
+
     result = {"render": render_result, "details": details_result, **extra}
     persist_job_result(result, audience=audience)
     return result

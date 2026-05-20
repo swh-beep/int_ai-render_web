@@ -9,6 +9,7 @@ class RenderPostprocessStageResult:
     generated_results: list[str]
     full_analyzed_data: list[dict]
     volume_ranking: list[dict]
+    rerank_applied: bool = False
 
 
 def _bounded_timeout_for_deadline(
@@ -38,26 +39,27 @@ def _reorder_generated_results(
     absolute_deadline_ts: float | None = None,
     *,
     rank_best_variant: Callable[..., int | None],
-) -> list[str]:
+) -> tuple[list[str], bool]:
     reordered = list(generated_results or [])
     if not allow_failed_rerank:
-        return reordered
+        return reordered, False
     ranking_timeout_sec = _bounded_timeout_for_deadline(
-        18.0,
+        60.0,
         absolute_deadline_ts=absolute_deadline_ts,
         minimum_sec=8.0,
     )
     if ranking_timeout_sec is None:
-        return reordered
+        return reordered, False
     candidates = [path for path in (rankable_results or []) if path in reordered]
     candidates = candidates or list(reordered)
+    rerank_applied = False
     try:
         try:
             best_idx = rank_best_variant(
                 candidates,
                 full_analyzed_data,
                 timeout_sec=ranking_timeout_sec,
-                max_attempts=1,
+                max_attempts=3,
             )
         except TypeError:
             best_idx = rank_best_variant(candidates, full_analyzed_data)
@@ -67,9 +69,10 @@ def _reorder_generated_results(
                 reordered = [best_path]
             else:
                 reordered = [best_path] + [path for path in reordered if path != best_path]
+            rerank_applied = True
     except Exception:
         pass
-    return reordered
+    return reordered, rerank_applied
 
 
 def _refresh_main_render_boxes(
@@ -146,7 +149,7 @@ def run_render_postprocess_stage(
     skip_main_render_remap: bool = False,
     absolute_deadline_ts: float | None = None,
 ) -> RenderPostprocessStageResult:
-    reordered_results = _reorder_generated_results(
+    reordered_results, rerank_applied = _reorder_generated_results(
         generated_results,
         rankable_results,
         full_analyzed_data,
@@ -175,4 +178,5 @@ def run_render_postprocess_stage(
         generated_results=reordered_results,
         full_analyzed_data=ranked_items,
         volume_ranking=volume_ranking,
+        rerank_applied=rerank_applied,
     )

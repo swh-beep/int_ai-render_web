@@ -920,7 +920,7 @@ def test_generate_furnished_room_does_not_send_scale_guide_image_to_model(tmp_pa
     assert len(captured["content"]) == 3
 
 
-def test_generate_furnished_room_includes_strict_scale_plan_context(tmp_path, monkeypatch):
+def test_generate_furnished_room_keeps_strict_scale_plan_out_of_generation_prompt(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     captured = {}
@@ -982,8 +982,9 @@ def test_generate_furnished_room_includes_strict_scale_plan_context(tmp_path, mo
     )
 
     assert result["path"] == os.path.join("outputs", "result_1012_job-scale-plan-prompt.png")
-    assert "<STRICT SCALE PLAN (HARD CONTRACT)>" in captured["prompt"]
-    assert "Anchor: Sofa | roomW=0.6" in captured["prompt"]
+    assert "<STRICT SCALE PLAN (HARD CONTRACT)>" not in captured["prompt"]
+    assert "<CANONICAL GEOMETRY CONTRACT>" not in captured["prompt"]
+    assert "Anchor: Sofa | roomW=0.6" not in captured["prompt"]
 
 
 def test_scale_guide_leak_detector_uses_guide_geometry_signature(tmp_path):
@@ -1006,13 +1007,13 @@ def test_scale_guide_leak_detector_matches_real_perspective_guide_artifact():
     assert furnished_generation_stage._has_scale_guide_leak(guide_path, guide_path) is True
 
 
-def test_scale_guide_leak_detector_does_not_flag_archived_clean_render():
-    guide_path = os.path.join("outputs", "scale_debug", "scale_guide_url.png")
-    clean_render_path = os.path.join("outputs", "scale_debug", "result_url.png")
+def test_scale_guide_leak_detector_does_not_flag_archived_clean_render(tmp_path):
+    guide_path = tmp_path / "scale_guide_url.png"
+    clean_render_path = tmp_path / "result_url.png"
+    _write_grid_image(guide_path)
+    clean_render_path.write_bytes(_make_png_bytes(160, 90))
 
-    assert os.path.exists(guide_path)
-    assert os.path.exists(clean_render_path)
-    assert furnished_generation_stage._has_scale_guide_leak(clean_render_path, guide_path) is False
+    assert furnished_generation_stage._has_scale_guide_leak(str(clean_render_path), str(guide_path)) is False
 
 
 def test_generate_furnished_room_does_not_retry_on_scale_guide_signature_when_guide_is_not_attached(tmp_path, monkeypatch):
@@ -1893,7 +1894,7 @@ def test_run_render_variant_stage_uses_start_index_for_variant_suffixes():
     ]
 
 
-def test_run_render_room_workflow_aggregates_scale_counts_after_variants_complete(monkeypatch):
+def test_run_render_room_workflow_preserves_variant_scale_counts_without_summary_aggregation(monkeypatch):
     summary_ref = _SummaryRef()
     captured = {}
 
@@ -2055,8 +2056,10 @@ def test_run_render_room_workflow_aggregates_scale_counts_after_variants_complet
     result = run_render_room_workflow(request, deps)
 
     assert captured["generated_results"] == ["outputs/variant-1.png", "outputs/variant-2.png"]
-    assert summary_ref.summary["scalecheck_fail"] == 2
-    assert summary_ref.summary["scalecheck_retry"] == 1
+    assert summary_ref.summary["scalecheck_fail"] == 0
+    assert summary_ref.summary["scalecheck_retry"] == 0
+    assert result["variant_diagnostics"][1]["scalecheck_fail_count"] == 2
+    assert result["variant_diagnostics"][1]["scalecheck_retry_count"] == 1
     assert result["result_url"] == "url://outputs/variant-1.png"
     assert set(result.keys()) == {
         "candidate_result_urls",
@@ -2089,7 +2092,7 @@ def test_run_render_room_workflow_aggregates_scale_counts_after_variants_complet
     assert len(result["variant_diagnostics"]) == 2
 
 
-def test_run_render_room_workflow_sorts_variants_by_quality_before_postprocess(monkeypatch):
+def test_run_render_room_workflow_passes_variants_to_postprocess_in_generation_order(monkeypatch):
     summary_ref = _SummaryRef()
     captured = {}
 
@@ -2269,13 +2272,13 @@ def test_run_render_room_workflow_sorts_variants_by_quality_before_postprocess(m
     run_render_room_workflow(request, deps)
 
     assert captured["generated_results"] == [
+        "outputs/variant_c.png",
         "outputs/variant_a.png",
         "outputs/variant_b.png",
-        "outputs/variant_c.png",
     ]
 
 
-def test_run_render_room_workflow_disables_failed_rerank_for_strict_internal(monkeypatch):
+def test_run_render_room_workflow_allows_best_of_three_rerank_for_internal(monkeypatch):
     summary_ref = _SummaryRef()
     captured = {}
 
@@ -2438,11 +2441,11 @@ def test_run_render_room_workflow_disables_failed_rerank_for_strict_internal(mon
 
     run_render_room_workflow(request, deps)
 
-    assert captured["allow_failed_rerank"] is False
+    assert captured["allow_failed_rerank"] is True
     assert captured["generated_results"] == [
+        "outputs/variant_c.png",
         "outputs/variant_a.png",
         "outputs/variant_b.png",
-        "outputs/variant_c.png",
     ]
 
 
@@ -2679,6 +2682,51 @@ def test_generate_furnished_room_counts_retries_before_first_success(tmp_path, m
         "scalecheck_issues": [],
         "scalecheck_failed_rules": [],
     }
+
+
+def test_generate_furnished_room_respects_explicit_single_attempt_limit(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    call_state = {"count": 0}
+
+    monkeypatch.setattr(furnished_generation_stage.time, "time", lambda: 1014.0)
+
+    def _call_gemini(model_name, content, *args, **kwargs):
+        call_state["count"] += 1
+        return SimpleNamespace(candidates=[SimpleNamespace()], parts=[])
+
+    result = generate_furnished_room(
+        str(room_path),
+        "style",
+        "ref.png",
+        "job-single-attempt",
+        furniture_specs_json={"items": []},
+        room_dimensions="4000x4000x2400",
+        primary_item={"label": "Chair", "dims_mm": {"width_mm": 600, "depth_mm": 600, "height_mm": 900}},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        start_time=1014.0,
+        enable_scale_check=False,
+        total_timeout_limit=30,
+        detect_windows_present=lambda path: False,
+        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=SimpleNamespace(get=lambda: _build_summary()),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, []),
+        max_generation_attempts=1,
+    )
+
+    assert call_state["count"] == 1
+    assert result is None
 
 
 def test_collect_repair_targets_prefers_weighted_issue_score_over_family_priority():

@@ -77,8 +77,8 @@ def resolve_provider_defaults(env: Mapping[str, str | None]) -> ProviderDefaults
     configured_analysis_provider = (env.get("ANALYSIS_PROVIDER", "gemini") or "gemini").strip().lower() or "gemini"
     configured_main_image_provider = (env.get("MAIN_IMAGE_PROVIDER", "gemini") or "gemini").strip().lower() or "gemini"
     configured_repair_image_provider = (
-        env.get("REPAIR_IMAGE_PROVIDER", configured_main_image_provider) or configured_main_image_provider
-    ).strip().lower() or configured_main_image_provider
+        env.get("REPAIR_IMAGE_PROVIDER", "openai") or "openai"
+    ).strip().lower() or "openai"
 
     analysis_provider = "gemini" if (force_gemini_analysis_raw is not None or legacy_force_raw is not None) and force_gemini_analysis_provider else configured_analysis_provider
     main_image_provider = "gemini" if (force_gemini_image_raw is not None or legacy_force_raw is not None) and force_gemini_image_providers else configured_main_image_provider

@@ -1,6 +1,10 @@
+import json
+import os
 import random
+import threading
 import time
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from google import genai
@@ -191,6 +195,94 @@ def _build_generation_config(
     return config
 
 
+_QA_BUDGET_LOCK = threading.Lock()
+
+
+def _parse_max_calls(max_calls: int | str | None) -> int | None:
+    try:
+        parsed = int(max_calls) if max_calls is not None and str(max_calls).strip() else 0
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _resolve_budget_path(budget_file: str | None = None) -> Path | None:
+    raw = (budget_file or os.getenv("QA_GEMINI_BUDGET_FILE") or "").strip()
+    return Path(raw).resolve() if raw else None
+
+
+def get_qa_budget_snapshot(*, budget_file: str | None = None, max_calls: int | str | None = None) -> dict:
+    limit = _parse_max_calls(max_calls if max_calls is not None else os.getenv("QA_GEMINI_MAX_CALLS"))
+    path = _resolve_budget_path(budget_file)
+    if path is None or limit is None:
+        return {"enabled": False, "limit": limit or 0, "count": 0, "remaining": limit or 0, "events": []}
+
+    if not path.exists():
+        return {"enabled": True, "limit": limit, "count": 0, "remaining": limit, "events": [], "updated_at": None}
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+
+    count = int(payload.get("count") or 0)
+    snapshot = {
+        "enabled": True,
+        "limit": limit,
+        "count": count,
+        "remaining": max(0, limit - count),
+        "events": list(payload.get("events") or []),
+        "updated_at": payload.get("updated_at"),
+    }
+    return snapshot
+
+
+def _write_qa_budget_snapshot(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _reserve_qa_budget_call(*, model_name: str, log_tag: str | None) -> dict | None:
+    path = _resolve_budget_path()
+    limit = _parse_max_calls(os.getenv("QA_GEMINI_MAX_CALLS"))
+    if path is None or limit is None:
+        return None
+
+    with _QA_BUDGET_LOCK:
+        if path.exists():
+            try:
+                current = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                current = {}
+        else:
+            current = {}
+
+        count = int(current.get("count") or 0)
+        if count >= limit:
+            raise RuntimeError(f"QA Gemini budget exceeded ({count}/{limit})")
+
+        next_count = count + 1
+        updated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        events = list(current.get("events") or [])
+        events.append(
+            {
+                "index": next_count,
+                "model_name": model_name,
+                "log_tag": log_tag,
+                "timestamp": updated_at,
+            }
+        )
+        payload = {
+            "count": next_count,
+            "limit": limit,
+            "remaining": max(0, limit - next_count),
+            "updated_at": updated_at,
+            "events": events,
+        }
+        _write_qa_budget_snapshot(path, payload)
+        return payload
+
+
 def call_gemini_with_failover(
     model_name: str,
     contents: Sequence[Any],
@@ -248,6 +340,7 @@ def call_gemini_with_failover(
                 log_tag=log_tag,
             )
 
+            budget_state = _reserve_qa_budget_call(model_name=model_name, log_tag=log_tag)
             started_at = time.time()
             response = client.models.generate_content(
                 model=model_name,
@@ -256,7 +349,10 @@ def call_gemini_with_failover(
             )
             elapsed_ms = (time.time() - started_at) * 1000
             if not log_brief:
-                logger.info(f"[Gemini] success key=...{masked_key} ({elapsed_ms:.0f}ms) model={model_name}{tag}")
+                budget_suffix = ""
+                if budget_state:
+                    budget_suffix = f" budget={budget_state.get('count')}/{budget_state.get('limit')}"
+                logger.info(f"[Gemini] success key=...{masked_key} ({elapsed_ms:.0f}ms) model={model_name}{tag}{budget_suffix}")
             return response
 
         except Exception as exc:
@@ -281,5 +377,5 @@ def call_gemini_with_failover(
                 )
                 time.sleep(1)
 
-    logger.error(f"[Gemini] fatal{tag}: all keys failed")
+    logger.error(f"[Gemini] fatal{tag}: attempts exhausted ({max_attempts})")
     return None

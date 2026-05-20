@@ -60,17 +60,17 @@ def _render_with_details_payload():
 
 
 class ExternalRenderVideoWorkflowTests(unittest.TestCase):
-    def test_extract_source_images_uses_main_then_mixed_detail_priority(self):
+    def test_extract_source_images_uses_main_then_detail_order(self):
         self.assertEqual(
             _extract_source_images(_render_with_details_payload()),
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
                 "https://cdn.example/detail-3.png",
                 "https://cdn.example/detail-4.png",
-                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-6.png",
             ],
         )
 
@@ -78,12 +78,12 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         req = _build_source_request(
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
                 "https://cdn.example/detail-3.png",
                 "https://cdn.example/detail-4.png",
-                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-6.png",
             ],
             cfg_scale=0.5,
         )
@@ -93,13 +93,13 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         self.assertEqual(
             [item.motion for item in req.items],
             [
-                "zoom_in_slow",
                 "orbit_l_slow",
                 "orbit_r_slow",
-                "zoom_in_slow",
                 "orbit_l_slow",
                 "orbit_r_slow",
-                "zoom_in_slow",
+                "orbit_l_slow",
+                "orbit_r_slow",
+                "orbit_l_slow",
             ],
         )
         self.assertEqual([item.effect for item in req.items], ["sunlight"] * 7)
@@ -142,6 +142,7 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
             result = run_external_render_video_job(
                 {
                     "render_job_id": "render-job-1",
+                    "clip_count": 4,
                     "cfg_scale": 0.5,
                     "audience": "external",
                 },
@@ -182,12 +183,12 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
             result["source_images"],
             [
                 "https://cdn.example/main-render.png",
-                "https://cdn.example/detail-6.png",
                 "https://cdn.example/detail-1.png",
-                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-2.png",
                 "https://cdn.example/detail-3.png",
                 "https://cdn.example/detail-4.png",
-                "https://cdn.example/detail-2.png",
+                "https://cdn.example/detail-5.png",
+                "https://cdn.example/detail-6.png",
             ],
         )
 
@@ -197,13 +198,13 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         self.assertEqual(
             [item.motion for item in captured["source_req"].items],
             [
-                "zoom_in_slow",
                 "orbit_l_slow",
                 "orbit_r_slow",
-                "zoom_in_slow",
                 "orbit_l_slow",
                 "orbit_r_slow",
-                "zoom_in_slow",
+                "orbit_l_slow",
+                "orbit_r_slow",
+                "orbit_l_slow",
             ],
         )
         self.assertEqual([item.effect for item in captured["source_req"].items], ["sunlight"] * 7)
@@ -215,6 +216,8 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
         self.assertEqual(captured["compile_req"].clips[0].trim_end, 3.0)
         self.assertEqual(captured["compile_req"].clips[-1].trim_end, 3.0)
         self.assertTrue(all(clip.trim_end == 5.0 for clip in captured["compile_req"].clips[1:-1]))
+        self.assertEqual(captured["compile_req"].aspect_ratio, "16:9")
+        self.assertEqual(captured["compile_req"].aspect_mode, "fill")
         self.assertEqual(captured["compile_kwargs"]["video_target_fps"], 12)
 
     def test_run_external_render_video_job_uses_s3_result_when_render_job_not_in_queue(self):
@@ -244,6 +247,7 @@ class ExternalRenderVideoWorkflowTests(unittest.TestCase):
             result = run_external_render_video_job(
                 {
                     "render_job_id": "render-job-1",
+                    "clip_count": 4,
                     "cfg_scale": 0.5,
                     "audience": "external",
                 },

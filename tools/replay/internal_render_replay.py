@@ -66,9 +66,6 @@ def _validate_case_manifest(payload: dict[str, Any], manifest_file: Path) -> Non
     room_file = _require_mapping(payload, "room_file")
     if not isinstance(room_file.get("path"), str) or not room_file["path"].strip():
         raise ValueError("Manifest room_file must contain 'path'")
-    room_path = _resolve_repo_path(room_file["path"])
-    if not room_path.exists():
-        raise ValueError(f"Room file does not exist: {room_path}")
 
     item_files = _require_mapping(payload, "item_files")
     items_json = _require_list(payload, "items_json")
@@ -104,6 +101,12 @@ def _validate_case_manifest(payload: dict[str, Any], manifest_file: Path) -> Non
     for client_id, path_str in item_files.items():
         if not isinstance(path_str, str) or not path_str.strip():
             raise ValueError(f"Item file path must be a non-empty string for {client_id}")
+
+    room_path = _resolve_repo_path(room_file["path"])
+    if not room_path.exists():
+        raise ValueError(f"Room file does not exist: {room_path}")
+
+    for client_id, path_str in item_files.items():
         item_path = _resolve_repo_path(path_str)
         if not item_path.exists():
             raise ValueError(f"Item file does not exist for {client_id}: {item_path}")

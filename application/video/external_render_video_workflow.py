@@ -8,18 +8,11 @@ from api_models import CompileClip, CompileRequest, SourceGenRequest, SourceItem
 from application.video.video_support import download_to_path, ffmpeg_image_to_video
 
 
-_PRIMARY_MOTION_SEQUENCE: tuple[str, ...] = (
-    "zoom_in_slow",
+_EXTERNAL_VIDEO_CLIP_COUNT = 7
+_EXTERNAL_MOTION_SEQUENCE: tuple[str, ...] = (
     "orbit_l_slow",
     "orbit_r_slow",
-    "zoom_in_slow",
 )
-_REPEATING_MOTION_SEQUENCE: tuple[str, ...] = (
-    "orbit_l_slow",
-    "orbit_r_slow",
-    "zoom_in_slow",
-)
-_DETAIL_PRIORITY_ORDER: tuple[int, ...] = (5, 0, 4, 2, 3, 1)
 _EXTERNAL_BRAND_CARD_SEC = 3.0
 _EXTERNAL_BRAND_CARD_PATH = Path(__file__).resolve().parents[2] / "static" / "thumbnails" / "external_video_logo_card.jpg"
 _EXTERNAL_BRAND_CARD_FALLBACK_PATH = Path(__file__).resolve().parents[2] / "static" / "TIOR STUDIO(Black).png"
@@ -61,21 +54,6 @@ def _preferred_brand_card_path() -> Path | None:
     return None
 
 
-def _reorder_detail_images(detail_urls: list[str]) -> list[str]:
-    if not detail_urls:
-        return []
-    ordered: list[str] = []
-    seen: set[int] = set()
-    for index in _DETAIL_PRIORITY_ORDER:
-        if 0 <= index < len(detail_urls) and index not in seen:
-            ordered.append(detail_urls[index])
-            seen.add(index)
-    for index, url in enumerate(detail_urls):
-        if index not in seen:
-            ordered.append(url)
-    return ordered
-
-
 def _extract_source_images(result: dict | None) -> list[str]:
     if not isinstance(result, dict):
         return []
@@ -102,14 +80,12 @@ def _extract_source_images(result: dict | None) -> list[str]:
     ordered: list[str] = []
     if primary_main:
         ordered.append(primary_main)
-    ordered.extend(_reorder_detail_images(detail_urls))
+    ordered.extend(detail_urls)
     return ordered
 
 
 def _motion_for_external_clip(index: int) -> str:
-    if index < len(_PRIMARY_MOTION_SEQUENCE):
-        return _PRIMARY_MOTION_SEQUENCE[index]
-    return _REPEATING_MOTION_SEQUENCE[(index - len(_PRIMARY_MOTION_SEQUENCE)) % len(_REPEATING_MOTION_SEQUENCE)]
+    return _EXTERNAL_MOTION_SEQUENCE[index % len(_EXTERNAL_MOTION_SEQUENCE)]
 
 
 def _build_source_request(source_images: list[str], *, cfg_scale: float) -> SourceGenRequest:
@@ -126,6 +102,10 @@ def _build_source_request(source_images: list[str], *, cfg_scale: float) -> Sour
             )
         )
     return SourceGenRequest(items=planned_items, cfg_scale=cfg_scale)
+
+
+def _requested_external_clip_count(payload: dict, available_source_count: int) -> int:
+    return max(1, min(_EXTERNAL_VIDEO_CLIP_COUNT, max(0, int(available_source_count))))
 
 
 def _poll_video_job_until_terminal(
@@ -282,8 +262,9 @@ def run_external_render_video_job(
             "clip_urls": [],
         }
 
-    requested_clip_count = max(1, len(source_images))
-    source_req = _build_source_request(source_images, cfg_scale=cfg_scale)
+    requested_clip_count = _requested_external_clip_count(payload, len(source_images))
+    planned_source_images = list(source_images[:requested_clip_count])
+    source_req = _build_source_request(planned_source_images, cfg_scale=cfg_scale)
     source_job_id = queue_source_generation_job(
         source_req,
         video_target_fps=video_target_fps,
@@ -304,11 +285,13 @@ def run_external_render_video_job(
         for result in (source_state.get("results") or [])
         if isinstance(result, str) and result.strip()
     ]
+    if len(source_results) > requested_clip_count:
+        source_results = source_results[:requested_clip_count]
     fallback_used = False
     if not source_results:
         fallback_results = _build_static_fallback_clips(
             render_job_id,
-            source_images=source_images,
+            source_images=planned_source_images,
             clip_count=requested_clip_count,
             video_target_fps=video_target_fps,
         )
@@ -316,7 +299,7 @@ def run_external_render_video_job(
             return {
                 "error": source_state.get("error") or "Video source generation failed",
                 "render_job_id": render_job_id,
-                "source_images": source_images,
+                "source_images": planned_source_images,
                 "clip_urls": [],
             }
         source_results = fallback_results
@@ -325,7 +308,7 @@ def run_external_render_video_job(
         source_results = _supplement_missing_clips(
             source_results,
             render_job_id=render_job_id,
-            source_images=source_images,
+            source_images=planned_source_images,
             requested_clip_count=requested_clip_count,
             video_target_fps=video_target_fps,
         )
@@ -351,6 +334,8 @@ def run_external_render_video_job(
             for clip_url in compile_clip_urls
         ],
         include_intro_outro=False,
+        aspect_ratio="16:9",
+        aspect_mode="fill",
     )
     compile_job_id = queue_final_compile_job(compile_req, video_target_fps=video_target_fps)
     compile_state = _poll_video_job_until_terminal(
@@ -366,7 +351,7 @@ def run_external_render_video_job(
         return {
             "error": compile_state.get("error") or "Video compile failed",
             "render_job_id": render_job_id,
-            "source_images": source_images,
+            "source_images": planned_source_images,
             "clip_urls": [
                 resolved
                 for resolved in (
@@ -436,7 +421,7 @@ def run_external_render_video_job(
 
     result = {
         "render_job_id": render_job_id,
-        "source_images": source_images,
+        "source_images": planned_source_images,
         "clip_urls": clip_urls,
         "clip_count": len(clip_urls),
         "video_url": video_url,

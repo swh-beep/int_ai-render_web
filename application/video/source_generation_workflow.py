@@ -54,8 +54,19 @@ def _local_output_path(output_url: str | None) -> Path | None:
 
 
 def _result_exists(output_url: str | None) -> bool:
+    if output_url and output_url.startswith(("http://", "https://")):
+        return True
     local_path = _local_output_path(output_url)
     return bool(local_path and local_path.exists())
+
+
+def _publish_local_output_url(
+    local_url: str,
+    resolve_output_url: Callable[[str], str | None] | None,
+) -> str:
+    if not resolve_output_url:
+        return local_url
+    return resolve_output_url(local_url) or local_url
 
 
 def _normalize_prompt(value: str | None) -> str | None:
@@ -471,6 +482,7 @@ def run_source_generation_job(
     video_max_concurrency: int,
     create_kling_task: Callable[..., str],
     poll_kling_task: Callable[..., str],
+    resolve_output_url: Callable[[str], str | None] | None = None,
 ) -> None:
     try:
         job = get_video_job(job_id)
@@ -538,7 +550,10 @@ def run_source_generation_job(
 
                 try:
                     path = future.result()
-                    results_map[idx] = f"/outputs/{path.name}"
+                    local_url = f"/outputs/{path.name}"
+                    result_url = _publish_local_output_url(local_url, resolve_output_url)
+                    results_map[idx] = result_url
+                    update_video_job_item(job_id, idx, output_url=result_url)
                     completed_count = sum(1 for result in results_map if result)
                     requested_progress = int((completed_count / max(1, total_clips)) * 100)
                     update_video_job(

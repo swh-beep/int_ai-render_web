@@ -5,6 +5,7 @@ import time
 from typing import Any, Callable
 
 from PIL import Image
+from application.render.placement_support import build_placement_prompt_block
 from application.render.repair_strategy_stage import build_repair_strategy_plan
 from shared.image_canvas import (
     get_image_size,
@@ -138,6 +139,281 @@ def _normalize_render_candidate_aspect(
         return normalized_path
     except Exception:
         return None
+
+
+def _format_identity_dims(dims: dict | None) -> str:
+    if not isinstance(dims, dict):
+        return ""
+    parts: list[str] = []
+    width_mm = dims.get("width_mm")
+    depth_mm = dims.get("depth_mm")
+    height_mm = dims.get("height_mm")
+    if width_mm is not None:
+        parts.append(f"W={width_mm}mm")
+    if depth_mm is not None:
+        parts.append(f"D={depth_mm}mm")
+    if height_mm is not None:
+        parts.append(f"H={height_mm}mm")
+    return " ".join(parts)
+
+
+def _item_category_for_prompt(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return "unknown"
+    category = (
+        item.get("category_canonical")
+        or item.get("category")
+        or item.get("type")
+        or ""
+    )
+    text = str(category or "").strip()
+    return text or "unknown"
+
+
+def _category_prompt_guardrails(category: str) -> list[str]:
+    text = str(category or "").strip().lower()
+    rules: list[str] = []
+    if "mirror" in text:
+        rules.extend(["wall_attached_or_leaning_as_reference", "preserve_reflective_face"])
+    if "rug" in text or "carpet" in text:
+        rules.extend(["floor_flat", "keep_footprint_shape", "not_wall_to_wall_unless_dimensions_require"])
+    if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
+        rules.extend(["preserve_light_fixture_scale", "do_not_convert_into_furniture"])
+    if any(token in text for token in ("table_lamp", "decor", "vase", "object", "accessory")):
+        rules.append("surface_or_compact_object_scale")
+    return rules
+
+
+def _item_target_key_for_prompt(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("target_key") or item.get("source_index") or item.get("label") or "").strip()
+
+
+def _item_dims_for_prompt(item: dict | None) -> dict:
+    if not isinstance(item, dict):
+        return {}
+    dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
+    return dims if isinstance(dims, dict) else {}
+
+
+def _item_anchor_priority(item: dict | None, *, explicit_primary_key: str) -> tuple:
+    if not isinstance(item, dict):
+        return (-1, -1, -1, -1, -1)
+    item_key = _item_target_key_for_prompt(item)
+    dims = _item_dims_for_prompt(item)
+    identity_profile = item.get("identity_profile") or {}
+    product_identity = item.get("product_identity") or {}
+    family = str(
+        product_identity.get("family")
+        or identity_profile.get("family")
+        or item.get("category_canonical")
+        or item.get("category")
+        or ""
+    ).strip().lower()
+
+    try:
+        width_mm = int(dims.get("width_mm") or 0)
+    except Exception:
+        width_mm = 0
+    try:
+        depth_mm = int(dims.get("depth_mm") or 0)
+    except Exception:
+        depth_mm = 0
+    try:
+        height_mm = int(dims.get("height_mm") or 0)
+    except Exception:
+        height_mm = 0
+    try:
+        volume_proxy = int(item.get("volume_proxy") or 0)
+    except Exception:
+        volume_proxy = 0
+    if volume_proxy <= 0:
+        volume_proxy = max(width_mm * max(depth_mm, 1) * max(height_mm, 1), width_mm * max(height_mm, 1))
+
+    family_bonus_map = {
+        "main_sofa": 9,
+        "lounge_sofa": 9,
+        "sofa": 9,
+        "storage_cabinet_shelf": 8,
+        "storage": 8,
+        "cabinet": 8,
+        "desk_table": 7,
+        "dining_table": 7,
+        "table": 6,
+        "lounge_chair": 6,
+        "armchair": 6,
+        "chair": 5,
+        "floor_lamp": 5,
+        "pendant_lamp": 4,
+        "table_lamp": 2,
+        "mirror": 1,
+        "rug": 0,
+        "decor": 0,
+        "plant": 0,
+    }
+    family_bonus = family_bonus_map.get(family, 3 if family else 0)
+    room_presence = str(identity_profile.get("room_presence_class") or "").strip().lower()
+    presence_bonus = 0
+    if "anchor" in room_presence:
+        presence_bonus = 3
+    elif "large" in room_presence:
+        presence_bonus = 2
+    elif "medium" in room_presence:
+        presence_bonus = 1
+    has_dims = 1 if any(v > 0 for v in (width_mm, depth_mm, height_mm)) else 0
+    explicit_primary = 1 if explicit_primary_key and item_key == explicit_primary_key else 0
+    return (explicit_primary, family_bonus, presence_bonus, has_dims, volume_proxy)
+
+
+def _select_primary_anchor_keys(furniture_specs_json: dict | None, *, limit: int = 4) -> list[str]:
+    if not isinstance(furniture_specs_json, dict):
+        return []
+    items = [item for item in (furniture_specs_json.get("items") or []) if isinstance(item, dict)]
+    if not items:
+        return []
+    explicit_primary_key = str(
+        ((furniture_specs_json.get("primary_scale") or {}) if isinstance(furniture_specs_json.get("primary_scale"), dict) else {}).get("target_key")
+        or ((furniture_specs_json.get("primary") or {}) if isinstance(furniture_specs_json.get("primary"), dict) else {}).get("target_key")
+        or ""
+    ).strip()
+    two_pass_summary = (furniture_specs_json.get("two_pass_strategy") or {}) if isinstance(furniture_specs_json.get("two_pass_strategy"), dict) else {}
+    pass1_primary_keys = [
+        str(value or "").strip()
+        for value in (two_pass_summary.get("pass1_primary_keys") or [])
+        if str(value or "").strip()
+    ]
+    excluded_keys = {
+        str(value or "").strip()
+        for value in (
+            list(two_pass_summary.get("pass1_support_keys") or [])
+            + list(two_pass_summary.get("pass2_detail_keys") or [])
+        )
+        if str(value or "").strip()
+    }
+    explicit_role_data_present = bool(pass1_primary_keys or excluded_keys)
+    if explicit_role_data_present:
+        selected: list[str] = []
+        for item_key in pass1_primary_keys + ([explicit_primary_key] if explicit_primary_key else []):
+            if not item_key or item_key in excluded_keys or item_key in selected:
+                continue
+            selected.append(item_key)
+            if len(selected) >= limit:
+                return selected
+        if selected:
+            return selected
+    scored_items = [
+        (_item_anchor_priority(item, explicit_primary_key=explicit_primary_key), item)
+        for item in items
+    ]
+    sorted_items = [item for _, item in sorted(scored_items, key=lambda pair: pair[0], reverse=True)]
+    eligible_items = [
+        item
+        for score, item in sorted(scored_items, key=lambda pair: pair[0], reverse=True)
+        if (
+            score[0] == 1
+            or (
+                score[1] >= 2
+                and score[2] >= 1
+                and "tiny" not in str(((item.get("identity_profile") or {}).get("room_presence_class") or "")).lower()
+                and str(((item.get("identity_profile") or {}).get("absolute_size_class") or "")).lower() != "tiny"
+            )
+        )
+    ]
+    candidate_items = eligible_items or sorted_items[:1]
+    selected: list[str] = []
+    for item in candidate_items:
+        item_key = _item_target_key_for_prompt(item)
+        if not item_key or item_key in selected or item_key in excluded_keys:
+            continue
+        selected.append(item_key)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _build_item_exactness_card_row(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
+    if not label:
+        return ""
+    try:
+        qty = max(1, int(item.get("qty") or 1))
+    except Exception:
+        qty = 1
+    dims = _item_dims_for_prompt(item)
+    category = _item_category_for_prompt(item)
+    dims_text = _format_identity_dims(dims)
+    bits = ["reference_image=authoritative_cutout", f"qty={qty}"]
+    if category:
+        bits.append(f"category={category}")
+    if dims_text:
+        bits.append(dims_text)
+    guardrails = _category_prompt_guardrails(category)
+    if guardrails:
+        bits.append(f"category_rules={', '.join(guardrails[:4])}")
+    bits.append("same_family_substitute=invalid")
+    return f"- {label}: " + "; ".join(bits)
+
+
+def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, primary_anchor_keys: list[str] | None = None) -> str:
+    if not isinstance(furniture_specs_json, dict):
+        return ""
+    anchor_key_set = {
+        str(value or "").strip()
+        for value in (primary_anchor_keys or [])
+        if str(value or "").strip()
+    }
+    primary_rows: list[str] = []
+    secondary_rows: list[str] = []
+    for item in furniture_specs_json.get("items") or []:
+        row = _build_item_exactness_card_row(item)
+        if not row:
+            continue
+        item_key = _item_target_key_for_prompt(item)
+        if item_key and item_key in anchor_key_set:
+            primary_rows.append(row)
+        else:
+            secondary_rows.append(row)
+    if not primary_rows and not secondary_rows:
+        return ""
+    lines = [
+        "\n<ITEM EXACTNESS CARDS>\n",
+        "The attached cutout image is the authoritative product-shape source. Text tags are only scale, placement, and exception guardrails.\n",
+        "Do not restyle, simplify, or generalize an item into a same-family substitute. If text and image conflict, follow the image.\n",
+    ]
+    if primary_rows:
+        lines.extend(
+            [
+                "<PRIMARY PRODUCT LOCKS>\n",
+                "Match these hero products first. If any tradeoff exists, preserve these exact products before styling or simplifying any supporting item.\n",
+                *[row + "\n" for row in primary_rows],
+            ]
+        )
+    if secondary_rows:
+        lines.extend(
+            [
+                "<SECONDARY SUPPORTING ITEMS>\n",
+                "Render these after the primary product locks are correct. Keep product identity if visible, but never let these override the primary locks.\n",
+                *[row + "\n" for row in secondary_rows],
+            ]
+        )
+    lines.append("--------------------------------------------------\n")
+    return "".join(lines)
+
+
+def _build_fallback_furniture_guidance_context(furniture_specs: str | None) -> str:
+    text = str(furniture_specs or "").strip()
+    if not text:
+        return ""
+    return (
+        "\n<FALLBACK ITEM GUIDANCE>\n"
+        "Structured item cards are unavailable for this request.\n"
+        "Use the fallback list below only as a last-resort reference, and prefer any attached reference images over this prose.\n"
+        f"{text}\n"
+        "--------------------------------------------------\n"
+    )
 
 
 def _summarize_scale_review(diagnostics: dict | None) -> dict:
@@ -603,6 +879,7 @@ def generate_furnished_room(
     windows_present=None,
     room_analysis_text=None,
     enable_scale_check=False,
+    max_generation_attempts: int | None = None,
     total_timeout_limit: float,
     detect_windows_present: Callable[[str], bool],
     logger,
@@ -704,19 +981,14 @@ def generate_furnished_room(
                 "--------------------------------------------------\n"
             )
 
-        specs_context = ""
-        if furniture_specs:
-            specs_context = (
-                "\n<REFERENCE FURNITURE LIST (GUIDANCE ONLY)>\n"
-                "The following list describes the items detected from the moodboard.\n"
-                "Use this as a soft reference for material, color, shape, and scale cues.\n"
-                "If there is any conflict, prioritize the provided furniture cutout images.\n"
-                "Respect quantities exactly. If qty>1, render multiple identical instances.\n"
-                "Do NOT add extra items. Do NOT omit any listed items.\n"
-                "Do NOT replace any listed item with a generic substitute (no sofa instead of a desk, etc.).\n"
-                f"{furniture_specs}\n"
-                "--------------------------------------------------\n"
-            )
+        primary_anchor_keys = _select_primary_anchor_keys(furniture_specs_json)
+        anchor_key_set = set(primary_anchor_keys)
+        specs_context = _build_item_exactness_cards_context(
+            furniture_specs_json,
+            primary_anchor_keys=primary_anchor_keys,
+        )
+        if not specs_context:
+            specs_context = _build_fallback_furniture_guidance_context(furniture_specs)
 
         dims_table_context = ""
         try:
@@ -762,24 +1034,6 @@ def generate_furnished_room(
         placement_plan_context = ""
         strict_scale_requested = bool(isinstance(scale_plan, dict) and scale_plan.get("strict_scale_requested"))
         b_lite_runtime = strict_scale_requested
-        two_pass_staging_runtime = bool(
-            (isinstance(scale_plan, dict) and scale_plan.get("two_pass_staging_runtime"))
-            or (isinstance(geometry_contract, dict) and geometry_contract.get("two_pass_staging_runtime"))
-        )
-        two_pass_summary = (furniture_specs_json.get("two_pass_strategy") or {}) if isinstance(furniture_specs_json, dict) else {}
-        pass2_detail_keys = {
-            str(value or "").strip()
-            for value in ((two_pass_summary.get("pass2_detail_keys") or []) if isinstance(two_pass_summary, dict) else [])
-            if str(value or "").strip()
-        }
-        pass1_render_keys = {
-            str(value or "").strip()
-            for value in (
-                list((two_pass_summary.get("pass1_primary_keys") or []) if isinstance(two_pass_summary, dict) else [])
-                + list((two_pass_summary.get("pass1_support_keys") or []) if isinstance(two_pass_summary, dict) else [])
-            )
-            if str(value or "").strip()
-        }
         item_labels_by_key: dict[str, str] = {}
         if isinstance(furniture_specs_json, dict):
             for item in furniture_specs_json.get("items") or []:
@@ -788,27 +1042,24 @@ def generate_furnished_room(
                 item_key = str(item.get("target_key") or item.get("source_index") or item.get("label") or "").strip()
                 if item_key and item_key not in item_labels_by_key:
                     item_labels_by_key[item_key] = str(item.get("label") or item.get("category") or item_key)
-        if two_pass_staging_runtime and pass2_detail_keys and not pass1_render_keys:
-            pass1_render_keys = {item_key for item_key in item_labels_by_key.keys() if item_key not in pass2_detail_keys}
-        pass1_labels = [item_labels_by_key.get(item_key, item_key) for item_key in sorted(pass1_render_keys)]
-        pass2_labels = [item_labels_by_key.get(item_key, item_key) for item_key in sorted(pass2_detail_keys)]
-        two_pass_prompt_context = ""
-        if two_pass_staging_runtime and pass2_labels:
-            pass1_text = ", ".join(pass1_labels[:8]) if pass1_labels else "anchor and footprint-defining furniture"
-            pass2_text = ", ".join(pass2_labels[:8])
-            two_pass_prompt_context = (
-                "\n<TWO-PASS STAGING MODE>\n"
-                f"This first render must stage only these pass1 anchor/footprint items: {pass1_text}.\n"
-                f"Do NOT insert these pass2 detail items yet: {pass2_text}.\n"
-                "They will be added in a later localized completion step. Keep space reserved for them.\n"
-                "--------------------------------------------------\n"
-            )
+        anchor_labels = [item_labels_by_key.get(item_key, item_key) for item_key in primary_anchor_keys if item_key in item_labels_by_key]
 
         try:
             _room_dims = room_dims_parsed or parse_room_dimensions_mm(room_dimensions or "")
             room_w = int(_room_dims.get("width_mm") or 0)
             room_d = int(_room_dims.get("depth_mm") or 0)
             room_h = int(_room_dims.get("height_mm") or 0)
+            effective_room_w = room_w
+            wall_span_ratio = 1.0
+            try:
+                if isinstance(wall_span_norm, (list, tuple)) and len(wall_span_norm) == 2:
+                    x_left = float(wall_span_norm[0])
+                    x_right = float(wall_span_norm[1])
+                    wall_span_ratio = max(0.0, min(1.0, x_right - x_left))
+                    if room_w > 0 and 0.25 <= wall_span_ratio < 0.98:
+                        effective_room_w = max(1, int(round(room_w * wall_span_ratio)))
+            except Exception:
+                wall_span_ratio = 1.0
 
             _primary = (
                 primary_item
@@ -828,14 +1079,12 @@ def generate_furnished_room(
                     pass
 
             try:
+                complete_items = []
+                incomplete_items = []
+                inventory_labels = []
+                inventory_rows = []
+                small_scale_rows = []
                 if furniture_specs_json and isinstance(furniture_specs_json, dict):
-                    complete_items = []
-                    incomplete_items = []
-                    inventory_labels = []
-                    inventory_rows = []
-                    identity_rows = []
-                    envelope_rows = []
-                    small_scale_rows = []
                     total_requested_qty = 0
 
                     for it in (furniture_specs_json.get("items") or []):
@@ -847,70 +1096,11 @@ def generate_furnished_room(
                             qty = 1
                         inventory_labels.append(label)
                         total_requested_qty += qty
-                        identity_profile = it.get("identity_profile") or {}
-                        product_identity = it.get("product_identity") or {}
-                        placement_contract = it.get("placement_contract") or {}
-                        layout_envelope = it.get("layout_envelope") or {}
-                        family = product_identity.get("family") or identity_profile.get("family")
-                        zone = placement_contract.get("zone")
+                        category = _item_category_for_prompt(it)
                         inventory_bits = [f"qty={qty}"]
-                        if family:
-                            inventory_bits.append(f"family={family}")
-                        if zone:
-                            inventory_bits.append(f"zone={zone}")
+                        if category:
+                            inventory_bits.append(f"category={category}")
                         inventory_rows.append(f"- {label}: " + "; ".join(inventory_bits))
-                        silhouette = identity_profile.get("silhouette_summary")
-                        material_cues = ", ".join((identity_profile.get("material_cues") or [])[:3])
-                        topology_cues = ", ".join((product_identity.get("topology_cues") or [])[:3])
-                        support_geometry = ", ".join((product_identity.get("support_geometry") or [])[:3])
-                        opening_features = ", ".join((product_identity.get("opening_or_gap_features") or [])[:2])
-                        pattern_cues = ", ".join((product_identity.get("pattern_cues") or [])[:2])
-                        reflection_constraints = ", ".join((product_identity.get("reflection_constraints") or [])[:2])
-                        distinctive_parts = ", ".join((identity_profile.get("distinctive_parts") or [])[:3])
-                        preserve_rules = ", ".join((product_identity.get("preserve_rules") or identity_profile.get("preserve_rules") or [])[:3])
-                        size_class = identity_profile.get("absolute_size_class")
-                        room_presence_class = identity_profile.get("room_presence_class")
-                        if family or silhouette or material_cues or topology_cues or support_geometry or opening_features or pattern_cues or reflection_constraints or distinctive_parts or preserve_rules:
-                            detail_bits = []
-                            if family:
-                                detail_bits.append(f"family={family}")
-                            if size_class:
-                                detail_bits.append(f"size_class={size_class}")
-                            if room_presence_class:
-                                detail_bits.append(f"room_presence={room_presence_class}")
-                            if silhouette:
-                                detail_bits.append(f"silhouette={silhouette}")
-                            if material_cues:
-                                detail_bits.append(f"materials={material_cues}")
-                            if topology_cues:
-                                detail_bits.append(f"topology={topology_cues}")
-                            if support_geometry:
-                                detail_bits.append(f"support={support_geometry}")
-                            if opening_features:
-                                detail_bits.append(f"gaps={opening_features}")
-                            if pattern_cues:
-                                detail_bits.append(f"pattern={pattern_cues}")
-                            if reflection_constraints:
-                                detail_bits.append(f"reflection={reflection_constraints}")
-                            if distinctive_parts:
-                                detail_bits.append(f"distinctive_parts={distinctive_parts}")
-                            if preserve_rules:
-                                detail_bits.append(f"preserve_rules={preserve_rules}")
-                            if placement_contract.get("zone"):
-                                detail_bits.append(f"zone={placement_contract.get('zone')}")
-                            identity_rows.append(f"- {label}: " + "; ".join(detail_bits))
-                        if layout_envelope:
-                            env_bits = []
-                            if layout_envelope.get("placement_family"):
-                                env_bits.append(f"placement={layout_envelope.get('placement_family')}")
-                            if layout_envelope.get("room_width_ratio") is not None:
-                                env_bits.append(f"room_width_ratio={layout_envelope.get('room_width_ratio')}")
-                            if layout_envelope.get("room_depth_ratio") is not None:
-                                env_bits.append(f"room_depth_ratio={layout_envelope.get('room_depth_ratio')}")
-                            if layout_envelope.get("room_height_ratio") is not None:
-                                env_bits.append(f"room_height_ratio={layout_envelope.get('room_height_ratio')}")
-                            if env_bits:
-                                envelope_rows.append(f"- {label}: " + "; ".join(env_bits))
                         dm = it.get("dims_mm") or {}
                         w = int(dm.get("width_mm") or 0)
                         d = int(dm.get("depth_mm") or 0)
@@ -935,299 +1125,183 @@ def generate_furnished_room(
                                 pass
                             continue
                         complete_items.append({"label": label, "w": w, "d": d, "h": h})
-                        room_width_ratio = layout_envelope.get("room_width_ratio")
-                        room_depth_ratio = layout_envelope.get("room_depth_ratio")
+                        room_width_ratio = None
+                        room_depth_ratio = None
                         if room_w > 0 and room_d > 0:
                             try:
-                                room_width_ratio = float(room_width_ratio if room_width_ratio is not None else (w / room_w))
+                                room_width_ratio = float(w / room_w)
                             except Exception:
                                 room_width_ratio = None
                             try:
-                                room_depth_ratio = float(room_depth_ratio if room_depth_ratio is not None else (d / room_d))
+                                room_depth_ratio = float(d / room_d)
                             except Exception:
                                 room_depth_ratio = None
+                        category_text = str(category or "").lower()
                         compact_object = bool(
-                            family in {"table_lamp", "decor", "stool"}
-                            or (family == "rug" and room_width_ratio is not None and room_width_ratio <= 0.35)
+                            any(token in category_text for token in ("table_lamp", "decor", "stool", "vase", "accessory"))
+                            or ("rug" in category_text and room_width_ratio is not None and room_width_ratio <= 0.35)
                             or (room_width_ratio is not None and room_width_ratio <= 0.18)
                             or (room_depth_ratio is not None and room_depth_ratio <= 0.18)
                         )
                         if compact_object:
                             compact_bits = [f"W={w}mm", f"D={d}mm", f"H={h}mm"]
-                            if size_class:
-                                compact_bits.append(f"size_class={size_class}")
                             compact_note = "keep visually compact"
-                            if family == "rug":
+                            if "rug" in category_text:
                                 compact_note = "keep this rug compact relative to the room, not wall-to-wall"
-                            elif family in {"table_lamp", "decor"}:
+                            elif any(token in category_text for token in ("table_lamp", "decor", "vase", "accessory")):
                                 compact_note = "keep this as a surface-scale object, never side-table sized"
                             small_scale_rows.append(f"- {label}: " + "; ".join(compact_bits) + f"; {compact_note}.")
 
-                    if incomplete_items:
-                        if strict_scale_requested:
-                            incomplete_dims_context = (
-                                "\n<STRICT SCALE CONTRACT VIOLATION>\n"
-                                + "\n".join([f"- {lbl}: missing {', '.join(miss)}" for lbl, miss in incomplete_items])
-                                + "\nRule: Do NOT estimate missing numbers in strict scale mode. This candidate is invalid until every item has W/D/H.\n"
-                                + "--------------------------------------------------\n"
-                            )
-                        else:
-                            incomplete_dims_context = (
-                                "\n<INCOMPLETE DIMENSIONS (DO NOT IGNORE)>\n"
-                                + "\n".join([f"- {lbl}: missing {', '.join(miss)}" for lbl, miss in incomplete_items])
-                                + "\nRule: Do NOT invent missing numbers, but you MUST still render these items.\n"
-                                + "Estimate size from the moodboard and keep within room limits and relative proportions.\n"
-                                + "--------------------------------------------------\n"
-                            )
-
-                    if inventory_rows:
-                        inventory_context = (
-                            "\n<ITEM INVENTORY (MUST RENDER ALL ITEMS)>\n"
-                            f"Distinct items: {len(inventory_labels)} | Total requested quantity: {total_requested_qty}\n"
-                            + "\n".join(inventory_rows)
-                            + "\nRules:\n"
-                            + "- Render every listed item exactly the requested quantity. Do not add bonus objects.\n"
-                            + "- Do not duplicate rugs, accent chairs, or tables beyond the listed qty.\n"
-                            + "- If qty=1, exactly one instance must appear. If qty>1, render identical multiples only for that item.\n"
-                            + "- Never collapse a repeated item into a single instance.\n"
-                            + "- If space is tight, reduce size slightly or use shelves/walls where appropriate, but never omit or replace items.\n"
+                if incomplete_items:
+                    if strict_scale_requested:
+                        incomplete_dims_context = (
+                            "\n<STRICT SCALE CONTRACT VIOLATION>\n"
+                            + "\n".join([f"- {lbl}: missing {', '.join(miss)}" for lbl, miss in incomplete_items])
+                            + "\nRule: Do NOT estimate missing numbers in strict scale mode. This candidate is invalid until every item has W/D/H.\n"
                             + "--------------------------------------------------\n"
                         )
-
-                    if identity_rows:
-                        identity_context = (
-                            "\n<ITEM IDENTITY PROFILES (STRICT)>\n"
-                            "Each listed item has a stable identity. Preserve silhouette, support geometry, and material identity.\n"
-                            + "\n".join(identity_rows)
-                            + "\n--------------------------------------------------\n"
-                        )
-
-                    if envelope_rows:
-                        layout_envelope_context = (
-                            "\n<LAYOUT ENVELOPE SUMMARY>\n"
-                            "Use these item-vs-room ratios as hard placement guidance before aesthetic balancing.\n"
-                            + "\n".join(envelope_rows)
-                            + "\n--------------------------------------------------\n"
-                        )
-                    if small_scale_rows:
-                        small_scale_context = (
-                            "\n<SMALL ITEM SCALE GUARDRAILS>\n"
-                            "These listed items must stay visually compact on the first pass. Do not enlarge them into anchor furniture.\n"
-                            + "\n".join(small_scale_rows)
-                            + "\n--------------------------------------------------\n"
-                        )
-
-                    if isinstance(scale_plan, dict) and scale_plan.get("strict_scale_ready"):
-                        plan_room = scale_plan.get("room_dims") or {}
-                        anchor = scale_plan.get("anchor_item") or {}
-                        anchor_env = anchor.get("layout_envelope") or {}
-                        plan_rows = []
-                        for plan_item in (scale_plan.get("items") or [])[:12]:
-                            if not isinstance(plan_item, dict):
-                                continue
-                            rel = plan_item.get("relative_to_anchor") or {}
-                            plan_rows.append(
-                                "- {label}: placement={placement} roomW={room_w} roomD={room_d} roomH={room_h} anchorW={anchor_w} anchorH={anchor_h} foot={foot}".format(
-                                    label=plan_item.get("label") or "Item",
-                                    placement=plan_item.get("placement_family") or "unknown",
-                                    room_w=plan_item.get("room_width_ratio"),
-                                    room_d=plan_item.get("room_depth_ratio"),
-                                    room_h=plan_item.get("room_height_ratio"),
-                                    anchor_w=rel.get("width_ratio"),
-                                    anchor_h=rel.get("height_ratio"),
-                                    foot=rel.get("footprint_ratio"),
-                                )
-                            )
-                        scale_plan_context = (
-                            "\n<STRICT SCALE PLAN (HARD CONTRACT)>\n"
-                            f"Room(mm): W={plan_room.get('width_mm')} D={plan_room.get('depth_mm')} H={plan_room.get('height_mm')}\n"
-                            f"Anchor: {anchor.get('label')} | roomW={anchor_env.get('room_width_ratio')} roomD={anchor_env.get('room_depth_ratio')} roomH={anchor_env.get('room_height_ratio')}\n"
-                            "The following per-item ratios are the primary geometric contract for this scene.\n"
-                            "If there is any conflict between aesthetics and these numbers, keep the numbers.\n"
-                            + "\n".join(plan_rows)
-                            + "\nDo NOT enlarge rugs, tiny lamps, poufs, or side tables beyond these ratios.\n"
-                            + "--------------------------------------------------\n"
-                        )
-
-                    if isinstance(geometry_contract, dict):
-                        geometry_rows = []
-                        for plan_item in (geometry_contract.get("item_targets") or [])[:12]:
-                            if not isinstance(plan_item, dict):
-                                continue
-                            geometry_rows.append(
-                                "- {label}: zone={zone} place={placement} roomW={room_w} roomD={room_d} roomH={room_h} anchorW={anchor_w} anchorD={anchor_d} anchorH={anchor_h} foot={foot} orientation={orientation}".format(
-                                    label=plan_item.get("label") or "Item",
-                                    zone=plan_item.get("zone") or "unknown",
-                                    placement=plan_item.get("placement_family") or "unknown",
-                                    room_w=plan_item.get("room_width_ratio"),
-                                    room_d=plan_item.get("room_depth_ratio"),
-                                    room_h=plan_item.get("room_height_ratio"),
-                                    anchor_w=plan_item.get("anchor_width_ratio"),
-                                    anchor_d=plan_item.get("anchor_depth_ratio"),
-                                    anchor_h=plan_item.get("anchor_height_ratio"),
-                                    foot=plan_item.get("footprint_ratio"),
-                                    orientation=plan_item.get("orientation_hint") or "keep natural source orientation",
-                                )
-                            )
-                        geometry_contract_context = (
-                            "\n<CANONICAL GEOMETRY CONTRACT>\n"
-                            f"version={geometry_contract.get('contract_version')} source={geometry_contract.get('geometry_source')} confidence={geometry_contract.get('geometry_confidence')} strict_ready={geometry_contract.get('strict_scale_ready')}\n"
-                            f"anchor={geometry_contract.get('anchor_item_key')}\n"
-                            + "\n".join(geometry_rows)
-                            + "\nUse ONLY this contract as the authoritative geometry source.\n"
-                            + "Do not reinterpret size from aesthetics.\n"
-                            + "--------------------------------------------------\n"
-                        )
-                        layout_envelope_context = ""
-                        scale_plan_context = ""
-                        placement_plan_context = ""
-                        ratio_rules_context = ""
-
-                    if not isinstance(geometry_contract, dict):
-                        placement_plan_dict = placement_plan if isinstance(placement_plan, dict) else (furniture_specs_json.get("placement_plan") if isinstance(furniture_specs_json, dict) else {})
-                        placement_zones = (placement_plan_dict or {}).get("placement_zones") or {}
-                        placement_rows = []
-                        for item_key, zone in list(placement_zones.items())[:12]:
-                            if not isinstance(zone, dict):
-                                continue
-                            room_targets = zone.get("room_ratio_targets") or {}
-                            anchor_rel = zone.get("anchor_relationship") or {}
-                            placement_rows.append(
-                                "- {key}: mode={mode}; zone={zone_name}; roomW={room_w}; roomH={room_h}; anchorW={anchor_w}; anchorH={anchor_h}; foot={foot}; orientation={orientation}".format(
-                                    key=item_key,
-                                    mode=zone.get("placement_family") or "unknown",
-                                    zone_name=zone.get("zone") or "unknown",
-                                    room_w=room_targets.get("room_width_ratio"),
-                                    room_h=room_targets.get("room_height_ratio"),
-                                    anchor_w=anchor_rel.get("width_ratio"),
-                                    anchor_h=anchor_rel.get("height_ratio"),
-                                    foot=room_targets.get("footprint_ratio"),
-                                    orientation=zone.get("orientation_hint") or "keep natural source orientation",
-                                )
-                            )
-                        if placement_rows:
-                            placement_plan_context = (
-                                "\n<PLACEMENT PLAN (BINDING)>\n"
-                                "Use these per-item zones and ratio targets before styling. Keep anchor relationships intact.\n"
-                                + "\n".join(placement_rows)
-                                + "\nGlobal rules:\n"
-                                + "- In straight-edged rooms with straight window mullions or wall lines, keep sofas, storage, rugs, desks, and main tables axis-aligned to those dominant room lines.\n"
-                                + "- Do not rotate major furniture 20-60 degrees for styling unless explicit placement instructions or curved/angled architecture require it.\n"
-                                + "- Ceiling fixtures must stay on the ceiling plane, and wall-attached items must stay on the wall plane.\n"
-                                + "\n--------------------------------------------------\n"
-                            )
-
-                    def _ratio_str(value, total, cap=None):
-                        if not value or not total:
-                            return "n/a"
-                        pct = round((value / total) * 100, 1)
-                        if cap is not None and pct > cap:
-                            return f"{cap:.1f}% (cap)"
-                        return f"{pct:.1f}%"
-
-                    abs_lines = []
-                    abs_warn_labels = []
-                    if room_w > 0 and room_d > 0 and room_h > 0:
-                        for it in complete_items:
-                            w = it["w"]
-                            d = it["d"]
-                            h = it["h"]
-                            label = it["label"]
-                            abs_lines.append(
-                                f"- {label}: room W={_ratio_str(w, room_w, 100.0)}, D={_ratio_str(d, room_d, 100.0)}, H={_ratio_str(h, room_h, 100.0)}"
-                            )
-                            over = []
-                            if w > room_w:
-                                over.append("W")
-                            if d > room_d:
-                                over.append("D")
-                            if h > room_h:
-                                over.append("H")
-                            if over:
-                                abs_warn_labels.append(label)
-                            try:
-                                summary = summary_ref.get()
-                                if isinstance(summary, dict):
-                                    summary["dims_warn"] = summary.get("dims_warn", 0) + 1
-                            except Exception:
-                                pass
                     else:
-                        if log_brief and not log_summary:
-                            print("[Dims] WARN room W/D/H missing; skip absolute ratios", flush=True)
+                        incomplete_dims_context = (
+                            "\n<INCOMPLETE DIMENSIONS (DO NOT IGNORE)>\n"
+                            + "\n".join([f"- {lbl}: missing {', '.join(miss)}" for lbl, miss in incomplete_items])
+                            + "\nRule: Do NOT invent missing numbers, but you MUST still render these items.\n"
+                            + "Estimate size from the moodboard and keep within room limits and relative proportions.\n"
+                            + "--------------------------------------------------\n"
+                        )
+
+                if inventory_rows:
+                    inventory_context = (
+                        "\n<ITEM INVENTORY (MUST RENDER ALL ITEMS)>\n"
+                        f"Distinct items: {len(inventory_labels)} | Total requested quantity: {total_requested_qty}\n"
+                        + "\n".join(inventory_rows)
+                        + "\nRules:\n"
+                        + "- Render every listed item exactly the requested quantity. Do not add bonus objects.\n"
+                        + "- Do not duplicate rugs, accent chairs, or tables beyond the listed qty.\n"
+                        + "- If qty=1, exactly one instance must appear. If qty>1, render identical multiples only for that item.\n"
+                        + "- Never collapse a repeated item into a single instance.\n"
+                        + "- If space is tight, reduce size slightly or use shelves/walls where appropriate, but never omit or replace items.\n"
+                        + "--------------------------------------------------\n"
+                    )
+
+                if small_scale_rows:
+                    small_scale_context = (
+                        "\n<SMALL ITEM SCALE GUARDRAILS>\n"
+                        "These listed items must stay visually compact on the first pass. Do not enlarge them into anchor furniture.\n"
+                        + "\n".join(small_scale_rows)
+                        + "\n--------------------------------------------------\n"
+                    )
+
+                def _ratio_str(value, total, cap=None):
+                    if not value or not total:
+                        return "n/a"
+                    pct = round((value / total) * 100, 1)
+                    if cap is not None and pct > cap:
+                        return f"{cap:.1f}% (cap)"
+                    return f"{pct:.1f}%"
+
+                abs_lines = []
+                abs_warn_labels = []
+                if room_w > 0 and room_d > 0 and room_h > 0:
+                    for it in complete_items:
+                        w = it["w"]
+                        d = it["d"]
+                        h = it["h"]
+                        label = it["label"]
+                        abs_lines.append(
+                            f"- {label}: room W={_ratio_str(w, room_w, 100.0)}, D={_ratio_str(d, room_d, 100.0)}, H={_ratio_str(h, room_h, 100.0)}"
+                        )
+                        over = []
+                        if w > room_w:
+                            over.append("W")
+                        if d > room_d:
+                            over.append("D")
+                        if h > room_h:
+                            over.append("H")
+                        if over:
+                            abs_warn_labels.append(label)
                         try:
                             summary = summary_ref.get()
                             if isinstance(summary, dict):
                                 summary["dims_warn"] = summary.get("dims_warn", 0) + 1
                         except Exception:
                             pass
-
-                    rel_lines = []
-                    rel_warn_labels = []
-                    primary_label = _primary.get("label", "Primary Furniture")
-                    if p_w > 0 and p_d > 0 and p_h > 0:
-                        for it in complete_items:
-                            label = it["label"]
-                            if label == primary_label:
-                                continue
-                            rel_w = round((it["w"] / p_w) * 100, 1)
-                            rel_d = round((it["d"] / p_d) * 100, 1)
-                            rel_h = round((it["h"] / p_h) * 100, 1)
-                            rel_lines.append(f"- {label}: W={rel_w:.1f}%, D={rel_d:.1f}%, H={rel_h:.1f}% of {primary_label}")
-                            if rel_w > 100 or rel_d > 100 or rel_h > 100:
-                                rel_warn_labels.append(label)
-                            try:
-                                summary = summary_ref.get()
-                                if isinstance(summary, dict):
-                                    summary["dims_warn"] = summary.get("dims_warn", 0) + 1
-                            except Exception:
-                                pass
-                    elif log_brief:
-                        print("[Dims] WARN primary W/D/H missing; skip relative ratios", flush=True)
-
+                else:
                     if log_brief and not log_summary:
-                        if abs_warn_labels:
-                            sample = ", ".join(abs_warn_labels[:3])
-                            extra = len(abs_warn_labels) - 3
-                            suffix = f" (+{extra} more)" if extra > 0 else ""
-                            print(f"[Dims] WARN {len(abs_warn_labels)} items exceed room W/D/H: {sample}{suffix}", flush=True)
-                        if rel_warn_labels:
-                            sample = ", ".join(rel_warn_labels[:3])
-                            extra = len(rel_warn_labels) - 3
-                            suffix = f" (+{extra} more)" if extra > 0 else ""
-                            print(f"[Dims] WARN {len(rel_warn_labels)} items larger than primary: {sample}{suffix}", flush=True)
+                        print("[Dims] WARN room W/D/H missing; skip absolute ratios", flush=True)
+                    try:
+                        summary = summary_ref.get()
+                        if isinstance(summary, dict):
+                            summary["dims_warn"] = summary.get("dims_warn", 0) + 1
+                    except Exception:
+                        pass
 
-                    order_w = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["w"], reverse=True)]) if complete_items else ""
-                    order_d = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["d"], reverse=True)]) if complete_items else ""
-                    order_h = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["h"], reverse=True)]) if complete_items else ""
-                    height_caps = []
+                rel_lines = []
+                rel_warn_labels = []
+                primary_label = _primary.get("label", "Primary Furniture")
+                if p_w > 0 and p_d > 0 and p_h > 0:
                     for it in complete_items:
-                        if it["h"] > 0:
-                            height_caps.append(f"- {it['label']}: H must be <= {it['h']}mm")
+                        label = it["label"]
+                        if label == primary_label:
+                            continue
+                        rel_w = round((it["w"] / p_w) * 100, 1)
+                        rel_d = round((it["d"] / p_d) * 100, 1)
+                        rel_h = round((it["h"] / p_h) * 100, 1)
+                        rel_lines.append(f"- {label}: W={rel_w:.1f}%, D={rel_d:.1f}%, H={rel_h:.1f}% of {primary_label}")
+                        if rel_w > 100 or rel_d > 100 or rel_h > 100:
+                            rel_warn_labels.append(label)
+                        try:
+                            summary = summary_ref.get()
+                            if isinstance(summary, dict):
+                                summary["dims_warn"] = summary.get("dims_warn", 0) + 1
+                        except Exception:
+                            pass
+                elif log_brief:
+                    print("[Dims] WARN primary W/D/H missing; skip relative ratios", flush=True)
 
-                    if not isinstance(geometry_contract, dict) and (abs_lines or rel_lines or order_w or order_d or order_h):
-                        ratio_rules_context = "\n<CRITICAL: W/D/H RATIO RULES (ALL FURNITURE)>\nApply ratios only to items with complete W/D/H.\n"
-                        if abs_lines:
-                            ratio_rules_context += "ABSOLUTE RATIOS (item vs room):\n" + "\n".join(abs_lines) + "\n"
-                        else:
-                            ratio_rules_context += "ABSOLUTE RATIOS: room W/D/H missing or invalid.\n"
-                        if rel_lines:
-                            ratio_rules_context += f"RELATIVE RATIOS (item vs {primary_label}):\n" + "\n".join(rel_lines) + "\n"
-                        if order_w or order_d or order_h:
-                            ratio_rules_context += (
-                                "DIMENSION ORDER (largest -> smallest):\n"
-                                + f"- WIDTH: {order_w}\n"
-                                + f"- DEPTH: {order_d}\n"
-                                + f"- HEIGHT: {order_h}\n"
-                            )
-                        if height_caps:
-                            ratio_rules_context += "HEIGHT CAPS (STRICT):\n" + "\n".join(height_caps) + "\n"
-                        ratio_rules_context += "--------------------------------------------------\n"
+                if log_brief and not log_summary:
+                    if abs_warn_labels:
+                        sample = ", ".join(abs_warn_labels[:3])
+                        extra = len(abs_warn_labels) - 3
+                        suffix = f" (+{extra} more)" if extra > 0 else ""
+                        print(f"[Dims] WARN {len(abs_warn_labels)} items exceed room W/D/H: {sample}{suffix}", flush=True)
+                    if rel_warn_labels:
+                        sample = ", ".join(rel_warn_labels[:3])
+                        extra = len(rel_warn_labels) - 3
+                        suffix = f" (+{extra} more)" if extra > 0 else ""
+                        print(f"[Dims] WARN {len(rel_warn_labels)} items larger than primary: {sample}{suffix}", flush=True)
+
+                order_w = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["w"], reverse=True)]) if complete_items else ""
+                order_d = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["d"], reverse=True)]) if complete_items else ""
+                order_h = " > ".join([x["label"] for x in sorted(complete_items, key=lambda x: x["h"], reverse=True)]) if complete_items else ""
+                height_caps = []
+                for it in complete_items:
+                    if it["h"] > 0:
+                        height_caps.append(f"- {it['label']}: H must be <= {it['h']}mm")
+
+                if not isinstance(geometry_contract, dict) and (abs_lines or rel_lines or order_w or order_d or order_h):
+                    ratio_rules_context = "\n<CRITICAL: W/D/H RATIO RULES (ALL FURNITURE)>\nApply ratios only to items with complete W/D/H.\n"
+                    if abs_lines:
+                        ratio_rules_context += "ABSOLUTE RATIOS (item vs room):\n" + "\n".join(abs_lines) + "\n"
+                    else:
+                        ratio_rules_context += "ABSOLUTE RATIOS: room W/D/H missing or invalid.\n"
+                    if rel_lines:
+                        ratio_rules_context += f"RELATIVE RATIOS (item vs {primary_label}):\n" + "\n".join(rel_lines) + "\n"
+                    if order_w or order_d or order_h:
+                        ratio_rules_context += (
+                            "DIMENSION ORDER (largest -> smallest):\n"
+                            + f"- WIDTH: {order_w}\n"
+                            + f"- DEPTH: {order_d}\n"
+                            + f"- HEIGHT: {order_h}\n"
+                        )
+                    if height_caps:
+                        ratio_rules_context += "HEIGHT CAPS (STRICT):\n" + "\n".join(height_caps) + "\n"
+                    ratio_rules_context += "--------------------------------------------------\n"
             except Exception:
                 pass
 
-            if room_w > 0 and p_w > 0:
-                occ = round((p_w / room_w) * 100, 1)
-                gap_total_mm = room_w - p_w
+            if effective_room_w > 0 and p_w > 0:
+                occ = round((p_w / effective_room_w) * 100, 1)
+                gap_total_mm = effective_room_w - p_w
                 gap_side_mm = int(gap_total_mm / 2) if gap_total_mm > 0 else 0
                 primary_d_disp = f"{p_d}mm" if p_d > 0 else "unknown"
                 primary_h_disp = f"{p_h}mm" if p_h > 0 else "unknown"
@@ -1238,6 +1312,11 @@ def generate_furnished_room(
                     f"(W {p_w}mm, D {primary_d_disp}, H {primary_h_disp})\n"
                 )
                 calculated_analysis += f"   - **ROOM DIMS:** W {room_w}mm, D {room_d_disp}, H {room_h_disp}\n"
+                if effective_room_w != room_w:
+                    calculated_analysis += (
+                        f"   - **USABLE WALL SPAN:** approx {effective_room_w}mm "
+                        f"({round(wall_span_ratio * 100, 1)}% of room width).\n"
+                    )
                 calculated_analysis += f"   - **CALCULATED GAP (WIDTH):** Total empty space width = {gap_total_mm}mm. (approx {gap_side_mm}mm on each side).\n"
                 calculated_analysis += f"   - **WIDTH OCCUPANCY:** {occ}% (The furniture takes up {occ}% of the wall).\n"
                 if occ > 92:
@@ -1264,6 +1343,7 @@ def generate_furnished_room(
                 spatial_context += f"- **ACTUAL ROOM DIMENSIONS:** {room_dimensions}\n"
             if placement_instructions:
                 spatial_context += f"- **PLACEMENT INSTRUCTIONS:** {placement_instructions}\n"
+                spatial_context += build_placement_prompt_block(placement_instructions)
             spatial_context += (
                 "**SCALING RULE:** You MUST calibrate the scale of all furniture relative to the ACTUAL ROOM DIMENSIONS provided.\n"
                 f"{calculated_analysis}\n"
@@ -1345,13 +1425,25 @@ def generate_furnished_room(
             "7. **NO ROOM ROTATION OR RESTAGING:** Do not rotate the room, do not convert an angled shot into a frontal shot, and do not recompose the architecture around the furniture.\n\n"
             "<CRITICAL: FURNITURE COMPOSITING>\n"
             "1. **SCALE:** Fit furniture realistically within the *existing* floor space.\n"
-            "2. **PLACEMENT:** Obey the per-item placement family exactly. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
+            "2. **PLACEMENT:** Obey the item category and the user's placement instruction. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
             "3. **AXIS ALIGNMENT:** If the room edges, window mullions, or major wall lines are straight, keep sofas, storage, rugs, and large tables parallel or perpendicular to those dominant room axes. Do not place them on a casual 20-60 degree diagonal unless explicit instructions require it.\n"
-            "4. **STYLE:** Match the intended style implied by the provided furniture items.\n"
-            "5. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
+            "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
+            + (
+                f"4a. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
+                if anchor_labels
+                else ""
+            )
+            + (
+                "4b. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
+                if anchor_labels
+                else ""
+            )
+            +
+            "5. **STYLE:** Match the intended style implied by the provided furniture items.\n"
+            "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
             f"{window_context}"
-            f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and a CANONICAL GEOMETRY CONTRACT. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest-volume movable furniture (EXCLUDING rugs/carpets).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
-            "You are provided with ACTUAL DIMENSIONS and PRE-CALCULATED RATIOS. Do not ignore them.\n"
+            f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and SIZE HIERARCHY. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest movable furniture reference (EXCLUDING rugs/carpets when possible).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
+            "You are provided with ACTUAL DIMENSIONS and item-to-room ratio guidance. Do not ignore them.\n"
             "1. **SPECIFIC SCALE ANALYSIS FOR THIS REQUEST:**\n"
             f"{calculated_analysis if calculated_analysis else '   - (Apply relative scaling based on provided specs)'}\n"
             "2. **RELATIVE W/D/H HIERARCHY:**\n"
@@ -1364,12 +1456,14 @@ def generate_furnished_room(
             "4. **HEIGHT CONSISTENCY:**\n"
             "   - Do NOT make a shorter item appear taller by placing it closer to the camera.\n"
             "   - Apparent height must respect the real H ratios across all items.\n"
+            "5. **NO GUIDE ARTIFACTS:**\n"
+            "   - Never render grid lines, measurement marks, drafting guides, fluorescent overlays, or any scale annotation in the final image.\n"
             "<CRITICAL: LIGHTING PRESERVATION (PRIORITY #1)>\n"
             "1. **KEEP EXISTING LIGHTING LOGIC:** Follow the input image's visible light sources and direction.\n"
             "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
             "3. **LIGHT DIRECTION:** Keep shadows consistent with the existing key light direction.\n"
             "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-            "5. **WHITE BALANCE:** Neutral white balance (around 4000~5000K). **NO warm/yellow cast.**\n"
+            "5. **WHITE BALANCE:** Natural neutral white balance. Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color.\n"
             "6. **NO NEW OPENINGS:** Do not add new windows/doors or fake exterior light sources.\n\n"
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
             "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
@@ -1389,6 +1483,9 @@ def generate_furnished_room(
             "   - Bright and airy, but never overlit. Preserve highlight detail and avoid glare.\n"
             "   - Lighting must feel natural and cohesive across all surfaces (especially floors); no artificial blotches.\n"
             "   - **OUTPUT RULE:** Return the image with furniture added, blended with the existing lighting (daylight or ambient) without introducing new openings.\n"
+            "<PHOTOREAL MATERIAL REALISM>\n"
+            "Preserve real material texture and tactile surface detail: leather grain, fabric weave, wood grain, glass reflections, and metal highlights.\n"
+            "Avoid clay-like, waxy, plastic, CGI, overly smooth, or over-airbrushed furniture surfaces.\n"
         )
 
         style_direction_context = (
@@ -1411,7 +1508,6 @@ def generate_furnished_room(
             f"{geometry_contract_context}\n"
             f"{scene_contract_context}\n"
             f"{placement_plan_context}\n"
-            f"{two_pass_prompt_context}\n"
             f"{spatial_context}\n"
             f"{scale_guide_context}\n"
             f"{inventory_context}\n"
@@ -1430,13 +1526,35 @@ def generate_furnished_room(
         repair_focus_context = ""
         reference_content = []
 
-        def _build_content():
-            return [base_prompt + repair_focus_context, "Empty Room (Target Canvas - KEEP THIS):", room_img, *reference_content]
+        def _build_content(
+            *,
+            prompt_override: str | None = None,
+            reference_override: list | None = None,
+            room_image_override=None,
+            room_label: str = "Empty Room (Target Canvas - KEEP THIS):",
+        ):
+            prompt = prompt_override if prompt_override is not None else base_prompt + repair_focus_context
+            image = room_image_override if room_image_override is not None else room_img
+            refs = reference_override if reference_override is not None else reference_content
+            return [prompt, room_label, image, *list(refs or [])]
 
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
+                two_pass_summary = (
+                    furniture_specs_json.get("two_pass_strategy")
+                    if isinstance(furniture_specs_json.get("two_pass_strategy"), dict)
+                    else {}
+                )
+                pass2_detail_keys = {
+                    str(value or "").strip()
+                    for value in (two_pass_summary.get("pass2_detail_keys") or [])
+                    if str(value or "").strip()
+                }
+
+                def _cutout_item_key(row: dict) -> str:
+                    return str(row.get("target_key") or row.get("source_index") or row.get("label") or "").strip()
 
                 def _cutout_scale_priority(row: dict):
                     dm = (row or {}).get("dims_mm") or {}
@@ -1465,28 +1583,23 @@ def generate_furnished_room(
                         idx = int((row or {}).get("index") or 0)
                     except Exception:
                         idx = 0
-                    return (has_dims, vol, w, d, h, cat, -idx)
+                    item_key = _cutout_item_key(row)
+                    is_primary_anchor = 1 if item_key and item_key in anchor_key_set else 0
+                    return (is_primary_anchor, has_dims, vol, w, d, h, cat, -idx)
 
-                if two_pass_staging_runtime and pass2_detail_keys:
-                    pass1_cutout_items = [
-                        row
-                        for row in items_for_cutout
-                        if str((row or {}).get("target_key") or (row or {}).get("source_index") or (row or {}).get("label") or "").strip()
-                        not in pass2_detail_keys
-                    ]
-                    pass2_cutout_items = [
-                        row
-                        for row in items_for_cutout
-                        if str((row or {}).get("target_key") or (row or {}).get("source_index") or (row or {}).get("label") or "").strip()
-                        in pass2_detail_keys
-                    ]
-                    pass1_cutout_items.sort(key=_cutout_scale_priority, reverse=True)
-                    pass2_cutout_items.sort(key=_cutout_scale_priority, reverse=True)
-                    items_for_cutout = pass1_cutout_items[:12] + pass2_cutout_items[:4]
-                else:
-                    items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
-                    items_for_cutout = items_for_cutout[:12]
-                for it in items_for_cutout:
+                items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
+                first_pass_items = [
+                    item
+                    for item in items_for_cutout
+                    if _cutout_item_key(item) not in pass2_detail_keys
+                ]
+                reserve_items = [
+                    item
+                    for item in items_for_cutout
+                    if _cutout_item_key(item) in pass2_detail_keys
+                ]
+                first_pass_items = first_pass_items[:12]
+                for it in first_pass_items:
                     cp = it.get("crop_path")
                     if cp and os.path.exists(cp):
                         cutouts.append(it)
@@ -1494,7 +1607,7 @@ def generate_furnished_room(
                     cp = it.get("crop_path")
                     lbl = (it.get("label") or "").strip() or "Item"
                     item_key = str(it.get("target_key") or it.get("source_index") or it.get("label") or "").strip()
-                    identity_profile = it.get("identity_profile") or {}
+                    category = _item_category_for_prompt(it)
                     qty = int(it.get("qty") or 1)
                     if qty < 1:
                         qty = 1
@@ -1514,47 +1627,80 @@ def generate_furnished_room(
                     cutout_img = Image.open(cp)
                     try:
                         max_thumb = _reference_thumbnail_size(it)
-                        if two_pass_staging_runtime and item_key in pass2_detail_keys:
-                            max_thumb = min(max_thumb, 256)
                         cutout_img.thumbnail((max_thumb, max_thumb), Image.Resampling.LANCZOS)
                     except Exception:
                         pass
                     extra_imgs.append(cutout_img)
-                    reference_header = "Furniture Cutout Reference (MUST MATCH EXACT DESIGN). "
-                    if two_pass_staging_runtime and item_key in pass2_detail_keys:
-                        reference_header = "Pass2 Detail Reserve Reference (VISUAL CONTEXT ONLY - DO NOT PLACE IN FIRST PASS). "
-                    reference_content += [
+                    reference_header = "Furniture Cutout Reference (SECONDARY SUPPORT ITEM - KEEP PRODUCT IDENTITY AFTER PRIMARY LOCKS ARE CORRECT). "
+                    if item_key and item_key in anchor_key_set:
+                        reference_header = "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
+                    reference_entry = [
                         (
                             reference_header
-                            + 
-                            f"Label={lbl} | Qty={qty} | W={w if w is not None else 'null'}mm "
+                            + f"Label={lbl} | Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
                             f"| Options={opts_txt}"
-                            + (
-                                f" | DistinctiveParts={', '.join((identity_profile.get('distinctive_parts') or [])[:3])}"
-                                if isinstance(identity_profile, dict) and identity_profile.get("distinctive_parts")
-                                else ""
-                            )
-                            + (
-                                f" | PreserveRules={', '.join((identity_profile.get('preserve_rules') or [])[:3])}"
-                                if isinstance(identity_profile, dict) and identity_profile.get("preserve_rules")
-                                else ""
-                            )
-                            + (
-                                f" | Archetype={((it.get('archetype_strategy') or {}).get('render_strategy'))}"
-                                if isinstance(it.get("archetype_strategy"), dict) and (it.get("archetype_strategy") or {}).get("render_strategy")
-                                else ""
-                            )
-                            + (
-                                f" | ForbiddenSubstitutions={', '.join((((it.get('archetype_strategy') or {}).get('forbidden_substitutions')) or [])[:2])}"
-                                if isinstance(it.get("archetype_strategy"), dict) and (it.get("archetype_strategy") or {}).get("forbidden_substitutions")
-                                else ""
-                            )
                         ),
                         cutout_img,
                     ]
+                    reference_content += reference_entry
+                reserve_cutouts = []
+                for it in reserve_items[:4]:
+                    cp = it.get("crop_path")
+                    if cp and os.path.exists(cp):
+                        reserve_cutouts.append(it)
+                if reserve_cutouts:
+                    reference_content.append(
+                        "Do NOT insert these pass2 detail items yet. They are reserve references for later localized repair only."
+                    )
+                for it in reserve_cutouts:
+                    cp = it.get("crop_path")
+                    lbl = (it.get("label") or "").strip() or "Item"
+                    item_key = _cutout_item_key(it)
+                    category = _item_category_for_prompt(it)
+                    qty = int(it.get("qty") or 1)
+                    if qty < 1:
+                        qty = 1
+                    dims = normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
+                    w = dims.get("width_mm")
+                    d = dims.get("depth_mm")
+                    h = dims.get("height_mm")
+                    cutout_img = Image.open(cp)
+                    try:
+                        max_thumb = _reference_thumbnail_size(it)
+                        cutout_img.thumbnail((max_thumb, max_thumb), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    extra_imgs.append(cutout_img)
+                    reference_content += [
+                        (
+                            "Pass2 Detail Reserve Reference (DO NOT INSERT IN FIRST PASS; keep for targeted repair only). "
+                            + f"Label={lbl} | TargetKey={item_key} | Category={category} | Qty={qty} "
+                            + f"| W={w if w is not None else 'null'}mm D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm"
+                        ),
+                        cutout_img,
+                    ]
+            if not reference_content and ref_path:
+                fallback_refs = ref_path if isinstance(ref_path, (list, tuple)) else [ref_path]
+                for index, raw_path in enumerate(fallback_refs, start=1):
+                    path_str = str(raw_path or "").strip()
+                    if not path_str or not os.path.exists(path_str):
+                        continue
+                    ref_img = Image.open(path_str)
+                    try:
+                        ref_img.thumbnail((384, 384), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    extra_imgs.append(ref_img)
+                    fallback_entry = [
+                        f"Fallback Furniture Reference Image {index} (EXACTNESS ANCHOR - use this reference image even if structured item cards are unavailable).",
+                        ref_img,
+                    ]
+                    reference_content += fallback_entry
         except Exception:
             pass
+
+        remaining = max(30, total_timeout_limit - (time.time() - start_time))
         safety_settings = allow_all_safety_settings()
 
         def _save_render_from_response(response, *, prefix: str):
@@ -1588,31 +1734,51 @@ def generate_furnished_room(
                         return normalized_path
             return None
 
-        def _render_once():
-            current_timeout = _bounded_stage2_timeout()
-            if current_timeout <= 0.0:
-                return None
-            content = _build_content()
+        effective_generation_attempts: int | None = None
+        try:
+            if max_generation_attempts is not None:
+                effective_generation_attempts = max(1, int(max_generation_attempts))
+        except Exception:
+            effective_generation_attempts = None
+
+        def _generation_request_options(current_timeout: float) -> dict:
             request_options = {
                 "timeout": current_timeout,
                 "aspect_ratio": "16:9",
                 "thinking_level": "high",
                 "include_thoughts": False,
             }
-            if b_lite_runtime:
+            if effective_generation_attempts is not None:
+                request_options["max_attempts"] = effective_generation_attempts
+            elif b_lite_runtime:
                 request_options["max_attempts"] = 1
+            return request_options
+
+        def _call_generation(content: list, *, current_timeout: float, log_tag: str):
             response = generation_call(
                 resolved_generation_model,
                 content,
-                request_options,
+                _generation_request_options(current_timeout),
                 safety_settings,
                 system_instruction,
+                log_tag=log_tag,
+            )
+            return response
+
+        def _render_once():
+            current_timeout = _bounded_stage2_timeout()
+            if current_timeout <= 0.0:
+                return None
+            content = _build_content()
+            response = _call_generation(
+                content,
+                current_timeout=current_timeout,
                 log_tag="Stage2.Furnish",
             )
             return _save_render_from_response(response, prefix="result")
 
         b_lite_runtime = strict_scale_requested
-        max_attempts = 1 if b_lite_runtime else 3
+        max_attempts = effective_generation_attempts if effective_generation_attempts is not None else (1 if b_lite_runtime else 3)
         guide_attached_to_prompt = False
         last_path = None
         last_success_path = None
@@ -1698,49 +1864,7 @@ def generate_furnished_room(
                 if str((((row.get("item") or {}).get("archetype_strategy") or {}).get("strictness") or "")).strip().lower() == "critical"
                 or bool(row.get("unmatched"))
             ]
-            if b_lite_runtime and pass2_detail_keys:
-                prioritized_targets: list[dict] = []
-                seen_keys: set[str] = set()
-                primary_target_key = str(
-                    ((furniture_specs_json.get("primary_scale") or {}) if isinstance(furniture_specs_json, dict) else {}).get("target_key")
-                    or ((furniture_specs_json.get("primary") or {}) if isinstance(furniture_specs_json, dict) else {}).get("target_key")
-                    or ""
-                ).strip()
-
-                def _pass_role_for_row(row: dict) -> str:
-                    item = row.get("item") or {}
-                    two_pass = (item.get("two_pass_strategy") or {}) if isinstance(item, dict) else {}
-                    return str(two_pass.get("pass_role") or item.get("pass_role") or "").strip().lower()
-
-                protected_pass1_targets = [
-                    row
-                    for row in critical_targets
-                    if (
-                        str(row.get("item_key") or "").strip() == primary_target_key
-                        or str(row.get("item_key") or "").strip() in pass1_render_keys
-                        or _pass_role_for_row(row) in {"pass1_anchor", "pass1_footprint"}
-                    )
-                ]
-                buckets = [
-                    protected_pass1_targets,
-                    [row for row in targets if str(row.get("item_key") or "").strip() in pass2_detail_keys],
-                    critical_targets,
-                    targets,
-                ]
-                for bucket in buckets:
-                    for row in bucket:
-                        item_key = str(row.get("item_key") or "").strip()
-                        dedupe_key = item_key or str(id(row))
-                        if dedupe_key in seen_keys:
-                            continue
-                        prioritized_targets.append(row)
-                        seen_keys.add(dedupe_key)
-                        if len(prioritized_targets) >= 5:
-                            break
-                    if len(prioritized_targets) >= 5:
-                        break
-                targets = prioritized_targets[:5]
-            elif critical_targets:
+            if critical_targets:
                 targets = critical_targets[:3]
             else:
                 targets = targets[:3]
@@ -1849,7 +1973,9 @@ def generate_furnished_room(
                     "thinking_level": "high",
                     "include_thoughts": False,
                 }
-                if b_lite_runtime:
+                if effective_generation_attempts is not None:
+                    request_options["max_attempts"] = effective_generation_attempts
+                elif b_lite_runtime:
                     request_options["max_attempts"] = 1
                 response = repair_call(
                     resolved_repair_model,
@@ -2028,7 +2154,7 @@ def generate_furnished_room(
             return _build_result(last_success_path or last_path)
         return _build_result(last_success_path or last_path)
     except Exception as exc:
-        print(f"!! Stage 2 에러: {exc}", flush=True)
+        print(f"!! Stage 2 ?먮윭: {exc}", flush=True)
         return None
     finally:
         for im in extra_imgs:

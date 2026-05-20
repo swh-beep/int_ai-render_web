@@ -103,7 +103,7 @@ def _build_detail_entries(
 ) -> list:
     details = []
 
-    for item in generated_paths:
+    for item in sorted(generated_paths, key=lambda row: int((row or {}).get("index") or 0)):
         path = item.get("path")
         if not path:
             continue
@@ -115,6 +115,7 @@ def _build_detail_entries(
             "index": item["index"] + 1,
             "url": url,
             "style_name": item.get("style_name"),
+            "aspect_ratio": item.get("style_ratio"),
             "cutout_ref_count": int(item.get("cutout_ref_count") or 0),
         }
         labels = item.get("cutout_ref_labels") or []

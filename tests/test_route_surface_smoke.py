@@ -42,12 +42,17 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
             },
         ]
         fake_deps.persist_internal_room_upload.return_value = "outputs/raw_room.png"
-        fake_deps.persist_internal_item_uploads.return_value = ["outputs/cart_item_1.png", "outputs/cart_item_2.png"]
+        fake_deps.persist_internal_item_source_uploads.return_value = ["outputs/cart_item_src_1.png", "outputs/cart_item_src_2.png"]
+        fake_deps.prepare_internal_item_upload_paths.return_value = ["outputs/cart_item_1.png", "outputs/cart_item_2.png"]
         fake_deps.build_internal_itemized_async_render_job_payload.return_value = {"render": {"audience": "internal"}}
         fake_deps.resolve_image_url = lambda path, prefix=None: f"resolved:{path}"
         fake_deps.build_s3_prefix = lambda audience, category, subfolder=None: f"{audience}/{category}/{subfolder or 'root'}"
         fake_deps.build_item_target_key = lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}"
-        fake_deps.enqueue_job.return_value = (MagicMock(id="job-123"), None)
+        fake_deps.enqueue_job.side_effect = lambda job_func, payload, queue_name=None, **kwargs: (
+            MagicMock(id=kwargs["job_id"]),
+            None,
+        )
+        fake_deps.start_background_task.side_effect = lambda task: task()
 
         client = TestClient(app)
 
@@ -75,7 +80,9 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"job_id": "job-123", "status": "queued"})
+        response_payload = response.json()
+        self.assertEqual(response_payload["status"], "queued")
+        self.assertTrue(response_payload["job_id"])
         fake_deps.parse_internal_render_items_form.assert_called_once()
         call_args = fake_deps.parse_internal_render_items_form.call_args
         self.assertEqual(call_args.args[0], (
@@ -88,7 +95,10 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         self.assertEqual(call_args.args[1][0].filename, "chair.png")
         self.assertEqual(call_args.args[1][1].filename, "table.png")
         fake_deps.persist_internal_room_upload.assert_called_once()
-        fake_deps.persist_internal_item_uploads.assert_called_once()
+        fake_deps.persist_internal_item_source_uploads.assert_called_once()
+        fake_deps.prepare_internal_item_upload_paths.assert_called_once_with(
+            ["outputs/cart_item_src_1.png", "outputs/cart_item_src_2.png"]
+        )
         build_call = fake_deps.build_internal_itemized_async_render_job_payload.call_args.kwargs
         self.assertEqual(build_call["room"], "livingroom")
         self.assertEqual(build_call["style"], "modern")
@@ -100,3 +110,5 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         self.assertIs(build_call["resolve_image_url"], fake_deps.resolve_image_url)
         self.assertIs(build_call["build_s3_prefix"], fake_deps.build_s3_prefix)
         self.assertIs(build_call["build_item_target_key"], fake_deps.build_item_target_key)
+        self.assertIs(build_call["publish_inputs"], True)
+        self.assertEqual(fake_deps.enqueue_job.call_args.kwargs["job_id"], response_payload["job_id"])

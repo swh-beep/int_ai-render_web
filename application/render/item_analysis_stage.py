@@ -241,10 +241,13 @@ def detect_furniture_boxes(
         with Image.open(moodboard_path) as img:
             prompt = (
                 "OBJECT DETECTION TASK:\n"
-                "Identify ALL discrete furniture items in this image (Sofa, Chair, Table, Lamp, Rug, Ottoman, etc.).\n"
+                "Identify ALL discrete interior objects that could make useful detail-shot targets in this image, "
+                "including furniture, lighting, decor, and accessories.\n"
+                "Examples: sofas, chairs, tables, lamps, rugs, ottomans, mirrors, wall art, framed prints, posters, "
+                "vases, books, plants, candles, sculptures, trays, table decor, shelf decor, and small accessories.\n"
                 "**NOTE:** The background is a neutral grey (#D2D2D2) for contrast. Do not detect the background itself.\n"
                 "Return a JSON list where each item has:\n"
-                "- 'label': Name of the item.\n"
+                "- 'label': Specific name of the item. Use specific labels instead of generic 'Decor' whenever possible.\n"
                 "- 'box_2d': [ymin, xmin, ymax, xmax] coordinates normalized to 0-1000 scale.\n"
                 "\n"
                 "<CRITICAL: SORTING ORDER>\n"
@@ -252,16 +255,18 @@ def detect_furniture_boxes(
                 "1. Largest items first (e.g., Sofa, Bed, Large Rug, Wardrobe).\n"
                 "2. Medium items second (e.g., Armchair, Coffee Table, Console).\n"
                 "3. Small items last (e.g., Side Table, Lamp, Vase, Decor).\n"
-                "Ignore walls, windows, and floors. Focus on movable objects."
+                "Ignore walls, windows, floors, ceiling, and built-in architecture. "
+                "But do detect discrete objects attached to a wall or placed on a shelf, table, or floor."
             )
             detect_model = model_name or default_model_name
-            detect_timeout = max(10, int(timeout_sec or 120))
+            detect_timeout = max(60, int(timeout_sec or 120))
+            detect_max_attempts = max(3, int(max_attempts or 3))
             response = call_gemini_with_failover(
                 detect_model,
                 [prompt, img],
                 {
                     "timeout": detect_timeout,
-                    "max_attempts": max(1, int(max_attempts or 1)),
+                    "max_attempts": detect_max_attempts,
                 },
                 {},
                 log_tag="Analysis.DetectFurniture",
@@ -281,7 +286,7 @@ def detect_furniture_boxes(
     except Exception as exc:
         print(f"!! Detection Failed: {exc}", flush=True)
 
-    return [{"label": "Main Furniture"}, {"label": "Coffee Table"}, {"label": "Lounge Chair"}]
+    return []
 
 
 def _crop_item_with_padding(moodboard_path, item_data, unique_id=None, item_index=None, save_crop=True):
@@ -465,6 +470,53 @@ def analyze_cropped_item(
         except Exception:
             crop_path = None
 
+        resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
+        if not enable_text_read:
+            reference_features = extract_reference_features(
+                crop_path=crop_path,
+                label=label,
+                category=item_data.get("category"),
+                description=f"{label} product reference image is authoritative.",
+                dims_mm=resolved_dims_mm,
+                call_gemini_with_failover=call_gemini_with_failover,
+                analysis_model_name=analysis_model_name,
+                safe_json_from_model_text=safe_extract_json,
+                log_brief=log_brief,
+                allow_model_call=False,
+            )
+            if isinstance(reference_features, dict):
+                reference_features["extraction_mode"] = "deterministic"
+                reference_features["extraction_reason"] = "authoritative_reference_image"
+            final_desc = _stabilize_description(
+                label=label,
+                category=item_data.get("category") or item_data.get("category_canonical"),
+                description=f"{label} product reference image is authoritative.",
+                dims_mm=resolved_dims_mm,
+                reference_features=reference_features,
+            )
+            if cropped_img:
+                try:
+                    cropped_img.close()
+                except Exception:
+                    pass
+            if cutout_img:
+                try:
+                    cutout_img.close()
+                except Exception:
+                    pass
+            return {
+                "label": label,
+                "description": final_desc,
+                "box_2d": box,
+                "crop_path": crop_path,
+                "reference_features": reference_features,
+                "target_key": item_data.get("target_key"),
+                "source_index": item_data.get("source_index"),
+                "category": item_data.get("category"),
+                "category_canonical": item_data.get("category_canonical"),
+                "item_id": item_data.get("item_id"),
+            }
+
         if enable_text_read:
             prompt = (
                 f"Analyze this image cutout of a '{label}'.\n"
@@ -545,7 +597,6 @@ def analyze_cropped_item(
             )
 
         desc = f"{label} with its original material and silhouette preserved."
-        resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
 
         if response and response.text:
             data = safe_extract_json(response.text)

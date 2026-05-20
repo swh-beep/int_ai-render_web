@@ -4,8 +4,40 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
-from application.details.detail_analysis_stage import load_analyzed_items
+from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.detail_result_stage import build_detail_generation_output
+from application.details.detail_style_stage import with_internal_angle_styles
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default)) or default))
+    except Exception:
+        return max(minimum, int(default))
+
+
+DETAIL_GENERATION_TIMEOUT_CAP_SEC = _env_int("DETAIL_GENERATION_TIMEOUT_SEC", 180, minimum=10)
+DETAIL_GENERATION_BUDGETED_MAX_WORKERS = _env_int("DETAIL_GENERATION_BUDGETED_MAX_WORKERS", 10)
+DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
+EXTERNAL_DETAIL_STYLE_LIMIT = 6
+
+
+def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
+    styles = list(dynamic_styles or [])
+    max_count = max(0, int(limit or 0))
+    if max_count <= 0:
+        return []
+
+    selected: list[dict] = []
+    left = 0
+    right = len(styles) - 1
+    while left <= right and len(selected) < max_count:
+        selected.append(styles[left])
+        left += 1
+        if left <= right and len(selected) < max_count:
+            selected.append(styles[right])
+            right -= 1
+    return selected
 
 
 def run_generate_details_job(
@@ -33,9 +65,9 @@ def run_generate_details_job(
         moodboard_url = payload.get("moodboard_url")
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
+        require_details = bool(payload.get("require_details"))
         raw_absolute_deadline_ts = payload.get("absolute_deadline_ts")
         raw_minimum_budget_sec = payload.get("minimum_detail_budget_sec")
-
         try:
             absolute_deadline_ts = float(raw_absolute_deadline_ts) if raw_absolute_deadline_ts is not None else None
         except Exception:
@@ -44,9 +76,17 @@ def run_generate_details_job(
             minimum_detail_budget_sec = max(1.0, float(raw_minimum_budget_sec or 5.0))
         except Exception:
             minimum_detail_budget_sec = 5.0
-        budgeted_mode = absolute_deadline_ts is not None
+        budgeted_mode = absolute_deadline_ts is not None and not require_details
 
         aud = normalize_audience(audience)
+        input_furniture_count = len(furniture_data) if isinstance(furniture_data, list) else 0
+        print(
+            ">> [Detail View] mode "
+            f"audience={aud} require_details={require_details} "
+            f"budgeted_mode={budgeted_mode} deadline_supplied={absolute_deadline_ts is not None} "
+            f"furniture_data_count={input_furniture_count}",
+            flush=True,
+        )
         prefix_detail_user = build_s3_prefix(aud, "detailrendered", "user-photos")
         prefix_detail_rendered = build_s3_prefix(aud, "detailrendered", "rendered")
 
@@ -98,7 +138,7 @@ def run_generate_details_job(
             if budget < minimum_detail_budget_sec:
                 return 0
             cap = int(budget // 18.0)
-            return max(1, min(style_count, max(1, min(6, cap or 1))))
+            return max(1, min(style_count, max(1, min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, cap or 1))))
 
         def _ret(result: dict) -> dict:
             persist_job_result(result, audience=aud)
@@ -117,7 +157,7 @@ def run_generate_details_job(
         unique_id = uuid.uuid4().hex[:6]
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
 
-        analyzed_items = load_analyzed_items(
+        analyzed_items = prepare_detail_generation_items(
             furniture_data=furniture_data,
             moodboard_url=moodboard_url,
             local_path=local_path,
@@ -128,6 +168,8 @@ def run_generate_details_job(
             max_concurrency_analysis=max_concurrency_analysis,
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
+            normalize_label_for_match=normalize_label_for_match,
+            simple_generation_mode=True,
         )
         if budgeted_mode:
             remaining_budget = _remaining_deadline_sec()
@@ -139,91 +181,132 @@ def run_generate_details_job(
                     )
                 )
 
+        detected_item_count = len(analyzed_items or [])
         dynamic_styles = construct_dynamic_styles(analyzed_items)
-        if aud == "external":
-            detail_only = []
-            for style in dynamic_styles:
-                name = style.get("name") or ""
-                if name.startswith("Detail:"):
-                    detail_only.append(style)
-            dynamic_styles = detail_only[:9]
+        raw_style_count = len(dynamic_styles or [])
+        if aud == "internal":
+            dynamic_styles = with_internal_angle_styles(dynamic_styles)
+        elif aud == "external":
+            dynamic_styles = select_external_detail_styles(dynamic_styles)
+        print(
+            ">> [Detail View] target counts "
+            f"analyzed_items={detected_item_count} raw_styles={raw_style_count} final_styles={len(dynamic_styles or [])}",
+            flush=True,
+        )
         if not dynamic_styles:
             if budgeted_mode:
                 return _ret(_build_best_effort_output("No detail styles available within the remaining deadline budget", analyzed_items=analyzed_items))
             return _ret({"error": "No styles available"})
 
         generated_paths = []
+
+        def _append_detail_result(index: int, style_payload: dict, result) -> None:
+            if not result:
+                return
+            if isinstance(result, dict):
+                generated_paths.append(
+                    {
+                        "index": index,
+                        "path": result.get("path"),
+                        "style_name": result.get("style_name") or style_payload.get("name"),
+                        "style_ratio": result.get("aspect_ratio") or style_payload.get("ratio"),
+                        "style_target_key": style_payload.get("target_key"),
+                        "style_target_label": style_payload.get("target_label"),
+                        "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
+                        "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
+                    }
+                )
+                return
+            generated_paths.append(
+                {
+                    "index": index,
+                    "path": result,
+                    "style_name": style_payload.get("name"),
+                    "style_ratio": style_payload.get("ratio"),
+                    "style_target_key": style_payload.get("target_key"),
+                    "style_target_label": style_payload.get("target_label"),
+                    "cutout_ref_count": 0,
+                    "cutout_ref_labels": [],
+                }
+            )
+
         if budgeted_mode:
             dynamic_styles = dynamic_styles[: _budgeted_style_cap(len(dynamic_styles), _remaining_deadline_sec())]
             print(f"?? Generating {len(dynamic_styles)} Budgeted Dynamic Shots...", flush=True)
-            for index, style in enumerate(dynamic_styles):
-                remaining_budget = _remaining_deadline_sec()
-                if remaining_budget is not None and remaining_budget < minimum_detail_budget_sec:
-                    break
-                style_payload = dict(style or {})
-                if remaining_budget is not None:
-                    style_payload["timeout_sec"] = max(1.0, min(90.0, float(remaining_budget) - 1.0))
-                result = generate_detail_view(local_path, style_payload, unique_id, index + 1, analyzed_items)
-                if not result:
-                    continue
-                if isinstance(result, dict):
-                    generated_paths.append(
-                        {
-                            "index": index,
-                            "path": result.get("path"),
-                            "style_name": result.get("style_name") or style_payload.get("name"),
-                            "style_target_key": style_payload.get("target_key"),
-                            "style_target_label": style_payload.get("target_label"),
-                            "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
-                            "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
-                        }
+            if len(dynamic_styles) > 1:
+                futures = []
+                max_workers = min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, len(dynamic_styles))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for index, style in enumerate(dynamic_styles):
+                        remaining_budget = _remaining_deadline_sec()
+                        if remaining_budget is not None and remaining_budget < minimum_detail_budget_sec:
+                            break
+                        style_payload = dict(style or {})
+                        if remaining_budget is not None:
+                            style_payload["timeout_sec"] = max(
+                                1.0,
+                                min(float(DETAIL_GENERATION_TIMEOUT_CAP_SEC), float(remaining_budget) - 1.0),
+                            )
+                        futures.append(
+                            (
+                                index,
+                                style_payload,
+                                executor.submit(
+                                    generate_detail_view,
+                                    local_path,
+                                    style_payload,
+                                    unique_id,
+                                    index + 1,
+                                    analyzed_items,
+                                    prefer_crop_extract=False,
+                                ),
+                            )
+                        )
+                    for index, style_payload, future in futures:
+                        _append_detail_result(index, style_payload, future.result())
+            else:
+                for index, style in enumerate(dynamic_styles):
+                    remaining_budget = _remaining_deadline_sec()
+                    if remaining_budget is not None and remaining_budget < minimum_detail_budget_sec:
+                        break
+                    style_payload = dict(style or {})
+                    if remaining_budget is not None:
+                        style_payload["timeout_sec"] = max(
+                            1.0,
+                            min(float(DETAIL_GENERATION_TIMEOUT_CAP_SEC), float(remaining_budget) - 1.0),
+                        )
+                    result = generate_detail_view(
+                        local_path,
+                        style_payload,
+                        unique_id,
+                        index + 1,
+                        analyzed_items,
+                        prefer_crop_extract=False,
                     )
-                else:
-                    generated_paths.append(
-                        {
-                            "index": index,
-                            "path": result,
-                            "style_name": style_payload.get("name"),
-                            "style_target_key": style_payload.get("target_key"),
-                            "style_target_label": style_payload.get("target_label"),
-                            "cutout_ref_count": 0,
-                            "cutout_ref_labels": [],
-                        }
-                    )
+                    _append_detail_result(index, style_payload, result)
         else:
             print(f"?? Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
-            with ThreadPoolExecutor(max_workers=15) as executor:
+            with ThreadPoolExecutor(max_workers=min(DETAIL_GENERATION_MAX_WORKERS, len(dynamic_styles))) as executor:
                 futures = []
                 for index, style in enumerate(dynamic_styles):
-                    futures.append((index, executor.submit(generate_detail_view, local_path, style, unique_id, index + 1, analyzed_items)))
+                    futures.append(
+                        (
+                            index,
+                            executor.submit(
+                                generate_detail_view,
+                                local_path,
+                                style,
+                                unique_id,
+                                index + 1,
+                                analyzed_items,
+                                prefer_crop_extract=False,
+                            ),
+                        )
+                    )
                 for index, future in futures:
                     result = future.result()
-                    if not result:
-                        continue
-                    if isinstance(result, dict):
-                        generated_paths.append(
-                            {
-                                "index": index,
-                                "path": result.get("path"),
-                                "style_name": result.get("style_name") or (dynamic_styles[index].get("name") if index < len(dynamic_styles) else None),
-                                "style_target_key": (dynamic_styles[index].get("target_key") if index < len(dynamic_styles) else None),
-                                "style_target_label": (dynamic_styles[index].get("target_label") if index < len(dynamic_styles) else None),
-                                "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
-                                "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
-                            }
-                        )
-                    else:
-                        generated_paths.append(
-                            {
-                                "index": index,
-                                "path": result,
-                                "style_name": (dynamic_styles[index].get("name") if index < len(dynamic_styles) else None),
-                                "style_target_key": (dynamic_styles[index].get("target_key") if index < len(dynamic_styles) else None),
-                                "style_target_label": (dynamic_styles[index].get("target_label") if index < len(dynamic_styles) else None),
-                                "cutout_ref_count": 0,
-                                "cutout_ref_labels": [],
-                            }
-                        )
+                    style_payload = dynamic_styles[index] if index < len(dynamic_styles) else {}
+                    _append_detail_result(index, style_payload, result)
 
         print(f"=== [Detail View] complete: {len(generated_paths)} generated ===", flush=True)
         if not generated_paths:

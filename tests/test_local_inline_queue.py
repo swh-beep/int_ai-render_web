@@ -1,4 +1,5 @@
 import io
+import json
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -40,6 +41,16 @@ class LocalInlineQueueTests(unittest.TestCase):
         self.assertTrue(fetched.is_finished)
         self.assertEqual(fetched.result, {"ok": True, "payload": {"value": 7}})
 
+    def test_enqueue_job_preserves_requested_job_id_for_local_inline_store(self):
+        def _job(payload):
+            return {"ok": True, "payload": payload}
+
+        with patch.object(main, "LOCAL_INLINE_QUEUE_ENABLED", True), patch.object(main, "_get_rq_queue", return_value=None):
+            job, err = main._enqueue_job(_job, {"value": 11}, job_id="staged-job-1")
+
+        self.assertIsNone(err)
+        self.assertEqual(job.id, "staged-job-1")
+
     def test_internal_async_render_allows_local_inline_queue_without_redis_url(self):
         deps = MagicMock()
         deps.redis_url = ""
@@ -47,12 +58,14 @@ class LocalInlineQueueTests(unittest.TestCase):
         deps.rq_queue_render = "render"
         deps.parse_internal_render_items_form.return_value = [{"upload_index": 0}]
         deps.persist_internal_room_upload.return_value = "outputs/raw.png"
-        deps.persist_internal_item_uploads.return_value = ["outputs/item_1.png"]
+        deps.persist_internal_item_source_uploads.return_value = ["outputs/item_src_1.png"]
+        deps.prepare_internal_item_upload_paths.return_value = ["outputs/item_1.png"]
         deps.build_internal_itemized_async_render_job_payload.return_value = {"render": {"audience": "internal"}}
         deps.resolve_image_url = lambda path, prefix=None: f"resolved:{path}"
         deps.build_s3_prefix = lambda audience, category, subfolder=None: f"{audience}/{category}/{subfolder or 'root'}"
         deps.build_item_target_key = lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}"
-        deps.enqueue_job.return_value = (MagicMock(id="local-job-1"), None)
+        deps.enqueue_job.side_effect = lambda job_func, payload, queue_name=None, **kwargs: (MagicMock(id=kwargs["job_id"]), None)
+        deps.start_background_task.side_effect = lambda task: task()
 
         response = handle_render_room_async(
             file=_upload("room.png"),
@@ -67,7 +80,9 @@ class LocalInlineQueueTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b'{"job_id":"local-job-1","status":"queued"}')
+        payload = json.loads(response.body)
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(deps.enqueue_job.call_args.kwargs["job_id"], payload["job_id"])
 
 
 if __name__ == "__main__":

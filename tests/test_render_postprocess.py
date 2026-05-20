@@ -214,6 +214,35 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(captured["candidates"], [str(generated_path_b)])
         self.assertEqual(result.generated_results[0], str(generated_path_b))
 
+    def test_run_render_postprocess_stage_rerank_uses_resilient_timeout_and_attempts(self):
+        captured = {}
+        generated_path_a = self.tmp_root / "candidate-a-budget.png"
+        generated_path_b = self.tmp_root / "candidate-b-budget.png"
+        generated_path_a.write_bytes(b"png")
+        generated_path_b.write_bytes(b"png")
+
+        def _rank_best_variant(candidates, items, **kwargs):
+            captured["candidates"] = list(candidates)
+            captured["kwargs"] = dict(kwargs)
+            return 1
+
+        result = run_render_postprocess_stage(
+            generated_results=[str(generated_path_a), str(generated_path_b)],
+            full_analyzed_data=[{"label": "Chair"}],
+            audience="internal",
+            rank_best_variant=_rank_best_variant,
+            refresh_item_boxes_from_main_render=lambda path, items: items,
+            attach_volume_ranks=lambda items: items,
+            volume_ranking_snapshot=lambda items: [],
+            logger=_StubLogger(),
+            log_brief=False,
+            skip_main_render_remap=True,
+        )
+
+        self.assertEqual(captured["kwargs"]["timeout_sec"], 60)
+        self.assertEqual(captured["kwargs"]["max_attempts"], 3)
+        self.assertEqual(result.generated_results[0], str(generated_path_b))
+
     def test_run_render_postprocess_stage_skips_rerank_when_failed_rerank_disabled(self):
         captured = {}
         generated_path_a = self.tmp_root / "candidate-a-failed.png"

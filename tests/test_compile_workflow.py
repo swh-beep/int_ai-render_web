@@ -1,11 +1,20 @@
-from pathlib import Path
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from api_models import CompileClip
+from api_models import CompileClip, CompileRequest
+from application.video import compile_workflow
 from application.video.compile_workflow import _build_audio_filter, _build_process_clip_command, _build_video_filter
+from application.video.job_store import get_video_job, video_jobs, video_jobs_lock
 
 
 class CompileWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        with video_jobs_lock:
+            video_jobs.clear()
+
     def test_build_video_filter_defaults_to_trim_speed_scale_crop(self):
         vf = _build_video_filter(
             trim_start=0.0,
@@ -62,7 +71,7 @@ class CompileWorkflowTests(unittest.TestCase):
         self.assertIn("scale=1080:1080:force_original_aspect_ratio=increase", vf)
         self.assertIn("crop=1080:1080", vf)
 
-    def test_build_video_filter_supports_blur_fill_mode(self):
+    def test_build_video_filter_supports_black_fill_padding(self):
         vf = _build_video_filter(
             trim_start=0.0,
             trim_end=5.0,
@@ -74,9 +83,9 @@ class CompileWorkflowTests(unittest.TestCase):
             aspect_mode="fill",
         )
 
-        self.assertIn("split=2[bg][fg]", vf)
-        self.assertIn("boxblur=12:1", vf)
-        self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
+        self.assertNotIn("split=2[bg][fg]", vf)
+        self.assertNotIn("boxblur=12:1", vf)
+        self.assertIn("pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black", vf)
         self.assertIn("scale=1920:1080:force_original_aspect_ratio=decrease", vf)
 
     def test_build_video_filter_supports_720p_quality(self):
@@ -151,6 +160,44 @@ class CompileWorkflowTests(unittest.TestCase):
         self.assertIn("anullsrc=channel_layout=stereo:sample_rate=44100", cmd)
         self.assertIn("1:a", cmd)
         self.assertIn("aac", cmd)
+
+    def test_run_final_compile_job_publishes_worker_output_url(self):
+        resolved = []
+
+        def resolve_output_url(url):
+            resolved.append(url)
+            return f"https://cdn.example/{url.rsplit('/', 1)[-1]}"
+
+        def fake_download(url, out_path):
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_bytes(b"source-video")
+
+        def fake_run_ffmpeg(cmd):
+            output_path = Path(cmd[-1])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"compiled-video")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prev_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                with patch.object(compile_workflow, "download_to_path", side_effect=fake_download), patch.object(
+                    compile_workflow, "run_ffmpeg", side_effect=fake_run_ffmpeg
+                ):
+                    compile_workflow.run_final_compile_job(
+                        "compile-published",
+                        CompileRequest(clips=[CompileClip(video_url="https://cdn.example/source.mp4")]),
+                        video_target_fps=12,
+                        resolve_output_url=resolve_output_url,
+                    )
+            finally:
+                os.chdir(prev_cwd)
+
+        state = get_video_job("compile-published")
+        self.assertIsNotNone(state)
+        self.assertEqual(state.get("status"), "COMPLETED")
+        self.assertEqual(state.get("result_url"), "https://cdn.example/final_compile-published.mp4")
+        self.assertEqual(resolved, ["/outputs/final_compile-published.mp4"])
 
 
 if __name__ == "__main__":

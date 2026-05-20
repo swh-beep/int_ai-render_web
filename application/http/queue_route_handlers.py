@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import os
+import traceback
+import uuid
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
-
-from application.job_entrypoints import job_render_with_extra
 
 @dataclass
 class QueueRouteDependencies:
@@ -51,6 +52,7 @@ class QueueRouteDependencies:
     rq_video_job_timeout: int
     job_render: Callable[..., dict]
     job_render_with_details: Callable[..., dict]
+    job_render_with_extra: Callable[..., dict]
     job_generate_render_video: Callable[..., dict]
     job_image_edit: Callable[..., dict]
     job_frontal_view: Callable[..., dict]
@@ -59,6 +61,12 @@ class QueueRouteDependencies:
     job_generate_empty_room: Callable[..., dict]
     job_regenerate_single_detail: Callable[..., dict]
     job_generate_details: Callable[..., dict]
+    set_staging_job: Callable[[str, dict], None] | None = None
+    update_staging_job: Callable[[str, dict], None] | None = None
+    get_staging_job: Callable[[str], dict | None] | None = None
+    start_background_task: Callable[[Callable[[], None]], None] | None = None
+    persist_internal_item_source_uploads: Callable[[list[UploadFile]], list[str]] | None = None
+    prepare_internal_item_upload_paths: Callable[[list[str]], list[str]] | None = None
 
 
 def _redis_not_configured_response() -> JSONResponse:
@@ -67,6 +75,76 @@ def _redis_not_configured_response() -> JSONResponse:
 
 def _queue_backend_available(deps: QueueRouteDependencies) -> bool:
     return bool(deps.redis_url) or bool(getattr(deps, "local_inline_queue_enabled", False))
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _stage_status_payload(job_id: str, state: dict) -> dict:
+    payload = {
+        "id": job_id,
+        "status": str(state.get("status") or "queued"),
+        "enqueued_at": state.get("enqueued_at"),
+        "started_at": state.get("started_at"),
+        "ended_at": state.get("ended_at"),
+    }
+    stage = state.get("stage")
+    if stage:
+        payload["stage"] = stage
+    actual_job_id = state.get("actual_job_id")
+    if actual_job_id and actual_job_id != job_id:
+        payload["actual_job_id"] = actual_job_id
+    if payload["status"] == "failed":
+        payload["error"] = state.get("exc_info") or state.get("error") or "Staging failed"
+    return payload
+
+
+def _saved_result_can_finish_stale_job(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("error"):
+        return True
+    terminal_keys = {
+        "render",
+        "empty_room_url",
+        "upscaled_url",
+        "final_url",
+        "finalized_url",
+        "video_url",
+        "clip_urls",
+        "source_images",
+        "frontal_url",
+    }
+    return any(key in result for key in terminal_keys)
+
+
+def _set_staging_job(deps: QueueRouteDependencies, job_id: str, state: dict) -> None:
+    setter = getattr(deps, "set_staging_job", None)
+    if callable(setter):
+        setter(job_id, state)
+
+
+def _update_staging_job(deps: QueueRouteDependencies, job_id: str, **fields: Any) -> None:
+    updater = getattr(deps, "update_staging_job", None)
+    if callable(updater):
+        updater(job_id, fields)
+
+
+def _get_staging_job(deps: QueueRouteDependencies, job_id: str) -> dict | None:
+    getter = getattr(deps, "get_staging_job", None)
+    if callable(getter):
+        state = getter(job_id)
+        return state if isinstance(state, dict) else None
+    return None
+
+
+def _start_background_task(deps: QueueRouteDependencies, task: Callable[[], None]) -> None:
+    starter = getattr(deps, "start_background_task", None)
+    if callable(starter):
+        starter(task)
+    else:
+        task()
 
 
 def _enqueue_or_error(job_func: Callable[..., Any], payload: dict, *, queue_name: str | None, deps: QueueRouteDependencies) -> JSONResponse:
@@ -186,11 +264,82 @@ def _validate_internal_render_upload(upload: UploadFile, *, field_name: str) -> 
         )
 
 
+def _stage_internal_render_publish_and_enqueue(
+    *,
+    job_id: str,
+    raw_path: str,
+    item_specs: list[dict],
+    item_source_paths: list[str],
+    room: str,
+    style: str,
+    variant: str,
+    dimensions: str,
+    placement: str,
+    deps: QueueRouteDependencies,
+) -> None:
+    try:
+        _update_staging_job(
+            deps,
+            job_id,
+            status="queued",
+            stage="preparing_inputs",
+            started_at=_utcnow_iso(),
+            error=None,
+            exc_info=None,
+        )
+        prepare_item_paths = getattr(deps, "prepare_internal_item_upload_paths", None)
+        if not callable(prepare_item_paths):
+            raise RuntimeError("prepare_internal_item_upload_paths is not configured")
+        item_paths = prepare_item_paths(item_source_paths)
+
+        _update_staging_job(deps, job_id, status="queued", stage="publishing_inputs")
+        payload = deps.build_internal_itemized_async_render_job_payload(
+            raw_path=raw_path,
+            item_specs=item_specs,
+            item_paths=item_paths,
+            room=room,
+            style=style,
+            variant=variant,
+            dimensions=dimensions,
+            placement=placement,
+            resolve_image_url=deps.resolve_image_url,
+            build_s3_prefix=deps.build_s3_prefix,
+            build_item_target_key=deps.build_item_target_key,
+            publish_inputs=True,
+        )
+
+        _update_staging_job(deps, job_id, status="queued", stage="enqueueing")
+        job, err = deps.enqueue_job(deps.job_render, payload, queue_name=deps.rq_queue_render, job_id=job_id)
+        if err:
+            raise RuntimeError(err)
+        actual_job_id = str(getattr(job, "id", job_id) or job_id)
+        _update_staging_job(
+            deps,
+            job_id,
+            status="queued",
+            stage="enqueued",
+            actual_job_id=actual_job_id,
+        )
+    except Exception as exc:
+        _update_staging_job(
+            deps,
+            job_id,
+            status="failed",
+            stage="failed",
+            ended_at=_utcnow_iso(),
+            error=str(exc),
+            exc_info=traceback.format_exc(),
+        )
+
+
 def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONResponse:
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     job = deps.fetch_job(job_id)
     if not job:
+        staged = _get_staging_job(deps, job_id)
+        if staged is not None:
+            return JSONResponse(content=_stage_status_payload(job_id, staged))
         saved = deps.load_job_result_s3(job_id)
         if saved is not None:
             return JSONResponse(
@@ -220,6 +369,13 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONR
             if saved is not None:
                 payload["result"] = saved
                 payload["result_source"] = "s3"
+    elif not job.is_failed:
+        saved = deps.load_job_result_s3(job_id)
+        if _saved_result_can_finish_stale_job(saved):
+            payload["status"] = "finished"
+            payload["result"] = saved
+            payload["result_source"] = "s3"
+            payload["stale_job_status"] = job.get_status()
     if job.is_failed:
         payload["error"] = job.exc_info
     return JSONResponse(content=payload)
@@ -252,27 +408,50 @@ def handle_render_room_async(
                 status_code=400,
                 detail="items_json must contain at least one item and match item_images",
             )
+        persist_item_sources = getattr(deps, "persist_internal_item_source_uploads", None)
+        if not callable(persist_item_sources):
+            raise RuntimeError("persist_internal_item_source_uploads is not configured")
         raw_path = deps.persist_internal_room_upload(file)
-        item_paths = deps.persist_internal_item_uploads(item_images)
-        payload = deps.build_internal_itemized_async_render_job_payload(
+        item_source_paths = persist_item_sources(item_images)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+    job_id = uuid.uuid4().hex
+    now = _utcnow_iso()
+    _set_staging_job(
+        deps,
+        job_id,
+        {
+            "status": "queued",
+            "stage": "staged",
+            "enqueued_at": now,
+            "started_at": None,
+            "ended_at": None,
+            "error": None,
+            "exc_info": None,
+        },
+    )
+
+    def _task() -> None:
+        _stage_internal_render_publish_and_enqueue(
+            job_id=job_id,
             raw_path=raw_path,
             item_specs=item_specs,
-            item_paths=item_paths,
+            item_source_paths=item_source_paths,
             room=room,
             style=style,
             variant=variant,
             dimensions=dimensions,
             placement=placement,
-            resolve_image_url=deps.resolve_image_url,
-            build_s3_prefix=deps.build_s3_prefix,
-            build_item_target_key=deps.build_item_target_key,
+            deps=deps,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        return _enqueue_or_error(deps.job_render, payload, queue_name=deps.rq_queue_render, deps=deps)
-    except Exception as exc:
-        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+    _start_background_task(deps, _task)
+    return JSONResponse(content={"job_id": job_id, "status": "queued"})
 
 
 def handle_api_internal_render(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
@@ -485,7 +664,7 @@ def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: 
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
-    job, err = deps.enqueue_job(job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
+    job, err = deps.enqueue_job(deps.job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
@@ -543,7 +722,10 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
             "job_id": job.id,
             "status": "queued",
             "render_job_id": job_payload["render_job_id"],
-            "clip_count": _count_external_video_source_images(source_result),
+            "clip_count": min(
+                int(job_payload.get("clip_count") or 7),
+                _count_external_video_source_images(source_result),
+            ),
         }
     )
 

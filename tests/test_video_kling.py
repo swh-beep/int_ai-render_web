@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from api_models import SourceGenRequest, SourceItem
 from application.video import source_generation_workflow
 from application.video.job_store import get_video_job, video_jobs, video_jobs_lock
+from application.video.video_support import kling_prompts_dynamic
 from infrastructure.ai.kling_client import build_kling_endpoint, create_kling_task, encode_kling_jwt, poll_kling_task
 
 
@@ -42,6 +43,18 @@ class KlingClientTests(unittest.TestCase):
         self.assertIn(b'"iss":"ak"', decoded_payload)
         self.assertIn(b'"exp":2800', decoded_payload)
         self.assertIn(b'"nbf":995', decoded_payload)
+
+    def test_orbit_prompts_are_arc_rotation_not_sideways_slide(self):
+        left = kling_prompts_dynamic("orbit_l_slow", "sunlight")
+        right = kling_prompts_dynamic("orbit_r_slow", "sunlight")
+
+        self.assertIn("camera orbit", left["prompt"])
+        self.assertIn("fixed central point", left["prompt"])
+        self.assertIn("gentle arc", left["prompt"])
+        self.assertIn("Do not pan, slide, truck sideways", left["prompt"])
+        self.assertIn("counterclockwise", left["prompt"])
+        self.assertIn("clockwise", right["prompt"])
+        self.assertIn("sideways slide", left["negative_prompt"])
 
     @patch("infrastructure.ai.kling_client.requests.post")
     def test_create_kling_task_raises_on_rate_limit(self, mock_post):
@@ -319,6 +332,41 @@ class SourceGenerationWorkflowTests(unittest.TestCase):
             state = get_video_job("job-duration")
             self.assertIsNotNone(state)
             self.assertEqual(state.get("status"), "COMPLETED")
+        finally:
+            os.chdir(prev_cwd)
+
+    def test_run_source_generation_job_publishes_worker_output_url(self):
+        prev_cwd = os.getcwd()
+        os.chdir(self.tmp_root)
+        resolved = []
+
+        def resolve_output_url(url):
+            resolved.append(url)
+            return f"https://cdn.example/{url.rsplit('/', 1)[-1]}"
+
+        try:
+            with patch.object(
+                source_generation_workflow,
+                "download_to_path",
+                side_effect=lambda url, out_path: Path(out_path).write_bytes(b"fake-mp4"),
+            ):
+                source_generation_workflow.run_source_generation_job(
+                    "job-published",
+                    [SourceItem(url="https://example.com/image.png", motion="orbit_r_slow", effect="sunlight")],
+                    0.5,
+                    video_target_fps=12,
+                    video_max_concurrency=1,
+                    create_kling_task=lambda *args, **kwargs: "task-123",
+                    poll_kling_task=lambda *args, **kwargs: "https://example.com/generated.mp4",
+                    resolve_output_url=resolve_output_url,
+                )
+
+            state = get_video_job("job-published")
+            self.assertIsNotNone(state)
+            self.assertEqual(state.get("status"), "COMPLETED")
+            self.assertEqual(state.get("results"), ["https://cdn.example/source_job-published_0.mp4"])
+            self.assertEqual((state.get("items") or [{}])[0].get("output_url"), "https://cdn.example/source_job-published_0.mp4")
+            self.assertEqual(resolved, ["/outputs/source_job-published_0.mp4"])
         finally:
             os.chdir(prev_cwd)
 

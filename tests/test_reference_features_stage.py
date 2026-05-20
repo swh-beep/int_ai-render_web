@@ -85,7 +85,7 @@ def test_analyze_cropped_item_uses_fallback_reference_features_for_noncritical_i
             "target_key": "decor_vase",
             "source_index": 1,
         },
-        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(text=json.dumps({"description": "Decor vase"})),
+        call_gemini_with_failover=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("model call should not happen")),
         analysis_model_name="model",
         safe_extract_json=lambda text: json.loads(text),
         normalize_dims_dict=lambda dims: dims,
@@ -98,17 +98,17 @@ def test_analyze_cropped_item_uses_fallback_reference_features_for_noncritical_i
     )
 
     assert allow_flags == [False]
-    assert result["reference_features"]["extraction_mode"] == "fallback"
+    assert result["reference_features"]["extraction_mode"] == "deterministic"
 
 
-def test_analyze_cropped_item_keeps_model_reference_features_for_critical_item(monkeypatch, tmp_path):
+def test_analyze_cropped_item_uses_deterministic_reference_features_for_critical_item(monkeypatch, tmp_path):
     image_path = tmp_path / "item.png"
     _write_png(image_path)
     allow_flags = []
 
     def _fake_extract_reference_features(**kwargs):
         allow_flags.append(kwargs.get("allow_model_call"))
-        return {}
+        return {"preserve_rules": ["wall-mounted reflective surface"]}
 
     monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
 
@@ -122,7 +122,7 @@ def test_analyze_cropped_item_keeps_model_reference_features_for_critical_item(m
             "target_key": "mirror_1",
             "source_index": 1,
         },
-        call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(text=json.dumps({"description": "Wall mirror"})),
+        call_gemini_with_failover=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("model call should not happen")),
         analysis_model_name="model",
         safe_extract_json=lambda text: json.loads(text),
         normalize_dims_dict=lambda dims: dims,
@@ -134,8 +134,9 @@ def test_analyze_cropped_item_keeps_model_reference_features_for_critical_item(m
         provided_dims_mm={"width_mm": 400, "depth_mm": 10, "height_mm": 800},
     )
 
-    assert allow_flags == [True]
-    assert result["reference_features"]["extraction_mode"] == "model"
+    assert allow_flags == [False]
+    assert result["reference_features"]["extraction_mode"] == "deterministic"
+    assert "wall-mounted reflective surface" in result["description"]
 
 
 def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeypatch, tmp_path):

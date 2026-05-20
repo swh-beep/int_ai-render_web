@@ -217,6 +217,8 @@ def _sync_furniture_specs_contracts(
                 item["product_identity"] = dict(enriched.get("product_identity") or {})
             if enriched.get("identity_profile"):
                 item["identity_profile"] = dict(enriched.get("identity_profile") or {})
+            if enriched.get("reference_features"):
+                item["reference_features"] = dict(enriched.get("reference_features") or {})
             if enriched.get("layout_envelope"):
                 item["layout_envelope"] = dict(enriched.get("layout_envelope") or {})
             if enriched.get("placement_contract"):
@@ -252,6 +254,7 @@ def _sync_furniture_specs_contracts(
         for key in (
             "product_identity",
             "identity_profile",
+            "reference_features",
             "archetype_strategy",
             "two_pass_strategy",
             "layout_envelope",
@@ -286,6 +289,132 @@ def _sync_furniture_specs_contracts(
     if placement_plan is not None:
         payload["placement_plan"] = placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {})
     return payload
+
+
+def _copy_prompt_payload_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, list):
+        return list(value)
+    return value
+
+
+_MAIN_PROMPT_ITEM_KEYS = (
+    "label",
+    "name",
+    "category",
+    "category_canonical",
+    "qty",
+    "dims_mm",
+    "requested_dims_mm",
+    "target_key",
+    "source_index",
+    "item_id",
+    "payload_index",
+    "index",
+    "crop_path",
+    "options",
+    "two_pass_strategy",
+)
+
+
+def _build_main_prompt_item_payload(src: dict | None) -> dict:
+    if not isinstance(src, dict):
+        return {}
+    item = {}
+    for key in _MAIN_PROMPT_ITEM_KEYS:
+        if src.get(key) is not None:
+            item[key] = _copy_prompt_payload_value(src.get(key))
+    if not item.get("dims_mm") and isinstance(item.get("requested_dims_mm"), dict):
+        item["dims_mm"] = dict(item["requested_dims_mm"])
+    return item
+
+
+def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | None:
+    if not isinstance(furniture_specs_json, dict):
+        return furniture_specs_json
+
+    simple_payload: dict[str, Any] = {}
+    for key in (
+        "max_width_mm",
+        "max_depth_mm",
+        "max_height_mm",
+        "room_dims_mm",
+        "room_dims",
+        "size_hierarchy",
+        "size_hierarchy_scale",
+    ):
+        if furniture_specs_json.get(key) is not None:
+            simple_payload[key] = _copy_prompt_payload_value(furniture_specs_json.get(key))
+
+    simple_items = []
+    for src in furniture_specs_json.get("items") or []:
+        if not isinstance(src, dict):
+            continue
+        item = _build_main_prompt_item_payload(src)
+        simple_items.append(item)
+    simple_payload["items"] = simple_items
+
+    primary_key = str(
+        ((furniture_specs_json.get("primary_scale") or {}) if isinstance(furniture_specs_json.get("primary_scale"), dict) else {}).get("target_key")
+        or ((furniture_specs_json.get("primary") or {}) if isinstance(furniture_specs_json.get("primary"), dict) else {}).get("target_key")
+        or ""
+    ).strip()
+    if primary_key:
+        primary = next((item for item in simple_items if str(item.get("target_key") or "").strip() == primary_key), None)
+        if isinstance(primary, dict):
+            simple_payload["primary"] = dict(primary)
+            simple_payload["primary_scale"] = dict(primary)
+    elif isinstance(furniture_specs_json.get("primary"), dict):
+        simple_payload["primary"] = _build_main_prompt_item_payload(furniture_specs_json.get("primary") or {})
+    elif isinstance(furniture_specs_json.get("primary_scale"), dict):
+        simple_payload["primary_scale"] = _build_main_prompt_item_payload(furniture_specs_json.get("primary_scale") or {})
+
+    if furniture_specs_json.get("two_pass_strategy") is not None:
+        simple_payload["two_pass_strategy"] = _copy_prompt_payload_value(furniture_specs_json.get("two_pass_strategy"))
+
+    return simple_payload
+
+
+def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> str | None:
+    if not isinstance(furniture_specs_json, dict):
+        return None
+
+    rows: list[str] = []
+    for index, item in enumerate(furniture_specs_json.get("items") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or f"Item {index}").strip()
+        if not label:
+            label = f"Item {index}"
+        try:
+            qty = max(1, int(item.get("qty") or 1))
+        except Exception:
+            qty = 1
+        qty_text = f" (qty={qty})" if qty > 1 else ""
+
+        dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
+        dims_bits = []
+        if isinstance(dims, dict):
+            for key, short in (("width_mm", "W"), ("depth_mm", "D"), ("height_mm", "H"), ("radius_mm", "R")):
+                value = _coerce_positive_int(dims.get(key))
+                if value is not None:
+                    dims_bits.append(f"{short}={value}mm")
+
+        family = (
+            item.get("category_canonical")
+            or item.get("category")
+            or ""
+        )
+
+        bits = []
+        if family:
+            bits.append(f"category={family}")
+        if dims_bits:
+            bits.append(", ".join(dims_bits))
+        rows.append(f"{index}. {label}{qty_text}: " + " | ".join(bits))
+    text = "\n".join(rows).strip()
+    return text or None
 
 
 def _weighted_issue_score(issue_records: list[dict] | None) -> float:
@@ -445,6 +574,26 @@ def _variant_quality_sort_key(path: str, diagnostics_by_path: dict[str, dict]) -
     )
 
 
+def _fallback_rank_candidates(
+    candidate_results: list[str] | None,
+    variant_diagnostics: list[dict] | None,
+    *,
+    audience: str,
+) -> list[str]:
+    ordered = [str(path) for path in (candidate_results or []) if path]
+    if len(ordered) <= 1:
+        return ordered
+    diagnostics_by_path = {
+        str(row.get("path")): row
+        for row in (variant_diagnostics or [])
+        if isinstance(row, dict) and row.get("path")
+    }
+    ordered.sort(key=lambda path: _variant_quality_sort_key(path, diagnostics_by_path))
+    if audience == "external":
+        return ordered[:1]
+    return ordered
+
+
 def _select_rankable_results(generated_results: list[str], diagnostics_by_path: dict[str, dict]) -> list[str]:
     eligible = [
         path
@@ -476,6 +625,46 @@ def _selected_result_reason_for_row(row: dict | None) -> str:
     except Exception:
         pass
     return "best_effort_least_bad"
+
+
+def _polish_selected_best_result(
+    generated_results: list[str] | None,
+    *,
+    audience: str,
+    unique_id: str,
+    selected_result_reason: str | None,
+    polish_main_image: Callable[..., str | None] | None,
+    logger,
+) -> tuple[list[str], str | None]:
+    delivery_paths = [str(path) for path in (generated_results or []) if path]
+    if not delivery_paths or not callable(polish_main_image):
+        return delivery_paths, selected_result_reason
+
+    best_path = delivery_paths[0]
+    polished_path = None
+    try:
+        try:
+            polished_path = polish_main_image(
+                best_path,
+                unique_id=unique_id,
+                audience=audience,
+                selected_result_reason=selected_result_reason,
+            )
+        except TypeError:
+            polished_path = polish_main_image(best_path, unique_id=unique_id)
+    except Exception as exc:
+        logger.warning(f"[MainPolish] skipped: {exc}")
+        return delivery_paths, selected_result_reason
+
+    polished_path = str(polished_path or "").strip()
+    if not polished_path:
+        return delivery_paths, selected_result_reason
+
+    updated_paths = list(delivery_paths)
+    updated_paths[0] = polished_path
+    if selected_result_reason:
+        return updated_paths, f"{selected_result_reason}_polished"
+    return updated_paths, "polished_best"
 
 
 def _is_validation_unavailable_best_effort_candidate(row: dict | None) -> bool:
@@ -751,7 +940,7 @@ def run_render_room_workflow(
         start_time = bootstrap.start_time
         summary = bootstrap.summary
         summary_token = bootstrap.summary_token
-        absolute_deadline_ts = float(start_time) + max(1.0, float(deps.runtime.total_timeout_limit_sec or 600.0))
+        absolute_deadline_ts = float(start_time) + max(1.0, float(deps.runtime.total_timeout_limit_sec or 1800.0))
 
         audience_result = run_render_audience_stage(
             audience=request.audience,
@@ -883,7 +1072,11 @@ def run_render_room_workflow(
             audience=aud,
         )
         room_analysis_text = _merge_room_analysis_text(room_analysis_text, room_dims_contract)
-        room_dims_center = dict(getattr(room_dims_contract, "dims_mm_center", {}) or {})
+        room_dims_center = dict(
+            getattr(room_dims_contract, "dims_mm_center", None)
+            or ((room_dims_contract or {}).get("dims_mm_center") if isinstance(room_dims_contract, dict) else None)
+            or {}
+        )
         if room_dims_center:
             room_dims_parsed = {
                 "width_mm": room_dims_center.get("width_mm") or room_dims_parsed.get("width_mm"),
@@ -968,109 +1161,65 @@ def run_render_room_workflow(
 
         if windows_present is None:
             windows_present = False
-        budgeted_stage2_mode = bool(strict_scale_requested)
-        planned_stage2_variants = 1 if budgeted_stage2_mode else 2
-        deps.runtime.log_section(
-            f"[Stage 2] {planned_stage2_variants} variation{'s' if planned_stage2_variants != 1 else ''} start (Specs Injection)"
-        )
-
         ref_input = ref_paths if len(ref_paths) > 1 else (ref_paths[0] if ref_paths else None)
         resolved_style_prompt = _resolve_style_prompt(deps.runtime.style_map, request.style)
+        deps.runtime.log_section("[Stage 2] unified main generation start (best-of-3)")
+        generation_specs_json = _build_simple_generation_specs(furniture_specs_json)
+        generation_specs_text = _build_compact_generation_specs_text(generation_specs_json) or furniture_specs_text
+        primary_item = _hydrate_item_dims(
+            primary_item,
+            ((generation_specs_json or {}).get("primary_scale") if isinstance(generation_specs_json, dict) else None)
+            or ((generation_specs_json or {}).get("primary") if isinstance(generation_specs_json, dict) else None),
+        )
+        size_hierarchy = (
+            ((generation_specs_json or {}).get("size_hierarchy_scale") if isinstance(generation_specs_json, dict) else None)
+            or ((generation_specs_json or {}).get("size_hierarchy") if isinstance(generation_specs_json, dict) else None)
+            or size_hierarchy
+        )
+        scale_plan_dict = dict(scale_plan or {})
+        room_dims_contract_dict = room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {})
+        geometry_contract_dict = geometry_contract.as_dict() if hasattr(geometry_contract, "as_dict") else dict(geometry_contract or {})
+        scene_contract_dict = scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {})
+        placement_plan_dict = placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {})
+
         variant_results = run_render_variant_stage(
             step1_img=step1_img,
             style_prompt=resolved_style_prompt,
             ref_input=ref_input,
             unique_id=unique_id,
-            furniture_specs_text=furniture_specs_text,
-            furniture_specs_json=furniture_specs_json,
+            furniture_specs_text=generation_specs_text,
+            furniture_specs_json=generation_specs_json,
             dimensions=request.dimensions,
             placement=request.placement,
-            scale_guide_path=scale_guide_path,
+            scale_guide_path=None,
             primary_item=primary_item,
             room_dims_parsed=room_dims_parsed,
             wall_span_norm=wall_span_norm,
             size_hierarchy=size_hierarchy,
-            scale_plan=scale_plan,
-            geometry_contract=geometry_contract.as_dict() if hasattr(geometry_contract, "as_dict") else dict(geometry_contract or {}),
-            scene_contract=scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {}),
-            placement_plan=placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {}),
+            scale_plan=None,
+            geometry_contract=None,
+            scene_contract=scene_contract_dict,
+            placement_plan=None,
             start_time=start_time,
             room_planes=room_planes,
             windows_present=windows_present,
             room_analysis_text=room_analysis_text,
-            enable_scale_check=enable_scale_check,
+            enable_scale_check=False,
             generate_furnished_room=deps.generation.generate_furnished_room,
-            max_variants=planned_stage2_variants,
-            max_workers=1 if budgeted_stage2_mode else 2,
+            max_variants=3,
+            max_workers=3,
+            max_generation_attempts=1,
             start_index=0,
         )
         variant_diagnostics = _compact_variant_diagnostics(variant_results)
-        if budgeted_stage2_mode:
-            staged_variant_reviews = annotate_variant_reviews(
-                variant_diagnostics,
-                strict_internal=True,
-                geometry_source=qc_geometry_source,
-                geometry_confidence=qc_geometry_confidence,
-                strict_scale_mode=qc_strict_scale_mode,
-            )
-            remaining_stage2_budget_sec = max(0.0, absolute_deadline_ts - float(deps.runtime.time_now()))
-            if _should_launch_budgeted_fallback_variant(
-                staged_variant_reviews,
-                strict_scale_requested=True,
-                remaining_budget_sec=remaining_stage2_budget_sec,
-            ):
-                try:
-                    deps.runtime.logger.info(
-                        f"[Stage 2] launching fallback variation 2 under remaining_budget_sec={remaining_stage2_budget_sec:.1f}"
-                    )
-                except Exception:
-                    pass
-                variant_results.extend(
-                    run_render_variant_stage(
-                        step1_img=step1_img,
-                        style_prompt=resolved_style_prompt,
-                        ref_input=ref_input,
-                        unique_id=unique_id,
-                        furniture_specs_text=furniture_specs_text,
-                        furniture_specs_json=furniture_specs_json,
-                        dimensions=request.dimensions,
-                        placement=request.placement,
-                        scale_guide_path=scale_guide_path,
-                        primary_item=primary_item,
-                        room_dims_parsed=room_dims_parsed,
-                        wall_span_norm=wall_span_norm,
-                        size_hierarchy=size_hierarchy,
-                        scale_plan=scale_plan,
-                        geometry_contract=geometry_contract.as_dict() if hasattr(geometry_contract, "as_dict") else dict(geometry_contract or {}),
-                        scene_contract=scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {}),
-                        placement_plan=placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {}),
-                        start_time=start_time,
-                        room_planes=room_planes,
-                        windows_present=windows_present,
-                        room_analysis_text=room_analysis_text,
-                        enable_scale_check=enable_scale_check,
-                        generate_furnished_room=deps.generation.generate_furnished_room,
-                        max_variants=1,
-                        max_workers=1,
-                        start_index=1,
-                    )
-                )
-                variant_diagnostics = _compact_variant_diagnostics(variant_results)
         variant_diagnostics = annotate_variant_reviews(
             variant_diagnostics,
-            strict_internal=bool(strict_scale_requested),
+            strict_internal=False,
             geometry_source=qc_geometry_source,
             geometry_confidence=qc_geometry_confidence,
             strict_scale_mode=qc_strict_scale_mode,
         )
-        diagnostics_by_path = {
-            row.get("path"): row
-            for row in variant_diagnostics
-            if isinstance(row, dict) and row.get("path")
-        }
         generated_results = []
-        scalecheck_fail_total = 0
-        scalecheck_retry_total = 0
         for row in variant_results or []:
             if not isinstance(row, dict):
                 if row:
@@ -1079,31 +1228,13 @@ def run_render_room_workflow(
             path = row.get("path")
             if path:
                 generated_results.append(path)
-            try:
-                scalecheck_fail_total += int(row.get("scalecheck_fail_count") or 0)
-            except Exception:
-                pass
-            try:
-                scalecheck_retry_total += int(row.get("scalecheck_retry_count") or 0)
-            except Exception:
-                pass
-        if generated_results and diagnostics_by_path:
-            generated_results = sort_variant_paths(variant_diagnostics)
-        rankable_results, allow_failed_rerank = _resolve_postprocess_ranking_inputs(
-            generated_results,
-            variant_diagnostics,
-            strict_scale_requested=bool(strict_scale_requested),
-        )
-        if isinstance(summary, dict):
-            summary["scalecheck_fail"] = summary.get("scalecheck_fail", 0) + scalecheck_fail_total
-            summary["scalecheck_retry"] = summary.get("scalecheck_retry", 0) + scalecheck_retry_total
 
         postprocess_result = run_render_postprocess_stage(
             generated_results=generated_results,
-            rankable_results=rankable_results,
+            rankable_results=list(generated_results),
             full_analyzed_data=full_analyzed_data,
             audience=aud,
-            allow_failed_rerank=allow_failed_rerank,
+            allow_failed_rerank=bool(generated_results),
             rank_best_variant=deps.postprocess.rank_best_variant,
             refresh_item_boxes_from_main_render=deps.postprocess.refresh_item_boxes_from_main_render,
             attach_volume_ranks=deps.postprocess.attach_volume_ranks,
@@ -1111,13 +1242,19 @@ def run_render_room_workflow(
             logger=deps.runtime.logger,
             log_brief=deps.runtime.log_brief,
             skip_main_render_remap=_can_skip_postprocess_remap(
-                strict_scale_requested=bool(strict_scale_requested),
+                strict_scale_requested=False,
                 variant_diagnostics=variant_diagnostics,
                 remaining_budget_sec=max(0.0, absolute_deadline_ts - float(deps.runtime.time_now())),
             ),
             absolute_deadline_ts=absolute_deadline_ts,
         )
         candidate_results = list(postprocess_result.generated_results or [])
+        if not bool(getattr(postprocess_result, "rerank_applied", False)):
+            candidate_results = _fallback_rank_candidates(
+                candidate_results,
+                variant_diagnostics,
+                audience=aud,
+            )
         generated_results = list(candidate_results)
         full_analyzed_data = postprocess_result.full_analyzed_data
         volume_ranking = postprocess_result.volume_ranking
@@ -1130,8 +1267,19 @@ def run_render_room_workflow(
         ) = _select_final_generated_results(
             candidate_results,
             variant_diagnostics,
-            strict_scale_requested=bool(strict_scale_requested),
+            strict_scale_requested=False,
         )
+        if not strict_final_result_blocked:
+            if aud == "external":
+                generated_results = list(generated_results[:1])
+            generated_results, selected_result_reason = _polish_selected_best_result(
+                generated_results,
+                audience=aud,
+                unique_id=unique_id,
+                selected_result_reason=selected_result_reason,
+                polish_main_image=deps.generation.polish_main_image,
+                logger=deps.runtime.logger,
+            )
         if selected_variant_review:
             full_analyzed_data = _apply_selected_review_boxes_to_analyzed_items(
                 full_analyzed_data,
@@ -1147,7 +1295,7 @@ def run_render_room_workflow(
         return build_render_response_payload(
             std_path=std_path,
             step1_img=step1_img,
-            scale_guide_path=scale_guide_path,
+            scale_guide_path=None,
             generated_results=generated_results,
             selected_result_index=selected_result_index,
             selected_result_reason=selected_result_reason,
@@ -1155,11 +1303,11 @@ def run_render_room_workflow(
             variant_diagnostics=variant_diagnostics,
             candidate_results=candidate_results,
             final_result_blocked=strict_final_result_blocked,
-            scale_plan=scale_plan,
-            room_dims_contract=room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {}),
-            geometry_contract=geometry_contract.as_dict() if hasattr(geometry_contract, "as_dict") else dict(geometry_contract or {}),
-            scene_contract=scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {}),
-            placement_plan=placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {}),
+            scale_plan=scale_plan_dict,
+            room_dims_contract=room_dims_contract_dict,
+            geometry_contract=geometry_contract_dict,
+            scene_contract=scene_contract_dict,
+            placement_plan=placement_plan_dict,
             include_replay_debug=(aud == "internal"),
             moodboard_url=mb_url,
             furniture_data=full_analyzed_data,
