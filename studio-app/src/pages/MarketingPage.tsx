@@ -1908,7 +1908,7 @@ export function MarketingPage() {
                           >
                             {clip.approvedAttemptId === selectedAttempt?.attemptId ? "승인됨" : "승인"}
                           </button>
-                          <button type="button" onClick={() => { setRegeneratingClipId(clip.clientImageId); setRegeneratePrompt(selectedAttempt?.prompt ?? clip.prompt); }}>재생성</button>
+                          <button type="button" onClick={() => { setRegeneratingClipId(clip.clientImageId); setRegeneratePrompt(selectedAttempt?.prompt ?? clip.prompt); }}>재생성 설정</button>
                           <button type="button" disabled={isBusy} onClick={() => deleteClipFromSequence(clip)}>순서에서 삭제</button>
                         </div>
                         <div className="attempt-list">

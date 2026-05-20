@@ -1664,7 +1664,7 @@ describe("MarketingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
 
     expect(await screen.findByText("Clip 1")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "재생성" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "재생성 설정" })[0]);
 
     const regenerationPanel = (await screen.findByRole("button", { name: "이 prompt로 재생성" })).closest("section") as HTMLElement;
     const regenerationReferenceLabel = within(regenerationPanel).getByText("선택한 레퍼런스");
