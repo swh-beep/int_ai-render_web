@@ -72,13 +72,16 @@ def test_estimate_room_dims_contract_prefers_room_analysis_estimated_dimensions(
     )
 
     assert contract.source == "estimated"
-    assert contract.confidence == "medium"
-    assert contract.strict_scale_mode == "range_based_geometry_mode"
+    assert contract.confidence == "high"
+    assert contract.strict_scale_mode == "strict_geometry_mode"
+    assert contract.room_dims_valid is True
     assert contract.dims_mm_center == {
         "width_mm": 5100,
         "depth_mm": 3900,
         "height_mm": 2550,
     }
+    assert contract.dims_mm_range["width_mm"] == {"min_mm": 5100, "max_mm": 5100}
+    assert contract.calibration_metadata["external_inferred_dimensions_assumed_exact"] is True
     assert "room_image_estimate" in contract.estimation_basis
     assert "room_defaults" not in contract.estimation_basis
 

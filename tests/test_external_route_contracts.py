@@ -141,7 +141,7 @@ def _external_finished_result_payload_many_sources():
 
 
 class ExternalRouteContractsTests(unittest.TestCase):
-    def test_external_audience_must_keep_scale_check_disabled(self):
+    def test_external_audience_enables_scale_check_like_internal(self):
         result = run_render_audience_stage(
             audience=None,
             normalize_audience=lambda aud: "external" if aud is None else aud,
@@ -149,7 +149,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
         )
 
         self.assertEqual(result.audience, "external")
-        self.assertFalse(result.enable_scale_check)
+        self.assertTrue(result.enable_scale_check)
 
     def test_external_preset_route_response_shape_stays_stable(self):
         deps = _external_deps()

@@ -52,6 +52,31 @@ def _room_dims_summary_line(room_dims_contract) -> str:
     return f"{label}: {dims_text}. Confidence: {confidence}."
 
 
+def _room_dims_complete(dims: dict | None) -> bool:
+    dims = dims if isinstance(dims, dict) else {}
+    return all(_coerce_positive_int(dims.get(key)) is not None for key in ("width_mm", "depth_mm", "height_mm"))
+
+
+def _room_dims_contract_dict(room_dims_contract) -> dict:
+    return room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {})
+
+
+def _room_dims_contract_requests_strict(room_dims_contract) -> bool:
+    contract = _room_dims_contract_dict(room_dims_contract)
+    mode = str(contract.get("strict_scale_mode") or "").strip().lower()
+    return bool(mode == "strict_geometry_mode" and contract.get("room_dims_valid") and _room_dims_complete(contract.get("dims_mm_center")))
+
+
+def _room_dimensions_text_from_dims(dims: dict | None) -> str:
+    dims = dims if isinstance(dims, dict) else {}
+    width_mm = _coerce_positive_int(dims.get("width_mm"))
+    depth_mm = _coerce_positive_int(dims.get("depth_mm"))
+    height_mm = _coerce_positive_int(dims.get("height_mm"))
+    if not all((width_mm, depth_mm, height_mm)):
+        return ""
+    return f"W {width_mm}mm x D {depth_mm}mm x H {height_mm}mm"
+
+
 def _merge_room_analysis_text(room_analysis_text: str | None, room_dims_contract) -> str:
     base = str(room_analysis_text or "").strip()
     summary_line = _room_dims_summary_line(room_dims_contract)
@@ -314,6 +339,14 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "index",
     "crop_path",
     "options",
+    "reference_features",
+    "identity_profile",
+    "product_identity",
+    "archetype_strategy",
+    "layout_envelope",
+    "placement_contract",
+    "identity_confidence",
+    "identity_strictness",
     "two_pass_strategy",
 )
 
@@ -1080,6 +1113,8 @@ def run_render_room_workflow(
             primary_item=primary_item,
             audience=aud,
         )
+        if _room_dims_contract_requests_strict(room_dims_contract):
+            strict_scale_requested = True
         room_analysis_text = _merge_room_analysis_text(room_analysis_text, room_dims_contract)
         room_dims_center = dict(
             getattr(room_dims_contract, "dims_mm_center", None)
@@ -1186,10 +1221,15 @@ def run_render_room_workflow(
             or size_hierarchy
         )
         scale_plan_dict = dict(scale_plan or {})
-        room_dims_contract_dict = room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {})
+        room_dims_contract_dict = _room_dims_contract_dict(room_dims_contract)
         geometry_contract_dict = geometry_contract.as_dict() if hasattr(geometry_contract, "as_dict") else dict(geometry_contract or {})
         scene_contract_dict = scene_contract.as_dict() if hasattr(scene_contract, "as_dict") else dict(scene_contract or {})
         placement_plan_dict = placement_plan.as_dict() if hasattr(placement_plan, "as_dict") else dict(placement_plan or {})
+        stage2_strict_scale_requested = bool(strict_scale_requested and _room_dims_complete(room_dims_parsed))
+        stage2_enable_scale_check = bool(enable_scale_check and stage2_strict_scale_requested)
+        generation_dimensions = str(request.dimensions or "").strip()
+        if not generation_dimensions and stage2_strict_scale_requested:
+            generation_dimensions = _room_dimensions_text_from_dims(room_dims_parsed)
 
         variant_results = run_render_variant_stage(
             step1_img=step1_img,
@@ -1198,22 +1238,22 @@ def run_render_room_workflow(
             unique_id=unique_id,
             furniture_specs_text=generation_specs_text,
             furniture_specs_json=generation_specs_json,
-            dimensions=request.dimensions,
+            dimensions=generation_dimensions,
             placement=request.placement,
-            scale_guide_path=None,
+            scale_guide_path=scale_guide_path,
             primary_item=primary_item,
             room_dims_parsed=room_dims_parsed,
             wall_span_norm=wall_span_norm,
             size_hierarchy=size_hierarchy,
-            scale_plan=None,
-            geometry_contract=None,
+            scale_plan=scale_plan_dict,
+            geometry_contract=geometry_contract_dict,
             scene_contract=scene_contract_dict,
-            placement_plan=None,
+            placement_plan=placement_plan_dict,
             start_time=start_time,
             room_planes=room_planes,
             windows_present=windows_present,
             room_analysis_text=room_analysis_text,
-            enable_scale_check=False,
+            enable_scale_check=stage2_enable_scale_check,
             generate_furnished_room=deps.generation.generate_furnished_room,
             max_variants=3,
             max_workers=3,
@@ -1223,7 +1263,7 @@ def run_render_room_workflow(
         variant_diagnostics = _compact_variant_diagnostics(variant_results)
         variant_diagnostics = annotate_variant_reviews(
             variant_diagnostics,
-            strict_internal=False,
+            strict_internal=stage2_strict_scale_requested,
             geometry_source=qc_geometry_source,
             geometry_confidence=qc_geometry_confidence,
             strict_scale_mode=qc_strict_scale_mode,
@@ -1238,12 +1278,19 @@ def run_render_room_workflow(
             if path:
                 generated_results.append(path)
 
+        strict_delivery_scale_requested = bool(aud == "external" and stage2_strict_scale_requested)
+        rankable_results, allow_failed_rerank = _resolve_postprocess_ranking_inputs(
+            generated_results,
+            variant_diagnostics,
+            strict_scale_requested=strict_delivery_scale_requested,
+        )
+
         postprocess_result = run_render_postprocess_stage(
             generated_results=generated_results,
-            rankable_results=list(generated_results),
+            rankable_results=rankable_results,
             full_analyzed_data=full_analyzed_data,
             audience=aud,
-            allow_failed_rerank=bool(generated_results),
+            allow_failed_rerank=allow_failed_rerank,
             rank_best_variant=deps.postprocess.rank_best_variant,
             refresh_item_boxes_from_main_render=deps.postprocess.refresh_item_boxes_from_main_render,
             attach_volume_ranks=deps.postprocess.attach_volume_ranks,
@@ -1251,7 +1298,7 @@ def run_render_room_workflow(
             logger=deps.runtime.logger,
             log_brief=deps.runtime.log_brief,
             skip_main_render_remap=_can_skip_postprocess_remap(
-                strict_scale_requested=False,
+                strict_scale_requested=stage2_strict_scale_requested,
                 variant_diagnostics=variant_diagnostics,
                 remaining_budget_sec=max(0.0, absolute_deadline_ts - float(deps.runtime.time_now())),
             ),
@@ -1276,7 +1323,7 @@ def run_render_room_workflow(
         ) = _select_final_generated_results(
             candidate_results,
             variant_diagnostics,
-            strict_scale_requested=False,
+            strict_scale_requested=strict_delivery_scale_requested,
         )
         if not strict_final_result_blocked:
             if aud == "external":

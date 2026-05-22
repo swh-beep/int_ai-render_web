@@ -47,7 +47,7 @@ def run_render_scale_stage(
 
     if audience == "external":
         try:
-            logger.info("[Scale] external request -> guide/check disabled")
+            logger.info("[Scale] external request -> explicit guide deferred until room dimensions are inferred")
         except Exception:
             pass
     elif not room_dims_valid:

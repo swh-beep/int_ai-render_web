@@ -387,6 +387,7 @@ def analyze_cropped_item(
     item_index=None,
     save_crop=True,
     enable_text_read=True,
+    allow_reference_feature_model: bool = False,
     provided_dims_mm=None,
     absolute_deadline_ts: float | None = None,
 ):
@@ -472,6 +473,13 @@ def analyze_cropped_item(
 
         resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
         if not enable_text_read:
+            extract_ref_features, extraction_reason = should_extract_reference_features(
+                label=label,
+                category=item_data.get("category"),
+                category_canonical=item_data.get("category_canonical"),
+                dims_mm=resolved_dims_mm,
+            )
+            reference_model_allowed = bool(allow_reference_feature_model and extract_ref_features)
             reference_features = extract_reference_features(
                 crop_path=crop_path,
                 label=label,
@@ -482,11 +490,13 @@ def analyze_cropped_item(
                 analysis_model_name=analysis_model_name,
                 safe_json_from_model_text=safe_extract_json,
                 log_brief=log_brief,
-                allow_model_call=False,
+                allow_model_call=reference_model_allowed,
+                extraction_reason=extraction_reason,
+                absolute_deadline_ts=absolute_deadline_ts,
             )
             if isinstance(reference_features, dict):
-                reference_features["extraction_mode"] = "deterministic"
-                reference_features["extraction_reason"] = "authoritative_reference_image"
+                reference_features["extraction_mode"] = "model" if reference_model_allowed else "deterministic"
+                reference_features["extraction_reason"] = extraction_reason or "authoritative_reference_image"
             final_desc = _stabilize_description(
                 label=label,
                 category=item_data.get("category") or item_data.get("category_canonical"),

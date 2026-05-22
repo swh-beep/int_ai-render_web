@@ -1537,6 +1537,7 @@ def analyze_cropped_item(
     item_index=None,
     save_crop=True,
     enable_text_read=True,
+    allow_reference_feature_model: bool = False,
     provided_dims_mm=None,
     absolute_deadline_ts: Optional[float] = None,
 ):
@@ -1552,6 +1553,7 @@ def analyze_cropped_item(
         item_index=item_index,
         save_crop=save_crop,
         enable_text_read=enable_text_read,
+        allow_reference_feature_model=allow_reference_feature_model,
         provided_dims_mm=provided_dims_mm,
         absolute_deadline_ts=absolute_deadline_ts,
     )

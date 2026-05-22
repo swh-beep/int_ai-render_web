@@ -58,6 +58,8 @@ _HIGH_PRIORITY_REFERENCE_REASONS = {
     "support_geometry_object",
     "topology_sensitive_seating",
     "large_light_anchor_candidate",
+    "light_fixture_identity_object",
+    "decor_reference_identity_object",
 }
 _MEDIUM_PRIORITY_REFERENCE_REASONS = {
     "thin_floor_footprint_object",
@@ -149,16 +151,18 @@ def should_extract_reference_features(
 
     if family in _REFLECTIVE_FAMILIES:
         return True, "reflective_wall_object"
+    if family in _LIGHT_FAMILIES:
+        return True, "light_fixture_identity_object"
+    if family in _SEATING_FAMILIES:
+        return True, "topology_sensitive_seating"
+    if family in {"decor", "plant"}:
+        return True, "decor_reference_identity_object"
     if family in _RUG_FAMILIES or (height_mm > 0 and height_mm <= 40 and max(width_mm, depth_mm) >= 500):
         return True, "thin_floor_footprint_object"
     if max_dim > 0 and max_dim <= 250:
         return True, "tiny_absolute_scale_object"
     if family in _SUPPORT_GEOMETRY_FAMILIES:
         return True, "support_geometry_object"
-    if family in _SEATING_FAMILIES and max(width_mm, depth_mm) >= 900:
-        return True, "topology_sensitive_seating"
-    if family in _LIGHT_FAMILIES and max_dim >= 1200:
-        return True, "large_light_anchor_candidate"
     if max(width_mm, depth_mm) >= 1400:
         return True, "large_anchor_candidate"
     return False, "fallback_only"

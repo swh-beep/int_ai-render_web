@@ -46,8 +46,13 @@ def _has_any_dims(dims: dict[str, int | None]) -> bool:
     return any(_coerce_positive_int(value) is not None for value in (dims or {}).values())
 
 
+def _has_complete_dims(dims: dict[str, int | None]) -> bool:
+    return all(_coerce_positive_int(dims.get(key)) is not None for key in ("width_mm", "depth_mm", "height_mm"))
+
+
 def _ratio_range(center_value: int, *, percent: float) -> dict[str, int]:
-    delta = max(1, int(round(center_value * max(0.0, percent))))
+    bounded_percent = max(0.0, float(percent or 0.0))
+    delta = 0 if bounded_percent == 0.0 else max(1, int(round(center_value * bounded_percent)))
     return {"min_mm": max(1, center_value - delta), "max_mm": center_value + delta}
 
 
@@ -122,8 +127,7 @@ def estimate_room_dims_contract(
     audience: str = "external",
 ) -> RoomDimsContract:
     if room_dims_valid:
-        strict_mode = "strict_geometry_mode" if str(audience or "").strip().lower() == "internal" else "range_based_geometry_mode"
-        return build_explicit_room_dims_contract(explicit_room_dims, strict_scale_mode=strict_mode)
+        return build_explicit_room_dims_contract(explicit_room_dims, strict_scale_mode="strict_geometry_mode")
 
     basis: list[str] = []
     confidence = "none"
@@ -165,7 +169,7 @@ def estimate_room_dims_contract(
     anchor_dims = _dims_for_item(anchor_item)
     anchor_family = _family_for_item(anchor_item)
     anchor_width = anchor_dims.get("width_mm") or 0
-    if anchor_width > 0:
+    if anchor_width > 0 and not _has_complete_dims(center):
         ratio_hint = _ANCHOR_ROOM_WIDTH_RATIO_HINTS.get(anchor_family) or 0.28
         estimated_width = max(2200, int(round(anchor_width / max(0.08, ratio_hint))))
         existing_width = _coerce_positive_int(center.get("width_mm"))
@@ -189,7 +193,15 @@ def estimate_room_dims_contract(
     if not _has_any_dims(center):
         return build_unknown_room_dims_contract(reason="missing_room_dimensions_analysis")
 
-    percent = 0.18 if confidence == "medium" else 0.28
+    complete_estimate = _has_complete_dims(center)
+    assume_exact_external = str(audience or "").strip().lower() == "external" and complete_estimate
+    if assume_exact_external:
+        confidence = "high"
+        strict_scale_mode = "strict_geometry_mode"
+        calibration_metadata["external_inferred_dimensions_assumed_exact"] = True
+        basis.append("external_inferred_dimensions_assumed_exact")
+
+    percent = 0.0 if assume_exact_external else (0.18 if confidence == "medium" else 0.28)
     return RoomDimsContract(
         source="estimated",
         confidence=confidence,
@@ -202,5 +214,5 @@ def estimate_room_dims_contract(
         estimation_basis=basis,
         calibration_metadata=calibration_metadata,
         strict_scale_mode=strict_scale_mode,
-        room_dims_valid=False,
+        room_dims_valid=bool(assume_exact_external),
     )

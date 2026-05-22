@@ -113,8 +113,18 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
                     "dims_mm": {"width_mm": 700, "depth_mm": 760, "height_mm": 820},
                     "requested_dims_mm": {"width_mm": 700, "depth_mm": 760, "height_mm": 820},
                     "crop_path": str(ref_path),
-                    "identity_profile": {"family": "chair"},
-                    "product_identity": {"family": "chair"},
+                    "reference_features": {"material_cues": ["boucle"], "distinctive_parts": ["curved open back"]},
+                    "identity_profile": {"family": "chair", "material_cues": ["boucle"], "distinctive_parts": ["curved open back"]},
+                    "product_identity": {
+                        "family": "chair",
+                        "topology_cues": ["curved open back"],
+                        "support_geometry": ["four slim legs"],
+                        "preserve_rules": ["copy curved open back"],
+                    },
+                    "archetype_strategy": {
+                        "render_strategy": "topology_sensitive_seating",
+                        "forbidden_substitutions": ["generic dining chair"],
+                    },
                     "placement_contract": {"zone": "adjacent_seating_band"},
                 },
                 {
@@ -167,6 +177,10 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "<ITEM INVENTORY (MUST RENDER ALL ITEMS)>" in prompt
         assert "Distinct items: 2 | Total requested quantity: 3" in prompt
         assert "- Accent Chair: qty=2; category=chair" in prompt
+        assert "materials=boucle" in prompt
+        assert "topology=curved open back" in prompt
+        assert "support=four slim legs" in prompt
+        assert "forbid=generic dining chair" in prompt
         assert "- Rug: qty=1; category=rug" in prompt
         assert "Do not duplicate rugs, accent chairs, or tables beyond the listed qty." in prompt
         assert "Preserve real material texture and tactile surface detail" in prompt
@@ -296,6 +310,135 @@ def test_generate_furnished_room_includes_small_item_guardrails_and_external_roo
         assert "<ROOM-SCALE INFERENCE RULES>" in prompt
         assert "<PLACEMENT PLAN (BINDING)>" not in prompt
         assert "placement_zones" not in prompt
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_includes_strict_estimated_scale_contract_context(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    ref_path = tmp_path / "ref.png"
+    ref_path.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 3100.0)
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the scene restrained and architectural."},
+        str(ref_path),
+        "prompt-contract-strict-estimated-scale",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "chair-1",
+                    "label": "Dining Chair",
+                    "category": "chair",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 470, "depth_mm": 500, "height_mm": 810},
+                    "requested_dims_mm": {"width_mm": 470, "depth_mm": 500, "height_mm": 810},
+                    "crop_path": str(ref_path),
+                    "identity_profile": {"family": "chair", "room_presence_class": "medium-room-presence"},
+                    "product_identity": {"family": "chair"},
+                    "placement_contract": {"zone": "around_table"},
+                    "layout_envelope": {"room_width_ratio": 0.094, "room_depth_ratio": 0.125, "room_height_ratio": 0.3},
+                }
+            ],
+            "primary_scale": {"target_key": "chair-1", "label": "Dining Chair"},
+        },
+        room_dimensions="W 5000mm x D 4000mm x H 2700mm",
+        primary_item={"target_key": "chair-1", "label": "Dining Chair"},
+        room_dims_parsed={"width_mm": 5000, "depth_mm": 4000, "height_mm": 2700},
+        room_analysis_text="ANALYSIS-DERIVED ROOM DIMENSIONS: W 5000mm, D 4000mm, H 2700mm.",
+        placement_plan={
+            "anchor_item_key": "chair-1",
+            "placement_zones": {
+                "chair-1": {
+                    "placement_family": "floor_placed",
+                    "zone": "around_table",
+                    "room_ratio_targets": {"room_width_ratio": 0.094, "room_depth_ratio": 0.125, "room_height_ratio": 0.3},
+                }
+            },
+        },
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={
+            "strict_scale_requested": True,
+            "strict_scale_ready": True,
+            "room_dims": {"width_mm": 5000, "depth_mm": 4000, "height_mm": 2700},
+            "room_dims_source": "estimated",
+            "room_dims_confidence": "high",
+            "anchor_item": {"target_key": "chair-1", "label": "Dining Chair"},
+            "items": [
+                {
+                    "target_key": "chair-1",
+                    "label": "Dining Chair",
+                    "dims_mm": {"width_mm": 470, "depth_mm": 500, "height_mm": 810},
+                    "room_width_ratio": 0.094,
+                    "room_depth_ratio": 0.125,
+                    "room_height_ratio": 0.3,
+                    "placement_family": "floor_placed",
+                }
+            ],
+        },
+        geometry_contract={
+            "strict_scale_requested": True,
+            "strict_scale_ready": True,
+            "geometry_source": "estimated",
+            "geometry_confidence": "high",
+            "strict_scale_mode": "strict_geometry_mode",
+            "anchor_item_key": "chair-1",
+            "item_targets": [
+                {
+                    "target_key": "chair-1",
+                    "label": "Dining Chair",
+                    "room_width_ratio": 0.094,
+                    "room_depth_ratio": 0.125,
+                    "room_height_ratio": 0.3,
+                    "placement_family": "floor_placed",
+                    "zone": "around_table",
+                }
+            ],
+        },
+        start_time=3100.0,
+        enable_scale_check=True,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: True,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5000, "depth_mm": 4000, "height_mm": 2700},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {"chair-1": {}}, "unmatched_items": []}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        assert "<SCALE PLAN (BINDING)>" in prompt
+        assert "strict_scale_requested=True" in prompt
+        assert "room_dims_source=estimated confidence=high" in prompt
+        assert "<GEOMETRY CONTRACT (BINDING)>" in prompt
+        assert "strict_scale_mode=strict_geometry_mode" in prompt
+        assert "<PLACEMENT PLAN (BINDING)>" in prompt
+        assert "Dining Chair" in prompt
+        assert "room_width_ratio=0.094" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():

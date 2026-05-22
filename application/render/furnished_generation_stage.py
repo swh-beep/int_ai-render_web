@@ -179,9 +179,153 @@ def _category_prompt_guardrails(category: str) -> list[str]:
         rules.extend(["floor_flat", "keep_footprint_shape", "not_wall_to_wall_unless_dimensions_require"])
     if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
         rules.extend(["preserve_light_fixture_scale", "do_not_convert_into_furniture"])
+    if "table_lamp" in text:
+        rules.extend(["exact_lampshade_shape", "exact_base_and_stem_geometry", "no_generic_lamp_substitution"])
+    if "chair" in text:
+        rules.extend(["exact_back_seat_leg_geometry", "no_generic_chair_substitution"])
+    if any(token in text for token in ("decor", "art", "frame")):
+        rules.extend(["copy_artwork_image_content", "no_generic_wall_art_substitution"])
     if any(token in text for token in ("table_lamp", "decor", "vase", "object", "accessory")):
         rules.append("surface_or_compact_object_scale")
     return rules
+
+
+def _prompt_cue_list(values, *, limit: int = 3) -> str:
+    if not isinstance(values, list):
+        return ""
+    cues = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in cues:
+            continue
+        cues.append(text)
+        if len(cues) >= limit:
+            break
+    return ", ".join(cues)
+
+
+def _format_contract_dims(dims: dict | None) -> str:
+    if not isinstance(dims, dict):
+        return ""
+    width = dims.get("width_mm")
+    depth = dims.get("depth_mm")
+    height = dims.get("height_mm")
+    parts = []
+    if width is not None:
+        parts.append(f"W={width}mm")
+    if depth is not None:
+        parts.append(f"D={depth}mm")
+    if height is not None:
+        parts.append(f"H={height}mm")
+    return " ".join(parts)
+
+
+def _ratio_bits(row: dict | None) -> list[str]:
+    row = row if isinstance(row, dict) else {}
+    bits: list[str] = []
+    for key in ("room_width_ratio", "room_depth_ratio", "room_height_ratio", "room_footprint_ratio", "footprint_ratio"):
+        value = row.get(key)
+        if value is not None:
+            bits.append(f"{key}={value}")
+    return bits
+
+
+def _build_scale_plan_context(scale_plan: dict | None, item_labels_by_key: dict[str, str] | None) -> str:
+    if not isinstance(scale_plan, dict) or not scale_plan:
+        return ""
+    room_dims = _format_contract_dims(scale_plan.get("room_dims"))
+    source = scale_plan.get("room_dims_source") or ((scale_plan.get("room_dims_contract") or {}).get("source") if isinstance(scale_plan.get("room_dims_contract"), dict) else None)
+    confidence = scale_plan.get("room_dims_confidence") or ((scale_plan.get("room_dims_contract") or {}).get("confidence") if isinstance(scale_plan.get("room_dims_contract"), dict) else None)
+    lines = [
+        "\n<SCALE PLAN (BINDING)>\n",
+        f"strict_scale_requested={bool(scale_plan.get('strict_scale_requested'))} strict_scale_ready={bool(scale_plan.get('strict_scale_ready'))}\n",
+    ]
+    if room_dims:
+        lines.append(f"room_dims={room_dims}\n")
+    if source or confidence:
+        lines.append(f"room_dims_source={source or 'unknown'} confidence={confidence or 'none'}\n")
+    anchor = scale_plan.get("anchor_item") if isinstance(scale_plan.get("anchor_item"), dict) else {}
+    if anchor:
+        anchor_key = str(anchor.get("target_key") or "").strip()
+        anchor_label = str(anchor.get("label") or (item_labels_by_key or {}).get(anchor_key) or anchor_key).strip()
+        anchor_dims = _format_contract_dims(anchor.get("dims_mm"))
+        lines.append(f"anchor={anchor_label or anchor_key}" + (f" {anchor_dims}" if anchor_dims else "") + "\n")
+    item_rows = []
+    for row in (scale_plan.get("items") or [])[:10]:
+        if not isinstance(row, dict):
+            continue
+        item_key = str(row.get("target_key") or row.get("source_index") or "").strip()
+        label = str(row.get("label") or (item_labels_by_key or {}).get(item_key) or item_key or "Item").strip()
+        dims = _format_contract_dims(row.get("dims_mm"))
+        bits = [bit for bit in [dims, f"placement={row.get('placement_family')}" if row.get("placement_family") else ""] if bit]
+        bits.extend(_ratio_bits(row))
+        if bits:
+            item_rows.append(f"- {label}: " + "; ".join(bits))
+    if item_rows:
+        lines.append("item_scale_targets:\n" + "\n".join(item_rows) + "\n")
+    lines.append("Treat these dimensions and ratios as hard generation targets; do not resize items for composition.\n")
+    lines.append("--------------------------------------------------\n")
+    return "".join(lines)
+
+
+def _build_geometry_contract_context(geometry_contract: dict | None, item_labels_by_key: dict[str, str] | None) -> str:
+    if not isinstance(geometry_contract, dict) or not geometry_contract:
+        return ""
+    lines = [
+        "\n<GEOMETRY CONTRACT (BINDING)>\n",
+        f"strict_scale_requested={bool(geometry_contract.get('strict_scale_requested'))} strict_scale_ready={bool(geometry_contract.get('strict_scale_ready'))}\n",
+        f"strict_scale_mode={geometry_contract.get('strict_scale_mode') or 'unknown'} source={geometry_contract.get('geometry_source') or 'unknown'} confidence={geometry_contract.get('geometry_confidence') or 'none'}\n",
+    ]
+    if geometry_contract.get("anchor_item_key"):
+        lines.append(f"anchor_item_key={geometry_contract.get('anchor_item_key')}\n")
+    missing = [str(value) for value in (geometry_contract.get("missing_requirements") or []) if str(value).strip()]
+    if missing:
+        lines.append("missing_requirements=" + ", ".join(missing[:8]) + "\n")
+    target_rows = []
+    for row in (geometry_contract.get("item_targets") or [])[:10]:
+        if not isinstance(row, dict):
+            continue
+        item_key = str(row.get("target_key") or "").strip()
+        label = str(row.get("label") or (item_labels_by_key or {}).get(item_key) or item_key or "Item").strip()
+        bits = [bit for bit in [f"zone={row.get('zone')}" if row.get("zone") else "", f"placement={row.get('placement_family')}" if row.get("placement_family") else ""] if bit]
+        bits.extend(_ratio_bits(row))
+        if bits:
+            target_rows.append(f"- {label}: " + "; ".join(bits))
+    if target_rows:
+        lines.append("geometry_targets:\n" + "\n".join(target_rows) + "\n")
+    lines.append("Any output violating this geometry contract is invalid.\n")
+    lines.append("--------------------------------------------------\n")
+    return "".join(lines)
+
+
+def _build_placement_plan_context(placement_plan: dict | None, item_labels_by_key: dict[str, str] | None) -> str:
+    if not isinstance(placement_plan, dict) or not placement_plan:
+        return ""
+    zones = placement_plan.get("placement_zones") if isinstance(placement_plan.get("placement_zones"), dict) else {}
+    if not zones and not placement_plan.get("anchor_item_key"):
+        return ""
+    lines = ["\n<PLACEMENT PLAN (BINDING)>\n"]
+    if placement_plan.get("anchor_item_key"):
+        lines.append(f"anchor_item_key={placement_plan.get('anchor_item_key')}\n")
+    zone_rows = []
+    for item_key, zone in list(zones.items())[:10]:
+        label = str((item_labels_by_key or {}).get(str(item_key)) or item_key or "Item").strip()
+        if isinstance(zone, dict):
+            bits = [bit for bit in [f"zone={zone.get('zone')}" if zone.get("zone") else "", f"placement={zone.get('placement_family')}" if zone.get("placement_family") else ""] if bit]
+            targets = zone.get("room_ratio_targets") if isinstance(zone.get("room_ratio_targets"), dict) else {}
+            bits.extend(_ratio_bits(targets))
+            orientation = str(zone.get("orientation_hint") or "").strip()
+            if orientation:
+                bits.append(f"orientation={orientation}")
+            if bits:
+                zone_rows.append(f"- {label}: " + "; ".join(bits))
+        elif str(zone or "").strip():
+            zone_rows.append(f"- {label}: zone={zone}")
+    if zone_rows:
+        lines.append("\n".join(zone_rows) + "\n")
+    lines.append("Place items according to these zones before applying styling.\n")
+    lines.append("--------------------------------------------------\n")
+    return "".join(lines)
 
 
 def _item_target_key_for_prompt(item: dict | None) -> str:
@@ -364,7 +508,65 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         bits.append(dims_text)
     guardrails = _category_prompt_guardrails(category)
     if guardrails:
-        bits.append(f"category_rules={', '.join(guardrails[:4])}")
+        bits.append(f"category_rules={', '.join(guardrails[:6])}")
+    profile = item.get("identity_profile") or {}
+    product_identity = item.get("product_identity") or {}
+    reference_features = item.get("reference_features") or {}
+    archetype = item.get("archetype_strategy") or {}
+    if isinstance(profile, dict) or isinstance(product_identity, dict):
+        family = ""
+        if isinstance(product_identity, dict):
+            family = str(product_identity.get("family") or "").strip()
+        if not family and isinstance(profile, dict):
+            family = str(profile.get("family") or "").strip()
+        if family:
+            bits.append(f"family={family}")
+    topology = ""
+    if isinstance(product_identity, dict):
+        topology = _prompt_cue_list(product_identity.get("topology_cues"))
+    if not topology and isinstance(profile, dict):
+        topology = _prompt_cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
+    if not topology and isinstance(reference_features, dict):
+        topology = _prompt_cue_list(reference_features.get("silhouette_cues"))
+    if topology:
+        bits.append(f"topology={topology}")
+    support = ""
+    if isinstance(product_identity, dict):
+        support = _prompt_cue_list(product_identity.get("support_geometry"))
+    if not support and isinstance(profile, dict):
+        support = _prompt_cue_list(profile.get("support_geometry"))
+    if support:
+        bits.append(f"support={support}")
+    materials = ""
+    if isinstance(profile, dict):
+        materials = _prompt_cue_list(profile.get("material_cues"))
+    if not materials and isinstance(reference_features, dict):
+        materials = _prompt_cue_list(reference_features.get("material_cues"))
+    if materials:
+        bits.append(f"materials={materials}")
+    parts = ""
+    if isinstance(profile, dict):
+        parts = _prompt_cue_list(profile.get("distinctive_parts"))
+    if not parts and isinstance(reference_features, dict):
+        parts = _prompt_cue_list(reference_features.get("distinctive_parts"))
+    if parts:
+        bits.append(f"parts={parts}")
+    preserve = ""
+    if isinstance(product_identity, dict):
+        preserve = _prompt_cue_list(product_identity.get("preserve_rules"))
+    if not preserve and isinstance(profile, dict):
+        preserve = _prompt_cue_list(profile.get("preserve_rules"))
+    if not preserve and isinstance(reference_features, dict):
+        preserve = _prompt_cue_list(reference_features.get("preserve_rules"))
+    if preserve:
+        bits.append(f"preserve={preserve}")
+    if isinstance(archetype, dict):
+        strategy = str(archetype.get("render_strategy") or "").strip()
+        if strategy:
+            bits.append(f"strategy={strategy}")
+        forbid = _prompt_cue_list(archetype.get("forbidden_substitutions"))
+        if forbid:
+            bits.append(f"forbid={forbid}")
     bits.append("same_family_substitute=invalid")
     return f"- {label}: " + "; ".join(bits)
 
@@ -1056,6 +1258,10 @@ def generate_furnished_room(
                 if item_key and item_key not in item_labels_by_key:
                     item_labels_by_key[item_key] = str(item.get("label") or item.get("category") or item_key)
         anchor_labels = [item_labels_by_key.get(item_key, item_key) for item_key in primary_anchor_keys if item_key in item_labels_by_key]
+        scale_plan_context = _build_scale_plan_context(scale_plan, item_labels_by_key)
+        geometry_contract_context = _build_geometry_contract_context(geometry_contract, item_labels_by_key)
+        if strict_scale_requested or isinstance(geometry_contract, dict):
+            placement_plan_context = _build_placement_plan_context(placement_plan, item_labels_by_key)
 
         try:
             _room_dims = room_dims_parsed or parse_room_dimensions_mm(room_dimensions or "")

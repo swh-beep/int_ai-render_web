@@ -26,7 +26,7 @@ def test_should_extract_reference_features_marks_critical_archetypes():
     assert reason == "reflective_wall_object"
 
 
-def test_should_extract_reference_features_skips_generic_decor():
+def test_should_extract_reference_features_marks_decor_for_identity_extraction():
     should_extract, reason = should_extract_reference_features(
         label="Decor Vase",
         category="decor",
@@ -34,8 +34,8 @@ def test_should_extract_reference_features_skips_generic_decor():
         dims_mm={"width_mm": 400, "depth_mm": 400, "height_mm": 400},
     )
 
-    assert should_extract is False
-    assert reason == "fallback_only"
+    assert should_extract is True
+    assert reason == "decor_reference_identity_object"
 
 
 def test_extract_reference_features_can_force_fallback_without_model_call(tmp_path):
@@ -137,6 +137,53 @@ def test_analyze_cropped_item_uses_deterministic_reference_features_for_critical
     assert allow_flags == [False]
     assert result["reference_features"]["extraction_mode"] == "deterministic"
     assert "wall-mounted reflective surface" in result["description"]
+
+
+def test_analyze_cropped_item_can_model_extract_reference_features_without_text_read(monkeypatch, tmp_path):
+    image_path = tmp_path / "item.png"
+    _write_png(image_path)
+    calls = []
+
+    def _fake_extract_reference_features(**kwargs):
+        calls.append(kwargs)
+        return {
+            "silhouette_cues": ["rectangular shade"],
+            "material_cues": ["wood", "fabric"],
+            "distinctive_parts": ["block base"],
+            "preserve_rules": ["copy exact shade and base geometry"],
+        }
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Table Lamp",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "table_lamp",
+            "category_canonical": "table_lamp",
+            "target_key": "lamp_1",
+            "source_index": 1,
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("text OCR model should not happen")),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        allow_reference_feature_model=True,
+        provided_dims_mm={"width_mm": 330, "depth_mm": 330, "height_mm": 480},
+    )
+
+    assert calls
+    assert calls[0]["allow_model_call"] is True
+    assert calls[0]["extraction_reason"] == "light_fixture_identity_object"
+    assert result["reference_features"]["extraction_mode"] == "model"
+    assert "rectangular shade" in result["description"]
+    assert "block base" in result["description"]
 
 
 def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeypatch, tmp_path):
