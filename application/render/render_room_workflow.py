@@ -640,28 +640,37 @@ def _polish_selected_best_result(
     if not delivery_paths or not callable(polish_main_image):
         return delivery_paths, selected_result_reason
 
-    best_path = delivery_paths[0]
-    polished_path = None
-    try:
-        try:
-            polished_path = polish_main_image(
-                best_path,
-                unique_id=unique_id,
-                audience=audience,
-                selected_result_reason=selected_result_reason,
-            )
-        except TypeError:
-            polished_path = polish_main_image(best_path, unique_id=unique_id)
-    except Exception as exc:
-        logger.warning(f"[MainPolish] skipped: {exc}")
-        return delivery_paths, selected_result_reason
-
-    polished_path = str(polished_path or "").strip()
-    if not polished_path:
-        return delivery_paths, selected_result_reason
-
     updated_paths = list(delivery_paths)
-    updated_paths[0] = polished_path
+    polished_any = False
+    for index, source_path in enumerate(delivery_paths):
+        polished_path = None
+        try:
+            try:
+                polished_path = polish_main_image(
+                    source_path,
+                    unique_id=unique_id,
+                    audience=audience,
+                    selected_result_reason=selected_result_reason,
+                    is_selected_best=(index == 0),
+                    variant_position=index + 1,
+                )
+            except TypeError:
+                polished_path = polish_main_image(source_path, unique_id=unique_id)
+        except Exception as exc:
+            try:
+                logger.warning(f"[MainPolish] skipped: {exc}")
+            except Exception:
+                pass
+            continue
+
+        polished_path = str(polished_path or "").strip()
+        if not polished_path:
+            continue
+        updated_paths[index] = polished_path
+        polished_any = True
+
+    if not polished_any:
+        return delivery_paths, selected_result_reason
     if selected_result_reason:
         return updated_paths, f"{selected_result_reason}_polished"
     return updated_paths, "polished_best"

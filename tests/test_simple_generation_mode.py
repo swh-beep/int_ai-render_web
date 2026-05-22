@@ -225,8 +225,8 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
     monkeypatch.setattr("application.render.render_room_workflow.run_render_postprocess_stage", fake_postprocess)
 
     def fake_polish(path, **kwargs):
-        captured["polish"] = {"path": path, **kwargs}
-        return "outputs/simple-b_polished.png"
+        captured.setdefault("polish_calls", []).append({"path": path, **kwargs})
+        return path.replace(".png", "_polished.png")
 
     request = RenderWorkflowRequest(
         file=object(),
@@ -326,13 +326,17 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
         "outputs/simple-c.png",
     ]
     assert captured["postprocess_kwargs"]["allow_failed_rerank"] is True
-    assert captured["polish"]["path"] == "outputs/simple-b.png"
-    assert captured["polish"]["unique_id"] == "job-simple"
+    assert [call["path"] for call in captured["polish_calls"]] == [
+        "outputs/simple-b.png",
+        "outputs/simple-a.png",
+        "outputs/simple-c.png",
+    ]
+    assert [call["unique_id"] for call in captured["polish_calls"]] == ["job-simple", "job-simple", "job-simple"]
     assert result["result_url"] == "url://outputs/simple-b_polished.png"
     assert result["result_urls"] == [
         "url://outputs/simple-b_polished.png",
-        "url://outputs/simple-a.png",
-        "url://outputs/simple-c.png",
+        "url://outputs/simple-a_polished.png",
+        "url://outputs/simple-c_polished.png",
     ]
     assert result["candidate_result_urls"] == [
         "url://outputs/simple-b.png",
