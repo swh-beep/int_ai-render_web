@@ -187,6 +187,20 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(result.full_analyzed_data[0]["volume_rank"], 1)
         self.assertEqual(result.volume_ranking, [{"label": "Chair", "volume_rank": 1}])
 
+    def test_run_render_postprocess_stage_external_falls_back_to_one_candidate_when_ranking_unavailable(self):
+        result = run_render_postprocess_stage(
+            generated_results=["a.png", "b.png", "c.png"],
+            full_analyzed_data=[{"label": "Chair"}],
+            audience="external",
+            rank_best_variant=lambda _generated, _items: None,
+            refresh_item_boxes_from_main_render=lambda _path, items: items,
+            attach_volume_ranks=lambda items: items,
+            volume_ranking_snapshot=lambda _items: [],
+            logger=_StubLogger(),
+            log_brief=True,
+        )
+        self.assertEqual(result.generated_results, ["a.png"])
+
     def test_run_render_postprocess_stage_ranks_only_review_pass_subset(self):
         captured = {}
         generated_path_a = self.tmp_root / "candidate-a.png"

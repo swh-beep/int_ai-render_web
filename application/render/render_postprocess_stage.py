@@ -72,6 +72,8 @@ def _reorder_generated_results(
             rerank_applied = True
     except Exception:
         pass
+    if audience == "external" and len(reordered) > 1:
+        reordered = reordered[:1]
     return reordered, rerank_applied
 
 
