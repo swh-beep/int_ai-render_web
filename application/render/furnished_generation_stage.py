@@ -4,6 +4,7 @@ import time
 from typing import Any, Callable
 
 from PIL import Image
+from application.render.placement_support import build_placement_prompt_block
 
 
 def generate_furnished_room(
@@ -125,6 +126,17 @@ def generate_furnished_room(
             room_w = int(_room_dims.get("width_mm") or 0)
             room_d = int(_room_dims.get("depth_mm") or 0)
             room_h = int(_room_dims.get("height_mm") or 0)
+            effective_room_w = room_w
+            wall_span_ratio = 1.0
+            try:
+                if isinstance(wall_span_norm, (list, tuple)) and len(wall_span_norm) == 2:
+                    x_left = float(wall_span_norm[0])
+                    x_right = float(wall_span_norm[1])
+                    wall_span_ratio = max(0.0, min(1.0, x_right - x_left))
+                    if room_w > 0 and 0.25 <= wall_span_ratio < 0.98:
+                        effective_room_w = max(1, int(round(room_w * wall_span_ratio)))
+            except Exception:
+                wall_span_ratio = 1.0
 
             _primary = (
                 primary_item
@@ -308,9 +320,9 @@ def generate_furnished_room(
             except Exception:
                 pass
 
-            if room_w > 0 and p_w > 0:
-                occ = round((p_w / room_w) * 100, 1)
-                gap_total_mm = room_w - p_w
+            if effective_room_w > 0 and p_w > 0:
+                occ = round((p_w / effective_room_w) * 100, 1)
+                gap_total_mm = effective_room_w - p_w
                 gap_side_mm = int(gap_total_mm / 2) if gap_total_mm > 0 else 0
                 primary_d_disp = f"{p_d}mm" if p_d > 0 else "unknown"
                 primary_h_disp = f"{p_h}mm" if p_h > 0 else "unknown"
@@ -321,6 +333,11 @@ def generate_furnished_room(
                     f"(W {p_w}mm, D {primary_d_disp}, H {primary_h_disp})\n"
                 )
                 calculated_analysis += f"   - **ROOM DIMS:** W {room_w}mm, D {room_d_disp}, H {room_h_disp}\n"
+                if effective_room_w != room_w:
+                    calculated_analysis += (
+                        f"   - **USABLE WALL SPAN:** approx {effective_room_w}mm "
+                        f"({round(wall_span_ratio * 100, 1)}% of room width).\n"
+                    )
                 calculated_analysis += f"   - **CALCULATED GAP (WIDTH):** Total empty space width = {gap_total_mm}mm. (approx {gap_side_mm}mm on each side).\n"
                 calculated_analysis += f"   - **WIDTH OCCUPANCY:** {occ}% (The furniture takes up {occ}% of the wall).\n"
                 if occ > 92:
@@ -347,6 +364,7 @@ def generate_furnished_room(
                 spatial_context += f"- **ACTUAL ROOM DIMENSIONS:** {room_dimensions}\n"
             if placement_instructions:
                 spatial_context += f"- **PLACEMENT INSTRUCTIONS:** {placement_instructions}\n"
+                spatial_context += build_placement_prompt_block(placement_instructions)
             spatial_context += (
                 "**SCALING RULE:** You MUST calibrate the scale of all furniture relative to the ACTUAL ROOM DIMENSIONS provided.\n"
                 f"{calculated_analysis}\n"
@@ -412,6 +430,8 @@ def generate_furnished_room(
             "4. **HEIGHT CONSISTENCY:**\n"
             "   - Do NOT make a shorter item appear taller by placing it closer to the camera.\n"
             "   - Apparent height must respect the real H ratios across all items.\n"
+            "5. **NO GUIDE ARTIFACTS:**\n"
+            "   - Never render grid lines, measurement marks, drafting guides, fluorescent overlays, or any scale annotation in the final image.\n"
             "<CRITICAL: LIGHTING PRESERVATION (PRIORITY #1)>\n"
             "1. **KEEP EXISTING LIGHTING LOGIC:** Follow the input image's visible light sources and direction.\n"
             "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
@@ -538,16 +558,11 @@ def generate_furnished_room(
         except Exception:
             pass
 
-        try:
-            if scale_guide_path and os.path.exists(scale_guide_path):
-                guide_img = Image.open(scale_guide_path)
-                extra_imgs.append(guide_img)
-                content += [
-                    "SCALE GUIDE OVERLAY (fluorescent yellow 500x500mm floor grid only; DO NOT render the grid itself):",
-                    guide_img,
-                ]
-        except Exception:
-            pass
+        if scale_guide_path and os.path.exists(scale_guide_path):
+            content.append(
+                "Internal QA note: a separate scale-guide artifact exists for validation only. "
+                "Do not render any grid, measurement line, or fluorescent overlay in the final image."
+            )
 
         remaining = max(30, total_timeout_limit - (time.time() - start_time))
         safety_settings = allow_all_safety_settings()

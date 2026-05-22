@@ -23,6 +23,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 ASSET_DIR = BASE_DIR.parent / "localtest_image"
 REPORT_PATH = BASE_DIR / "live_validation_report.json"
+DEFAULT_ROOM_DIMENSIONS_TEXT = "10000 x 5500 x 3000 mm"
 
 
 class ValidationError(RuntimeError):
@@ -96,7 +97,11 @@ def _poll_video_job(client: TestClient, job_id: str, timeout_sec: int = 120) -> 
     raise ValidationError(f"Video job {job_id} timed out: {last_payload}")
 
 
-def main_validation():
+def main_validation(
+    *,
+    report_path: Path | None = None,
+    room_dimensions_text: str | None = None,
+):
     room_photo = _absolute_asset("room_photo.png")
     customize_moodboard = _absolute_asset("customize_moodboard.png")
     preset_product_1 = _absolute_asset("preset_product_1.png")
@@ -117,8 +122,10 @@ def main_validation():
     main._enqueue_job = _make_sync_enqueue(fake_results)
     main.REDIS_URL = "sync-validation"
 
+    room_dimensions_text = (room_dimensions_text or DEFAULT_ROOM_DIMENSIONS_TEXT).strip()
     report = {
         "mode": "sync-enqueue-route-validation",
+        "room_dimensions_text": room_dimensions_text,
         "assets": {
             "room_photo": room_photo,
             "customize_moodboard": customize_moodboard,
@@ -143,7 +150,7 @@ def main_validation():
                     "room": "livingroom",
                     "style": "Customize",
                     "variant": "1",
-                    "dimensions": "",
+                    "dimensions": room_dimensions_text,
                     "placement": "Preserve architecture and use the provided customized moodboard.",
                     "audience": "internal",
                 },
@@ -159,7 +166,12 @@ def main_validation():
         _assert(isinstance(internal_main_result.get("furniture_data"), list), "Internal main render missing furniture_data list")
         report["results"]["internal_main"] = {
             "enqueue_response": internal_main_response,
+            "original_url": internal_main_result.get("original_url"),
+            "empty_room_url": internal_main_result.get("empty_room_url"),
             "result_url": internal_main_result.get("result_url"),
+            "result_urls": list(internal_main_result.get("result_urls") or []),
+            "moodboard_url": internal_main_result.get("moodboard_url"),
+            "scale_guide_url": internal_main_result.get("scale_guide_url"),
             "detail_ready_furniture_count": len(internal_main_result.get("furniture_data") or []),
         }
 
@@ -220,6 +232,7 @@ def main_validation():
         _assert(internal_frontal_urls, "Internal frontal-view render missing urls")
         report["results"]["internal_frontal_view"] = {
             "enqueue_response": internal_frontal_response,
+            "urls": internal_frontal_urls,
             "first_url": internal_frontal_urls[0],
         }
 
@@ -240,6 +253,7 @@ def main_validation():
         _assert(internal_image_edit_urls, "Internal image-edit render missing urls")
         report["results"]["internal_image_edit"] = {
             "enqueue_response": internal_image_edit_response,
+            "urls": internal_image_edit_urls,
             "first_url": internal_image_edit_urls[0],
         }
 
@@ -258,6 +272,7 @@ def main_validation():
         _assert(moodboard_urls, "Moodboard generation did not return moodboards")
         report["results"]["internal_moodboard_options"] = {
             "first_url": moodboard_urls[0],
+            "urls": moodboard_urls,
             "count": len(moodboard_urls),
         }
 
@@ -374,6 +389,7 @@ def main_validation():
             "enqueue_response": internal_detail_response,
             "detail_count": len(internal_details),
             "first_detail_url": internal_details[0].get("url") if internal_details else None,
+            "detail_urls": [item.get("url") for item in internal_details if isinstance(item, dict) and item.get("url")],
         }
 
         regenerate_detail_response, regenerate_detail_job = _queue_job_and_capture(
@@ -408,6 +424,7 @@ def main_validation():
             json={
                 "image_url": room_photo,
                 "preset_id": "livingroom_french-modern_1",
+                "dimensions": room_dimensions_text,
             },
         )
         external_preset_result = external_preset_job.get("result") or {}
@@ -430,7 +447,11 @@ def main_validation():
         report["results"]["external_preset"] = {
             "enqueue_response": external_preset_response,
             "result_url": preset_render.get("result_url"),
+            "result_urls": list(preset_render.get("result_urls") or []),
+            "empty_room_url": preset_render.get("empty_room_url"),
+            "scale_guide_url": preset_render.get("scale_guide_url"),
             "detail_count": len(preset_details),
+            "detail_urls": [item.get("url") for item in preset_details if isinstance(item, dict) and item.get("url")],
             "resolved": external_preset_result.get("resolved"),
             "main_render_box_count": preset_main_render_count,
             "render_box_sources": _count_box_sources(preset_furniture),
@@ -449,6 +470,7 @@ def main_validation():
                 "room": "livingroom",
                 "style": "French Modern",
                 "variant": "1",
+                "dimensions": room_dimensions_text,
                 "items": [
                     {
                         "id": "product-1",
@@ -512,7 +534,11 @@ def main_validation():
         report["results"]["external_cart"] = {
             "enqueue_response": external_cart_response,
             "result_url": cart_render.get("result_url"),
+            "result_urls": list(cart_render.get("result_urls") or []),
+            "empty_room_url": cart_render.get("empty_room_url"),
+            "scale_guide_url": cart_render.get("scale_guide_url"),
             "detail_count": len(cart_details),
+            "detail_urls": [item.get("url") for item in cart_details if isinstance(item, dict) and item.get("url")],
             "cart_kept_count": len(external_cart_result.get("cart_kept") or []),
             "render_box_sources": _count_box_sources(cart_furniture),
             "used_cutout_reference_count": len(cart_used_cutout_references),
@@ -521,8 +547,10 @@ def main_validation():
             "volume_ranking_count": len(cart_volume_ranking),
         }
 
-        REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        target_report_path = report_path or REPORT_PATH
+        target_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
+        return report
     finally:
         main._enqueue_job = original_enqueue
         main.REDIS_URL = original_redis_url

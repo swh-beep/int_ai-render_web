@@ -17,6 +17,23 @@ def volume_proxy(dims: dict) -> int:
     return 0
 
 
+def _scale_confidence_from_dims(dims: dict) -> int:
+    try:
+        width_mm = int(dims.get("width_mm") or 0)
+        depth_mm = int(dims.get("depth_mm") or 0)
+        height_mm = int(dims.get("height_mm") or 0)
+        radius_mm = int(dims.get("radius_mm") or 0)
+        if width_mm > 0 and depth_mm > 0 and height_mm > 0:
+            return 3
+        if width_mm > 0 and depth_mm > 0:
+            return 2
+        if width_mm > 0 or depth_mm > 0 or height_mm > 0 or radius_mm > 0:
+            return 1
+    except Exception:
+        pass
+    return 0
+
+
 def item_box_area_proxy(box_2d) -> int:
     try:
         if not isinstance(box_2d, list) or len(box_2d) != 4:
@@ -114,6 +131,7 @@ def attach_volume_ranks(
 
         item["volume_proxy"] = int(vp or 0)
         item["volume_rank_basis"] = basis
+        item["scale_rank_confidence"] = _scale_confidence_from_dims(dims)
 
         if not item.get("category_canonical"):
             item["category_canonical"] = canonical_category(item.get("category") or item.get("label"))
@@ -138,15 +156,20 @@ def attach_volume_ranks(
         ranked = sorted(
             pairs,
             key=lambda x: (
-                -(int((x[1] or {}).get("category_score") or 0)),
+                -(int((x[1] or {}).get("scale_rank_confidence") or 0)),
                 -(int((x[1] or {}).get("volume_proxy") or 0)),
+                -(int((x[1] or {}).get("category_score") or 0)),
                 x[0],
             ),
         )
     else:
         ranked = sorted(
             pairs,
-            key=lambda x: (-(int((x[1] or {}).get("volume_proxy") or 0)), x[0]),
+            key=lambda x: (
+                -(int((x[1] or {}).get("scale_rank_confidence") or 0)),
+                -(int((x[1] or {}).get("volume_proxy") or 0)),
+                x[0],
+            ),
         )
 
     for rank, (_, item) in enumerate(ranked, start=1):
@@ -230,8 +253,8 @@ def build_furniture_specs_json(
 
         width_mm = dims.get("width_mm") or 0
         depth_mm = dims.get("depth_mm") or 0
-        height_mm = dims.get("height_mm") or 1000
-        vp = (width_mm * depth_mm * height_mm) if (width_mm or depth_mm) else 0
+        height_mm = dims.get("height_mm") or 0
+        vp = volume_proxy(dims)
         if is_rug:
             vp = 0
 
@@ -278,6 +301,7 @@ def build_furniture_specs_json(
                     "radius_mm": dims.get("radius_mm"),
                 },
                 "volume_proxy": vp,
+                "scale_rank_confidence": _scale_confidence_from_dims(dims),
                 "box_2d": box,
                 "description": desc,
                 "crop_path": (it.get("crop_path") if isinstance(it, dict) else None),
@@ -318,7 +342,11 @@ def build_furniture_specs_json(
             idx = int(row.get("index") or 0)
         except Exception:
             idx = 0
-        return (has_dims, vol, width_mm, depth_mm, height_mm, radius_mm, -idx)
+        try:
+            confidence = int(row.get("scale_rank_confidence") or 0)
+        except Exception:
+            confidence = 0
+        return (has_dims, confidence, width_mm, depth_mm, height_mm, vol, radius_mm, -idx)
 
     primary_scale = None
     scale_candidates = [x for x in candidates if dims_has_positive_values(x.get("dims_mm") or {})]

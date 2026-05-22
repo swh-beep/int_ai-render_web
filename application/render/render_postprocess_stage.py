@@ -28,6 +28,8 @@ def _reorder_generated_results(
                 reordered = [best_path] + [path for idx, path in enumerate(reordered) if idx != best_idx]
     except Exception:
         pass
+    if audience == "external" and len(reordered) > 1:
+        reordered = reordered[:1]
     return reordered
 
 

@@ -16,6 +16,44 @@ from application.render.render_workflow_contracts import (
 )
 
 
+def _polish_selected_best_result(
+    generated_results: list[str],
+    *,
+    audience: str,
+    unique_id: str,
+    polish_main_image: Callable[..., str | None] | None,
+    logger,
+) -> list[str]:
+    delivery_paths = [str(path) for path in (generated_results or []) if path]
+    if not delivery_paths or not callable(polish_main_image):
+        return delivery_paths
+
+    best_path = delivery_paths[0]
+    try:
+        try:
+            polished_path = polish_main_image(
+                best_path,
+                unique_id=unique_id,
+                audience=audience,
+            )
+        except TypeError:
+            polished_path = polish_main_image(best_path, unique_id=unique_id)
+    except Exception as exc:
+        try:
+            logger.warning(f"[MainPolish] skipped: {exc}")
+        except Exception:
+            pass
+        return delivery_paths
+
+    polished_path = str(polished_path or "").strip()
+    if not polished_path:
+        return delivery_paths
+
+    updated_paths = list(delivery_paths)
+    updated_paths[0] = polished_path
+    return updated_paths
+
+
 def run_render_room_workflow(
     request: RenderWorkflowRequest,
     deps: RenderWorkflowDependencies,
@@ -179,6 +217,14 @@ def run_render_room_workflow(
         generated_results = postprocess_result.generated_results
         full_analyzed_data = postprocess_result.full_analyzed_data
         volume_ranking = postprocess_result.volume_ranking
+
+        generated_results = _polish_selected_best_result(
+            generated_results,
+            audience=aud,
+            unique_id=unique_id,
+            polish_main_image=deps.generation.polish_main_image,
+            logger=deps.runtime.logger,
+        )
 
         log_render_summary(summary, log_summary=deps.runtime.log_summary, logger=deps.runtime.logger)
         return build_render_response_payload(

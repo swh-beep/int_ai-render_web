@@ -62,6 +62,7 @@ class RenderWorkflowAnalysisServices:
 class RenderWorkflowGenerationServices:
     generate_empty_room: Callable[..., tuple[str, str | None]]
     generate_furnished_room: Callable[..., str | None]
+    polish_main_image: Callable[..., str | None] | None = None
 
 
 @dataclass

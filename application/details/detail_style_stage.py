@@ -88,6 +88,8 @@ def construct_dynamic_styles(analyzed_items):
                 "target_label": label,
                 "target_key": item.get("target_key"),
                 "source_index": item.get("source_index"),
+                "target_box_2d": item.get("box_2d"),
+                "target_box_source": item.get("box_source"),
                 "prompt": (
                     f"ACT AS: Documentary Interior Photographer.\n"
                     f"TASK: Take a candid shot of the '{label}' strictly IN-SITU.\n\n"
@@ -105,4 +107,3 @@ def construct_dynamic_styles(analyzed_items):
         count += 1
 
     return styles
-
