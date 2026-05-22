@@ -197,6 +197,17 @@ def _item_dims_for_prompt(item: dict | None) -> dict:
     return dims if isinstance(dims, dict) else {}
 
 
+def _item_identifier_bits_for_prompt(item: dict | None) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    bits: list[str] = []
+    for key in ("source_index", "item_id", "target_key"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            bits.append(f"{key}={value}")
+    return bits
+
+
 def _item_anchor_priority(item: dict | None, *, explicit_primary_key: str) -> tuple:
     if not isinstance(item, dict):
         return (-1, -1, -1, -1, -1)
@@ -348,6 +359,7 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
     bits = ["reference_image=authoritative_cutout", f"qty={qty}"]
     if category:
         bits.append(f"category={category}")
+    bits.extend(_item_identifier_bits_for_prompt(item))
     if dims_text:
         bits.append(dims_text)
     guardrails = _category_prompt_guardrails(category)
@@ -382,6 +394,7 @@ def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, pr
         "\n<ITEM EXACTNESS CARDS>\n",
         "The attached cutout image is the authoritative product-shape source. Text tags are only scale, placement, and exception guardrails.\n",
         "Do not restyle, simplify, or generalize an item into a same-family substitute. If text and image conflict, follow the image.\n",
+        "If multiple rows share the same label, they are still separate products when source_index, item_id, or target_key differ. Render each distinct product once per its qty; never merge them or reuse one reference image for another row.\n",
     ]
     if primary_rows:
         lines.extend(
@@ -1100,6 +1113,7 @@ def generate_furnished_room(
                         inventory_bits = [f"qty={qty}"]
                         if category:
                             inventory_bits.append(f"category={category}")
+                        inventory_bits.extend(_item_identifier_bits_for_prompt(it))
                         inventory_rows.append(f"- {label}: " + "; ".join(inventory_bits))
                         dm = it.get("dims_mm") or {}
                         w = int(dm.get("width_mm") or 0)
@@ -1611,6 +1625,8 @@ def generate_furnished_room(
                     qty = int(it.get("qty") or 1)
                     if qty < 1:
                         qty = 1
+                    item_id = str(it.get("item_id") or "").strip()
+                    source_index = str(it.get("source_index") or "").strip()
                     dims = normalize_dims_dict(it.get("requested_dims_mm") or it.get("dims_mm") or {})
                     w = dims.get("width_mm")
                     d = dims.get("depth_mm")
@@ -1637,7 +1653,9 @@ def generate_furnished_room(
                     reference_entry = [
                         (
                             reference_header
-                            + f"Label={lbl} | Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
+                            + f"Label={lbl} | TargetKey={item_key or 'null'} "
+                            + f"| SourceIndex={source_index or 'null'} | ItemID={item_id or 'null'} "
+                            + f"| Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
                             f"| Options={opts_txt}"
                         ),
@@ -1658,6 +1676,8 @@ def generate_furnished_room(
                     lbl = (it.get("label") or "").strip() or "Item"
                     item_key = _cutout_item_key(it)
                     category = _item_category_for_prompt(it)
+                    item_id = str(it.get("item_id") or "").strip()
+                    source_index = str(it.get("source_index") or "").strip()
                     qty = int(it.get("qty") or 1)
                     if qty < 1:
                         qty = 1
@@ -1675,7 +1695,8 @@ def generate_furnished_room(
                     reference_content += [
                         (
                             "Pass2 Detail Reserve Reference (DO NOT INSERT IN FIRST PASS; keep for targeted repair only). "
-                            + f"Label={lbl} | TargetKey={item_key} | Category={category} | Qty={qty} "
+                            + f"Label={lbl} | TargetKey={item_key} | SourceIndex={source_index or 'null'} "
+                            + f"| ItemID={item_id or 'null'} | Category={category} | Qty={qty} "
                             + f"| W={w if w is not None else 'null'}mm D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm"
                         ),
                         cutout_img,

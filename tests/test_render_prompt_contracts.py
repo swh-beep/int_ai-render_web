@@ -408,6 +408,104 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
             output_path.unlink()
 
 
+def test_generate_furnished_room_disambiguates_duplicate_product_labels(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    red_art_ref = tmp_path / "red_art.png"
+    red_art_ref.write_bytes(_make_png_bytes(80, 80))
+    gray_art_ref = tmp_path / "gray_art.png"
+    gray_art_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 4400.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["prompt"] = content[0]
+        captured["content"] = content
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the dining room calm and precise."},
+        str(red_art_ref),
+        "prompt-contract-duplicate-labels",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "cart_product-39067_red-art_004",
+                    "item_id": "product_39067",
+                    "source_index": 4,
+                    "label": "AI 디자인용 이미지입니다",
+                    "category": "decor",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 900, "depth_mm": 50, "height_mm": 1200},
+                    "requested_dims_mm": {"width_mm": 900, "depth_mm": 50, "height_mm": 1200},
+                    "crop_path": str(red_art_ref),
+                    "identity_profile": {"family": "decor"},
+                    "product_identity": {"family": "decor"},
+                },
+                {
+                    "target_key": "cart_product-39065_gray-art_005",
+                    "item_id": "product_39065",
+                    "source_index": 5,
+                    "label": "AI 디자인용 이미지입니다",
+                    "category": "decor",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 400, "depth_mm": 50, "height_mm": 600},
+                    "requested_dims_mm": {"width_mm": 400, "depth_mm": 50, "height_mm": 600},
+                    "crop_path": str(gray_art_ref),
+                    "identity_profile": {"family": "decor"},
+                    "product_identity": {"family": "decor"},
+                },
+            ],
+            "primary_scale": {"target_key": "cart_product-39067_red-art_004", "label": "AI 디자인용 이미지입니다"},
+        },
+        room_dimensions="5000x4000x2600",
+        primary_item={"target_key": "cart_product-39067_red-art_004", "label": "AI 디자인용 이미지입니다"},
+        room_dims_parsed={"width_mm": 5000, "depth_mm": 4000, "height_mm": 2600},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=4400.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5000, "depth_mm": 4000, "height_mm": 2600},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        content = captured["content"]
+        assert "item_id=product_39067" in prompt
+        assert "item_id=product_39065" in prompt
+        assert "source_index=4" in prompt
+        assert "source_index=5" in prompt
+        headers = [part for part in content if isinstance(part, str) and "Furniture Cutout Reference" in part]
+        assert any("ItemID=product_39067" in header and "SourceIndex=4" in header for header in headers)
+        assert any("ItemID=product_39065" in header and "SourceIndex=5" in header for header in headers)
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_furnished_room_splits_primary_locks_from_secondary_items_and_orders_cutout_headers(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
