@@ -14,6 +14,8 @@ from application.video.job_store import get_video_job, video_jobs, video_jobs_lo
 from application.video.video_support import kling_prompts_dynamic
 from infrastructure.ai.kling_client import build_kling_endpoint, create_kling_task, encode_kling_jwt, poll_kling_task
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class _DummyResponse:
     def __init__(self, *, status_code: int, payload=None, text: str = ""):
@@ -32,6 +34,17 @@ class KlingClientTests(unittest.TestCase):
             build_kling_endpoint("https://api-singapore.klingai.com/"),
             "https://api-singapore.klingai.com/v1/videos/image2video",
         )
+
+    def test_runtime_surfaces_do_not_reference_legacy_provider_hooks(self):
+        live_validation_source = (ROOT / "live_validate_render_flows.py").read_text(encoding="utf-8")
+        render_config = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        legacy_hook = "_free" + "pik_kling"
+        legacy_key = "FREE" + "PIK_API_KEY"
+
+        self.assertNotIn(legacy_hook, live_validation_source)
+        self.assertIn("_kling_create_task", live_validation_source)
+        self.assertIn("_kling_poll", live_validation_source)
+        self.assertNotIn(legacy_key, render_config)
 
     def test_encode_kling_jwt_uses_access_key_as_issuer(self):
         token = encode_kling_jwt("ak", "sk", now=1000)
@@ -102,7 +115,7 @@ class KlingClientTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["aspect_ratio"], "9:16")
         self.assertEqual(kwargs["json"]["sound"], "off")
         self.assertIn("Authorization", kwargs["headers"])
-        self.assertNotIn("x-freepik-api-key", kwargs["headers"])
+        self.assertNotIn("x-" + "freepik-api-key", kwargs["headers"])
 
     @patch("infrastructure.ai.kling_client.requests.post")
     def test_create_kling_task_posts_sound_on_when_requested(self, mock_post):

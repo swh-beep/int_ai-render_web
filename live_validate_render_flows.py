@@ -351,12 +351,14 @@ def main_validation(
             "status": video_sources_status.get("status"),
         }
 
-        original_create_kling = main._freepik_kling_create_task
-        original_poll_kling = main._freepik_kling_poll
+        original_create_kling = main._kling_create_task
+        original_poll_kling = main._kling_poll
         try:
-            main._freepik_kling_create_task = lambda image_b64, prompt, negative_prompt, duration, cfg_scale: "validation-task"
-            main._freepik_kling_poll = (
-                lambda task_id, *, clip_index, total_clips, update_job_status, timeout_sec=600: source_results[0]
+            main._kling_create_task = (
+                lambda image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio="9:16", quality=None, sound=None: "validation-task"
+            )
+            main._kling_poll = (
+                lambda task_id, *, clip_index, total_clips, update_job_status, status_callback=None, timeout_sec=600: source_results[0]
             )
             video_sources_dynamic_response = client.post(
                 "/video-mvp/generate-sources",
@@ -386,8 +388,8 @@ def main_validation(
                 "status": video_sources_dynamic_status.get("status"),
             }
         finally:
-            main._freepik_kling_create_task = original_create_kling
-            main._freepik_kling_poll = original_poll_kling
+            main._kling_create_task = original_create_kling
+            main._kling_poll = original_poll_kling
 
         video_compile_response = client.post(
             "/video-mvp/compile",
@@ -594,11 +596,13 @@ def main_validation(
             "volume_ranking_count": len(cart_volume_ranking),
         }
 
-        original_create_kling = main._freepik_kling_create_task
-        original_poll_kling = main._freepik_kling_poll
+        original_create_kling = main._kling_create_task
+        original_poll_kling = main._kling_poll
         try:
-            main._freepik_kling_create_task = lambda image_b64, prompt, negative_prompt, duration, cfg_scale: "external-video-task"
-            main._freepik_kling_poll = (
+            main._kling_create_task = (
+                lambda image_url, prompt, negative_prompt, duration, cfg_scale, end_image_url=None, aspect_ratio="9:16", quality=None, sound=None: "external-video-task"
+            )
+            main._kling_poll = (
                 lambda task_id, *, clip_index, total_clips, update_job_status, status_callback=None, timeout_sec=600: source_results[0]
             )
             external_video_response, external_video_job = _queue_job_and_capture(
@@ -624,8 +628,8 @@ def main_validation(
                 "render_job_id": external_video_result.get("render_job_id"),
             }
         finally:
-            main._freepik_kling_create_task = original_create_kling
-            main._freepik_kling_poll = original_poll_kling
+            main._kling_create_task = original_create_kling
+            main._kling_poll = original_poll_kling
 
         target_report_path = report_path or REPORT_PATH
         target_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

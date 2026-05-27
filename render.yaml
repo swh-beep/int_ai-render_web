@@ -92,8 +92,6 @@ envVarGroups:
         sync: false
       - key: REPLICATE_API_TOKEN
         sync: false
-      - key: FREEPIK_API_KEY
-        sync: false
       - key: KLING_ENDPOINT
         sync: false
 
