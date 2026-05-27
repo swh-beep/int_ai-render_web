@@ -18,6 +18,34 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         self.assertIn("/generate-details", paths)
         self.assertIn("/regenerate-single-detail", paths)
         self.assertIn("/api/outputs/upload-video", paths)
+        self.assertIn("/video-mvp/compile", paths)
+        self.assertIn("/video-mvp/compile-local", paths)
+
+    def test_compile_local_route_uses_threaded_webserver_compile(self):
+        client = TestClient(app)
+
+        with patch("main.queue_final_compile_job", return_value="local-compile-1") as compile_job:
+            response = client.post(
+                "/video-mvp/compile-local",
+                json={
+                    "clips": [
+                        {
+                            "video_url": "https://cdn.example/clip.mp4",
+                            "trim_start": 0,
+                            "trim_end": 5,
+                            "speed": 1.0,
+                            "reverse": False,
+                            "flip_horizontal": False,
+                        }
+                    ],
+                    "aspect_ratio": "9:16",
+                    "aspect_mode": "crop",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"job_id": "local-compile-1", "status": "queued"})
+        compile_job.assert_called_once()
 
     def test_async_render_multipart_binding_routes_itemized_inputs(self):
         fake_deps = MagicMock()

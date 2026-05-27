@@ -36,7 +36,7 @@ import { publishOutputAsset, uploadOutputImageAssets } from "../api/outputs";
 import {
   downloadUrlForResult,
   fetchVideoJobStatus,
-  requestCompile,
+  requestMarketingCompile,
   requestSourceGeneration,
   type VideoJobState,
 } from "../api/videoMvp";
@@ -51,7 +51,6 @@ import {
   defaultMarketingAspectRatio,
   defaultMarketingVideoQuality,
   generationModeLabel,
-  getApprovedAttemptsInOrder,
   getCompileBlockers,
   minimumImageCount,
   moveImage,
@@ -95,6 +94,11 @@ type ReviewFramePreview = {
   clipIndex: number;
   frameType: "Start Frame" | "End Frame" | "End Frame (Next Start)";
   url: string;
+};
+
+type Step2Query = {
+  path: "step2";
+  id: string;
 };
 
 const aspectRatioLabels: Record<MarketingAspectRatio, string> = {
@@ -202,8 +206,37 @@ function attemptFromDetail(attempt: MarketingReelAttemptDetail): MarketingVideoA
   };
 }
 
+function readStep2Query(): Step2Query | null {
+  const params = new URLSearchParams(window.location.search);
+  const path = params.get("path");
+  const id = params.get("id")?.trim();
+  if (path !== "step2" || !id) return null;
+  return { path, id };
+}
+
+function writeStep2Query(groupId: string, mode: "push" | "replace") {
+  const params = new URLSearchParams(window.location.search);
+  params.set("path", "step2");
+  params.set("id", groupId);
+  const search = params.toString();
+  window.history[mode === "push" ? "pushState" : "replaceState"](
+    {},
+    "",
+    `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
+  );
+}
+
+function clearMarketingQuery() {
+  const params = new URLSearchParams(window.location.search);
+  params.delete("path");
+  params.delete("id");
+  const search = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
+}
+
 export function MarketingPage() {
   const objectUrlsRef = useRef(new Set<string>());
+  const lastRestoredQueryIdRef = useRef("");
   const [activeStep, setActiveStep] = useState<Step>(1);
   const [aspectRatio, setAspectRatio] = useState<MarketingAspectRatio>(defaultMarketingAspectRatio);
   const [generationAspectRatio, setGenerationAspectRatio] = useState<MarketingGenerationAspectRatio>(defaultMarketingAspectRatio);
@@ -259,12 +292,11 @@ export function MarketingPage() {
   const [isClipPromptLoading, setIsClipPromptLoading] = useState(false);
   const [isClipPromptSaving, setIsClipPromptSaving] = useState(false);
   const [activeFramePreviewId, setActiveFramePreviewId] = useState<string | null>(null);
+  const [isRestoringFromUrl, setIsRestoringFromUrl] = useState(() => Boolean(readStep2Query()));
 
   const activeClips = clips.filter((clip) => !clip.isDeleted);
   const blockers = getCompileBlockers(activeClips);
-  const approvedAttempts = getApprovedAttemptsInOrder(activeClips);
   const canCompile = activeClips.length > 0 && blockers.length === 0;
-  const isSingleApprovedClip = canCompile && approvedAttempts.length === 1;
   const hasStartedGeneration = Boolean(groupId) || clips.some((clip) => clip.attempts.length > 0);
   const isSequenceLocked = Boolean(groupId);
   const displayAspectRatio = aspectRatio === "source" ? generationAspectRatio : aspectRatio;
@@ -427,6 +459,35 @@ export function MarketingPage() {
     return () => window.clearTimeout(timer);
   }, [historyToast]);
 
+  useEffect(() => {
+    function restoreFromCurrentQuery(force = false) {
+      const query = readStep2Query();
+      if (!query) return;
+      if (!force && lastRestoredQueryIdRef.current === query.id) return;
+      lastRestoredQueryIdRef.current = query.id;
+      setIsRestoringFromUrl(true);
+      setStatus("저장된 Step 2를 불러오는 중...");
+      setError("");
+      void getMarketingReelGroup(query.id)
+        .then((detail) => {
+          restoreReferenceToStep2(detail, {
+            closeHistory: false,
+            statusMessage: "저장된 Step 2 결과를 불러왔습니다.",
+          });
+        })
+        .catch((caught) => {
+          setError(caught instanceof Error ? caught.message : "마케팅 릴스 상세 조회 실패");
+          setActiveStep(1);
+        })
+        .finally(() => setIsRestoringFromUrl(false));
+    }
+
+    restoreFromCurrentQuery();
+    const handlePopState = () => restoreFromCurrentQuery(true);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   function updateStatus(message: string, nextProgress: number) {
     setStatus(message);
     setProgress(Math.max(0, Math.min(100, nextProgress)));
@@ -445,6 +506,7 @@ export function MarketingPage() {
   }
 
   function resetMarketingWorkspace() {
+    clearMarketingQuery();
     setActiveStep(1);
     setAspectRatio(defaultMarketingAspectRatio);
     setGenerationAspectRatio(defaultMarketingAspectRatio);
@@ -488,6 +550,7 @@ export function MarketingPage() {
   }
 
   function restoreCurrentDataToStep1Draft() {
+    clearMarketingQuery();
     setGroupId("");
     setFinalUrl("");
     setFinalTitle("");
@@ -908,6 +971,7 @@ export function MarketingPage() {
       });
       setClips(withClipIds);
       setActiveStep(2);
+      writeStep2Query(group.group_id, "replace");
 
       const sourceJobId = await requestSourceGeneration(buildSourceGenerationPayload({
         imageUrls: withClipIds.map((clip) => (clip.sourceGenerationUrl ?? clip.sourceImageUrl) as string),
@@ -1151,35 +1215,8 @@ export function MarketingPage() {
       const resolvedAspectRatio = await resolveAspectRatioForGeneration(activeClips);
       setGenerationAspectRatio(resolvedAspectRatio);
       const compilePayload = buildCompilePayloadFromApprovedItems(activeClips, resolvedAspectRatio, videoQuality, audioEnabled);
-      if (approvedAttempts.length === 1) {
-        const [approvedAttempt] = approvedAttempts;
-        const finalVideoUrl = approvedAttempt.videoUrl;
-        if (!finalVideoUrl) throw new Error("승인된 단일 영상 URL이 없습니다.");
-        updateStatus("단일 승인 영상을 최종본으로 저장 중...", 45);
-        setFinalUrl(finalVideoUrl);
-        const persistPayload: MarketingFinalResultPayload = {
-          compile_job_id: `single-clip-${approvedAttempt.attemptId}`,
-          final_video_url: finalVideoUrl,
-          final_download_url: approvedAttempt.downloadUrl ?? downloadUrlForResult(finalVideoUrl),
-          final_title: finalTitle.trim() || buildDefaultFinalTitle(),
-          selected_attempt_ids: [approvedAttempt.attemptId],
-          compile_payload_summary: {
-            mode: "single_clip_passthrough",
-            ...compilePayload,
-          },
-        };
-        setLastFinalPersistPayload(persistPayload);
-        try {
-          await patchMarketingFinalResult(groupId, persistPayload);
-          setLastFinalPersistPayload(null);
-        } catch (caught) {
-          setFinalSaveError(caught instanceof Error ? caught.message : "히스토리 저장 실패");
-        }
-        updateStatus("단일 영상 최종본이 준비되었습니다.", 100);
-        return;
-      }
       updateStatus("최종 영상 합치기 요청 중...", 20);
-      const compileJobId = await requestCompile(compilePayload);
+      const compileJobId = await requestMarketingCompile(compilePayload);
       const state = await pollJob(compileJobId, "최종 영상 합치기", 20, 70);
       if (!state.result_url) throw new Error(state.error ?? "최종 릴스 URL이 없습니다.");
       const finalVideoUrl = await publishOutputAsset(state.result_url, {
@@ -1506,6 +1543,7 @@ export function MarketingPage() {
 
   function importReferenceToStep1() {
     if (!selectedReference) return;
+    clearMarketingQuery();
     const restoredAspectRatio = normalizeGenerationAspectRatio(selectedReference.aspect_ratio);
     const restoredVideoQuality = normalizeMarketingVideoQuality(selectedReference.video_quality);
     setGlobalPrompt(selectedReference.global_prompt);
@@ -1526,24 +1564,45 @@ export function MarketingPage() {
     showHistoryToast("Step 1 설정을 복원했습니다.");
   }
 
-  function loadReferenceToStep2() {
-    if (!selectedReference) return;
-    const restoredAspectRatio = normalizeGenerationAspectRatio(selectedReference.aspect_ratio);
-    const restoredVideoQuality = normalizeMarketingVideoQuality(selectedReference.video_quality);
-    setGlobalPrompt(selectedReference.global_prompt);
-    setAudioEnabled(Boolean(selectedReference.audio_enabled));
-    setAudioPrompt(selectedReference.audio_prompt || initialAudioPrompt);
+  function restoreReferenceToStep2(
+    detail: MarketingReelGroupDetail,
+    options: {
+      closeHistory?: boolean;
+      statusMessage?: string;
+      toastMessage?: string;
+      urlMode?: "push" | "replace";
+    } = {},
+  ) {
+    const restoredAspectRatio = normalizeGenerationAspectRatio(detail.aspect_ratio);
+    const restoredVideoQuality = normalizeMarketingVideoQuality(detail.video_quality);
+    setSelectedReference(detail);
+    setHistoryTitleDraft(detail.final_title || "");
+    setSelectedReferenceClipId("");
+    setGlobalPrompt(detail.global_prompt);
+    setAudioEnabled(Boolean(detail.audio_enabled));
+    setAudioPrompt(detail.audio_prompt || initialAudioPrompt);
     setAspectRatio(restoredAspectRatio);
     setGenerationAspectRatio(restoredAspectRatio);
     setVideoQuality(restoredVideoQuality);
-    setGroupId(selectedReference.group_id);
-    setFinalUrl(selectedReference.final_video_url ?? "");
+    setGroupId(detail.group_id);
+    setFinalUrl(detail.final_video_url ?? "");
     setProgress(100);
-    setStatus("선택한 히스토리의 Step 2 결과를 불러왔습니다.");
-    setClips(clipsFromReference(selectedReference, true));
+    setStatus(options.statusMessage ?? "선택한 히스토리의 Step 2 결과를 불러왔습니다.");
+    setClips(clipsFromReference(detail, true));
     setActiveStep(2);
-    setHistoryOpen(false);
-    showHistoryToast("Step 2 결과를 열었습니다.");
+    setFinalSaveError("");
+    setLastFinalPersistPayload(null);
+    if (options.closeHistory ?? true) setHistoryOpen(false);
+    if (options.urlMode) writeStep2Query(detail.group_id, options.urlMode);
+    if (options.toastMessage) showHistoryToast(options.toastMessage);
+  }
+
+  function loadReferenceToStep2() {
+    if (!selectedReference) return;
+    restoreReferenceToStep2(selectedReference, {
+      toastMessage: "Step 2 결과를 열었습니다.",
+      urlMode: "push",
+    });
   }
 
   async function saveSelectedReferenceTitle() {
@@ -1614,6 +1673,7 @@ export function MarketingPage() {
       </nav>
 
       {error ? <p className="marketing-alert" role="alert">{error}</p> : null}
+      {isRestoringFromUrl ? <p className="status-line" role="status">저장된 Step 2를 불러오는 중...</p> : null}
 
       <section className="marketing-workflow-grid">
         <div className="marketing-workspace">
@@ -1701,7 +1761,9 @@ export function MarketingPage() {
               </div>
 
               <div className="image-editor-list">
-                {activeClips.length === 0 ? (
+                {isRestoringFromUrl ? (
+                  <div className="empty-state">저장된 Step 2를 불러오는 중...</div>
+                ) : activeClips.length === 0 ? (
                   <div className="empty-state">아직 선택된 사진이 없습니다.</div>
                 ) : activeClips.map((clip, index) => {
                   const startFrameRatioClass = frameRatioClass(clip.sourcePreviewAspectRatio);
@@ -1828,7 +1890,7 @@ export function MarketingPage() {
                     음성 {audioEnabled ? "ON" : "OFF"}
                   </button>
                   <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={() => setActiveStep(3)}>
-                    {isSingleApprovedClip ? "단일 영상 최종본 설정" : "승인본으로 합치기 준비"}
+                    승인본으로 합치기 준비
                   </button>
                 </div>
               </header>
@@ -1961,14 +2023,10 @@ export function MarketingPage() {
               <header className="workflow-panel-header">
                 <div>
                   <h2>3. 최종 합치기</h2>
-                  <p>
-                    {isSingleApprovedClip
-                      ? "승인한 source clip 1개를 합치기 없이 최종 영상으로 저장합니다."
-                      : "승인한 source clips를 현재 순서대로 하나의 최종 영상으로 합칩니다."}
-                  </p>
+                  <p>승인한 source clips를 현재 순서대로 하나의 최종 영상으로 합칩니다.</p>
                 </div>
                 <button className="run-reel-btn" type="button" disabled={!canCompile || isBusy} onClick={compileFinal}>
-                  {isSingleApprovedClip ? "단일 영상 최종본으로 사용" : "최종 영상 합치기"}
+                  최종 영상 합치기
                 </button>
               </header>
               {blockers.length ? (

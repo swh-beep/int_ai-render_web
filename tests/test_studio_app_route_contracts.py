@@ -17,7 +17,7 @@ class StudioAppRouteContractsTests(unittest.TestCase):
 
     def test_static_studio_routes_remain_served_from_static_html(self):
         route_markers = {
-            "/marketing": "Marketing Reels Studio",
+            "/": 'data-page="home"',
             "/image-studio": 'data-page="image-studio"',
             "/video-studio": 'data-page="video-studio"',
         }
@@ -30,7 +30,16 @@ class StudioAppRouteContractsTests(unittest.TestCase):
                 self.assertIn("text/html", response.headers["content-type"])
                 self.assertIn(marker, response.text)
 
-    def test_app_routes_return_vite_index_without_replacing_static_routes(self):
+    def test_marketing_route_returns_vite_index(self):
+        response = self.client.get("/marketing")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn('id="root"', response.text)
+        self.assertIn("/marketing/assets/", response.text)
+        self.assertNotIn("/app/assets/", response.text)
+
+    def test_app_routes_are_no_longer_public_pages(self):
         for route in (
             "/app/marketing",
             "/app/image-studio",
@@ -45,19 +54,19 @@ class StudioAppRouteContractsTests(unittest.TestCase):
             with self.subTest(route=route):
                 response = self.client.get(route)
 
-                self.assertEqual(response.status_code, 200)
-                self.assertIn("text/html", response.headers["content-type"])
-                self.assertIn('id="root"', response.text)
-                self.assertIn("/app/assets/", response.text)
+                self.assertEqual(response.status_code, 404)
 
-    def test_app_assets_are_served_from_vite_build_output(self):
+    def test_marketing_assets_are_served_from_vite_build_output(self):
         index_html = STUDIO_DIST / "index.html"
         self.assertTrue(index_html.exists(), "studio-app must be built before route contract tests")
         html = index_html.read_text(encoding="utf-8")
-        match = re.search(r'src="(/app/assets/[^"]+\.js)"', html)
+        match = re.search(r'src="(/marketing/assets/[^"]+\.js)"', html)
         self.assertIsNotNone(match, "Vite index should reference a built JS asset")
 
         response = self.client.get(match.group(1))
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("javascript", response.headers["content-type"])
+
+        legacy_response = self.client.get(match.group(1).replace("/marketing/assets/", "/app/assets/"))
+        self.assertEqual(legacy_response.status_code, 404)

@@ -3446,8 +3446,8 @@ body[data-page="video-studio"] .card-sub-2 {
   }
 }
 
-/* Static Studio parity overrides. Keep these after the marketing rules so
-   /app/image-studio and /app/video-studio match the existing static pages. */
+/* Static Studio parity overrides kept for shared class compatibility with the
+   existing static image-studio and video-studio pages. */
 body[data-page="image-studio"],
 body[data-page="video-studio"] {
   height: 100vh !important;

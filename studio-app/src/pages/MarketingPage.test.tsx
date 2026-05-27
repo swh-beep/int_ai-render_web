@@ -35,6 +35,7 @@ const videoApi = vi.hoisted(() => ({
   downloadUrlForResult: vi.fn((url: string) => `/download?url=${encodeURIComponent(url)}`),
   fetchVideoJobStatus: vi.fn(),
   requestCompile: vi.fn(),
+  requestMarketingCompile: vi.fn(),
   requestSourceGeneration: vi.fn(),
 }));
 
@@ -48,12 +49,49 @@ function uploadedAssets(urls: string[]) {
   return urls.map((url) => ({ publicUrl: url, readUrl: url }));
 }
 
+function step2HistoryDetail(groupId = "history-1") {
+  return {
+    group_id: groupId,
+    status: "REVIEWING",
+    created_at: "2026-05-10",
+    updated_at: "2026-05-10",
+    global_prompt: "loaded generation prompt",
+    audio_enabled: true,
+    audio_prompt: "loaded audio prompt",
+    platform: "",
+    tone: "",
+    goal: "",
+    clips: [1, 2, 3].map((order) => ({
+      clip_id: `clip-${order}`,
+      client_image_id: `client-${order}`,
+      source_image_url: `https://cdn.example/start-${order}.png`,
+      generation_mode: "START_ONLY",
+      original_order: order,
+      current_order: order,
+      initial_prompt: `loaded prompt ${order}`,
+      target_duration_sec: 5,
+      deleted_at: null,
+      attempts: [{
+        attempt_id: `attempt-${order}`,
+        clip_id: `clip-${order}`,
+        source_job_id: "job-1",
+        source_job_item_index: order - 1,
+        prompt: `loaded prompt ${order}`,
+        duration_sec: 5,
+        status: "COMPLETED",
+        source_video_url: `https://cdn.example/clip-${order}.mp4`,
+      }],
+    })),
+  };
+}
+
 function openHistory() {
   fireEvent.click(screen.getByRole("button", { name: "히스토리 열기" }));
 }
 
 describe("MarketingPage", () => {
   beforeEach(() => {
+    window.history.pushState({}, "", "/marketing");
     vi.clearAllMocks();
     document.body.style.overflow = "";
     document.body.style.paddingRight = "";
@@ -61,6 +99,7 @@ describe("MarketingPage", () => {
     outputsApi.uploadOutputImageAssets.mockReset();
     videoApi.fetchVideoJobStatus.mockReset();
     videoApi.requestCompile.mockReset();
+    videoApi.requestMarketingCompile.mockReset();
     videoApi.requestSourceGeneration.mockReset();
     videoApi.downloadUrlForResult.mockImplementation((url: string) => `/download?url=${encodeURIComponent(url)}`);
     marketingApi.listMarketingReelGroups.mockReset();
@@ -141,6 +180,7 @@ describe("MarketingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
 
     expect(await screen.findByText("Clip 1")).toBeInTheDocument();
+    expect(window.location.search).toBe("?path=step2&id=group-1");
     await waitFor(() => expect(marketingApi.createMarketingReelGroup).toHaveBeenCalledWith(expect.objectContaining({
       clips: [expect.objectContaining({ order: 1 })],
     })));
@@ -837,9 +877,11 @@ describe("MarketingPage", () => {
     render(<MarketingPage />);
     openHistory();
     fireEvent.click(await screen.findByRole("button", { name: /3 clips/ }));
+    window.history.pushState({}, "", "/marketing?path=step2&id=stale");
     fireEvent.click(await screen.findByRole("button", { name: "Step 1 설정으로 복원" }));
 
     expect(screen.queryByRole("dialog", { name: "공용 히스토리" })).not.toBeInTheDocument();
+    expect(window.location.search).toBe("");
     expect(screen.getByRole("status")).toHaveTextContent("Step 1 설정을 복원했습니다.");
     expect(screen.getByLabelText("Global prompt")).toHaveValue("imported global prompt");
     expect(screen.getByRole("switch", { name: "음성 생성" })).toHaveAttribute("aria-checked", "true");
@@ -884,6 +926,7 @@ describe("MarketingPage", () => {
     expect(screen.getByDisplayValue("imported prompt 1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "새 작업 시작" }));
 
+    expect(window.location.search).toBe("");
     expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeDisabled();
     expect(screen.getByText(/아직 선택된 사진이 없습니다./)).toBeInTheDocument();
     expect(screen.queryByDisplayValue("imported prompt 1")).not.toBeInTheDocument();
@@ -937,6 +980,7 @@ describe("MarketingPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Step 2 결과 열기" }));
 
     expect(screen.queryByRole("dialog", { name: "공용 히스토리" })).not.toBeInTheDocument();
+    expect(window.location.search).toBe("?path=step2&id=history-1");
     expect(screen.getByRole("status")).toHaveTextContent("Step 2 결과를 열었습니다.");
     expect(screen.getByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "최종 합치기 음성 유지" })).toHaveAttribute("aria-checked", "true");
@@ -948,6 +992,50 @@ describe("MarketingPage", () => {
       audioPrompt: "loaded audio prompt",
     }));
     expect(screen.getByRole("switch", { name: "최종 합치기 음성 유지" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("restores Step 2 review state from the marketing query string on reload", async () => {
+    window.history.pushState({}, "", "/marketing?path=step2&id=history-1");
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce(step2HistoryDetail("history-1"));
+
+    render(<MarketingPage />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("저장된 Step 2를 불러오는 중...");
+    await waitFor(() => expect(marketingApi.getMarketingReelGroup).toHaveBeenCalledWith("history-1"));
+    expect(await screen.findByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "최종 합치기 음성 유지" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByText("loaded prompt 1").length).toBeGreaterThan(0);
+    expect(screen.getByText("loaded prompt 2")).toBeInTheDocument();
+  });
+
+  it("keeps Step 1 active and shows an error when query Step 2 restore fails", async () => {
+    window.history.pushState({}, "", "/marketing?path=step2&id=missing-history");
+    marketingApi.getMarketingReelGroup.mockRejectedValueOnce(new Error("마케팅 릴스 상세 조회 실패"));
+
+    render(<MarketingPage />);
+
+    await waitFor(() => expect(marketingApi.getMarketingReelGroup).toHaveBeenCalledWith("missing-history"));
+    expect(screen.getByRole("heading", { name: "1. 생성 전" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("마케팅 릴스 상세 조회 실패");
+  });
+
+  it("restores the same Step 2 id again when browser history returns to its query", async () => {
+    window.history.pushState({}, "", "/marketing?path=step2&id=history-1");
+    marketingApi.getMarketingReelGroup
+      .mockResolvedValueOnce(step2HistoryDetail("history-1"))
+      .mockResolvedValueOnce(step2HistoryDetail("history-1"));
+
+    render(<MarketingPage />);
+
+    expect(await screen.findByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "이 데이터로 작업 시작" }));
+    expect(window.location.search).toBe("");
+
+    window.history.pushState({}, "", "/marketing?path=step2&id=history-1");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await waitFor(() => expect(marketingApi.getMarketingReelGroup).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
   });
 
   it("restores the saved landscape aspect ratio when history opens Step 2", async () => {
@@ -1465,7 +1553,7 @@ describe("MarketingPage", () => {
       .mockResolvedValueOnce("https://cdn.example/final.mp4");
     marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
     marketingApi.approveMarketingClipAttempt.mockResolvedValue({ group_id: "group-1" });
-    videoApi.requestCompile.mockResolvedValueOnce("compile-job-1");
+    videoApi.requestMarketingCompile.mockResolvedValueOnce("local-compile-job-1");
     marketingApi.patchMarketingFinalResult.mockResolvedValueOnce({ group_id: "group-1" });
 
     render(<MarketingPage />);
@@ -1490,17 +1578,25 @@ describe("MarketingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "최종 영상 합치기" }));
 
     await waitFor(() => expect(screen.getByText("최종 영상 합치기: Merging clips...")).toBeInTheDocument());
-    expect(videoApi.requestCompile).toHaveBeenCalledWith(expect.objectContaining({
+    expect(videoApi.requestMarketingCompile).toHaveBeenCalledWith(expect.objectContaining({
+      clips: [
+        expect.objectContaining({ video_url: "https://cdn.example/clip-1.mp4" }),
+        expect.objectContaining({ video_url: "https://cdn.example/clip-2.mp4" }),
+        expect.objectContaining({ video_url: "https://cdn.example/clip-3.mp4" }),
+      ],
+      aspect_ratio: "9:16",
+      aspect_mode: "crop",
       video_quality: "1080p",
       preserve_audio: true,
     }));
+    expect(videoApi.requestCompile).not.toHaveBeenCalled();
     const finalStep = screen.getByRole("heading", { name: "3. 최종 합치기" }).closest("section") as HTMLElement;
     expect(within(finalStep).getByLabelText("Final merge progress").querySelector(".progress-bar")).toHaveStyle({ width: "48%" });
 
     await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalled(), { timeout: 3000 });
   });
 
-  it("uses a single approved clip as the final video without calling compile", async () => {
+  it("routes a single approved clip through the local threaded compile API before saving the final video", async () => {
     marketingApi.createMarketingReelGroup.mockImplementationOnce(async (payload) => ({
       group_id: "group-1",
       clips: payload.clips.map((clip, index) => ({
@@ -1515,14 +1611,23 @@ describe("MarketingPage", () => {
     }));
     videoApi.requestSourceGeneration.mockResolvedValueOnce("source-job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
-    videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
-      status: "COMPLETED",
-      progress: 100,
-      results: ["/outputs/clip-1.mp4"],
-    });
-    outputsApi.publishOutputAsset.mockResolvedValueOnce("https://cdn.example/clip-1.mp4");
+    videoApi.fetchVideoJobStatus
+      .mockResolvedValueOnce({
+        status: "COMPLETED",
+        progress: 100,
+        results: ["/outputs/clip-1.mp4"],
+      })
+      .mockResolvedValueOnce({
+        status: "COMPLETED",
+        progress: 100,
+        result_url: "/outputs/final-single.mp4",
+      });
+    outputsApi.publishOutputAsset
+      .mockResolvedValueOnce("https://cdn.example/clip-1.mp4")
+      .mockResolvedValueOnce("https://cdn.example/final-single.mp4");
     marketingApi.updateMarketingClipAttempt.mockImplementation(async (_groupId, _attemptId, payload) => payload);
     marketingApi.approveMarketingClipAttempt.mockResolvedValue({ group_id: "group-1" });
+    videoApi.requestMarketingCompile.mockResolvedValueOnce("local-compile-single-1");
     marketingApi.patchMarketingFinalResult.mockResolvedValueOnce({ group_id: "group-1" });
 
     const { container } = render(<MarketingPage />);
@@ -1536,19 +1641,25 @@ describe("MarketingPage", () => {
 
     const approveButton = await screen.findByRole("button", { name: "승인" });
     fireEvent.click(approveButton);
-    await waitFor(() => expect(screen.getByRole("button", { name: "단일 영상 최종본 설정" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "단일 영상 최종본 설정" }));
-    expect(await screen.findByText("승인한 source clip 1개를 합치기 없이 최종 영상으로 저장합니다.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "단일 영상 최종본으로 사용" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "승인본으로 합치기 준비" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "승인본으로 합치기 준비" }));
+    expect(await screen.findByText("승인한 source clips를 현재 순서대로 하나의 최종 영상으로 합칩니다.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "최종 영상 합치기" }));
 
-    await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalledWith("group-1", expect.objectContaining({
-      compile_job_id: expect.stringMatching(/^single-clip-/),
-      final_video_url: "https://cdn.example/clip-1.mp4",
-      selected_attempt_ids: [expect.any(String)],
-      compile_payload_summary: expect.objectContaining({ mode: "single_clip_passthrough" }),
+    await waitFor(() => expect(videoApi.requestMarketingCompile).toHaveBeenCalledWith(expect.objectContaining({
+      clips: [expect.objectContaining({ video_url: "https://cdn.example/clip-1.mp4" })],
+      aspect_ratio: "16:9",
+      aspect_mode: "crop",
     })));
     expect(videoApi.requestCompile).not.toHaveBeenCalled();
-    expect(screen.getByText("단일 영상 최종본이 준비되었습니다.")).toBeInTheDocument();
+
+    await waitFor(() => expect(marketingApi.patchMarketingFinalResult).toHaveBeenCalledWith("group-1", expect.objectContaining({
+      compile_job_id: "local-compile-single-1",
+      final_video_url: "https://cdn.example/final-single.mp4",
+      selected_attempt_ids: [expect.any(String)],
+      compile_payload_summary: expect.not.objectContaining({ mode: "single_clip_passthrough" }),
+    })));
+    expect(screen.getByText("최종 릴스가 준비되었습니다.")).toBeInTheDocument();
     expect(screen.getByLabelText("Final Reel")).toBeInTheDocument();
     expect(container.querySelector(".final-video")?.classList.contains("ratio-16-9")).toBe(true);
   });

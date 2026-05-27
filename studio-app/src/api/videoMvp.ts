@@ -27,7 +27,6 @@ export type MarketingCompilePayload = {
     reverse: boolean;
     flip_horizontal: boolean;
   }>;
-  include_intro_outro: boolean;
   aspect_ratio: string;
   video_quality?: MarketingVideoQuality;
   preserve_audio?: boolean;
@@ -59,6 +58,19 @@ export async function requestSourceGeneration(payload: SourceClipPayload | Marke
 
 export async function requestCompile(payload: AssembleCompilePayload | MarketingCompilePayload): Promise<string> {
   const response = await fetch("/video-mvp/compile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await readApiError(response, `최종 릴스 컴파일 실패 (${response.status})`));
+
+  const body = (await response.json()) as { job_id?: string };
+  if (!body.job_id) throw new Error("컴파일 job id가 없습니다.");
+  return body.job_id;
+}
+
+export async function requestMarketingCompile(payload: MarketingCompilePayload): Promise<string> {
+  const response = await fetch("/video-mvp/compile-local", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

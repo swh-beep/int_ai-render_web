@@ -75,8 +75,8 @@ pm2 save
 
 log "Running local smoke checks"
 curl -fsS "http://127.0.0.1:${API_PORT}/version.json" >/dev/null
-curl -fsS "http://127.0.0.1:${API_PORT}/app/marketing" >/dev/null
+curl -fsS "http://127.0.0.1:${API_PORT}/marketing" >/dev/null
 
 log "Deploy complete"
 printf 'FastAPI: http://127.0.0.1:%s\n' "${API_PORT}"
-printf 'Marketing: http://127.0.0.1:%s/app/marketing\n' "${API_PORT}"
+printf 'Marketing: http://127.0.0.1:%s/marketing\n' "${API_PORT}"

@@ -1219,9 +1219,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 app.mount(
-    "/app/assets",
+    "/marketing/assets",
     StaticFiles(directory=str(STUDIO_APP_ASSETS), check_dir=False),
-    name="studio-app-assets",
+    name="marketing-app-assets",
 )
 
 app.add_middleware(
@@ -1912,10 +1912,6 @@ def video_studio_page():
 
 @app.get("/marketing")
 def marketing_page():
-    return FileResponse(STATIC_DIR / "marketing.html")
-
-@app.get("/app/{full_path:path}")
-def studio_app_page(full_path: str):
     index_path = STUDIO_APP_DIST / "index.html"
     if not index_path.exists():
         return JSONResponse(
@@ -2721,6 +2717,12 @@ async def api_compile_final(req: CompileRequest):
     )
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
+    return {"job_id": job_id, "status": "queued"}
+
+@app.post("/video-mvp/compile-local")
+@async_wrap
+async def api_compile_final_local(req: CompileRequest):
+    job_id = queue_final_compile_job(req, video_target_fps=VIDEO_TARGET_FPS)
     return {"job_id": job_id, "status": "queued"}
 
 @app.get("/video-mvp/status/{job_id}")

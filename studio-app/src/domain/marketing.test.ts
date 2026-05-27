@@ -167,7 +167,7 @@ describe("marketing domain", () => {
 
     expect(payload.aspect_ratio).toBe("9:16");
     expect(payload.aspect_mode).toBe("crop");
-    expect(payload.include_intro_outro).toBe(false);
+    expect("include_intro_outro" in payload).toBe(false);
     expect(payload.clips).toEqual([
       { video_url: "/outputs/a.mp4", speed: 1, trim_start: 0, trim_end: 5, reverse: false, flip_horizontal: false },
       { video_url: "/outputs/b.mp4", speed: 1, trim_start: 0, trim_end: 5, reverse: false, flip_horizontal: false },
@@ -255,5 +255,25 @@ describe("marketing domain", () => {
 
     expect(source).not.toContain("/marketing/save");
     expect(source).not.toContain("/marketing/history");
+  });
+
+  it("keeps marketing final compilation on the video-mvp compile API surface", async () => {
+    const modules = await Promise.all([
+      import("./marketing?raw"),
+      import("../api/videoMvp?raw"),
+      import("../pages/MarketingPage?raw"),
+    ]);
+    const source = modules.map((module) => module.default).join("\n");
+
+    expect(source).toContain("/video-mvp/compile");
+    expect(source).toContain("/video-mvp/status/");
+    expect(source).not.toContain("single_clip_passthrough");
+    expect(source).not.toContain("ffmpeg");
+    expect(source).not.toContain("subprocess");
+    expect(source).not.toContain("RQ");
+    expect(source).not.toContain("worker");
+    expect(source).not.toContain("include_intro_outro");
+    expect(source).not.toContain("intro_url");
+    expect(source).not.toContain("outro_url");
   });
 });

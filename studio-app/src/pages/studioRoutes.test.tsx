@@ -1,42 +1,31 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { App } from "../App";
+import { SideNav } from "../components/SideNav";
+
+vi.mock("../pages/MarketingPage", () => ({
+  MarketingPage: () => <main><h1>Marketing Studio Route</h1></main>,
+}));
 
 function renderAt(path: string) {
   window.history.pushState({}, "", path);
   return render(<App />);
 }
 
-describe("studio app migrated routes", () => {
-  it("renders the React Image Studio page instead of a placeholder", () => {
-    renderAt("/app/image-studio");
+describe("studio app marketing route", () => {
+  it("renders the Marketing app at /marketing", () => {
+    renderAt("/marketing");
 
-    expect(screen.getByRole("heading", { name: "Image Studio" })).toBeInTheDocument();
-    expect(screen.getByText("Generate Real Photo")).toBeInTheDocument();
-    expect(screen.getByText("Edit Image")).toBeInTheDocument();
-    expect(screen.getByText("Decorate Image")).toBeInTheDocument();
-    expect(screen.queryByText(/placeholder/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Marketing Studio Route" })).toBeInTheDocument();
   });
 
-  it("renders the React Video Studio page instead of a placeholder", () => {
-    renderAt("/app/video-studio");
+  it("links navigation back to the public static routes", () => {
+    render(<SideNav activePath="/marketing" />);
 
-    expect(screen.getByRole("heading", { name: "Video Studio" })).toBeInTheDocument();
-    expect(screen.getByText("Create Video Clips")).toBeInTheDocument();
-    expect(screen.getByText("Assemble Full Video")).toBeInTheDocument();
-    expect(screen.getByText("Post-Production")).toBeInTheDocument();
-    expect(screen.queryByText(/placeholder/i)).not.toBeInTheDocument();
-  });
-
-  it("renders direct Image Studio workspace routes", () => {
-    renderAt("/app/image-studio/generate-real-photo");
-    expect(screen.getByRole("heading", { name: "Generate Real Photo" })).toBeInTheDocument();
-  });
-
-  it("renders direct Video Studio workspace routes", () => {
-    renderAt("/app/video-studio/assemble-full-video");
-    expect(screen.getByText("No active shot")).toBeInTheDocument();
-    expect(screen.getByText("Clip Controls")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /MAIN/i })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /IMAGE STUDIO/i })).toHaveAttribute("href", "/image-studio");
+    expect(screen.getByRole("link", { name: /VIDEO STUDIO/i })).toHaveAttribute("href", "/video-studio");
+    expect(screen.getByRole("link", { name: /MARKETING/i })).toHaveAttribute("href", "/marketing");
   });
 });

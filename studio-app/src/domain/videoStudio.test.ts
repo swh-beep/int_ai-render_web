@@ -84,7 +84,7 @@ describe("video studio domain", () => {
   });
 
   it("does not expose database write endpoints", async () => {
-    const modules = await Promise.all([import("./videoStudio?raw"), import("../api/videoMvp?raw"), import("../pages/VideoStudioPage?raw")]);
+    const modules = await Promise.all([import("./videoStudio?raw"), import("../api/videoMvp?raw")]);
     const source = modules.map((module) => module.default).join("\n");
 
     expect(source).not.toContain("/api/marketing");

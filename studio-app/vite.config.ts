@@ -2,17 +2,17 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-function appBaseSlashRedirect() {
+function marketingBaseSlashRedirect() {
   return {
-    name: "app-base-slash-redirect",
+    name: "marketing-base-slash-redirect",
     enforce: "pre" as const,
     configureServer(server: import("vite").ViteDevServer) {
       server.middlewares.use((req, res, next) => {
         const url = "url" in req && typeof req.url === "string" ? req.url : "";
-        if (url === "/app" || url.startsWith("/app?")) {
-          const query = url.slice("/app".length);
+        if (url === "/marketing" || url.startsWith("/marketing?")) {
+          const query = url.slice("/marketing".length);
           res.statusCode = 302;
-          res.setHeader("Location", `/app/${query}`);
+          res.setHeader("Location", `/marketing/${query}`);
           res.end();
           return;
         }
@@ -23,8 +23,8 @@ function appBaseSlashRedirect() {
 }
 
 export default defineConfig({
-  base: "/app/",
-  plugins: [appBaseSlashRedirect(), tailwindcss(), react()],
+  base: "/marketing/",
+  plugins: [marketingBaseSlashRedirect(), tailwindcss(), react()],
   server: {
     host: "127.0.0.1",
     port: 5173,

@@ -28,7 +28,6 @@ export type CompilePayload = {
     reverse: boolean;
     flip_horizontal: boolean;
   }>;
-  include_intro_outro: false;
   aspect_ratio: MarketingGenerationAspectRatio;
   video_quality: MarketingVideoQuality;
   preserve_audio: boolean;
@@ -245,7 +244,6 @@ export function buildCompilePayloadFromApprovedItems(
       reverse: false,
       flip_horizontal: false,
     })),
-    include_intro_outro: false,
     aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
     video_quality: normalizeMarketingVideoQuality(videoQuality),
     preserve_audio: preserveAudio,
@@ -279,7 +277,6 @@ export function buildCompilePayload(
 
   return {
     clips,
-    include_intro_outro: false,
     aspect_ratio: normalizeGenerationAspectRatio(aspectRatio),
     video_quality: normalizeMarketingVideoQuality(videoQuality),
     preserve_audio: false,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a small live Kling image-to-video smoke test for /app/marketing assets."""
+"""Run a small live Kling image-to-video smoke test for /marketing assets."""
 
 from __future__ import annotations
 

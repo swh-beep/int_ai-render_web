@@ -37,7 +37,7 @@ pnpm dev &
 VITE_PID=$!
 
 echo "FastAPI: http://${API_HOST}:${API_PORT}"
-echo "Vite:    http://127.0.0.1:5173/app/marketing"
+echo "Vite:    http://127.0.0.1:5173/marketing"
 
 while kill -0 "${API_PID}" 2>/dev/null && kill -0 "${VITE_PID}" 2>/dev/null; do
   sleep 1
