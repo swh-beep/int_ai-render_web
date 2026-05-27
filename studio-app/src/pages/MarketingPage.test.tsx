@@ -1008,6 +1008,20 @@ describe("MarketingPage", () => {
     expect(screen.getByText("loaded prompt 2")).toBeInTheDocument();
   });
 
+  it("does not treat restored completed attempts as approved when the API has no approval", async () => {
+    window.history.pushState({}, "", "/marketing?path=step2&id=history-unapproved");
+    marketingApi.getMarketingReelGroup.mockResolvedValueOnce(step2HistoryDetail("history-unapproved"));
+
+    render(<MarketingPage />);
+
+    await waitFor(() => expect(marketingApi.getMarketingReelGroup).toHaveBeenCalledWith("history-unapproved"));
+    expect(await screen.findByRole("heading", { name: "2. 비디오 확인" })).toBeInTheDocument();
+    const prepareButton = screen.getByRole("button", { name: "승인본으로 합치기 준비" });
+    expect(prepareButton).toBeDisabled();
+    fireEvent.click(prepareButton);
+    expect(videoApi.requestMarketingCompile).not.toHaveBeenCalled();
+  });
+
   it("keeps Step 1 active and shows an error when query Step 2 restore fails", async () => {
     window.history.pushState({}, "", "/marketing?path=step2&id=missing-history");
     marketingApi.getMarketingReelGroup.mockRejectedValueOnce(new Error("마케팅 릴스 상세 조회 실패"));

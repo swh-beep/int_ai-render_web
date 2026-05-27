@@ -581,6 +581,39 @@ class MarketingReelsRepository:
         now = utcnow()
         with self.engine.begin() as conn:
             self._require_group(conn, group_id)
+            selected_attempt_ids = payload.selected_attempt_ids
+            valid_selected_attempts: dict[str, Any] = {}
+            if selected_attempt_ids is not None:
+                unique_selected_attempt_ids = list(dict.fromkeys(selected_attempt_ids))
+                if unique_selected_attempt_ids:
+                    selected_rows = conn.execute(
+                        select(
+                            marketing_video_clip_attempts.c.id,
+                            marketing_video_clip_attempts.c.clip_id,
+                        )
+                        .select_from(
+                            marketing_video_clip_attempts.join(
+                                marketing_video_clips,
+                                and_(
+                                    marketing_video_clips.c.id == marketing_video_clip_attempts.c.clip_id,
+                                    marketing_video_clips.c.group_id == group_id,
+                                    marketing_video_clips.c.deleted_at.is_(None),
+                                ),
+                            )
+                        )
+                        .where(
+                            and_(
+                                marketing_video_clip_attempts.c.group_id == group_id,
+                                marketing_video_clip_attempts.c.id.in_(unique_selected_attempt_ids),
+                                marketing_video_clip_attempts.c.status == "COMPLETED",
+                                marketing_video_clip_attempts.c.source_video_url.is_not(None),
+                                marketing_video_clip_attempts.c.source_video_url != "",
+                            )
+                        )
+                    ).mappings().all()
+                    valid_selected_attempts = {row["id"]: row for row in selected_rows}
+                    if len(valid_selected_attempts) != len(unique_selected_attempt_ids):
+                        raise ValueError("Final results require selected attempts to be completed source clips")
             approved_source_exists = conn.execute(
                 select(marketing_video_clips.c.id)
                 .select_from(
@@ -604,8 +637,19 @@ class MarketingReelsRepository:
                 )
                 .limit(1)
             ).first()
-            if not approved_source_exists:
+            if not approved_source_exists and not valid_selected_attempts:
                 raise ValueError("Final results require at least one approved source clip")
+            for row in valid_selected_attempts.values():
+                conn.execute(
+                    update(marketing_video_clips)
+                    .where(
+                        and_(
+                            marketing_video_clips.c.id == row["clip_id"],
+                            marketing_video_clips.c.group_id == group_id,
+                        )
+                    )
+                    .values(approved_attempt_id=row["id"], updated_at=now)
+                )
             existing = conn.execute(
                 select(marketing_video_final_attempts.c.id, marketing_video_final_attempts.c.group_id).where(
                     marketing_video_final_attempts.c.compile_job_id == payload.compile_job_id
@@ -634,7 +678,6 @@ class MarketingReelsRepository:
                 )
             else:
                 conn.execute(insert(marketing_video_final_attempts).values(**final_values, created_at=now))
-            selected_attempt_ids = payload.selected_attempt_ids
             if selected_attempt_ids is None:
                 selected_attempt_ids = [
                     row["approved_attempt_id"]

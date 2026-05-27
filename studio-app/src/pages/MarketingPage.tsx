@@ -1535,7 +1535,7 @@ export function MarketingPage() {
         prompt: clip.initial_prompt,
         targetDurationSec: normalizeSourceDurationSec(clip.target_duration_sec),
         attempts,
-        approvedAttemptId: includeAttempts ? clip.approved_attempt_id ?? selectedAttempt?.attemptId : undefined,
+        approvedAttemptId: includeAttempts ? clip.approved_attempt_id ?? undefined : undefined,
         viewingAttemptId: selectedAttempt?.attemptId,
       };
     });

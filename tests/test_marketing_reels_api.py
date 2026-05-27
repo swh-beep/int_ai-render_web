@@ -608,6 +608,39 @@ def test_final_patch_requires_an_approved_source_clip():
     assert response.status_code == 409
 
 
+def test_final_patch_backfills_approval_from_selected_completed_attempts():
+    client = _client()
+    group_id, clip_id = _create_group(client)
+    assert client.post(
+        f"/api/marketing/reel-groups/{group_id}/clip-attempts",
+        json={
+            "attempt_id": "attempt-selected",
+            "clip_id": clip_id,
+            "source_job_id": "job-1",
+            "source_job_item_index": 0,
+            "prompt": "opening",
+            "duration_sec": 5,
+            "status": "COMPLETED",
+            "source_video_url": "/outputs/a.mp4",
+        },
+    ).status_code == 200
+
+    response = client.patch(
+        f"/api/marketing/reel-groups/{group_id}/final",
+        json={
+            "compile_job_id": "compile-selected",
+            "final_video_url": "/outputs/final.mp4",
+            "selected_attempt_ids": ["attempt-selected"],
+            "compile_payload_summary": {"clips": 1},
+        },
+    )
+
+    assert response.status_code == 200
+    detail = client.get(f"/api/marketing/reel-groups/{group_id}").json()
+    assert detail["clips"][0]["approved_attempt_id"] == "attempt-selected"
+    assert detail["compositions"][0]["selected_attempt_ids"] == ["attempt-selected"]
+
+
 def test_only_completed_attempts_can_be_approved():
     client = _client()
     group_id, clip_id = _create_group(client)
