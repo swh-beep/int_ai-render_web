@@ -18,8 +18,38 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         self.assertIn("/generate-details", paths)
         self.assertIn("/regenerate-single-detail", paths)
         self.assertIn("/api/outputs/upload-video", paths)
+        self.assertIn("/video-mvp/generate-sources", paths)
+        self.assertIn("/video-mvp/generate-sources-local", paths)
         self.assertIn("/video-mvp/compile", paths)
         self.assertIn("/video-mvp/compile-local", paths)
+
+    def test_generate_sources_local_route_uses_threaded_webserver_generation(self):
+        client = TestClient(app)
+
+        with patch("main.queue_source_generation_job", return_value="local-source-1") as source_job:
+            response = client.post(
+                "/video-mvp/generate-sources-local",
+                json={
+                    "items": [
+                        {
+                            "url": "https://cdn.example/start.png",
+                            "motion": "custom",
+                            "effect": "none",
+                            "custom_motion_prompt": "slow camera push",
+                            "custom_effect_prompt": None,
+                            "duration": "5",
+                        }
+                    ],
+                    "cfg_scale": 0.5,
+                    "aspect_ratio": "9:16",
+                    "video_quality": "720p",
+                    "sound": "off",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"job_id": "local-source-1", "status": "queued"})
+        source_job.assert_called_once()
 
     def test_compile_local_route_uses_threaded_webserver_compile(self):
         client = TestClient(app)

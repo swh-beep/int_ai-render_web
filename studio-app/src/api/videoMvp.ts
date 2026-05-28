@@ -56,6 +56,19 @@ export async function requestSourceGeneration(payload: SourceClipPayload | Marke
   return body.job_id;
 }
 
+export async function requestMarketingSourceGeneration(payload: MarketingSourceGenerationPayload): Promise<string> {
+  const response = await fetch("/video-mvp/generate-sources-local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await readApiError(response, `Kling 생성 요청 실패 (${response.status})`));
+
+  const body = (await response.json()) as { job_id?: string };
+  if (!body.job_id) throw new Error("Kling 생성 job id가 없습니다.");
+  return body.job_id;
+}
+
 export async function requestCompile(payload: AssembleCompilePayload | MarketingCompilePayload): Promise<string> {
   const response = await fetch("/video-mvp/compile", {
     method: "POST",

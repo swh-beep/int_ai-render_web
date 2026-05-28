@@ -2706,6 +2706,18 @@ async def api_generate_sources(req: SourceGenRequest):
         return JSONResponse(content={"error": err}, status_code=500)
     return {"job_id": job_id, "status": "queued"}
 
+@app.post("/video-mvp/generate-sources-local")
+@async_wrap
+async def api_generate_sources_local(req: SourceGenRequest):
+    job_id = queue_source_generation_job(
+        req,
+        video_target_fps=VIDEO_TARGET_FPS,
+        video_max_concurrency=VIDEO_MAX_CONCURRENCY,
+        create_kling_task=_kling_create_task,
+        poll_kling_task=_kling_poll,
+    )
+    return {"job_id": job_id, "status": "queued"}
+
 @app.post("/video-mvp/compile")
 @async_wrap
 async def api_compile_final(req: CompileRequest):

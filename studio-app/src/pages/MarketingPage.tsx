@@ -37,7 +37,7 @@ import {
   downloadUrlForResult,
   fetchVideoJobStatus,
   requestMarketingCompile,
-  requestSourceGeneration,
+  requestMarketingSourceGeneration,
   type VideoJobState,
 } from "../api/videoMvp";
 import {
@@ -973,7 +973,7 @@ export function MarketingPage() {
       setActiveStep(2);
       writeStep2Query(group.group_id, "replace");
 
-      const sourceJobId = await requestSourceGeneration(buildSourceGenerationPayload({
+      const sourceJobId = await requestMarketingSourceGeneration(buildSourceGenerationPayload({
         imageUrls: withClipIds.map((clip) => (clip.sourceGenerationUrl ?? clip.sourceImageUrl) as string),
         endImageUrls: withClipIds.map((clip) => clip.endGenerationUrl ?? clip.endImageUrl),
         cutPrompts: withClipIds.map((clip) => clip.prompt),
@@ -1139,7 +1139,7 @@ export function MarketingPage() {
     try {
       const resolvedAspectRatio = await resolveAspectRatioForGeneration([clip]);
       setGenerationAspectRatio(resolvedAspectRatio);
-      const sourceJobId = await requestSourceGeneration(buildSourceGenerationPayload({
+      const sourceJobId = await requestMarketingSourceGeneration(buildSourceGenerationPayload({
         imageUrls: [sourceGenerationUrl],
         endImageUrls: [endGenerationUrl],
         cutPrompts: [prompt],

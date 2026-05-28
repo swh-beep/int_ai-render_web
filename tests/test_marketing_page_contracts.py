@@ -51,7 +51,7 @@ class MarketingPageContractsTests(unittest.TestCase):
 
         for marker in (
             "createMarketingReelGroup",
-            "requestSourceGeneration",
+            "requestMarketingSourceGeneration",
             "requestMarketingCompile",
             "buildKlingPrompt",
             "uploadOutputImageAssets",

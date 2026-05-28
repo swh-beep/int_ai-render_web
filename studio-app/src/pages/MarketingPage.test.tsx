@@ -36,6 +36,7 @@ const videoApi = vi.hoisted(() => ({
   fetchVideoJobStatus: vi.fn(),
   requestCompile: vi.fn(),
   requestMarketingCompile: vi.fn(),
+  requestMarketingSourceGeneration: vi.fn(),
   requestSourceGeneration: vi.fn(),
 }));
 
@@ -100,6 +101,7 @@ describe("MarketingPage", () => {
     videoApi.fetchVideoJobStatus.mockReset();
     videoApi.requestCompile.mockReset();
     videoApi.requestMarketingCompile.mockReset();
+    videoApi.requestMarketingSourceGeneration.mockReset();
     videoApi.requestSourceGeneration.mockReset();
     videoApi.downloadUrlForResult.mockImplementation((url: string) => `/download?url=${encodeURIComponent(url)}`);
     marketingApi.listMarketingReelGroups.mockReset();
@@ -160,7 +162,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -184,7 +186,7 @@ describe("MarketingPage", () => {
     await waitFor(() => expect(marketingApi.createMarketingReelGroup).toHaveBeenCalledWith(expect.objectContaining({
       clips: [expect.objectContaining({ order: 1 })],
     })));
-    expect(videoApi.requestSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
+    expect(videoApi.requestMarketingSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
       items: [expect.objectContaining({ url: "https://cdn.example/start-1.png" })],
     }));
     expect(screen.queryByText("Clip 2")).not.toBeInTheDocument();
@@ -210,7 +212,7 @@ describe("MarketingPage", () => {
       group_id: "group-landscape",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-landscape");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-landscape");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -402,7 +404,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -421,7 +423,7 @@ describe("MarketingPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /1차 비디오 생성/i }));
 
-    await waitFor(() => expect(videoApi.requestSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(videoApi.requestMarketingSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
       video_quality: "1080p",
     })));
   });
@@ -439,7 +441,7 @@ describe("MarketingPage", () => {
       group_id: "group-audio",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-audio");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-audio");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -465,7 +467,7 @@ describe("MarketingPage", () => {
       audioEnabled: true,
       audioPrompt: "room tone follows the camera motion",
     })));
-    expect(videoApi.requestSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
+    expect(videoApi.requestMarketingSourceGeneration).toHaveBeenCalledWith(expect.objectContaining({
       sound: "on",
       items: [expect.objectContaining({
         custom_motion_prompt: expect.stringContaining("Audio: room tone follows the camera motion"),
@@ -1239,7 +1241,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -1296,7 +1298,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -1373,7 +1375,7 @@ describe("MarketingPage", () => {
 
     await waitFor(() => expect(screen.getByText("upload failed")).toBeInTheDocument());
     expect(marketingApi.markMarketingReelGroupFailed).toHaveBeenCalledWith("group-setup-failed");
-    expect(videoApi.requestSourceGeneration).not.toHaveBeenCalled();
+    expect(videoApi.requestMarketingSourceGeneration).not.toHaveBeenCalled();
     expect(screen.queryByText(/생성 그룹이 만들어진 뒤에는/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /1차 비디오 생성/i })).toBeEnabled();
     expect(screen.getByLabelText("이미지 선택")).toBeEnabled();
@@ -1396,7 +1398,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -1439,7 +1441,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",
@@ -1490,7 +1492,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt
       .mockRejectedValueOnce(new Error("running save failed"))
       .mockImplementation(async (_groupId, payload) => payload);
@@ -1542,7 +1544,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("source-job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("source-job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus
       .mockResolvedValueOnce({
@@ -1623,7 +1625,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("source-job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("source-job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus
       .mockResolvedValueOnce({
@@ -1759,7 +1761,7 @@ describe("MarketingPage", () => {
       group_id: "group-1",
       clips: payload.clips,
     }));
-    videoApi.requestSourceGeneration.mockResolvedValueOnce("job-1");
+    videoApi.requestMarketingSourceGeneration.mockResolvedValueOnce("job-1");
     marketingApi.createMarketingClipAttempt.mockImplementation(async (_groupId, payload) => payload);
     videoApi.fetchVideoJobStatus.mockResolvedValueOnce({
       status: "COMPLETED",

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchVideoJobStatus, requestCompile, requestMarketingCompile } from "./videoMvp";
+import { fetchVideoJobStatus, requestCompile, requestMarketingCompile, requestMarketingSourceGeneration } from "./videoMvp";
 
 const jsonResponse = (body: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(body), {
@@ -12,6 +12,35 @@ const jsonResponse = (body: unknown, init?: ResponseInit) =>
 describe("video mvp api", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("requests marketing source generation through the local threaded endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(jsonResponse({ job_id: "local-source-job-1" }));
+    const payload = {
+      items: [{
+        url: "https://cdn.example/start-1.png",
+        motion: "custom",
+        effect: "none",
+        custom_motion_prompt: "slow camera push",
+        custom_effect_prompt: null,
+        duration: "5",
+      }],
+      cfg_scale: 0.5,
+      aspect_ratio: "9:16" as const,
+      video_quality: "1080p" as const,
+      sound: "off" as const,
+    };
+
+    await expect(requestMarketingSourceGeneration(payload)).resolves.toBe("local-source-job-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/video-mvp/generate-sources-local",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
   });
 
   it("requests final compilation through the video-mvp compile endpoint", async () => {
