@@ -30,10 +30,25 @@ def polish_main_render(
     try:
         image = Image.open(source_path)
         prompt = (
-            "Retouch this as a real interior photograph, not a redraw. "
-            "Only adjust exposure, white balance, contrast, shadows, highlights, and subtle lens realism. "
-            "Preserve all furniture/decor shapes, edges, surface details, material texture, colors, placement, and room structure. "
-            "Do not smooth, repaint, restyle, or make surfaces look clay-like, waxy, plastic, CGI, or over-airbrushed."
+            "Retouch this as a final high-end interior photograph and compositing realism pass, not a redraw. "
+            "PRIMARY GOAL: make every inserted furniture/decor object look physically integrated into the room, as if photographed in-camera. "
+            "Remove any Photoshop-composite look. "
+            "Fix mismatched lighting direction on furniture and decor. "
+            "Add or strengthen natural contact shadows where objects touch the floor, wall, table, ceiling, or another object. "
+            "Add soft ambient occlusion under furniture legs, rugs, lamps, plants, chairs, tables, sofas, and wall/ceiling fixtures. "
+            "Blend object edges into the room lighting; remove cutout halos, hard pasted edges, glowing rims, and sticker-like outlines. "
+            "Match sharpness, grain/noise, lens softness, contrast, and local exposure between inserted objects and the room. "
+            "Harmonize color temperature so objects share the same daylight/interior-light mix as the room. "
+            "Match the overall tonal grade: black levels, midtone warmth, saturation, contrast curve, and color cast must be consistent across the whole scene. "
+            "Keep every object in the same color-grading family as the room; no object should look separately filtered, over-sharpened, over-saturated, too blue, too warm, or locally HDR compared with its surroundings. "
+            "Correct shadows so they follow the existing window/daylight direction and never contradict visible sunlight patches. "
+            "Prevent objects from floating; every floor or surface item must feel grounded by believable shadow and occlusion. "
+            "Improve exposure, white balance, contrast, highlights, shadows, and subtle lens realism. "
+            "Make the image cleaner, more expensive, and editorial, but still natural. "
+            "Preserve all furniture/decor identities, shapes, proportions, placement, colors, material textures, room structure, camera angle, and framing. "
+            "Do not move, replace, resize, repaint, restyle, simplify, or add/remove any object. "
+            "Do not make surfaces clay-like, waxy, plastic, CGI, overly smooth, over-airbrushed, or illustration-like. "
+            "Return a single realistic interior photograph with cohesive lighting, believable cast shadows, clean material detail, and no visible compositing seams."
         )
         response = repair_call(
             resolved_model,

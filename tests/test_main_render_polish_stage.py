@@ -5,7 +5,7 @@ from PIL import Image
 from application.render.main_render_polish_stage import polish_main_render
 
 
-def test_polish_main_render_uses_short_edit_prompt_and_auto_quality_options(tmp_path):
+def test_polish_main_render_uses_compositing_realism_prompt_and_auto_quality_options(tmp_path):
     source_path = tmp_path / "main.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
     source_bytes = source_path.read_bytes()
@@ -45,10 +45,19 @@ def test_polish_main_render_uses_short_edit_prompt_and_auto_quality_options(tmp_
         assert captured["request_options"]["max_attempts"] == 1
         assert "thinking_level" not in captured["request_options"]
         assert "quality" not in captured["request_options"]
-        assert "Retouch this as a real interior photograph, not a redraw." in captured["prompt"]
-        assert "Only adjust exposure, white balance, contrast, shadows, highlights, and subtle lens realism." in captured["prompt"]
-        assert "Preserve all furniture/decor shapes, edges, surface details, material texture, colors, placement, and room structure." in captured["prompt"]
-        assert "Do not smooth, repaint, restyle, or make surfaces look clay-like, waxy, plastic, CGI, or over-airbrushed." in captured["prompt"]
+        assert "final high-end interior photograph and compositing realism pass" in captured["prompt"]
+        assert "Remove any Photoshop-composite look." in captured["prompt"]
+        assert "natural contact shadows" in captured["prompt"]
+        assert "soft ambient occlusion" in captured["prompt"]
+        assert "cutout halos" in captured["prompt"]
+        assert "hard pasted edges" in captured["prompt"]
+        assert "Match sharpness, grain/noise" in captured["prompt"]
+        assert "Match the overall tonal grade" in captured["prompt"]
+        assert "black levels, midtone warmth, saturation, contrast curve, and color cast" in captured["prompt"]
+        assert "same color-grading family as the room" in captured["prompt"]
+        assert "Prevent objects from floating" in captured["prompt"]
+        assert "Do not move, replace, resize, repaint, restyle" in captured["prompt"]
+        assert "Only adjust exposure, white balance, contrast, shadows, highlights, and subtle lens realism." not in captured["prompt"]
         assert "Enhance the light, shadows, contrast, white balance, material texture" not in captured["prompt"]
         assert len(captured["content"]) == 2
         assert captured["kwargs"]["log_tag"] == "Stage2.MainPolish"
