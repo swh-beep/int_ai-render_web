@@ -4,7 +4,11 @@ from application.details.detail_analysis_stage import prepare_detail_generation_
 from application.render.render_bootstrap_stage import _build_summary
 from application.render.geometry_contract_stage import build_geometry_contract
 from application.render.room_dimension_estimation_stage import estimate_room_dims_contract
-from application.render.render_room_workflow import _build_simple_generation_specs, run_render_room_workflow
+from application.render.render_room_workflow import (
+    _build_simple_generation_specs,
+    _polish_selected_best_result,
+    run_render_room_workflow,
+)
 from application.render.render_workflow_contracts import (
     RenderWorkflowAnalysisServices,
     RenderWorkflowDependencies,
@@ -97,6 +101,23 @@ def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata()
     assert simple["two_pass_strategy"] == {"pass1_primary_keys": ["chair-1"]}
     assert simple["size_hierarchy_scale"] == ["Chair"]
     assert simple["primary"]["target_key"] == "chair-1"
+
+
+def test_polish_selected_best_result_keeps_selected_candidate_when_polish_fails():
+    warnings = []
+
+    paths, reason = _polish_selected_best_result(
+        ["outputs/v3.png"],
+        audience="external",
+        unique_id="job-polish-fail",
+        selected_result_reason="hard_qc_pass_ranked",
+        polish_main_image=lambda *args, **kwargs: None,
+        logger=SimpleNamespace(warning=lambda message: warnings.append(message)),
+    )
+
+    assert paths == ["outputs/v3.png"]
+    assert reason == "hard_qc_pass_ranked"
+    assert warnings
 
 
 def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypatch):

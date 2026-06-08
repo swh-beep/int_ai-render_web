@@ -17,6 +17,7 @@ def polish_main_render(
     match_aspect_to_target: Callable[[str, str], str | None],
     logger,
     timeout_sec: float = 70.0,
+    max_polish_attempts: int = 3,
 ) -> str | None:
     if not source_path or not os.path.exists(source_path):
         return None
@@ -25,6 +26,12 @@ def polish_main_render(
     resolved_model = repair_model_name or model_name
     if repair_call is None or not resolved_model:
         return None
+
+    def _warn(message: str) -> None:
+        try:
+            logger.warning(message)
+        except Exception:
+            pass
 
     image = None
     try:
@@ -50,33 +57,42 @@ def polish_main_render(
             "Do not make surfaces clay-like, waxy, plastic, CGI, overly smooth, over-airbrushed, or illustration-like. "
             "Return a single realistic interior photograph with cohesive lighting, believable cast shadows, clean material detail, and no visible compositing seams."
         )
-        response = repair_call(
-            resolved_model,
-            [prompt, image],
-            {
-                "timeout": float(timeout_sec),
-                "aspect_ratio": "16:9",
-                "max_attempts": 1,
-            },
-            allow_all_safety_settings(),
-            None,
-            log_tag="Stage2.MainPolish",
-        )
-        if response and hasattr(response, "candidates") and response.candidates and hasattr(response, "parts"):
-            for part in response.parts:
-                if not hasattr(part, "inline_data"):
-                    continue
-                timestamp = int(time.time())
-                raw_path = os.path.join("outputs", f"result_polish_{timestamp}_{unique_id}.png")
-                with open(raw_path, "wb") as output_file:
-                    output_file.write(part.inline_data.data)
-                normalized_path = match_aspect_to_target(raw_path, source_path)
-                return normalized_path or raw_path
+        attempts = max(1, int(max_polish_attempts or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                response = repair_call(
+                    resolved_model,
+                    [prompt, image],
+                    {
+                        "timeout": float(timeout_sec),
+                        "aspect_ratio": "16:9",
+                        "max_attempts": 1,
+                    },
+                    allow_all_safety_settings(),
+                    None,
+                    log_tag="Stage2.MainPolish",
+                )
+            except Exception as exc:
+                _warn(f"[MainPolish] attempt {attempt}/{attempts} failed: {exc}")
+                continue
+
+            if response and hasattr(response, "candidates") and response.candidates and hasattr(response, "parts"):
+                for part in response.parts:
+                    if not hasattr(part, "inline_data"):
+                        continue
+                    timestamp = int(time.time())
+                    raw_path = os.path.join("outputs", f"result_polish_{timestamp}_{unique_id}.png")
+                    with open(raw_path, "wb") as output_file:
+                        output_file.write(part.inline_data.data)
+                    normalized_path = match_aspect_to_target(raw_path, source_path)
+                    return normalized_path or raw_path
+
+            _warn(
+                f"[MainPolish] empty image response attempt {attempt}/{attempts}; "
+                f"source={os.path.basename(source_path)}"
+            )
     except Exception as exc:
-        try:
-            logger.warning(f"[MainPolish] skipped: {exc}")
-        except Exception:
-            pass
+        _warn(f"[MainPolish] skipped: {exc}")
     finally:
         if image is not None:
             try:

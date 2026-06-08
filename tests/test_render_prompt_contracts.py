@@ -66,8 +66,46 @@ def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):
     assert "PRODUCT REFERENCE CUTOUTS" in captured["prompt"]
     assert "product identity errors before photographic polish" in captured["prompt"]
     assert captured["request_options"]["timeout"] == 60
-    assert captured["request_options"]["max_attempts"] == 3
+    assert captured["request_options"]["max_attempts"] == 1
     assert "Reference Product #1: Reference Chair" in captured["content"]
+
+
+def test_rank_best_variant_flash_reasks_after_invalid_model_selection(tmp_path):
+    candidates = []
+    for index in range(1, 4):
+        candidate = tmp_path / f"candidate_{index}.png"
+        candidate.write_bytes(_make_png_bytes(160, 90))
+        candidates.append(str(candidate))
+
+    responses = [
+        "not json",
+        '{"best_index": 99, "reason": "out of range"}',
+        '{"best_index": 3, "reason": "best product fidelity"}',
+    ]
+    calls = []
+
+    def fake_rank_call(model_name, content, request_options, *args, **kwargs):
+        calls.append({"request_options": dict(request_options)})
+        return SimpleNamespace(text=responses[len(calls) - 1])
+
+    def parse_json(text):
+        try:
+            return __import__("json").loads(text)
+        except Exception:
+            return {}
+
+    best_idx = rank_best_variant_flash(
+        candidates,
+        [],
+        call_gemini_with_failover=fake_rank_call,
+        rank_model_name="ranker",
+        safe_json_from_model_text=parse_json,
+        max_attempts=3,
+    )
+
+    assert best_idx == 2
+    assert len(calls) == 3
+    assert all(call["request_options"]["max_attempts"] == 1 for call in calls)
 
 
 def test_resolve_style_prompt_matches_lowercase_preset_style_keys():

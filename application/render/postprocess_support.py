@@ -138,6 +138,7 @@ def rank_best_variant_flash(
 ) -> Optional[int]:
     if not candidate_paths or len(candidate_paths) < 2:
         return 0 if candidate_paths else None
+    opened = []
     try:
         items_text = summarize_items_for_ranking(analyzed_items or [])
         prompt = (
@@ -156,7 +157,6 @@ def rank_best_variant_flash(
             "best_index is 1-based."
         )
         content = [prompt]
-        opened = []
         for index, item in enumerate((analyzed_items or [])[:12], start=1):
             if not isinstance(item, dict):
                 continue
@@ -199,37 +199,42 @@ def rank_best_variant_flash(
             except Exception:
                 continue
 
-        response = call_gemini_with_failover(
-            rank_model_name,
-            content,
-            {
-                "timeout": max(10, int(timeout_sec or 60)),
-                "max_attempts": max(1, int(max_attempts or 3)),
-            },
-            {},
-            log_tag="RankBestVariant",
-        )
+        attempts = max(1, int(max_attempts or 3))
+        for _attempt in range(attempts):
+            try:
+                response = call_gemini_with_failover(
+                    rank_model_name,
+                    content,
+                    {
+                        "timeout": max(10, int(timeout_sec or 60)),
+                        "max_attempts": 1,
+                    },
+                    {},
+                    log_tag="RankBestVariant",
+                )
+                parsed = safe_json_from_model_text(response.text if response and hasattr(response, "text") else "")
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                index = parsed.get("best_index")
+                if isinstance(index, str):
+                    try:
+                        index = int(index.strip())
+                    except Exception:
+                        index = None
+                if isinstance(index, (int, float)):
+                    index = int(index)
+                    if 1 <= index <= len(candidate_paths):
+                        return index - 1
+        return None
+    except Exception:
+        return None
+    finally:
         for image in opened:
             try:
                 image.close()
             except Exception:
                 pass
-
-        parsed = safe_json_from_model_text(response.text if response and hasattr(response, "text") else "")
-        if isinstance(parsed, dict):
-            index = parsed.get("best_index")
-            if isinstance(index, str):
-                try:
-                    index = int(index.strip())
-                except Exception:
-                    index = None
-            if isinstance(index, (int, float)):
-                index = int(index)
-                if 1 <= index <= len(candidate_paths):
-                    return index - 1
-        return None
-    except Exception:
-        return None
 
 
 def normalize_label_for_match(label: str) -> str:

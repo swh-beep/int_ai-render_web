@@ -64,3 +64,29 @@ def test_polish_main_render_uses_compositing_realism_prompt_and_auto_quality_opt
     finally:
         if output_path.exists():
             output_path.unlink()
+
+
+def test_polish_main_render_retries_empty_responses_three_times_by_default(tmp_path):
+    source_path = tmp_path / "main.png"
+    Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    attempts = []
+    warnings = []
+
+    def _call_repair(model_name, content, request_options, safety_settings, system_instruction=None, **kwargs):
+        attempts.append(dict(request_options))
+        return type("Resp", (), {"candidates": [object()], "parts": []})()
+
+    result = polish_main_render(
+        str(source_path),
+        unique_id="unitcase-retry",
+        allow_all_safety_settings=lambda: {},
+        call_repair_with_failover=_call_repair,
+        repair_model_name="gpt-image-2",
+        match_aspect_to_target=lambda raw_path, target_path: raw_path,
+        logger=type("Logger", (), {"warning": lambda self, message: warnings.append(message)})(),
+    )
+
+    assert result is None
+    assert len(attempts) == 3
+    assert all(options["max_attempts"] == 1 for options in attempts)
+    assert warnings

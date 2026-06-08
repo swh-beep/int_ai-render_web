@@ -703,6 +703,13 @@ def _polish_selected_best_result(
         polished_any = True
 
     if not polished_any:
+        try:
+            logger.warning(
+                "[MainPolish] no polished output; using unpolished candidate "
+                f"unique_id={unique_id} audience={audience} reason={selected_result_reason or 'unknown'}"
+            )
+        except Exception:
+            pass
         return delivery_paths, selected_result_reason
     if selected_result_reason:
         return updated_paths, f"{selected_result_reason}_polished"
