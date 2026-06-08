@@ -292,6 +292,86 @@ def test_select_final_generated_results_allows_repaired_delivery_best_effort_for
     assert blocked is False
 
 
+def test_select_final_generated_results_uses_least_bad_candidate_when_strict_qc_blocks_all():
+    generated_results, selected_index, selected_reason, selected_review, blocked = _select_final_generated_results(
+        ["candidate-a.png", "candidate-b.png", "candidate-c.png"],
+        [
+            {
+                "path": "candidate-a.png",
+                "variant_index": 0,
+                "hard_qc_pass": False,
+                "soft_qc_pass": False,
+                "review_pass": False,
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": [
+                    "primary_width_vs_room_width",
+                    "unmatched_source_items",
+                    "extra_instance_detected:sofa",
+                ],
+                "hard_failed_rules": [
+                    "primary_width_vs_room_width",
+                    "unmatched_source_items",
+                    "extra_instance_detected:sofa",
+                ],
+                "matched_source_count": 5,
+                "unmatched_source_count": 5,
+                "fidelity_fail_count": 0,
+                "placement_fail_count": 0,
+                "geometry_fail_count": 0,
+                "scalecheck_fail_count": 3,
+                "weighted_issue_score": 55.0,
+            },
+            {
+                "path": "candidate-b.png",
+                "variant_index": 1,
+                "hard_qc_pass": False,
+                "soft_qc_pass": False,
+                "review_pass": False,
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": [
+                    "scale_plan_room_height_ratio",
+                    "unmatched_source_items",
+                ],
+                "hard_failed_rules": [
+                    "scale_plan_room_height_ratio",
+                    "unmatched_source_items",
+                ],
+                "matched_source_count": 6,
+                "unmatched_source_count": 3,
+                "fidelity_fail_count": 0,
+                "placement_fail_count": 0,
+                "geometry_fail_count": 0,
+                "scalecheck_fail_count": 2,
+                "weighted_issue_score": 31.0,
+            },
+            {
+                "path": "candidate-c.png",
+                "variant_index": 2,
+                "hard_qc_pass": False,
+                "soft_qc_pass": False,
+                "review_pass": False,
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": ["unmatched_source_items"],
+                "hard_failed_rules": ["unmatched_source_items"],
+                "matched_source_count": 4,
+                "unmatched_source_count": 6,
+                "fidelity_fail_count": 1,
+                "placement_fail_count": 2,
+                "geometry_fail_count": 1,
+                "scalecheck_fail_count": 1,
+                "weighted_issue_score": 72.0,
+            },
+        ],
+        strict_scale_requested=True,
+    )
+
+    assert generated_results == ["candidate-b.png"]
+    assert selected_index == 1
+    assert selected_reason == "all_failed_weighted_fallback"
+    assert selected_review["path"] == "candidate-b.png"
+    assert blocked is False
+
+
 def test_resolve_postprocess_ranking_inputs_disables_failed_rerank_for_strict_failed_candidates():
     rankable_results, allow_failed_rerank = _resolve_postprocess_ranking_inputs(
         ["variant-c.png", "variant-a.png", "variant-b.png"],

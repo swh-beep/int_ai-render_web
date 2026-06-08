@@ -821,6 +821,10 @@ def _select_final_generated_results(
                 ]
                 strict_delivery_paths.sort(key=lambda path: _variant_quality_sort_key(path, rows_by_path))
                 final_results = strict_delivery_paths[:1]
+            if not final_results and ordered_candidates:
+                all_failed_paths = list(ordered_candidates)
+                all_failed_paths.sort(key=lambda path: _variant_quality_sort_key(path, rows_by_path))
+                final_results = all_failed_paths[:1]
     else:
         final_results = list(ordered_candidates)
     if not final_results:
