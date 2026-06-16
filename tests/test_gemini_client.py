@@ -24,7 +24,7 @@ def test_call_gemini_with_failover_consumes_max_attempts_without_forwarding_it_t
     _install_fake_genai_client(monkeypatch, captured)
 
     response = call_gemini_with_failover(
-        "gemini-3.1-flash-image-preview",
+        "gemini-3.1-flash-image",
         ["prompt"],
         {"timeout": 12, "max_attempts": 1},
         {},
@@ -46,7 +46,7 @@ def test_call_gemini_with_failover_applies_2k_image_defaults_for_flash_image_mod
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-flash-image-preview",
+        "gemini-3.1-flash-image",
         ["prompt"],
         {"timeout": 12},
         {},
@@ -66,7 +66,7 @@ def test_call_gemini_with_failover_forwards_explicit_image_ratio_and_thinking_co
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-flash-image-preview",
+        "gemini-3.1-flash-image",
         ["prompt"],
         {
             "timeout": 12,
@@ -94,7 +94,7 @@ def test_call_gemini_with_failover_uses_high_thinking_for_furniture_analysis(mon
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
         ["prompt"],
         {"timeout": 12},
         {},
@@ -113,7 +113,7 @@ def test_call_gemini_with_failover_uses_high_thinking_for_detect_furniture(monke
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
         ["prompt"],
         {"timeout": 12},
         {},
@@ -142,7 +142,7 @@ def test_call_gemini_with_failover_logs_attempts_exhausted_on_final_failure(monk
     monkeypatch.setattr("infrastructure.ai.gemini_client.time.sleep", lambda *_args, **_kwargs: None)
 
     response = call_gemini_with_failover(
-        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
         ["prompt"],
         {"timeout": 1, "max_attempts": 1},
         {},
@@ -167,7 +167,7 @@ def test_call_gemini_with_failover_uses_medium_thinking_for_non_furniture_analys
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
         ["prompt"],
         {"timeout": 12},
         {},

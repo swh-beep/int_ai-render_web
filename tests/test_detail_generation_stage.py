@@ -63,7 +63,7 @@ def test_generate_detail_view_initial_detail_prefers_editorial_model_generation_
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -71,7 +71,7 @@ def test_generate_detail_view_initial_detail_prefers_editorial_model_generation_
         assert result["generation_mode"] == "model_regeneration"
         assert result["style_name"] == "Detail: Accent Chair"
         assert result["cutout_ref_count"] == 0
-        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "4:5"
         assert "Create a NEW editorial close-up photographed inside the EXACT SAME finished room." in captured["prompt"]
         assert "Do NOT turn this into a simple digital crop of the input." in captured["prompt"]
@@ -127,7 +127,7 @@ def test_generate_detail_view_simple_scene_detail_uses_main_image_only(tmp_path)
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -145,7 +145,7 @@ def test_generate_detail_view_simple_scene_detail_uses_main_image_only(tmp_path)
             output_path.unlink()
 
 
-def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tmp_path):
+def test_generate_detail_view_uses_simple_scene_prompt_with_gemini_image_model(tmp_path):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 2000), color=(245, 245, 245)).save(source_path, format="PNG")
     captured = {}
@@ -182,43 +182,26 @@ def test_generate_detail_view_uses_short_gpt_image_prompt_without_cutout_refs(tm
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gpt_image,
-        model_name="gpt-image-2",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
     try:
-        assert result["generation_mode"] == "gpt_image_detail"
+        assert result["generation_mode"] == "simple_scene_detail"
         assert result["cutout_ref_count"] == 0
-        assert captured["model_name"] == "gpt-image-2"
+        assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "4:5"
         assert captured["request_options"]["timeout"] == 180.0
-        assert captured["request_options"]["max_attempts"] == 1
-        assert "thinking_level" not in captured["request_options"]
+        assert captured["request_options"]["thinking_level"] == "high"
         assert "quality" not in captured["request_options"]
         assert len(captured["content"]) == 3
-        assert "Using the provided image as the only source" in captured["prompt"]
-        assert "distinct editorial detail photo around the Floor Lamp area, not another full-room view" in captured["prompt"]
-        assert (
-            "This shot must look visually distinct from the source image and from the other detail shots"
-            in captured["prompt"]
-        )
-        assert "Use a clearly different camera position, distance, height, and focal depth" in captured["prompt"]
-        assert "Camera recipe:" in captured["prompt"]
-        assert "Follow the camera recipe exactly; do not fall back to a similar room overview" in captured["prompt"]
-        assert "The Floor Lamp area must be the visual anchor of the frame" in captured["prompt"]
-        assert "Do not invent blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips" in captured["prompt"]
-        assert "foreground framing" not in captured["prompt"]
-        assert "partial occlusion" not in captured["prompt"]
-        assert "partial foreground edge" not in captured["prompt"]
-        assert "shallow depth of field or diagonal composition" in captured["prompt"]
-        assert "If an object is not visible from the new camera angle, leave it out of frame instead of relocating it" in captured["prompt"]
+        assert "photorealistic editorial detail photograph focused on the Floor Lamp area" in captured["prompt"]
+        assert "This is not a redesign task." in captured["prompt"]
+        assert "Keep every furniture/decor item's shape, count, placement, scale, material, and color unchanged." in captured["prompt"]
+        assert "Shoot a close editorial detail from a natural in-room camera position." in captured["prompt"]
         assert "legacy prompt should not be used" not in captured["prompt"]
-        assert "every visible furniture/decor item's position, shape, size, count, color, material" in captured["prompt"]
-        assert "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything" in captured["prompt"]
-        assert "Only change camera position, framing, composition, distance, and focal depth" in captured["prompt"]
-        assert "No text or watermark" in captured["prompt"]
-        assert len(captured["prompt"]) < 1300
-        assert captured["kwargs"]["log_tag"] == "Detail.Generate.GPTImage"
+        assert "no text, no watermark" in captured["prompt"]
+        assert captured["kwargs"]["log_tag"] == "Detail.Generate.Simple"
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -259,24 +242,15 @@ def test_generate_detail_view_uses_object_centered_prompt_for_small_decor(tmp_pa
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gpt_image,
-        model_name="gpt-image-2",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
     try:
-        assert "create a distinct editorial close-up photo centered on the Framed Art, not another full-room view" in captured["prompt"]
-        assert (
-            "This shot must look visually distinct from the source image and from the other detail shots"
-            in captured["prompt"]
-        )
-        assert "Follow the camera recipe exactly; do not fall back to a similar room overview" in captured["prompt"]
-        assert "Do not invent blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips" in captured["prompt"]
-        assert "foreground framing" not in captured["prompt"]
-        assert "partial occlusion" not in captured["prompt"]
-        assert "The Framed Art must be clearly visible and visually dominant" in captured["prompt"]
-        assert "Include only enough surrounding room context to prove it is the same space" in captured["prompt"]
-        assert "Do not let nearby larger furniture become the main subject" in captured["prompt"]
-        assert "Framed Art area" not in captured["prompt"]
+        assert "photorealistic editorial detail photograph focused on the Framed Art area" in captured["prompt"]
+        assert "This is not a redesign task." in captured["prompt"]
+        assert "Shoot a close editorial detail from a natural in-room camera position." in captured["prompt"]
+        assert "no text, no watermark" in captured["prompt"]
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -317,12 +291,12 @@ def test_generate_detail_view_passes_vertical_aspect_ratio_and_high_thinking_to_
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
     try:
-        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "4:5"
         assert captured["request_options"]["thinking_level"] == "high"
         assert captured["request_options"]["include_thoughts"] is False
@@ -368,7 +342,7 @@ def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -420,7 +394,7 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path):
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -473,7 +447,7 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -529,7 +503,7 @@ def test_generate_detail_view_sanitizes_invalid_ratio_to_vertical_canvas(tmp_pat
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])
@@ -567,7 +541,7 @@ def test_generate_detail_view_rejects_unsafe_ratio_crop_and_cleans_up_raw_attemp
                 "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()})()],
             },
         )(),
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     leaked = list(Path("outputs").glob("detail_*_unsafe-crop-case_7_*.png"))
@@ -897,7 +871,7 @@ def test_generate_detail_view_limits_detail_aux_cutouts_to_nearest_context(tmp_p
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
     )
 
     output_path = Path(result["path"])

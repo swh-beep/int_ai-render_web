@@ -7,9 +7,9 @@ from infrastructure.ai.analysis_provider_dispatch import (
 
 
 def test_build_analysis_model_set_trims_and_deduplicates():
-    assert build_analysis_model_set([" gpt-5.4 ", "", None, "gpt-5.4", "gemini-3.1-pro-preview"]) == {
+    assert build_analysis_model_set([" gpt-5.4 ", "", None, "gpt-5.4", "gemini-3.5-flash"]) == {
         "gpt-5.4",
-        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
     }
 
 
@@ -64,7 +64,7 @@ def test_dispatch_routes_generation_models_to_gemini():
         log_brief=True,
     )
 
-    response = dispatch("gemini-3.1-flash-image-preview", ["prompt"], {"timeout": 20}, {"safe": True}, log_tag="unit")
+    response = dispatch("gemini-3.1-flash-image", ["prompt"], {"timeout": 20}, {"safe": True}, log_tag="unit")
     assert response.text == "gemini"
     assert calls[0][0] == "gemini"
     assert calls[0][1][3] == {"safe": True}

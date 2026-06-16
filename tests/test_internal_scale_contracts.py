@@ -151,7 +151,7 @@ def test_generate_empty_room_requests_landscape_ratio_and_high_thinking(tmp_path
         return_raw=False,
         total_timeout_limit=60,
         log_step=lambda *_args, **_kwargs: None,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
         build_empty_room_prompt=lambda: "prompt",
         allow_all_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
@@ -159,7 +159,7 @@ def test_generate_empty_room_requests_landscape_ratio_and_high_thinking(tmp_path
     )
     try:
         assert os.path.exists(result)
-        assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+        assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "16:9"
         assert captured["request_options"]["thinking_level"] == "high"
         assert captured["request_options"]["include_thoughts"] is False
@@ -194,7 +194,7 @@ def test_generate_empty_room_retries_when_landscape_crop_would_remove_too_much_s
             return_raw=False,
             total_timeout_limit=60,
             log_step=lambda *_args, **_kwargs: None,
-            model_name="gemini-3.1-flash-image-preview",
+            model_name="gemini-3.1-flash-image",
             build_empty_room_prompt=lambda: "prompt",
             allow_all_safety_settings=lambda: {},
             call_gemini_with_failover=_call_gemini,
@@ -238,7 +238,7 @@ def test_generate_empty_room_uses_injected_postprocessor_when_it_returns_matchin
             return_raw=False,
             total_timeout_limit=60,
             log_step=lambda *_args, **_kwargs: None,
-            model_name="gemini-3.1-flash-image-preview",
+            model_name="gemini-3.1-flash-image",
             build_empty_room_prompt=lambda: "prompt",
             allow_all_safety_settings=lambda: {},
             call_gemini_with_failover=_call_gemini,
@@ -275,7 +275,7 @@ def test_generate_empty_room_removes_raw_sibling_after_aspect_normalization(tmp_
             return_raw=False,
             total_timeout_limit=60,
             log_step=lambda *_args, **_kwargs: None,
-            model_name="gemini-3.1-flash-image-preview",
+            model_name="gemini-3.1-flash-image",
             build_empty_room_prompt=lambda: "prompt",
             allow_all_safety_settings=lambda: {},
             call_gemini_with_failover=_call_gemini,
@@ -802,13 +802,13 @@ def test_generate_furnished_room_requests_landscape_ratio_and_high_thinking(tmp_
         log_summary=False,
         allow_all_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, []),
     )
 
     assert result["path"] == os.path.join("outputs", "result_1010_job-main-config.png")
-    assert captured["model_name"] == "gemini-3.1-flash-image-preview"
+    assert captured["model_name"] == "gemini-3.1-flash-image"
     assert captured["request_options"]["aspect_ratio"] == "16:9"
     assert captured["request_options"]["thinking_level"] == "high"
     assert captured["request_options"]["include_thoughts"] is False
@@ -851,7 +851,7 @@ def test_generate_furnished_room_removes_raw_sibling_after_aspect_normalization(
         log_summary=False,
         allow_all_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
-        model_name="gemini-3.1-flash-image-preview",
+        model_name="gemini-3.1-flash-image",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, []),
     )

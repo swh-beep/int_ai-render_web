@@ -1,7 +1,7 @@
 from typing import Any, Callable, Iterable
 
 
-GEMINI_ANALYSIS_DEFAULT = "gemini-3.1-pro-preview"
+GEMINI_ANALYSIS_DEFAULT = "gemini-3.5-flash"
 
 
 def default_analysis_model_name(provider: str, openai_model_name: str) -> str:

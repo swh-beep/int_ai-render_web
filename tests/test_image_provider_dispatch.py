@@ -44,7 +44,7 @@ def test_image_dispatch_routes_to_gemini():
         openai_api_key="secret",
     )
 
-    response = dispatch("gemini-3.1-flash-image-preview", ["prompt"], {"timeout": 20}, {"safe": True}, log_tag="unit")
+    response = dispatch("gemini-3.1-flash-image", ["prompt"], {"timeout": 20}, {"safe": True}, log_tag="unit")
     assert response.text == "gemini"
     assert calls[0][0] == "gemini"
 

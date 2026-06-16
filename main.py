@@ -295,8 +295,8 @@ def _calc_app_build_id() -> str:
 APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
-MODEL_NAME = 'gemini-3.1-flash-image-preview'       # 절대 변경 금지
-DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3-pro-image-preview"
+MODEL_NAME = 'gemini-3.1-flash-image'       # 절대 변경 금지
+DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3.1-flash-image"
 
 
 def _default_direct_gemini_image_model_name() -> str:
@@ -320,7 +320,7 @@ OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
 CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
-CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "openai").strip().lower() or "openai"
+CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
 ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.analysis_provider
 MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_API_KEY)
 REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_API_KEY)
@@ -366,7 +366,7 @@ def _default_analysis_model_name(configured_model_name: str | None) -> str:
         provider=ANALYSIS_PROVIDER,
         configured_model_name=configured_model_name,
         default_openai_model_name=OPENAI_ANALYSIS_MODEL_NAME,
-        default_gemini_model_name="gemini-3.1-pro-preview",
+        default_gemini_model_name="gemini-3.5-flash",
     )
 
 

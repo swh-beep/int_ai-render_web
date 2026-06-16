@@ -27,15 +27,15 @@ EXPERIMENTS = [
         "env": {
             "TOTAL_TIMEOUT_LIMIT": "1800",
             "ANALYSIS_PROVIDER": "gemini",
-            "ANALYSIS_MODEL_NAME": "gemini-3.1-pro-preview",
-            "DETECT_FURNITURE_MODEL_NAME": "gemini-3.1-pro-preview",
-            "ROOM_ONLY_MODEL_NAME": "gemini-3.1-pro-preview",
-            "RANK_MODEL_NAME": "gemini-3.1-pro-preview",
-            "REMAP_MODEL_NAME": "gemini-3.1-pro-preview",
+            "ANALYSIS_MODEL_NAME": "gemini-3.5-flash",
+            "DETECT_FURNITURE_MODEL_NAME": "gemini-3.5-flash",
+            "ROOM_ONLY_MODEL_NAME": "gemini-3.5-flash",
+            "RANK_MODEL_NAME": "gemini-3.5-flash",
+            "REMAP_MODEL_NAME": "gemini-3.5-flash",
             "MAIN_IMAGE_PROVIDER": "gemini",
-            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image-preview",
+            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image",
             "REPAIR_IMAGE_PROVIDER": "gemini",
-            "REPAIR_IMAGE_MODEL_NAME": "gemini-3.1-flash-image-preview",
+            "REPAIR_IMAGE_MODEL_NAME": "gemini-3.1-flash-image",
         },
     },
     {
@@ -54,9 +54,9 @@ EXPERIMENTS = [
             "OPENAI_ANALYSIS_TIMEOUT_CAP_SEC": "25",
             "OPENAI_ANALYSIS_MAX_ATTEMPTS": "1",
             "MAIN_IMAGE_PROVIDER": "gemini",
-            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image-preview",
+            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image",
             "REPAIR_IMAGE_PROVIDER": "gemini",
-            "REPAIR_IMAGE_MODEL_NAME": "gemini-3.1-flash-image-preview",
+            "REPAIR_IMAGE_MODEL_NAME": "gemini-3.1-flash-image",
             "OPENAI_IMAGE_MODEL_NAME": "gpt-image-2",
         },
     },
@@ -76,7 +76,7 @@ EXPERIMENTS = [
             "OPENAI_ANALYSIS_TIMEOUT_CAP_SEC": "25",
             "OPENAI_ANALYSIS_MAX_ATTEMPTS": "1",
             "MAIN_IMAGE_PROVIDER": "gemini",
-            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image-preview",
+            "MAIN_IMAGE_MODEL_NAME": "gemini-3.1-flash-image",
             "REPAIR_IMAGE_PROVIDER": "openai",
             "REPAIR_IMAGE_MODEL_NAME": "gpt-image-2",
             "OPENAI_IMAGE_MODEL_NAME": "gpt-image-2",
@@ -189,19 +189,19 @@ def _experiment_runtime_metadata(experiment: dict[str, Any], *, base_env: dict[s
         provider=analysis_provider,
         configured_model_name=env.get("ANALYSIS_MODEL_NAME"),
         default_openai_model_name=openai_analysis_model_name,
-        default_gemini_model_name="gemini-3.1-pro-preview",
+        default_gemini_model_name="gemini-3.5-flash",
     )
     main_image_model_name = resolve_runtime_model_name(
         provider=main_image_provider,
         configured_model_name=env.get("MAIN_IMAGE_MODEL_NAME"),
         default_openai_model_name=openai_image_model_name,
-        default_gemini_model_name="gemini-3.1-flash-image-preview",
+        default_gemini_model_name="gemini-3.1-flash-image",
     )
     repair_image_model_name = resolve_runtime_model_name(
         provider=repair_image_provider,
         configured_model_name=env.get("REPAIR_IMAGE_MODEL_NAME"),
         default_openai_model_name=openai_image_model_name,
-        default_gemini_model_name="gemini-3.1-flash-image-preview",
+        default_gemini_model_name="gemini-3.1-flash-image",
     )
 
     return {

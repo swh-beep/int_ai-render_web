@@ -5,12 +5,12 @@ from infrastructure.ai.provider_defaults import (
 )
 
 
-def test_default_provider_resolution_keeps_main_on_gemini_and_repair_on_openai():
+def test_default_provider_resolution_keeps_main_and_repair_on_gemini():
     defaults = resolve_provider_defaults({})
 
     assert defaults.analysis_provider == "gemini"
     assert defaults.main_image_provider == "gemini"
-    assert defaults.repair_image_provider == "openai"
+    assert defaults.repair_image_provider == "gemini"
     assert defaults.openai_image_model_name == "gpt-image-2"
 
 
@@ -19,7 +19,7 @@ def test_explicit_openai_analysis_provider_is_respected_when_force_flags_are_uns
 
     assert defaults.analysis_provider == "openai"
     assert defaults.main_image_provider == "gemini"
-    assert defaults.repair_image_provider == "openai"
+    assert defaults.repair_image_provider == "gemini"
 
 
 def test_explicit_legacy_force_gemini_providers_still_forces_images_to_gemini():
@@ -72,43 +72,43 @@ def test_runtime_model_name_falls_back_to_provider_default_when_model_family_mis
             provider="gemini",
             configured_model_name="gpt-image-2",
             default_openai_model_name="gpt-image-2",
-            default_gemini_model_name="gemini-3.1-flash-image-preview",
+            default_gemini_model_name="gemini-3.1-flash-image",
         )
-        == "gemini-3.1-flash-image-preview"
+        == "gemini-3.1-flash-image"
     )
     assert (
         resolve_runtime_model_name(
             provider="openai",
-            configured_model_name="gemini-3.1-flash-image-preview",
+            configured_model_name="gemini-3.1-flash-image",
             default_openai_model_name="gpt-image-2",
-            default_gemini_model_name="gemini-3.1-flash-image-preview",
+            default_gemini_model_name="gemini-3.1-flash-image",
         )
         == "gpt-image-2"
     )
 
 
-def test_default_runtime_models_keep_main_gemini_and_repair_gpt_image_when_openai_key_exists():
+def test_default_runtime_models_keep_main_and_repair_on_gemini_when_openai_key_exists():
     defaults = resolve_provider_defaults({})
     main_provider = resolve_runtime_image_provider(defaults.main_image_provider, "secret")
     repair_provider = resolve_runtime_image_provider(defaults.repair_image_provider, "secret")
 
     assert main_provider == "gemini"
-    assert repair_provider == "openai"
+    assert repair_provider == "gemini"
     assert (
         resolve_runtime_model_name(
             provider=main_provider,
             configured_model_name=None,
             default_openai_model_name=defaults.openai_image_model_name,
-            default_gemini_model_name="gemini-3-pro-image-preview",
+            default_gemini_model_name="gemini-3.1-flash-image",
         )
-        == "gemini-3-pro-image-preview"
+        == "gemini-3.1-flash-image"
     )
     assert (
         resolve_runtime_model_name(
             provider=repair_provider,
             configured_model_name=None,
             default_openai_model_name=defaults.openai_image_model_name,
-            default_gemini_model_name="gemini-3-pro-image-preview",
+            default_gemini_model_name="gemini-3.1-flash-image",
         )
-        == "gpt-image-2"
+        == "gemini-3.1-flash-image"
     )

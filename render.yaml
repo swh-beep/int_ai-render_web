@@ -111,15 +111,23 @@ envVarGroups:
         sync: false
 
       - key: ANALYSIS_MODEL_NAME
-        value: gpt-5.5
+        value: gemini-3.5-flash
       - key: RANK_MODEL_NAME
-        value: gemini-3.1-pro-preview
+        value: gemini-3.5-flash
       - key: DETECT_FURNITURE_MODEL_NAME
-        value: gemini-3.1-pro-preview
+        value: gemini-3.5-flash
       - key: REMAP_MODEL_NAME
-        value: gemini-3.1-pro-preview
+        value: gemini-3.5-flash
       - key: ROOM_ONLY_MODEL_NAME
-        value: gemini-3.1-pro-preview
+        value: gemini-3.5-flash
+      - key: MAIN_IMAGE_PROVIDER
+        value: gemini
+      - key: MAIN_IMAGE_MODEL_NAME
+        value: gemini-3.1-flash-image
+      - key: REPAIR_IMAGE_PROVIDER
+        value: gemini
+      - key: REPAIR_IMAGE_MODEL_NAME
+        value: gemini-3.1-flash-image
       - key: REMAP_DETECT_RETRY
         value: "3"
       - key: REMAP_DETECT_TIMEOUT_SEC

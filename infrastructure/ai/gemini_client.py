@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 
 _IMAGE_2K_MODELS = {
+    "gemini-3.1-flash-image",
     "gemini-3.1-flash-image-preview",
     "gemini-3-pro-image-preview",
 }

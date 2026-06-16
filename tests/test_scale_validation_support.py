@@ -610,8 +610,8 @@ def test_validate_furnished_scale_prefers_gemini_detection_model_for_strict_open
 
     assert ok is False
     assert diagnostics["failed_rules"] == ["no_matched_items"]
-    assert batch_models == ["gemini-3.1-pro-preview"]
-    assert bbox_models == ["gemini-3.1-pro-preview"]
+    assert batch_models == ["gemini-3.5-flash"]
+    assert bbox_models == ["gemini-3.5-flash"]
 
 
 def test_validate_furnished_scale_short_circuits_on_geometry_hard_fail_when_batch_detect_fails(monkeypatch, tmp_path):

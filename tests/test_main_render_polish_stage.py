@@ -32,7 +32,7 @@ def test_polish_main_render_uses_compositing_realism_prompt_and_auto_quality_opt
         unique_id="unitcase",
         allow_all_safety_settings=lambda: {},
         call_repair_with_failover=_call_repair,
-        repair_model_name="gpt-image-2",
+        repair_model_name="gemini-3.1-flash-image",
         match_aspect_to_target=lambda raw_path, target_path: raw_path,
         logger=type("Logger", (), {"warning": lambda *a, **k: None})(),
     )
@@ -40,7 +40,7 @@ def test_polish_main_render_uses_compositing_realism_prompt_and_auto_quality_opt
     output_path = Path(result)
     try:
         assert output_path.exists()
-        assert captured["model_name"] == "gpt-image-2"
+        assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "16:9"
         assert captured["request_options"]["max_attempts"] == 1
         assert "thinking_level" not in captured["request_options"]
@@ -81,7 +81,7 @@ def test_polish_main_render_retries_empty_responses_three_times_by_default(tmp_p
         unique_id="unitcase-retry",
         allow_all_safety_settings=lambda: {},
         call_repair_with_failover=_call_repair,
-        repair_model_name="gpt-image-2",
+        repair_model_name="gemini-3.1-flash-image",
         match_aspect_to_target=lambda raw_path, target_path: raw_path,
         logger=type("Logger", (), {"warning": lambda self, message: warnings.append(message)})(),
     )

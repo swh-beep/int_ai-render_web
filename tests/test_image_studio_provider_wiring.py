@@ -60,7 +60,7 @@ def test_frontal_stage_uses_separate_generation_caller(tmp_path):
         build_frontal_generation_prompt=lambda blueprint: f"generate from {blueprint}",
         call_gemini_with_failover=_analysis_caller,
         analysis_model_name="gemini-analysis",
-        model_name="gpt-image-2",
+        model_name="gemini-3.1-flash-image",
         allow_all_safety_settings=lambda: {"safe": True},
         standardize_image=lambda path: path,
         call_generation_with_failover=_generation_caller,
@@ -71,7 +71,7 @@ def test_frontal_stage_uses_separate_generation_caller(tmp_path):
         assert output_path.exists()
         assert captured["analysis"][0][0] == "gemini-analysis"
         assert captured["analysis"][0][4]["log_tag"] == "Frontal.Analysis"
-        assert captured["generation"][0][0] == "gpt-image-2"
+        assert captured["generation"][0][0] == "gemini-3.1-flash-image"
         assert captured["generation"][0][2]["aspect_ratio"] == "16:9"
         assert captured["generation"][0][2]["max_attempts"] == 1
         assert captured["generation"][0][4]["log_tag"] == "Frontal.Generate"
