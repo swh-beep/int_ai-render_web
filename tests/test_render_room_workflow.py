@@ -63,7 +63,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.created_paths.append(str(path))
         return str(path)
 
-    def _run_workflow_case(self, *, audience: str, unique_id: str):
+    def _run_workflow_case(self, *, audience: str, unique_id: str, moodboard_items=None, analyze_cropped_item=None):
         generated_calls = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
@@ -121,7 +121,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 canonical_category=lambda category: category or "",
                 detect_furniture_boxes=lambda _path: [],
                 analyze_room_structure=lambda *_args, **_kwargs: {"room_text": "", "windows_present": False},
-                analyze_cropped_item=lambda *_args, **_kwargs: {"description": "chair"},
+                analyze_cropped_item=analyze_cropped_item or (lambda *_args, **_kwargs: {"description": "chair"}),
                 normalize_dims_dict=lambda dims: dims or {},
                 parse_object_dimensions_mm=lambda _text: {},
                 build_furniture_specs_json=lambda items: {"items": items},
@@ -144,7 +144,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 style="Customize",
                 variant="1",
                 audience=audience,
-                moodboard_items=[{"label": "Chair", "path": "https://example.com/chair.png"}],
+                moodboard_items=moodboard_items or [{"label": "Chair", "path": "https://example.com/chair.png"}],
             ),
             deps,
         )
@@ -177,3 +177,37 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["result_url"], "url://internal/mainrendered/rendered/int12345_v2_polished.png")
+
+    def test_external_render_adds_pass2_detail_items_after_primary_pass(self):
+        def analyze_cropped_item(_path, item, *_args, **_kwargs):
+            label = str((item or {}).get("label") or "")
+            if "Artwork" in label:
+                return {
+                    **dict(item or {}),
+                    "description": "Framed blue artwork",
+                    "category": "artwork",
+                    "category_canonical": "artwork",
+                    "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                }
+            return {
+                **dict(item or {}),
+                "description": "Large cream sofa",
+                "category": "sofa",
+                "category_canonical": "sofa",
+                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
+            }
+
+        payload, generated_calls, polished_calls = self._run_workflow_case(
+            audience="external",
+            unique_id="twopass01",
+            moodboard_items=[
+                {"label": "Sofa", "path": "https://example.com/sofa.png"},
+                {"label": "Artwork", "path": "https://example.com/art.png"},
+            ],
+            analyze_cropped_item=analyze_cropped_item,
+        )
+
+        self.assertEqual(len(generated_calls), 4)
+        self.assertEqual(Path(generated_calls[-1]).name, "twopass01_p2_v21.png")
+        self.assertEqual(Path(polished_calls[-1][0]).name, "twopass01_p2_v21.png")
+        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/polished-best.png")

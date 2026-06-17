@@ -1632,9 +1632,38 @@ def generate_furnished_room(
                 "Do NOT add curtains or blinds. Do NOT add or invent windows.\n\n"
             )
 
+        render_pass_mode = ""
+        if isinstance(furniture_specs_json, dict):
+            render_pass_mode = str(furniture_specs_json.get("render_pass_mode") or "").strip().lower()
+        is_pass2_additive_edit = render_pass_mode == "pass2_additive_edit"
+        room_input_label = (
+            "Furnished Room (Pass 1 Result - PRESERVE THIS):"
+            if is_pass2_additive_edit
+            else "Empty Room (Target Canvas - KEEP THIS):"
+        )
+        task_intro = (
+            "IMAGE MANIPULATION TASK (Second-pass Additive Edit):\n"
+            "Your goal is to KEEP the already furnished room image intact and add ONLY the listed secondary detail items.\n"
+            "The input room already contains the approved first-pass furniture. Do not restage it.\n\n"
+            "<PASS 2 PRESERVATION LOCK>\n"
+            "1. Preserve every existing first-pass furniture item exactly: same position, scale, color, material, silhouette, and lighting.\n"
+            "2. Do NOT move, delete, resize, recolor, replace, or simplify any existing furniture already visible in the input.\n"
+            "3. Add only the newly listed detail/decor items from the reference images. If an item cannot be placed cleanly, omit it rather than changing the room.\n"
+            "4. Treat this as a localized edit pass, not a new room generation.\n\n"
+            if is_pass2_additive_edit
+            else (
+                "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
+                "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
+            )
+        )
+        listed_items_rule = (
+            "6. **ONLY NEW LISTED DETAIL ITEMS:** Add every listed secondary detail item exactly the requested quantity where it can be placed cleanly. Do NOT add unlisted new decor or generic substitutes. Keep all existing first-pass furniture visible even though it is not listed in this pass.\n"
+            if is_pass2_additive_edit
+            else "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
+        )
+
         user_original_prompt = (
-            "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
-            "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
+            f"{task_intro}"
             "<CRITICAL: ARCHITECTURAL FREEZE (PRIORITY #1)>\n"
             "1. **DO NOT RE-GENERATE THE ROOM:** The walls, ceiling, floor pattern, and any visible openings/views must remain 100% IDENTICAL to the input image.\n"
             "2. **PERSPECTIVE LOCK:** You must use the EXACT same camera angle and perspective. Do not zoom in, do not zoom out.\n"
@@ -1660,7 +1689,7 @@ def generate_furnished_room(
             )
             +
             "5. **STYLE:** Match the intended style implied by the provided furniture items.\n"
-            "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
+            f"{listed_items_rule}"
             f"{window_context}"
             f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and SIZE HIERARCHY. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest movable furniture reference (EXCLUDING rugs/carpets when possible).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and item-to-room ratio guidance. Do not ignore them.\n"
@@ -1751,12 +1780,12 @@ def generate_furnished_room(
             prompt_override: str | None = None,
             reference_override: list | None = None,
             room_image_override=None,
-            room_label: str = "Empty Room (Target Canvas - KEEP THIS):",
+            room_label: str | None = None,
         ):
             prompt = prompt_override if prompt_override is not None else base_prompt + repair_focus_context
             image = room_image_override if room_image_override is not None else room_img
             refs = reference_override if reference_override is not None else reference_content
-            return [prompt, room_label, image, *list(refs or [])]
+            return [prompt, room_label or room_input_label, image, *list(refs or [])]
 
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):

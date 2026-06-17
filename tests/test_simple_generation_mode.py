@@ -6,6 +6,7 @@ from application.render.geometry_contract_stage import build_geometry_contract
 from application.render.room_dimension_estimation_stage import estimate_room_dims_contract
 from application.render.render_room_workflow import (
     _build_simple_generation_specs,
+    _split_generation_specs_for_render_passes,
     _polish_selected_best_result,
     run_render_room_workflow,
 )
@@ -101,6 +102,54 @@ def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata()
     assert simple["two_pass_strategy"] == {"pass1_primary_keys": ["chair-1"]}
     assert simple["size_hierarchy_scale"] == ["Chair"]
     assert simple["primary"]["target_key"] == "chair-1"
+
+
+def test_split_generation_specs_keeps_core_items_in_pass1_and_details_in_pass2():
+    specs = {
+        "items": [
+            {
+                "target_key": "sofa-1",
+                "label": "Sofa",
+                "category": "sofa",
+                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
+                "two_pass_strategy": {"pass_role": "pass1_anchor"},
+            },
+            {
+                "target_key": "chair-1",
+                "label": "Lounge Chair",
+                "category": "lounge_chair",
+                "dims_mm": {"width_mm": 760, "depth_mm": 820, "height_mm": 780},
+                "two_pass_strategy": {"pass_role": "pass1_footprint"},
+            },
+            {
+                "target_key": "lamp-1",
+                "label": "Small Table Lamp",
+                "category": "table_lamp",
+                "dims_mm": {"width_mm": 240, "depth_mm": 240, "height_mm": 430},
+                "two_pass_strategy": {"pass_role": "pass2_small"},
+            },
+            {
+                "target_key": "art-1",
+                "label": "Framed Artwork",
+                "category": "artwork",
+                "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                "two_pass_strategy": {"pass_role": "pass2_wall"},
+            },
+        ],
+        "primary_scale": {"target_key": "sofa-1"},
+        "two_pass_strategy": {
+            "pass1_primary_keys": ["sofa-1"],
+            "pass1_support_keys": ["chair-1"],
+            "pass2_detail_keys": ["lamp-1", "art-1"],
+        },
+    }
+
+    pass1_specs, pass2_specs = _split_generation_specs_for_render_passes(specs)
+
+    assert [item["target_key"] for item in pass1_specs["items"]] == ["sofa-1", "chair-1"]
+    assert [item["target_key"] for item in pass2_specs["items"]] == ["lamp-1", "art-1"]
+    assert pass2_specs["render_pass_mode"] == "pass2_additive_edit"
+    assert pass2_specs["primary"]["target_key"] == "sofa-1"
 
 
 def test_polish_selected_best_result_keeps_selected_candidate_when_polish_fails():

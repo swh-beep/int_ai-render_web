@@ -234,6 +234,90 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
             output_path.unlink()
 
 
+def test_generate_furnished_room_pass2_prompt_preserves_first_pass_scene(tmp_path, monkeypatch):
+    room_path = tmp_path / "furnished-room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    ref_path = tmp_path / "art-ref.png"
+    ref_path.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 2500.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("content", content)
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the finished room quiet and refined."},
+        str(ref_path),
+        "prompt-pass2",
+        furniture_specs_json={
+            "render_pass_mode": "pass2_additive_edit",
+            "items": [
+                {
+                    "target_key": "art-1",
+                    "label": "Framed Artwork",
+                    "category": "artwork",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                    "requested_dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                    "crop_path": str(ref_path),
+                    "identity_profile": {"family": "artwork", "absolute_size_class": "small"},
+                    "product_identity": {"family": "artwork"},
+                    "placement_contract": {"zone": "wall_art_band"},
+                }
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Existing Sofa"},
+        },
+        room_dimensions="4000x4000x2400",
+        primary_item={"target_key": "sofa-1", "label": "Existing Sofa"},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=2500.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        assert captured["content"][1] == "Furnished Room (Pass 1 Result - PRESERVE THIS):"
+        assert "Second-pass Additive Edit" in prompt
+        assert "Preserve every existing first-pass furniture item exactly" in prompt
+        assert "Do NOT move, delete, resize, recolor, replace, or simplify" in prompt
+        assert "Add only the newly listed detail/decor items" in prompt
+        assert "ONLY NEW LISTED DETAIL ITEMS" in prompt
+        assert "Keep all existing first-pass furniture visible even though it is not listed in this pass." in prompt
+        assert "existing empty room image" not in prompt.split("<CRITICAL: ARCHITECTURAL FREEZE", 1)[0]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_furnished_room_includes_small_item_guardrails_and_external_room_inference(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))

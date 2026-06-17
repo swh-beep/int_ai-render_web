@@ -347,8 +347,20 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "placement_contract",
     "identity_confidence",
     "identity_strictness",
+    "pass_role",
+    "strategy_priority",
     "two_pass_strategy",
 )
+
+_PASS2_RENDER_ROLES = {
+    "pass2_wall",
+    "pass2_support_sensitive",
+    "pass2_small",
+    "pass2_floor_secondary",
+    "pass2_decor",
+    "pass2_detail",
+}
+_MAX_PASS1_RENDER_ITEMS = 10
 
 
 def _build_main_prompt_item_payload(src: dict | None) -> dict:
@@ -407,6 +419,68 @@ def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | 
         simple_payload["two_pass_strategy"] = _copy_prompt_payload_value(furniture_specs_json.get("two_pass_strategy"))
 
     return simple_payload
+
+
+def _item_target_key(item: dict | None) -> str:
+    return str((item or {}).get("target_key") or "").strip()
+
+
+def _item_pass_role(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    role = str(item.get("pass_role") or "").strip().lower()
+    if role:
+        return role
+    strategy = item.get("two_pass_strategy") if isinstance(item.get("two_pass_strategy"), dict) else {}
+    return str((strategy or {}).get("pass_role") or "").strip().lower()
+
+
+def _split_generation_specs_for_render_passes(furniture_specs_json: dict | None) -> tuple[dict | None, dict | None]:
+    simple_payload = _build_simple_generation_specs(furniture_specs_json)
+    if not isinstance(simple_payload, dict):
+        return simple_payload, None
+
+    items = [item for item in (simple_payload.get("items") or []) if isinstance(item, dict)]
+    if not items:
+        return simple_payload, None
+
+    two_pass_summary = simple_payload.get("two_pass_strategy") if isinstance(simple_payload.get("two_pass_strategy"), dict) else {}
+    pass2_keys = {
+        str(key or "").strip()
+        for key in (two_pass_summary or {}).get("pass2_detail_keys") or []
+        if str(key or "").strip()
+    }
+
+    pass1_items: list[dict] = []
+    pass2_items: list[dict] = []
+    for item in items:
+        item_key = _item_target_key(item)
+        role = _item_pass_role(item)
+        if role in _PASS2_RENDER_ROLES or (item_key and item_key in pass2_keys):
+            pass2_items.append(item)
+        else:
+            pass1_items.append(item)
+
+    if not pass1_items and pass2_items:
+        pass1_items.append(pass2_items.pop(0))
+    if len(pass1_items) > _MAX_PASS1_RENDER_ITEMS:
+        pass2_items = pass1_items[_MAX_PASS1_RENDER_ITEMS:] + pass2_items
+        pass1_items = pass1_items[:_MAX_PASS1_RENDER_ITEMS]
+
+    pass1_payload = dict(simple_payload)
+    pass1_payload["items"] = [dict(item) for item in pass1_items]
+
+    if not pass2_items:
+        return pass1_payload, None
+
+    pass2_payload = dict(simple_payload)
+    pass2_payload["items"] = [dict(item) for item in pass2_items]
+    pass2_payload["render_pass_mode"] = "pass2_additive_edit"
+    pass2_payload["pass2_source_pass1_item_count"] = len(pass1_items)
+    pass2_payload["pass2_additive_instruction"] = (
+        "Preserve the already furnished room exactly and add only these secondary detail items."
+    )
+    return pass1_payload, pass2_payload
 
 
 def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> str | None:
@@ -1219,7 +1293,7 @@ def run_render_room_workflow(
         ref_input = ref_paths if len(ref_paths) > 1 else (ref_paths[0] if ref_paths else None)
         resolved_style_prompt = _resolve_style_prompt(deps.runtime.style_map, request.style)
         deps.runtime.log_section("[Stage 2] unified main generation start (best-of-3)")
-        generation_specs_json = _build_simple_generation_specs(furniture_specs_json)
+        generation_specs_json, pass2_generation_specs_json = _split_generation_specs_for_render_passes(furniture_specs_json)
         generation_specs_text = _build_compact_generation_specs_text(generation_specs_json) or furniture_specs_text
         primary_item = _hydrate_item_dims(
             primary_item,
@@ -1347,6 +1421,62 @@ def run_render_room_workflow(
                 polish_main_image=deps.generation.polish_main_image,
                 logger=deps.runtime.logger,
             )
+            if pass2_generation_specs_json and generated_results:
+                deps.runtime.log_section("[Stage 2B] additive detail generation start (pass2)")
+                pass2_specs_text = _build_compact_generation_specs_text(pass2_generation_specs_json)
+                pass2_placement = "\n".join(
+                    part
+                    for part in (
+                        str(request.placement or "").strip(),
+                        "SECOND PASS ADDITIVE EDIT: preserve the current furnished room, architecture, camera, lighting, and all first-pass furniture exactly. Add only the listed secondary decor/detail items. Do not move, remove, resize, recolor, or replace existing furniture.",
+                    )
+                    if part
+                )
+                pass2_results = run_render_variant_stage(
+                    step1_img=generated_results[0],
+                    style_prompt=resolved_style_prompt,
+                    ref_input=ref_input,
+                    unique_id=f"{unique_id}_p2",
+                    furniture_specs_text=pass2_specs_text,
+                    furniture_specs_json=pass2_generation_specs_json,
+                    dimensions=generation_dimensions,
+                    placement=pass2_placement,
+                    scale_guide_path=scale_guide_path,
+                    primary_item=primary_item,
+                    room_dims_parsed=room_dims_parsed,
+                    wall_span_norm=wall_span_norm,
+                    size_hierarchy=size_hierarchy,
+                    scale_plan=scale_plan_dict,
+                    geometry_contract=geometry_contract_dict,
+                    scene_contract=scene_contract_dict,
+                    placement_plan=placement_plan_dict,
+                    start_time=start_time,
+                    room_planes=room_planes,
+                    windows_present=windows_present,
+                    room_analysis_text=room_analysis_text,
+                    enable_scale_check=False,
+                    generate_furnished_room=deps.generation.generate_furnished_room,
+                    max_variants=1,
+                    max_workers=1,
+                    max_generation_attempts=1,
+                    start_index=20,
+                )
+                pass2_paths = [
+                    str((row or {}).get("path") or "")
+                    for row in pass2_results or []
+                    if isinstance(row, dict) and (row or {}).get("path")
+                ]
+                if pass2_paths:
+                    generated_results, selected_result_reason = _polish_selected_best_result(
+                        pass2_paths,
+                        audience=aud,
+                        unique_id=f"{unique_id}_p2",
+                        selected_result_reason="pass2_additive_edit",
+                        polish_main_image=deps.generation.polish_main_image,
+                        logger=deps.runtime.logger,
+                    )
+                    selected_result_index = 0
+                    selected_result_reason = f"{selected_result_reason}_after_pass2"
         if selected_variant_review:
             full_analyzed_data = _apply_selected_review_boxes_to_analyzed_items(
                 full_analyzed_data,

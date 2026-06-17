@@ -38,6 +38,18 @@ def test_should_extract_reference_features_marks_decor_for_identity_extraction()
     assert reason == "decor_reference_identity_object"
 
 
+def test_should_extract_reference_features_marks_general_items_for_identity_extraction():
+    should_extract, reason = should_extract_reference_features(
+        label="Floor Speaker",
+        category="speaker",
+        category_canonical="speaker",
+        dims_mm={"width_mm": 320, "depth_mm": 340, "height_mm": 980},
+    )
+
+    assert should_extract is True
+    assert reason == "general_reference_identity_object"
+
+
 def test_extract_reference_features_can_force_fallback_without_model_call(tmp_path):
     crop_path = tmp_path / "crop.png"
     _write_png(crop_path)
@@ -62,6 +74,93 @@ def test_extract_reference_features_can_force_fallback_without_model_call(tmp_pa
 
     assert call_count["count"] == 0
     assert result["reflective_surface"] is False
+
+
+def test_extract_reference_features_retries_same_prompt_until_specific_features(tmp_path):
+    crop_path = tmp_path / "crop.png"
+    _write_png(crop_path)
+    prompts = []
+    responses = iter(
+        [
+            {
+                "silhouette_cues": ["lamp"],
+                "material_cues": ["metal"],
+                "distinctive_parts": [],
+                "preserve_rules": [],
+                "reflective_surface": False,
+            },
+            {
+                "silhouette_cues": ["flat mushroom shade", "thin offset stem"],
+                "material_cues": ["brushed metal", "opal diffuser"],
+                "distinctive_parts": ["single disc shade", "small round base"],
+                "preserve_rules": ["preserve the off-center stem", "keep the low disc shade"],
+                "reflective_surface": False,
+            },
+        ]
+    )
+
+    def _call_model(_model, content, *_args, **_kwargs):
+        prompts.append(content[0])
+        return SimpleNamespace(text=json.dumps(next(responses)))
+
+    result = extract_reference_features(
+        crop_path=str(crop_path),
+        label="Table Lamp",
+        category="table_lamp",
+        description="Small table lamp.",
+        dims_mm={"width_mm": 260, "depth_mm": 260, "height_mm": 420},
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_json_from_model_text=lambda text: json.loads(text),
+        log_brief=True,
+        allow_model_call=True,
+        extraction_reason="light_fixture_identity_object",
+    )
+
+    assert len(prompts) == 2
+    assert prompts[0] == prompts[1]
+    assert result["distinctive_parts"] == ["single disc shade", "small round base"]
+    assert result["analysis_attempts"] == 2
+    assert result["analysis_retry_count"] == 1
+    assert result["analysis_quality"] == "model_sufficient"
+
+
+def test_extract_reference_features_falls_back_after_three_weak_attempts(tmp_path):
+    crop_path = tmp_path / "crop.png"
+    _write_png(crop_path)
+    call_count = {"count": 0}
+
+    def _call_model(*_args, **_kwargs):
+        call_count["count"] += 1
+        return SimpleNamespace(
+            text=json.dumps(
+                {
+                    "silhouette_cues": ["chair"],
+                    "material_cues": [],
+                    "distinctive_parts": [],
+                    "preserve_rules": [],
+                    "reflective_surface": False,
+                }
+            )
+        )
+
+    result = extract_reference_features(
+        crop_path=str(crop_path),
+        label="Dining Chair",
+        category="chair",
+        description="A chair.",
+        dims_mm={"width_mm": 460, "depth_mm": 520, "height_mm": 790},
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_json_from_model_text=lambda text: json.loads(text),
+        log_brief=True,
+        allow_model_call=True,
+        extraction_reason="topology_sensitive_seating",
+    )
+
+    assert call_count["count"] == 3
+    assert result["analysis_attempts"] == 3
+    assert result["analysis_quality"] == "fallback_after_weak_model"
 
 
 def test_analyze_cropped_item_uses_fallback_reference_features_for_noncritical_item(monkeypatch, tmp_path):
