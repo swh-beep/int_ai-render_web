@@ -376,6 +376,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         focused_call = self.generated_call_kwargs[-1]
         self.assertIn("FOCUSED PASS2 IDENTITY REPAIR", focused_call["placement_instructions"])
         self.assertIn("generic same-family substitute is invalid", focused_call["placement_instructions"])
+        self.assertIn("Replace or remove wrong same-family substitutes", focused_call["placement_instructions"])
+        self.assertIn("Do not create a second copy", focused_call["placement_instructions"])
         self.assertIn("topology=stacked layered shade profile, parallel horizontal discs", focused_call["furniture_specs"])
         self.assertIn("parts=visible vertical rods", focused_call["furniture_specs"])
         layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")

@@ -1720,7 +1720,7 @@ def run_render_room_workflow(
                             part
                             for part in (
                                 pass2_placement,
-                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Add these missing items only, preserving all existing furniture and camera exactly. A generic same-family substitute is invalid; the visible topology, distinctive parts, and materials must match the product reference.",
+                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Replace or remove wrong same-family substitutes before adding the exact product-backed item, preserving all correct existing furniture and camera exactly. A generic same-family substitute is invalid; the visible topology, distinctive parts, and materials must match the product reference. Do not create a second copy of a product when a wrong generic lamp, table, decor, or object is occupying that item's intended surface/zone; replace that wrong substitute with the exact reference instead.",
                             )
                             if part
                         )

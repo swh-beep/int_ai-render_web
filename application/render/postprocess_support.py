@@ -85,6 +85,8 @@ _CATEGORY_FAMILY_MAP = {
     "lounge_seating": "lounge_seating",
 }
 
+_KNOWN_FAMILY_VALUES = set(_CATEGORY_FAMILY_MAP.values())
+
 _SENSITIVE_REMAP_FAMILIES = {
     "mirror",
     "storage",
@@ -351,11 +353,24 @@ def _normalized_family_value(value: Any) -> str:
     raw_key = raw.strip().lower().replace(" ", "_").replace("-", "_")
     if raw_key in _CATEGORY_FAMILY_MAP:
         return _CATEGORY_FAMILY_MAP.get(raw_key, raw_key)
-    if raw_key in set(_CATEGORY_FAMILY_MAP.values()):
+    if raw_key in _KNOWN_FAMILY_VALUES:
         return raw_key
     matched = category_match_family(raw)
     candidate = str(matched or raw).strip().lower()
     return _CATEGORY_FAMILY_MAP.get(candidate, candidate)
+
+
+def _normalized_known_family_value(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw_key = raw.strip().lower().replace(" ", "_").replace("-", "_")
+    if raw_key in _CATEGORY_FAMILY_MAP:
+        return _CATEGORY_FAMILY_MAP.get(raw_key, raw_key)
+    if raw_key in set(_CATEGORY_FAMILY_MAP.values()):
+        return raw_key
+    matched = category_match_family(raw)
+    return _CATEGORY_FAMILY_MAP.get(matched, matched) if matched else ""
 
 
 def _storage_signal_text(item: dict) -> str:
@@ -420,7 +435,7 @@ def resolve_item_family(item: dict | None, *, default: str = "") -> str:
         item.get("label"),
         item.get("name"),
     ]
-    resolved = [_normalized_family_value(value) for value in candidates]
+    resolved = [_normalized_known_family_value(value) for value in candidates]
     first_non_generic = next((family for family in resolved if family and family not in _GENERIC_FAMILY_VALUES), "")
     first_generic = next((family for family in resolved if family in _GENERIC_FAMILY_VALUES and family), "")
 

@@ -3,7 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
-from application.render.postprocess_support import canonical_category, category_match_family, refresh_item_boxes_from_main_render
+from application.render.postprocess_support import canonical_category, category_match_family, refresh_item_boxes_from_main_render, resolve_item_family
 from application.render.render_postprocess_stage import run_render_postprocess_stage
 
 
@@ -235,6 +235,28 @@ class RenderPostprocessTests(unittest.TestCase):
     def test_category_resolver_promotes_decor_shelving_identity_to_storage(self):
         self.assertEqual(category_match_family("decor 몬타나 프리 333000 four-tier shelving grid"), "storage")
         self.assertEqual(category_match_family("decor 수납·선반장 > 일반수납장"), "storage")
+
+    def test_resolve_item_family_prefers_decor_category_over_generic_ai_label_family(self):
+        item = {
+            "label": "AI design image",
+            "category": "decor",
+            "category_canonical": "decor",
+            "product_identity": {
+                "family": "ai design image",
+                "topology_cues": [
+                    "Left smoky amber glass bell jar",
+                    "Right textured black ceramic vessel",
+                ],
+            },
+            "reference_features": {
+                "distinctive_parts": [
+                    "Amber glass bell jar with spherical knob",
+                    "Textured black ceramic vessel",
+                ],
+            },
+        }
+
+        self.assertEqual(resolve_item_family(item), "decor")
 
     def test_run_render_postprocess_stage_external_keeps_best_only_and_attaches_volume(self):
         generated_path = self.tmp_root / "candidate-c.png"
