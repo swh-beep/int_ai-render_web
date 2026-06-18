@@ -2423,6 +2423,12 @@ def generate_furnished_room(
                     },
                 }
 
+        def _is_lighting_validation_failure(issues: list[str] | None, diagnostics: dict | None) -> bool:
+            rules = set(_extract_failed_rule_ids(issues))
+            if isinstance(diagnostics, dict):
+                rules.update(str(rule) for rule in (diagnostics.get("failed_rules") or []) if str(rule).strip())
+            return bool(rules.intersection({"lighting_fixture_drift", "lampshade_color_drift"}))
+
         def _attempt_localized_repair(base_render_path: str, diagnostics: dict | None, repair_plan: dict | None = None):
             targets = _collect_repair_targets(
                 diagnostics,
@@ -2573,6 +2579,98 @@ def generate_furnished_room(
                     except Exception:
                         pass
 
+        def _attempt_lighting_drift_repair(base_render_path: str, diagnostics: dict | None):
+            if not (
+                base_render_path
+                and os.path.exists(base_render_path)
+                and callable(repair_call)
+                and resolved_repair_model
+                and _is_lighting_validation_failure([], diagnostics)
+            ):
+                return None
+            opened = []
+            try:
+                current_timeout = _bounded_stage2_timeout(repair=True)
+                if current_timeout <= 0.0:
+                    return None
+                base_img = Image.open(base_render_path)
+                source_img = Image.open(room_path)
+                opened.extend([base_img, source_img])
+                failed_rules = ", ".join(str(rule) for rule in (diagnostics or {}).get("failed_rules") or [])
+                reason = ""
+                review_payload = (diagnostics or {}).get("lighting_review") if isinstance(diagnostics, dict) else {}
+                if isinstance(review_payload, dict):
+                    reason = str(review_payload.get("reason") or "").strip()
+                content = [
+                    (
+                        "LIGHTING DRIFT REPAIR TASK.\n"
+                        "Edit the CURRENT CANDIDATE IMAGE only. This is a constrained cleanup, not a redraw.\n"
+                        "The previous candidate violated the lighting intent boundary by adding unlisted lighting geometry.\n"
+                        + (f"Failed rules: {failed_rules}\n" if failed_rules else "")
+                        + (f"Reviewer reason: {reason}\n" if reason else "")
+                        + "\nRemove or paint out only newly invented wall sconces, pendant lights, ceiling fixtures, recessed/down lights, cove lights, indirect ceiling trough lights, LED strips, glowing panels, extra bulbs, or extra lamps that are not visible in the source room and not listed product fixtures.\n"
+                        "Restore the affected ceiling/wall/window-edge surfaces to match the source room architecture and material continuity.\n"
+                        "Keep the night/lighting mood using only ambient exposure, darker windows, existing visible fixtures, and listed product lamps.\n"
+                        "Do not remove, move, resize, recolor, restyle, or replace any furniture, decor, rug, art, plant, electronics, or listed product lamp.\n"
+                        "Do not recolor opaque/fabric lampshades, diffusers, bases, stems, or fixture bodies; warm light affects emitted light only.\n"
+                        "Preserve camera framing, room geometry, product identities, material textures, and all valid shadows.\n"
+                        "Return a single clean 16:9 interior photograph."
+                    ),
+                    "CURRENT CANDIDATE IMAGE (edit this image only):",
+                    base_img,
+                    "SOURCE ROOM / PREVIOUS PASS REFERENCE (allowed existing fixtures and architecture):",
+                    source_img,
+                ]
+                light_ref_count = 0
+                if isinstance(furniture_specs_json, dict):
+                    for item in furniture_specs_json.get("items") or []:
+                        if light_ref_count >= 8 or not _item_is_light_fixture(item):
+                            continue
+                        crop_path = str((item or {}).get("crop_path") or "").strip()
+                        if not crop_path or not os.path.exists(crop_path):
+                            continue
+                        ref_img = Image.open(crop_path)
+                        try:
+                            ref_img.thumbnail((384, 384), Image.Resampling.LANCZOS)
+                        except Exception:
+                            pass
+                        opened.append(ref_img)
+                        light_ref_count += 1
+                        content.extend(
+                            [
+                                f"Allowed listed light fixture reference #{light_ref_count}: {(item or {}).get('label') or 'light'}",
+                                ref_img,
+                            ]
+                        )
+                request_options = {
+                    "timeout": current_timeout,
+                    "aspect_ratio": "16:9",
+                    "thinking_level": "high",
+                    "include_thoughts": False,
+                    "max_attempts": 1,
+                }
+                response = repair_call(
+                    resolved_repair_model,
+                    content,
+                    request_options,
+                    safety_settings,
+                    system_instruction,
+                    log_tag="Stage2.LightingDriftRepair",
+                )
+                return _save_render_from_response(response, prefix="repair_lighting")
+            except Exception as exc:
+                if log_brief:
+                    print(f"[LightingRepair] skipped: {exc}", flush=True)
+                else:
+                    logger.warning(f"[LightingRepair] skipped: {exc}")
+                return None
+            finally:
+                for image in opened:
+                    try:
+                        image.close()
+                    except Exception:
+                        pass
+
         def _build_result(path: str | None):
             if not path:
                 return None
@@ -2647,6 +2745,31 @@ def generate_furnished_room(
                     and not deadline_budget_exhausted
                 )
                 if can_try_repair:
+                    if _is_lighting_validation_failure(scalecheck_issues, scalecheck_diagnostics):
+                        lighting_repair_path = _attempt_lighting_drift_repair(last_path, scalecheck_diagnostics)
+                        if lighting_repair_path:
+                            repair_attempt_count += 1
+                            repair_applied = True
+                            repair_target_keys = []
+                            repair_target_labels = ["lighting_fixture_drift"]
+                            repaired_validation = _validate_candidate(lighting_repair_path)
+                            if repaired_validation["ok"]:
+                                scale_check_failed = False
+                                scalecheck_issues = []
+                                scalecheck_diagnostics = dict(repaired_validation["diagnostics"] or {})
+                                last_success_path = lighting_repair_path
+                                last_path = lighting_repair_path
+                                repair_focus_context = ""
+                                return _build_result(lighting_repair_path)
+                            scalecheck_issues = list(repaired_validation["issues"] or scalecheck_issues)
+                            scalecheck_diagnostics = dict(repaired_validation["diagnostics"] or scalecheck_diagnostics)
+                            structured_rules = _merge_rule_ids(
+                                list((scalecheck_diagnostics or {}).get("failed_rules") or []),
+                                _extract_failed_rule_ids(scalecheck_issues),
+                            )
+                            if structured_rules and not set(structured_rules).issubset({"validation_exception", "scale_validation_exception"}):
+                                last_structured_failed_rules = list(structured_rules)
+
                     repair_plan = build_repair_strategy_plan(scalecheck_diagnostics, furniture_specs_json, limit=3)
                     repair_path, repair_targets = _attempt_localized_repair(last_path, scalecheck_diagnostics, repair_plan)
                     if repair_path:

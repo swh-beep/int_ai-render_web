@@ -1619,7 +1619,7 @@ def test_generate_furnished_room_keeps_topology_cues_in_compact_cards(tmp_path, 
             output_path.unlink()
 
 
-def test_generate_furnished_room_retries_when_lighting_review_finds_new_fixture(tmp_path, monkeypatch):
+def test_generate_furnished_room_repairs_when_lighting_review_finds_new_fixture(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     ref_path = tmp_path / "lamp.png"
@@ -1630,6 +1630,7 @@ def test_generate_furnished_room_retries_when_lighting_review_finds_new_fixture(
     monkeypatch.setattr(generation_stage.time, "time", lambda: 6600.0)
 
     generation_calls = []
+    repair_calls = []
     review_calls = []
     review_responses = iter(
         [
@@ -1647,6 +1648,10 @@ def test_generate_furnished_room_retries_when_lighting_review_finds_new_fixture(
     def fake_lighting_review(model_name, content, *args, **kwargs):
         review_calls.append({"model_name": model_name, "content": content})
         return next(review_responses)
+
+    def fake_repair(model_name, content, *args, **kwargs):
+        repair_calls.append(content)
+        return _response()
 
     result = generate_furnished_room(
         str(room_path),
@@ -1697,7 +1702,7 @@ def test_generate_furnished_room_retries_when_lighting_review_finds_new_fixture(
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        call_repair_with_failover=fake_repair,
         repair_model_name="repair-model",
         call_lighting_review_with_failover=fake_lighting_review,
         lighting_review_model_name="review-model",
@@ -1707,13 +1712,16 @@ def test_generate_furnished_room_retries_when_lighting_review_finds_new_fixture(
 
     output_path = Path(result["path"])
     try:
-        assert len(generation_calls) == 2
+        assert len(generation_calls) == 1
+        assert len(repair_calls) == 1
         assert len(review_calls) == 2
         assert review_calls[0]["model_name"] == "review-model"
         assert "new wall, ceiling, pendant, sconce, LED strip" in review_calls[0]["content"][0]
+        assert "LIGHTING DRIFT REPAIR TASK" in repair_calls[0][0]
         assert result["scalecheck_fail_count"] == 1
-        assert result["scalecheck_retry_count"] == 1
+        assert result["scalecheck_retry_count"] == 0
         assert result["scale_check_failed"] is False
+        assert result["repair_applied"] is True
         assert output_path.exists()
     finally:
         if output_path.exists():
