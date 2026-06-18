@@ -198,10 +198,13 @@ _LIGHTING_INTENT_PATTERNS = (
     "불 켜",
     "불켜",
     "켜줘",
-    "켜달",
+    "켜 줘",
     "밤",
     "야간",
+    "어두운",
     "따뜻한 조명",
+    "밝고 화사",
+    "켜달",
     "따뜻하고",
     "아늑",
     "화사",
@@ -2761,6 +2764,28 @@ def generate_furnished_room(
                                 last_path = lighting_repair_path
                                 repair_focus_context = ""
                                 return _build_result(lighting_repair_path)
+                            if not _is_lighting_validation_failure(
+                                repaired_validation["issues"],
+                                repaired_validation["diagnostics"],
+                            ):
+                                last_success_path = lighting_repair_path
+                                last_path = lighting_repair_path
+                                repaired_failed_rules = _merge_rule_ids(
+                                    list(((repaired_validation.get("diagnostics") or {}).get("failed_rules") or [])),
+                                    _extract_failed_rule_ids(repaired_validation.get("issues") or []),
+                                )
+                                if set(repaired_failed_rules).issubset(
+                                    {
+                                        "strict_scale_contract_not_ready",
+                                        "validation_exception",
+                                        "scale_validation_exception",
+                                    }
+                                ):
+                                    scalecheck_issues = list(repaired_validation["issues"] or scalecheck_issues)
+                                    scalecheck_diagnostics = dict(repaired_validation["diagnostics"] or scalecheck_diagnostics)
+                                    if repaired_failed_rules:
+                                        last_structured_failed_rules = list(repaired_failed_rules)
+                                    return _build_result(lighting_repair_path)
                             scalecheck_issues = list(repaired_validation["issues"] or scalecheck_issues)
                             scalecheck_diagnostics = dict(repaired_validation["diagnostics"] or scalecheck_diagnostics)
                             structured_rules = _merge_rule_ids(

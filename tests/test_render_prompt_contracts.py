@@ -1726,3 +1726,101 @@ def test_generate_furnished_room_repairs_when_lighting_review_finds_new_fixture(
     finally:
         if output_path.exists():
             output_path.unlink()
+
+
+def test_generate_furnished_room_prefers_lighting_repair_over_original_when_only_scale_check_remains(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    ref_path = tmp_path / "lamp.png"
+    ref_path.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 6600.0)
+
+    review_responses = iter(
+        [
+            SimpleNamespace(
+                text='{"has_new_unlisted_light_fixture": true, "confidence": 0.91, "reason": "new recessed lights"}'
+            ),
+            SimpleNamespace(
+                text='{"has_new_unlisted_light_fixture": false, "confidence": 0.88, "reason": "new lighting removed"}'
+            ),
+        ]
+    )
+    repair_calls = []
+
+    def fake_lighting_review(model_name, content, *args, **kwargs):
+        return next(review_responses)
+
+    def fake_repair(model_name, content, *args, **kwargs):
+        repair_calls.append(content)
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep product colors exact."},
+        str(ref_path),
+        "prompt-contract-lighting-repair-fallback",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "lamp-1",
+                    "label": "Fabric Shade Floor Lamp",
+                    "category": "floor_lamp",
+                    "category_canonical": "floor_lamp",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
+                    "requested_dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
+                    "crop_path": str(ref_path),
+                    "identity_profile": {"family": "floor_lamp"},
+                    "product_identity": {"family": "floor_lamp"},
+                }
+            ],
+            "primary_scale": {"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
+        },
+        room_dimensions="4200x3600x2500",
+        placement_instructions="어두운 밤이고, 조명만 켜줘",
+        primary_item={"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
+        room_dims_parsed={"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": True},
+        geometry_contract={},
+        start_time=6600.0,
+        enable_scale_check=True,
+        max_generation_attempts=1,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=lambda *args, **kwargs: _response(),
+        generation_model_name="model",
+        call_repair_with_failover=fake_repair,
+        repair_model_name="repair-model",
+        call_lighting_review_with_failover=fake_lighting_review,
+        lighting_review_model_name="review-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (
+            False,
+            ["strict_scale_contract_not_ready"],
+            {"failed_rules": ["strict_scale_contract_not_ready"], "matched_items": {}, "unmatched_items": [], "rule_details": {}},
+        ),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert repair_calls
+        assert output_path.name.startswith("repair_lighting_")
+        assert result["scale_check_failed"] is True
+        assert result["scalecheck_failed_rules"] == ["strict_scale_contract_not_ready"]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
