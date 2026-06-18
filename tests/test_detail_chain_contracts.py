@@ -1103,7 +1103,7 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
 
-def test_external_generate_details_job_keeps_only_simple_detail_targets(tmp_path):
+def test_external_generate_details_job_uses_model_generation_for_detail_targets(tmp_path):
     image_path = tmp_path / "detail-src.png"
     image_path.write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
@@ -1146,7 +1146,7 @@ def test_external_generate_details_job_keeps_only_simple_detail_targets(tmp_path
 
     assert [row["style_name"] for row in result["details"]] == ["Detail: Accent Chair"]
     assert recorded_styles[1].get("simple_scene_detail") is True
-    assert recorded_crop_preferences == {1: True}
+    assert recorded_crop_preferences == {1: False}
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):
