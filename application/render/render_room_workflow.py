@@ -1626,14 +1626,6 @@ def run_render_room_workflow(
         if not strict_final_result_blocked:
             if aud == "external":
                 generated_results = list(generated_results[:1])
-            generated_results, selected_result_reason = _polish_selected_best_result(
-                generated_results,
-                audience=aud,
-                unique_id=unique_id,
-                selected_result_reason=selected_result_reason,
-                polish_main_image=deps.generation.polish_main_image,
-                logger=deps.runtime.logger,
-            )
             if pass2_generation_specs_json and generated_results:
                 deps.runtime.log_section("[Stage 2B] additive detail generation start (pass2)")
                 pass2_specs_text = _build_compact_generation_specs_text(pass2_generation_specs_json)

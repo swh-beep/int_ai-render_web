@@ -224,7 +224,8 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "Preserve real material texture and tactile surface detail" in prompt
         assert "leather grain, fabric weave, wood grain, glass reflections, and metal highlights" in prompt
         assert "Avoid clay-like, waxy, plastic, CGI, overly smooth, or over-airbrushed furniture surfaces." in prompt
-        assert "Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color." in prompt
+        assert "Natural neutral white balance by default." in prompt
+        assert "apply warmth to emitted light and overall ambiance only; preserve all product material colors." in prompt
         assert "**NO warm/yellow cast.**" not in prompt
         assert "OPENING LOCK" in prompt
         assert "AXIS ALIGNMENT" in prompt
@@ -1442,6 +1443,93 @@ def test_generate_furnished_room_keeps_tiny_surface_items_out_of_primary_locks(t
         assert "Lounge Sofa" in primary_section
         assert "Mini Table Lamp" not in primary_section
         assert "Lounge Sofa, Mini Table Lamp" not in prompt
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_bounds_user_lighting_requests_to_emission_not_fixture_or_shade(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    lamp_ref = tmp_path / "lamp.png"
+    lamp_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 6400.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["prompt"] = content[0]
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "밤이었으면해. 아늑하고 따뜻한 조명이 비치는 분위기를 연출해줘."},
+        str(lamp_ref),
+        "prompt-contract-lighting-boundary",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "lamp-1",
+                    "label": "Fabric Shade Table Lamp",
+                    "category": "table_lamp",
+                    "category_canonical": "table_lamp",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 320, "depth_mm": 320, "height_mm": 520},
+                    "requested_dims_mm": {"width_mm": 320, "depth_mm": 320, "height_mm": 520},
+                    "crop_path": str(lamp_ref),
+                    "identity_profile": {
+                        "family": "table_lamp",
+                        "material_cues": ["cream fabric shade", "black metal stem"],
+                        "distinctive_parts": ["opaque drum lampshade"],
+                    },
+                    "product_identity": {"family": "table_lamp"},
+                }
+            ],
+            "primary_scale": {"target_key": "lamp-1", "label": "Fabric Shade Table Lamp"},
+        },
+        room_dimensions="4200x3600x2500",
+        placement_instructions="조명을 켜달라. 밝고 화사하지만 따뜻한 느낌.",
+        primary_item={"target_key": "lamp-1", "label": "Fabric Shade Table Lamp"},
+        room_dims_parsed={"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=6400.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        assert "<LIGHTING INTENT BOUNDARY>" in prompt
+        assert "lighting mood instruction alone is not permission to add fixture geometry" in prompt
+        assert "Do NOT add wall sconces" in prompt
+        assert "Lampshade and diffuser color/material are product identity" in prompt
+        assert "change emitted light only" in prompt
+        assert "exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material" in prompt
+        assert "preserve_lampshade_material_color" in prompt
+        assert "light_color_changes_emission_only_not_shade" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():

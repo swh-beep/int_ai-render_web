@@ -1099,7 +1099,7 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_styles[3].get("camera_mode") == "side_angle"
     assert recorded_styles[3].get("focus_side") == "right"
     assert recorded_styles[4].get("ratio") == "4:5"
-    assert recorded_styles[4].get("simple_scene_detail") is True
+    assert "simple_scene_detail" not in recorded_styles[4]
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
 
@@ -1145,7 +1145,7 @@ def test_external_generate_details_job_uses_model_generation_for_detail_targets(
     )
 
     assert [row["style_name"] for row in result["details"]] == ["Detail: Accent Chair"]
-    assert recorded_styles[1].get("simple_scene_detail") is True
+    assert "simple_scene_detail" not in recorded_styles[1]
     assert recorded_crop_preferences == {1: False}
 
 

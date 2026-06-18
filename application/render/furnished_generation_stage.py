@@ -170,6 +170,19 @@ def _item_category_for_prompt(item: dict | None) -> str:
     return text or "unknown"
 
 
+_LIGHTING_INTENT_BOUNDARY = (
+    "\n<LIGHTING INTENT BOUNDARY>\n"
+    "User lighting requests such as 'turn on the lights', 'night', 'cozy warm lighting', 'bright and airy', or similar mood notes are scene illumination instructions only.\n"
+    "A lighting mood instruction alone is not permission to add fixture geometry.\n"
+    "Do NOT add wall sconces, pendant lights, ceiling lights, LED strips, floor lamps, table lamps, bulbs, glowing panels, or any new light fixture unless that fixture is an explicit listed product/reference item in this render pass or already exists visibly in the input room.\n"
+    "If the user asks to turn lights on, use only existing visible fixtures and listed product lamps; otherwise adjust ambient exposure, window balance, global grade, and emitted light.\n"
+    "Lampshade and diffuser color/material are product identity. For opaque or fabric shades, preserve the reference shade color/material exactly; change emitted light only.\n"
+    "Do not recolor an opaque lampshade, sconce shade, pendant shade, diffuser, base, stem, or fixture body to match warm/cool light color.\n"
+    "Allowed exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material may show light color through the material, while the underlying product color and geometry remain unchanged.\n"
+    "--------------------------------------------------\n"
+)
+
+
 def _category_prompt_guardrails(category: str) -> list[str]:
     text = str(category or "").strip().lower()
     rules: list[str] = []
@@ -178,7 +191,13 @@ def _category_prompt_guardrails(category: str) -> list[str]:
     if "rug" in text or "carpet" in text:
         rules.extend(["floor_flat", "keep_footprint_shape", "not_wall_to_wall_unless_dimensions_require"])
     if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
-        rules.extend(["preserve_light_fixture_scale", "do_not_convert_into_furniture"])
+        rules.extend([
+            "preserve_lampshade_material_color",
+            "light_color_changes_emission_only_not_shade",
+            "preserve_light_fixture_scale",
+            "do_not_convert_into_furniture",
+            "no_new_unlisted_light_fixture",
+        ])
     if "table_lamp" in text:
         rules.extend(["exact_lampshade_shape", "exact_base_and_stem_geometry", "no_generic_lamp_substitution"])
     if "chair" in text:
@@ -1745,23 +1764,24 @@ def generate_furnished_room(
             "   - Apparent height must respect the real H ratios across all items.\n"
             "5. **NO GUIDE ARTIFACTS:**\n"
             "   - Never render grid lines, measurement marks, drafting guides, fluorescent overlays, or any scale annotation in the final image.\n"
+            f"{_LIGHTING_INTENT_BOUNDARY}"
             "<CRITICAL: LIGHTING PRESERVATION (PRIORITY #1)>\n"
             "1. **KEEP EXISTING LIGHTING LOGIC:** Follow the input image's visible light sources and direction.\n"
-            "2. **EXPOSURE RULE:** Bright and airy (not dark), while preserving highlight detail (no blown-out whites).\n"
+            "2. **EXPOSURE RULE:** Default to bright and airy while preserving highlight detail. If the user explicitly requests night/cozy/warm lighting, adjust exposure and emitted light only while keeping product colors/materials unchanged.\n"
             "3. **LIGHT DIRECTION:** Keep shadows consistent with the existing key light direction.\n"
-            "4. **NO DIM ROOM:** Do NOT generate a dim, underexposed, moody, or nighttime look.\n"
-            "5. **WHITE BALANCE:** Natural neutral white balance. Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color.\n"
-            "6. **NO NEW OPENINGS:** Do not add new windows/doors or fake exterior light sources.\n\n"
+            "4. **NO UNREQUESTED NIGHT MODE:** Do NOT generate a dim, underexposed, moody, or nighttime look unless the user explicitly asks for it; even then, do not add unlisted light fixtures.\n"
+            "5. **WHITE BALANCE:** Natural neutral white balance by default. If the user explicitly requests warm/cozy lighting, apply warmth to emitted light and overall ambiance only; preserve all product material colors.\n"
+            "6. **NO NEW OPENINGS OR FIXTURES:** Do not add new windows/doors, fake exterior light sources, wall lights, sconces, pendants, LED strips, or any unlisted light fixture.\n\n"
             "<CRITICAL: PHOTOREALISTIC LIGHTING INTEGRATION (HYBRID: DAYLIGHT + ARTIFICIAL)>\n"
             "1. **LIGHTING STATE: SUBTLE SUPPORT ONLY (NEUTRAL):**\n"
-            "   - **ACTION:** Keep interior fixtures ON only if they appear in the reference; no extra fixtures.\n"
+            "   - **ACTION:** Keep interior fixtures ON only if they appear in the reference, are listed products, or already exist in the input room; no extra fixtures.\n"
             "   - **VISUALS:** Avoid visible glow/bloom halos. Lights should look realistic and restrained.\n"
             "2. **LIGHTING HIERARCHY (KEY vs. FILL):**\n"
             "   - **KEY LIGHT (DOMINANT):** Use the existing dominant light source visible in the input. Do NOT invent new openings.\n"
             "   - **FILL LIGHT (SECONDARY):** Interior lights act as gentle fill. They must NOT overpower the key light.\n"
-            "3. **STRICT COLOR TEMPERATURE CONTROL (NO YELLOW):**\n"
-            "   - **Target Temperature:** Use **Neutral White (4000K-5000K)** for any artificial lights to match daylight.\n"
-            "   - **PROHIBITED:** No warm/tungsten/orange bulbs (2700K). No vintage/sepia cast.\n"
+            "3. **STRICT COLOR TEMPERATURE CONTROL:**\n"
+            "   - **Default Temperature:** Use **Neutral White (4000K-5000K)** for artificial lights to match daylight when no user lighting mood is requested.\n"
+            "   - **Warm Mood Exception:** If the user explicitly requests warm/cozy/night lighting, warm only the emitted light and ambient grade. Do not turn fixture bodies or opaque shades yellow/orange.\n"
             "4. **SHADOW PHYSICS:**\n"
             "   - Cast soft, directional shadows driven by the existing key light direction.\n"
             "   - Use interior lights only to lift the darkest corners slightly.\n"

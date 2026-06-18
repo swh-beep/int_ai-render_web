@@ -140,7 +140,7 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(enriched["target_box_source"], "main_render")
         self.assertEqual(enriched["resolved_target_label"], "Accent Chair")
 
-    def test_construct_dynamic_styles_returns_only_simple_detail_targets(self):
+    def test_construct_dynamic_styles_returns_editorial_detail_targets(self):
         styles = construct_dynamic_styles(
             [
                 {
@@ -155,7 +155,7 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(len(styles), 1)
         self.assertEqual(styles[0]["name"], "Detail: Accent Chair")
         self.assertEqual(styles[0]["ratio"], "4:5")
-        self.assertIs(styles[0]["simple_scene_detail"], True)
+        self.assertNotIn("simple_scene_detail", styles[0])
         self.assertEqual(styles[0]["target_category_canonical"], "")
         self.assertNotIn("TARGET COORDINATES", styles[0]["prompt"])
 

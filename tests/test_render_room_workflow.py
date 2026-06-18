@@ -74,6 +74,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         polish_main_image=None,
     ):
         generated_calls = []
+        self.generated_call_sources = []
         self.generated_call_kwargs = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
@@ -82,6 +83,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             variant_id = str(args[3])
             path = self._touch(f"{variant_id}.png")
             generated_calls.append(path)
+            self.generated_call_sources.append(args[0])
             self.generated_call_kwargs.append(dict(kwargs))
             return path
 
@@ -164,33 +166,27 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         )
         return payload, generated_calls, polished_calls
 
-    def test_external_cart_generates_three_candidates_then_polishes_selected_best(self):
+    def test_external_cart_generates_three_candidates_then_returns_selected_best_without_pre_polish(self):
         payload, generated_calls, polished_calls = self._run_workflow_case(audience="external", unique_id="abc12345")
         self.assertEqual(len(generated_calls), 3)
-        self.assertEqual(polished_calls[0][0], str(self.outputs / "test_workflow_tmp" / "abc12345_v2.png"))
-        self.assertEqual(polished_calls[0][1]["unique_id"], "abc12345")
-        self.assertEqual(polished_calls[0][1]["audience"], "external")
-        self.assertEqual(payload["result_urls"], ["url://external/mainrendered/rendered/polished-best.png"])
-        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/polished-best.png")
+        self.assertEqual(polished_calls, [])
+        self.assertEqual(payload["result_urls"], ["url://external/mainrendered/rendered/abc12345_v2.png"])
+        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/abc12345_v2.png")
 
-    def test_internal_render_polishes_all_three_candidates_after_best_selection(self):
+    def test_internal_render_returns_ranked_candidates_without_pre_polish(self):
         payload, generated_calls, polished_calls = self._run_workflow_case(audience="internal", unique_id="int12345")
 
         self.assertEqual(len(generated_calls), 3)
-        self.assertEqual(
-            [Path(source_path).name for source_path, _kwargs in polished_calls],
-            ["int12345_v2.png", "int12345_v1.png", "int12345_v3.png"],
-        )
-        self.assertEqual([kwargs["audience"] for _source_path, kwargs in polished_calls], ["internal", "internal", "internal"])
+        self.assertEqual(polished_calls, [])
         self.assertEqual(
             payload["result_urls"],
             [
-                "url://internal/mainrendered/rendered/int12345_v2_polished.png",
-                "url://internal/mainrendered/rendered/int12345_v1_polished.png",
-                "url://internal/mainrendered/rendered/int12345_v3_polished.png",
+                "url://internal/mainrendered/rendered/int12345_v2.png",
+                "url://internal/mainrendered/rendered/int12345_v1.png",
+                "url://internal/mainrendered/rendered/int12345_v3.png",
             ],
         )
-        self.assertEqual(payload["result_url"], "url://internal/mainrendered/rendered/int12345_v2_polished.png")
+        self.assertEqual(payload["result_url"], "url://internal/mainrendered/rendered/int12345_v2.png")
 
     def test_external_render_adds_pass2_detail_items_after_primary_pass(self):
         def analyze_cropped_item(_path, item, *_args, **_kwargs):
@@ -223,6 +219,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
 
         self.assertEqual(len(generated_calls), 4)
         self.assertEqual(Path(generated_calls[-1]).name, "twopass01_p2_v21.png")
+        self.assertEqual(Path(self.generated_call_sources[-1]).name, "twopass01_v2.png")
         self.assertEqual(Path(polished_calls[-1][0]).name, "twopass01_p2_v21.png")
         self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/polished-best.png")
 

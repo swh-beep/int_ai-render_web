@@ -447,17 +447,12 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
         "outputs/simple-c.png",
     ]
     assert captured["postprocess_kwargs"]["allow_failed_rerank"] is True
-    assert [call["path"] for call in captured["polish_calls"]] == [
-        "outputs/simple-b.png",
-        "outputs/simple-a.png",
-        "outputs/simple-c.png",
-    ]
-    assert [call["unique_id"] for call in captured["polish_calls"]] == ["job-simple", "job-simple", "job-simple"]
-    assert result["result_url"] == "url://outputs/simple-b_polished.png"
+    assert "polish_calls" not in captured
+    assert result["result_url"] == "url://outputs/simple-b.png"
     assert result["result_urls"] == [
-        "url://outputs/simple-b_polished.png",
-        "url://outputs/simple-a_polished.png",
-        "url://outputs/simple-c_polished.png",
+        "url://outputs/simple-b.png",
+        "url://outputs/simple-a.png",
+        "url://outputs/simple-c.png",
     ]
     assert result["candidate_result_urls"] == [
         "url://outputs/simple-b.png",
@@ -667,8 +662,8 @@ def test_run_render_room_workflow_treats_external_estimated_dimensions_as_strict
         "outputs/external-b.png",
         "outputs/external-c.png",
     ]
-    assert captured["polish"]["path"] == "outputs/external-b.png"
-    assert result["result_urls"] == ["url://outputs/external-b_polished.png"]
+    assert "polish" not in captured
+    assert result["result_urls"] == ["url://outputs/external-b.png"]
 
 
 def test_run_render_room_workflow_uses_diagnostics_fallback_when_rerank_misses(monkeypatch):
@@ -835,9 +830,9 @@ def test_run_render_room_workflow_uses_diagnostics_fallback_when_rerank_misses(m
         "outputs/simple-b.png",
         "outputs/simple-c.png",
     ]
-    assert captured["polish"]["path"] == "outputs/simple-b.png"
-    assert result["result_url"] == "url://outputs/simple-b_polished.png"
-    assert result["result_urls"] == ["url://outputs/simple-b_polished.png"]
+    assert "polish" not in captured
+    assert result["result_url"] == "url://outputs/simple-b.png"
+    assert result["result_urls"] == ["url://outputs/simple-b.png"]
 
 
 def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but_preserves_cached_identity(tmp_path):

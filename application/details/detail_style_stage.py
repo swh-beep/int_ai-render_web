@@ -315,8 +315,6 @@ def construct_dynamic_styles(analyzed_items):
             style["prompt"] += (
                 " Keep the product-backed target key, source crop, and reference feature contract locked to this same object."
             )
-        else:
-            style["simple_scene_detail"] = True
         styles.append(style)
         count += 1
         accepted_detail_targets.append(item)
