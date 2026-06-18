@@ -121,6 +121,28 @@ def _merge_unique_str_lists(*values: list[str], limit: int = 6) -> list[str]:
     return merged
 
 
+def _options_reference_features(options: Any) -> dict:
+    if not isinstance(options, dict):
+        return {}
+    features = options.get("reference_features")
+    return dict(features) if isinstance(features, dict) else {}
+
+
+def _merge_options_reference_features(reference_features: dict | None, options: Any) -> dict:
+    provided = _options_reference_features(options)
+    if not provided:
+        return reference_features if isinstance(reference_features, dict) else {}
+    merged = dict(reference_features or {})
+    for key in ("silhouette_cues", "material_cues", "distinctive_parts", "preserve_rules", "color_cues"):
+        merged[key] = _merge_unique_str_lists(provided.get(key) or [], merged.get(key) or [], limit=8)
+    if provided.get("reflective_surface") is not None:
+        merged["reflective_surface"] = provided.get("reflective_surface")
+    elif "reflective_surface" not in merged:
+        merged["reflective_surface"] = False
+    merged["options_reference_features_applied"] = True
+    return merged
+
+
 def _expected_placement_family(family: str) -> str:
     normalized = str(family or "").strip().lower()
     if normalized in {"mirror", "wall_light"}:
@@ -685,6 +707,7 @@ def _analyze_items(
         reference_features = res_item.get("reference_features")
         if not isinstance(reference_features, dict):
             reference_features = {}
+        reference_features = _merge_options_reference_features(reference_features, opts)
         category_metadata = {
             field: (meta.get(field) if meta.get(field) not in (None, "") else res_item.get(field))
             for field in _CATEGORY_METADATA_FIELDS

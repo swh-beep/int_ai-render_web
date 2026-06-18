@@ -285,6 +285,60 @@ def test_analyze_cropped_item_can_model_extract_reference_features_without_text_
     assert "block base" in result["description"]
 
 
+def test_analyze_cropped_item_merges_options_reference_features_when_model_fallback_is_weak(monkeypatch, tmp_path):
+    image_path = tmp_path / "layer-lamp.png"
+    _write_png(image_path)
+
+    def _fake_extract_reference_features(**kwargs):
+        return {
+            "silhouette_cues": ["slim"],
+            "material_cues": [],
+            "distinctive_parts": [],
+            "preserve_rules": ["surface scale"],
+            "analysis_quality": "fallback_after_weak_model",
+        }
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Layer Table Lamp",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "table_lamp",
+            "category_canonical": "table_lamp",
+            "target_key": "cart_layer_lamp_012",
+            "source_index": 12,
+            "options": {
+                "reference_features": {
+                    "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+                    "distinctive_parts": ["Layered shade", "compact upright stem"],
+                    "preserve_rules": ["preserve stacked horizontal shade rings"],
+                }
+            },
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("OCR model should not happen")),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        allow_reference_feature_model=True,
+        provided_dims_mm={"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+    )
+
+    features = result["reference_features"]
+    assert "Stacked layered shade profile" in features["silhouette_cues"]
+    assert "Layered shade" in features["distinctive_parts"]
+    assert "surface scale" in features["preserve_rules"]
+    assert features["options_reference_features_applied"] is True
+    assert "Stacked layered shade profile" in result["description"]
+    assert "Layered shade" in result["description"]
+
+
 def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeypatch, tmp_path):
     image_path = tmp_path / "item.png"
     _write_png(image_path)

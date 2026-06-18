@@ -571,6 +571,41 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
     return f"- {label}: " + "; ".join(bits)
 
 
+def _build_reference_identity_suffix(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+    topology = (
+        _prompt_cue_list(product_identity.get("topology_cues"))
+        or _prompt_cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
+        or _prompt_cue_list(reference_features.get("silhouette_cues"))
+    )
+    parts = (
+        _prompt_cue_list(profile.get("distinctive_parts"))
+        or _prompt_cue_list(reference_features.get("distinctive_parts"))
+        or _prompt_cue_list(product_identity.get("support_geometry"))
+    )
+    materials = _prompt_cue_list(profile.get("material_cues")) or _prompt_cue_list(reference_features.get("material_cues"))
+    preserve = (
+        _prompt_cue_list(product_identity.get("preserve_rules"))
+        or _prompt_cue_list(profile.get("preserve_rules"))
+        or _prompt_cue_list(reference_features.get("preserve_rules"))
+    )
+    fields = ["IdentityMustMatch=exact reference crop geometry"]
+    if topology:
+        fields.append(f"TopologyCues={topology}")
+    if parts:
+        fields.append(f"DistinctiveParts={parts}")
+    if materials:
+        fields.append(f"MaterialCues={materials}")
+    if preserve:
+        fields.append(f"PreserveRules={preserve}")
+    fields.append("InvalidIf=generic same-family substitute or missing listed topology/distinctive parts")
+    return " | " + " | ".join(fields)
+
+
 def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, primary_anchor_keys: list[str] | None = None) -> str:
     if not isinstance(furniture_specs_json, dict):
         return ""
@@ -1650,6 +1685,9 @@ def generate_furnished_room(
             "2. Do NOT move, delete, resize, recolor, replace, or simplify any existing furniture already visible in the input.\n"
             "3. Add only the newly listed detail/decor items from the reference images. If an item cannot be placed cleanly, omit it rather than changing the room.\n"
             "4. Treat this as a localized edit pass, not a new room generation.\n\n"
+            "<PASS 2 PRODUCT IDENTITY LOCK>\n"
+            "Every active pass2 cutout is an exact product reference; generic same-family substitutes are invalid.\n"
+            "A pass2 item is still wrong if only a generic lamp, table, shelf, art, or decor object appears while the listed topology, distinctive parts, or material cues are missing.\n\n"
             if is_pass2_additive_edit
             else (
                 "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
@@ -1801,6 +1839,8 @@ def generate_furnished_room(
                     for value in (two_pass_summary.get("pass2_detail_keys") or [])
                     if str(value or "").strip()
                 }
+                if is_pass2_additive_edit:
+                    pass2_detail_keys = set()
 
                 def _cutout_item_key(row: dict) -> str:
                     return str(row.get("target_key") or row.get("source_index") or row.get("label") or "").strip()
@@ -1883,6 +1923,8 @@ def generate_furnished_room(
                         pass
                     extra_imgs.append(cutout_img)
                     reference_header = "Furniture Cutout Reference (SECONDARY SUPPORT ITEM - KEEP PRODUCT IDENTITY AFTER PRIMARY LOCKS ARE CORRECT). "
+                    if is_pass2_additive_edit:
+                        reference_header = "Furniture Cutout Reference (ACTIVE PASS2 ADDITIVE ITEM - ADD THIS EXACT PRODUCT WITHOUT MOVING EXISTING ROOM). "
                     if item_key and item_key in anchor_key_set:
                         reference_header = "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
                     reference_entry = [
@@ -1893,6 +1935,7 @@ def generate_furnished_room(
                             + f"| Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
                             f"| Options={opts_txt}"
+                            f"{_build_reference_identity_suffix(it)}"
                         ),
                         cutout_img,
                     ]
@@ -2138,6 +2181,7 @@ def generate_furnished_room(
                         "Use the current staged image as the base image.\n"
                         "Keep the room architecture, lighting, camera framing, and untouched furniture unchanged.\n"
                         "Edit ONLY the listed furniture targets. Do not redesign silhouettes.\n"
+                        "Presence is not enough: a generic same-family substitute is invalid when topology, distinctive parts, or materials differ from the reference crop.\n"
                         "If a bbox is provided, confine the edit to that region with a small safety margin.\n"
                         "If a target is missing, insert it at plausible scale using the provided layout envelope.\n"
                         + (
@@ -2181,6 +2225,7 @@ def generate_furnished_room(
                                 if profile.get("distinctive_parts")
                                 else ""
                             )
+                            + _build_reference_identity_suffix(item)
                             + (
                                 f" | PreserveRules={', '.join((profile.get('preserve_rules') or [])[:4])}"
                                 if profile.get("preserve_rules")

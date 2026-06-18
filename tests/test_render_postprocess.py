@@ -173,6 +173,39 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(remapped[0]["box_source"], "main_render")
         self.assertEqual(remapped[0]["box_label_detected"], "Shelf Lamp")
 
+    def test_refresh_item_boxes_from_main_render_rejects_generic_detection_for_identity_lamp(self):
+        analyzed_items = [
+            {
+                "label": "Layer Table Lamp",
+                "category": "table_lamp",
+                "category_canonical": "table_lamp",
+                "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                "box_2d": [0, 0, 1000, 1000],
+                "target_key": "cart_38172_layer-table-lamp_012",
+                "requires_identity_validation": True,
+                "identity_strictness": "critical",
+                "reference_features": {
+                    "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+                    "distinctive_parts": ["Layered shade", "compact upright stem"],
+                },
+            },
+        ]
+        detected = [
+            {"label": "table lamp", "box_2d": [490, 796, 576, 834]},
+        ]
+        render_path = self.tmp_root / "generic-table-lamp-detection.png"
+        render_path.write_bytes(b"png")
+        remapped = refresh_item_boxes_from_main_render(
+            str(render_path),
+            analyzed_items,
+            detect_furniture_boxes=lambda *args, **kwargs: detected,
+            remap_model_name="model",
+            remap_detect_timeout_sec=30,
+            remap_detect_retry=0,
+        )
+        self.assertEqual(remapped[0]["box_source"], "source_reference")
+        self.assertEqual(remapped[0]["box_2d"], [0, 0, 1000, 1000])
+
     def test_category_normalizers_support_requested_internal_taxonomy(self):
         self.assertEqual(canonical_category("거울 장식"), "mirror")
         self.assertEqual(canonical_category("메인소파"), "main_sofa")

@@ -443,6 +443,76 @@ def test_run_render_analysis_stage_builds_identity_profile_and_layout_envelope(t
     assert result.scale_plan["anchor_item"] is None
 
 
+def test_run_render_analysis_stage_merges_options_reference_features_into_identity(tmp_path):
+    room_path = tmp_path / "room.png"
+    item_path = tmp_path / "layer-lamp.png"
+    crop_path = tmp_path / "crop.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    item_path.write_bytes(_make_png_bytes(64, 64))
+    crop_path.write_bytes(_make_png_bytes(64, 64))
+
+    result = run_render_analysis_stage(
+        ref_paths=[],
+        item_refs=[
+            {
+                "path": str(item_path),
+                "label": "Layer Table Lamp",
+                "category": "table_lamp",
+                "payload_index": 12,
+                "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                "options": {
+                    "reference_features": {
+                        "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+                        "distinctive_parts": ["Layered shade", "compact upright stem"],
+                    }
+                },
+            }
+        ],
+        step1_img=str(room_path),
+        step1_raw=str(room_path),
+        dimensions="5000x5000x3000",
+        unique_id="job-options-identity",
+        detect_furniture_boxes=lambda *_args, **_kwargs: [],
+        canonical_category=lambda value: "table_lamp" if "lamp" in str(value).lower() else (value or "unknown"),
+        build_item_target_key=lambda *args, **kwargs: "cart_38172_layer-table-lamp_012",
+        analyze_room_structure=lambda *args, **kwargs: {
+            "room_text": "room analysis",
+            "windows_present": False,
+            "room_planes": {"y_top": 0.1, "y_bottom": 0.9},
+            "wall_span_norm": (0.1, 0.9),
+        },
+        analyze_cropped_item=lambda *args, **kwargs: {
+            "description": "Layer Table Lamp should preserve surface scale.",
+            "crop_path": str(crop_path),
+            "reference_features": {
+                "silhouette_cues": [],
+                "material_cues": [],
+                "distinctive_parts": [],
+                "preserve_rules": ["surface scale"],
+                "reflective_surface": False,
+            },
+        },
+        normalize_dims_dict=lambda dims: dims,
+        parse_object_dimensions_mm=lambda value: {},
+        build_furniture_specs_json=lambda items: {"items": items, "primary": items[0], "primary_scale": items[0]},
+        create_scale_guide_overlay_with_model=lambda *args, **kwargs: None,
+        match_aspect_to_target=lambda path, room: path,
+        enable_scale_guidance=False,
+        strict_scale_requested=True,
+        room_dims_parsed={"width_mm": 5000, "depth_mm": 5000, "height_mm": 3000},
+        summary=_build_summary(),
+        logger=SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None),
+        log_brief=True,
+        max_concurrency_analysis=1,
+        cart_max_analysis_workers=1,
+    )
+
+    item = result.full_analyzed_data[0]
+    assert "Stacked layered shade profile" in item["reference_features"]["silhouette_cues"]
+    assert "Stacked layered shade profile" in item["identity_profile"]["shape_cues"]
+    assert "compact upright stem" in item["identity_profile"]["distinctive_parts"]
+
+
 def test_run_render_analysis_stage_coerces_string_false_reflective_surface(tmp_path):
     room_path = tmp_path / "room.png"
     item_path = tmp_path / "item.png"

@@ -74,6 +74,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         polish_main_image=None,
     ):
         generated_calls = []
+        self.generated_call_kwargs = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
 
@@ -81,6 +82,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             variant_id = str(args[3])
             path = self._touch(f"{variant_id}.png")
             generated_calls.append(path)
+            self.generated_call_kwargs.append(dict(kwargs))
             return path
 
         def default_polish_main_image(source_path, **kwargs):
@@ -235,6 +237,10 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                     "category_canonical": "table_lamp",
                     "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
                     "requires_identity_validation": True,
+                    "reference_features": {
+                        "silhouette_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "distinctive_parts": ["visible vertical rods"],
+                    },
                 }
             return {
                 **dict(item or {}),
@@ -306,6 +312,10 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                     "category_canonical": "table_lamp",
                     "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
                     "requires_identity_validation": True,
+                    "reference_features": {
+                        "silhouette_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "distinctive_parts": ["visible vertical rods"],
+                    },
                 }
             return {
                 **dict(item or {}),
@@ -363,6 +373,11 @@ class RenderRoomWorkflowTests(unittest.TestCase):
 
         self.assertEqual(len(generated_calls), 5, refresh_calls)
         self.assertGreaterEqual(len(refresh_calls), 3, refresh_calls)
+        focused_call = self.generated_call_kwargs[-1]
+        self.assertIn("FOCUSED PASS2 IDENTITY REPAIR", focused_call["placement_instructions"])
+        self.assertIn("generic same-family substitute is invalid", focused_call["placement_instructions"])
+        self.assertIn("topology=stacked layered shade profile, parallel horizontal discs", focused_call["furniture_specs"])
+        self.assertIn("parts=visible vertical rods", focused_call["furniture_specs"])
         layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
         self.assertEqual(layer_lamp["box_source"], "main_render")
         self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")

@@ -657,6 +657,19 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
     if not isinstance(furniture_specs_json, dict):
         return None
 
+    def _cue_list(value, limit: int = 4) -> str:
+        if not isinstance(value, list):
+            return ""
+        values: list[str] = []
+        for raw in value:
+            text = str(raw or "").strip()
+            if not text or text in values:
+                continue
+            values.append(text)
+            if len(values) >= limit:
+                break
+        return ", ".join(values)
+
     rows: list[str] = []
     for index, item in enumerate(furniture_specs_json.get("items") or [], start=1):
         if not isinstance(item, dict):
@@ -689,6 +702,36 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
             bits.append(f"category={family}")
         if dims_bits:
             bits.append(", ".join(dims_bits))
+        profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+        product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+        reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+        topology = (
+            _cue_list(product_identity.get("topology_cues"))
+            or _cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
+            or _cue_list(reference_features.get("silhouette_cues"))
+        )
+        parts = (
+            _cue_list(profile.get("distinctive_parts"))
+            or _cue_list(reference_features.get("distinctive_parts"))
+            or _cue_list(product_identity.get("support_geometry"))
+        )
+        materials = _cue_list(profile.get("material_cues")) or _cue_list(reference_features.get("material_cues"))
+        preserve = (
+            _cue_list(product_identity.get("preserve_rules"))
+            or _cue_list(profile.get("preserve_rules"))
+            or _cue_list(reference_features.get("preserve_rules"))
+        )
+        if topology:
+            bits.append(f"topology={topology}")
+        if parts:
+            bits.append(f"parts={parts}")
+        if materials:
+            bits.append(f"materials={materials}")
+        if preserve:
+            bits.append(f"preserve={preserve}")
+        if item.get("requires_identity_validation") or ((item.get("two_pass_strategy") or {}).get("requires_identity_validation") if isinstance(item.get("two_pass_strategy"), dict) else False):
+            bits.append("identity=exact_reference_crop")
+            bits.append("generic_same_family_substitute=invalid")
         rows.append(f"{index}. {label}{qty_text}: " + " | ".join(bits))
     text = "\n".join(rows).strip()
     return text or None
@@ -1677,7 +1720,7 @@ def run_render_room_workflow(
                             part
                             for part in (
                                 pass2_placement,
-                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Add these missing items only, preserving all existing furniture and camera exactly.",
+                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Add these missing items only, preserving all existing furniture and camera exactly. A generic same-family substitute is invalid; the visible topology, distinctive parts, and materials must match the product reference.",
                             )
                             if part
                         )

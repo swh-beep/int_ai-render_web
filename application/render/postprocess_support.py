@@ -502,6 +502,88 @@ def label_match_score(src_label: str, dst_label: str) -> float:
     return score
 
 
+_GENERIC_DETECTION_TOKENS = {
+    "accent",
+    "art",
+    "cabinet",
+    "chair",
+    "decor",
+    "desk",
+    "floor",
+    "furniture",
+    "lamp",
+    "light",
+    "object",
+    "rug",
+    "shelf",
+    "sofa",
+    "storage",
+    "table",
+    "unit",
+}
+
+
+def _item_requires_strict_identity_remap(item: dict | None, src_family: str) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if bool(item.get("requires_identity_validation")):
+        return True
+    if str(item.get("identity_strictness") or "").strip().lower() == "critical":
+        return True
+    if src_family in _SENSITIVE_REMAP_FAMILIES and item.get("crop_path") and (
+        item.get("product_identity") or item.get("identity_profile") or item.get("reference_features")
+    ):
+        return True
+    return False
+
+
+def _specific_detection_overlap(item: dict, det_label: str) -> bool:
+    det_tokens = {
+        token
+        for token in normalize_label_for_match(det_label).split()
+        if len(token) >= 3 and token not in _GENERIC_DETECTION_TOKENS
+    }
+    if not det_tokens:
+        return False
+    fragments: list[str] = []
+    for field in ("label", "name", "product_name", "target_key", "item_id"):
+        fragments.extend(_flatten_identity_fragments(item.get(field)))
+    fragments.extend(_flatten_identity_fragments(item.get("reference_features")))
+    fragments.extend(_flatten_identity_fragments(item.get("identity_profile")))
+    fragments.extend(_flatten_identity_fragments(item.get("product_identity")))
+    item_text = normalize_label_for_match(" ".join(fragments))
+    if not item_text:
+        return False
+    item_tokens = set(item_text.split())
+    return bool(det_tokens & item_tokens)
+
+
+def _is_generic_family_detection(det_label: str, det_family: str, src_family: str) -> bool:
+    det_norm = normalize_label_for_match(det_label)
+    if not det_norm:
+        return False
+    family_text = str(det_family or src_family or "").strip().lower().replace("_", " ")
+    generic_labels = {
+        family_text,
+        family_text.replace(" ", ""),
+        "lamp",
+        "light",
+        "table lamp",
+        "desk lamp",
+        "shelf lamp",
+        "floor lamp",
+        "table",
+        "side table",
+        "shelf",
+        "shelf unit",
+        "storage",
+        "cabinet",
+        "decor",
+        "object",
+    }
+    return det_norm in {label for label in generic_labels if label}
+
+
 def _bbox_width_height(box_2d: Any) -> tuple[float, float]:
     if not isinstance(box_2d, list) or len(box_2d) != 4:
         return 0.0, 0.0
@@ -590,6 +672,14 @@ def remap_match_score(src_item: dict, det_item: dict, src_idx: int, det_idx: int
     aspect_bonus = _aspect_match_score(src_item, det_item, src_family)
     proximity = 1.0 / (1.0 + abs(int(src_idx) - int(det_idx)))
     score = (base + cat_bonus + family_bonus + identity_bonus + aspect_bonus) * 0.82 + proximity * 0.18
+    if (
+        _item_requires_strict_identity_remap(src_item, src_family)
+        and src_family in _SENSITIVE_REMAP_FAMILIES
+        and det_family == src_family
+        and _is_generic_family_detection(det_label, det_family, src_family)
+        and not _specific_detection_overlap(src_item or {}, det_label)
+    ):
+        score = min(score, 0.33)
     return max(0.0, min(1.0, score))
 
 

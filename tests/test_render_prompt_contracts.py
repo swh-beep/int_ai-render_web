@@ -318,6 +318,107 @@ def test_generate_furnished_room_pass2_prompt_preserves_first_pass_scene(tmp_pat
             output_path.unlink()
 
 
+def test_generate_furnished_room_pass2_uses_detail_cutouts_as_active_references(tmp_path, monkeypatch):
+    room_path = tmp_path / "furnished-room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    layer_ref = tmp_path / "layer-lamp-ref.png"
+    layer_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 2550.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("content", content)
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the finished room quiet and refined."},
+        str(layer_ref),
+        "prompt-pass2-active-cutout",
+        furniture_specs_json={
+            "render_pass_mode": "pass2_additive_edit",
+            "items": [
+                {
+                    "target_key": "cart_38172_layer-table-lamp_012",
+                    "label": "Layer Table Lamp",
+                    "category": "table_lamp",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "requested_dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "crop_path": str(layer_ref),
+                    "identity_profile": {
+                        "family": "table_lamp",
+                        "topology_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "distinctive_parts": ["visible vertical rods"],
+                    },
+                    "product_identity": {
+                        "family": "table_lamp",
+                        "topology_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "support_geometry": ["visible vertical rods"],
+                    },
+                }
+            ],
+            "two_pass_strategy": {
+                "pass1_primary_keys": ["sofa-1"],
+                "pass1_support_keys": [],
+                "pass2_detail_keys": ["cart_38172_layer-table-lamp_012"],
+                "identity_validation_required_keys": ["cart_38172_layer-table-lamp_012"],
+            },
+            "primary_scale": {"target_key": "sofa-1", "label": "Existing Sofa"},
+        },
+        room_dimensions="4000x4000x2400",
+        primary_item={"target_key": "sofa-1", "label": "Existing Sofa"},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=2550.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        active_reference_lines = [
+            part for part in captured["content"] if isinstance(part, str) and part.startswith("Furniture Cutout Reference")
+        ]
+        reserve_reference_lines = [
+            part for part in captured["content"] if isinstance(part, str) and part.startswith("Pass2 Detail Reserve Reference")
+        ]
+        assert any("Layer Table Lamp" in line for line in active_reference_lines)
+        assert any("IdentityMustMatch=exact reference crop geometry" in line for line in active_reference_lines)
+        assert any("TopologyCues=stacked layered shade profile, parallel horizontal discs" in line for line in active_reference_lines)
+        assert any("DistinctiveParts=visible vertical rods" in line for line in active_reference_lines)
+        assert "generic same-family substitutes are invalid" in captured["prompt"]
+        assert all("Layer Table Lamp" not in line for line in reserve_reference_lines)
+        assert not any("Do NOT insert these pass2 detail items yet" in part for part in captured["content"] if isinstance(part, str))
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_furnished_room_includes_small_item_guardrails_and_external_room_inference(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
