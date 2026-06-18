@@ -251,6 +251,8 @@ def canonical_category(raw: Optional[str]) -> str:
     text = normalize_label_for_match(raw or "")
     if not text:
         return ""
+    if "shelf lamp" in text or "shelf light" in text:
+        return "table_lamp"
     for category_name, keywords in _CANONICAL_RULES:
         if any(keyword in text for keyword in keywords):
             return category_name
@@ -264,6 +266,8 @@ def category_match_family(raw: Optional[str]) -> str:
         return ""
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["mirror"]):
         return "mirror"
+    if "shelf lamp" in text or "shelf light" in text:
+        return "table_lamp"
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["storage"]):
         return "storage"
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["stool"]):
@@ -281,6 +285,171 @@ def category_match_family(raw: Optional[str]) -> str:
     if any(keyword in text for keyword in _FAMILY_KEYWORDS["wall_light"]):
         return "wall_light"
     return ""
+
+
+_GENERIC_FAMILY_VALUES = {
+    "",
+    "accessory",
+    "accessories",
+    "decor",
+    "decoration",
+    "decorative",
+    "object",
+    "objects",
+    "unknown",
+}
+
+_STORAGE_DIRECT_SIGNALS = (
+    "storage",
+    "cabinet",
+    "shelf",
+    "shelving",
+    "bookcase",
+    "sideboard",
+    "credenza",
+    "dresser",
+    "drawers",
+    "wardrobe",
+    "수납",
+    "선반",
+    "수납장",
+    "일반수납장",
+)
+
+_STORAGE_TOPOLOGY_SIGNALS = (
+    "bay",
+    "bays",
+    "grid",
+    "tier",
+    "tiers",
+    "module",
+    "modules",
+)
+
+
+def _flatten_identity_fragments(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        fragments: list[str] = []
+        for nested in value.values():
+            fragments.extend(_flatten_identity_fragments(nested))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments: list[str] = []
+        for nested in value:
+            fragments.extend(_flatten_identity_fragments(nested))
+        return fragments
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _normalized_family_value(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw_key = raw.strip().lower().replace(" ", "_").replace("-", "_")
+    if raw_key in _CATEGORY_FAMILY_MAP:
+        return _CATEGORY_FAMILY_MAP.get(raw_key, raw_key)
+    if raw_key in set(_CATEGORY_FAMILY_MAP.values()):
+        return raw_key
+    matched = category_match_family(raw)
+    candidate = str(matched or raw).strip().lower()
+    return _CATEGORY_FAMILY_MAP.get(candidate, candidate)
+
+
+def _storage_signal_text(item: dict) -> str:
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    identity_profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    fragments: list[str] = []
+    for field in (
+        "category_path",
+        "main_category",
+        "mainCategory",
+        "sub_category",
+        "subCategory",
+        "category_name",
+        "category",
+        "category_canonical",
+        "label",
+        "name",
+        "product_name",
+    ):
+        fragments.extend(_flatten_identity_fragments(item.get(field)))
+    fragments.extend(_flatten_identity_fragments(product_identity))
+    fragments.extend(_flatten_identity_fragments(identity_profile))
+    fragments.extend(_flatten_identity_fragments(item.get("reference_features")))
+    fragments.extend(_flatten_identity_fragments(item.get("archetype_strategy")))
+    fragments.extend(_flatten_identity_fragments(item.get("placement_contract")))
+    return normalize_label_for_match(" ".join(fragment for fragment in fragments if fragment))
+
+
+def _has_storage_identity_signal(item: dict) -> bool:
+    text = _storage_signal_text(item)
+    if not text:
+        return False
+    if any(signal in text for signal in _STORAGE_DIRECT_SIGNALS):
+        return True
+    return (
+        any(signal in text for signal in _STORAGE_TOPOLOGY_SIGNALS)
+        and any(context in text for context in ("open", "horizontal", "vertical", "frame", "montana", "unit"))
+    )
+
+
+def resolve_item_family(item: dict | None, *, default: str = "") -> str:
+    """Resolve product family using category metadata plus product/reference identity.
+
+    Generic inbound categories such as decor/object are treated as weak signals so
+    product-backed shelves/cabinets do not become tabletop decor downstream.
+    """
+    if not isinstance(item, dict):
+        return str(default or "").strip().lower()
+
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    identity_profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    candidates = [
+        product_identity.get("family"),
+        identity_profile.get("family"),
+        item.get("category_canonical"),
+        item.get("category"),
+        item.get("sub_category"),
+        item.get("subCategory"),
+        item.get("main_category"),
+        item.get("mainCategory"),
+        item.get("category_path"),
+        item.get("label"),
+        item.get("name"),
+    ]
+    resolved = [_normalized_family_value(value) for value in candidates]
+    first_non_generic = next((family for family in resolved if family and family not in _GENERIC_FAMILY_VALUES), "")
+    first_generic = next((family for family in resolved if family in _GENERIC_FAMILY_VALUES and family), "")
+
+    if _has_storage_identity_signal(item):
+        if not first_non_generic or first_non_generic in {"storage", "storage_cabinet_shelf"}:
+            return "storage"
+        if any(
+            _normalized_family_value(item.get(field)) in {"storage", "storage_cabinet_shelf"}
+            for field in ("category_path", "main_category", "mainCategory", "sub_category", "subCategory")
+        ):
+            return "storage"
+
+    if first_non_generic:
+        return first_non_generic
+    if _has_storage_identity_signal(item):
+        return "storage"
+    return first_generic or str(default or "").strip().lower()
+
+
+def resolve_item_canonical_category(item: dict | None, *, default: str = "") -> str:
+    if not isinstance(item, dict):
+        return str(default or "").strip().lower()
+    if resolve_item_family(item) == "storage" and _has_storage_identity_signal(item):
+        return "storage_cabinet_shelf"
+    for field in ("category_canonical", "category", "sub_category", "subCategory", "main_category", "mainCategory", "label"):
+        resolved = canonical_category(item.get(field))
+        if resolved:
+            return resolved
+    return str(default or "").strip().lower()
 
 
 def safe_key_token(raw: Optional[str], fallback: str = "na", max_len: int = 24) -> str:

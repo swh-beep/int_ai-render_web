@@ -209,6 +209,10 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
                                 "label": "Chair",
                                 "path": "https://example.com/chair.png",
                                 "qty": 1,
+                                "category": "decor",
+                                "category_path": "Storage > Shelf",
+                                "mainCategory": "Storage",
+                                "subCategory": "Shelf",
                                 "payload_index": 1,
                                 "target_key": "cart_chair-1_001",
                                 "worker_preprocess": "external_cart_item_v1",
@@ -221,6 +225,10 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertEqual(result["result_url"], "https://cdn.example/main.png")
         prepared_item = captured["payload"]["moodboard_items"][0]
         self.assertEqual(prepared_item["path"], "https://cdn.example/cart_item_processed.png")
+        self.assertEqual(prepared_item["category"], "decor")
+        self.assertEqual(prepared_item["category_path"], "Storage > Shelf")
+        self.assertEqual(prepared_item["mainCategory"], "Storage")
+        self.assertEqual(prepared_item["subCategory"], "Shelf")
         self.assertNotIn("worker_preprocess", prepared_item)
         self.assertFalse(os.path.exists(local_src))
         self.assertFalse(os.path.exists(normalized))

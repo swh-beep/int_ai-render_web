@@ -1,6 +1,6 @@
 from typing import Any
 
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import resolve_item_family
 from application.render.two_pass_strategy_stage import (
     apply_two_pass_strategy,
     compute_pass_role,
@@ -30,14 +30,7 @@ def room_dims_complete(room_dims: dict | None) -> bool:
 
 
 def _item_family(item: dict) -> str:
-    identity = (item or {}).get("identity_profile") or {}
-    return str(
-        identity.get("family")
-        or category_match_family((item or {}).get("category_canonical") or (item or {}).get("category") or (item or {}).get("label"))
-        or (item or {}).get("category_canonical")
-        or category_match_family((item or {}).get("category") or (item or {}).get("label"))
-        or ""
-    )
+    return resolve_item_family(item)
 
 
 def _item_dims(item: dict) -> dict:

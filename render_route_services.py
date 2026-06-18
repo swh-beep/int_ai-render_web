@@ -22,6 +22,21 @@ from api_models import (
 from preset_helpers import resolve_preset_request
 
 
+_CATEGORY_METADATA_FIELDS = (
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
+)
+
+
+def _category_metadata(payload: dict) -> dict:
+    return {field: payload.get(field) for field in _CATEGORY_METADATA_FIELDS if payload.get(field) not in (None, "")}
+
+
 def _safe_upload_name(upload: UploadFile | None, fallback: str) -> str:
     if upload is None:
         return fallback
@@ -409,6 +424,7 @@ def build_external_cart_job(
                     category=it.get("category"),
                     item_id=it.get("id"),
                 ),
+                **_category_metadata(it),
             }
         )
 

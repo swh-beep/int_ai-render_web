@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import resolve_item_family
 from application.render.render_contracts import ArchetypeStrategy
 
 
@@ -21,14 +21,7 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 
 def _resolve_family(item: dict) -> str:
-    identity = (item.get("product_identity") or item.get("identity_profile") or {}) if isinstance(item, dict) else {}
-    family = category_match_family(
-        identity.get("family")
-        or item.get("category_canonical")
-        or item.get("category")
-        or item.get("label")
-    )
-    return str(family or identity.get("family") or item.get("category_canonical") or item.get("category") or "").strip().lower()
+    return resolve_item_family(item)
 
 
 def _resolve_dims(item: dict) -> dict[str, int | None]:

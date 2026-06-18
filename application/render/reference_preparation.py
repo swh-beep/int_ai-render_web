@@ -5,6 +5,17 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
+_CATEGORY_METADATA_FIELDS = (
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
+)
+
+
 @dataclass
 class RenderReferenceSelection:
     ref_path: str | None
@@ -70,6 +81,11 @@ def prepare_render_references(
                             "item_id": item_id,
                             "payload_index": payload_index,
                             "target_key": target_key,
+                            **{
+                                field: item.get(field)
+                                for field in _CATEGORY_METADATA_FIELDS
+                                if item.get(field) not in (None, "")
+                            },
                         }
                     )
                     ref_paths.append(local_path)

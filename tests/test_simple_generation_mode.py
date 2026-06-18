@@ -862,12 +862,13 @@ def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but
 
     assert detect_calls == [str(source_path)]
     assert len(analyze_calls) == 0
-    assert result[0]["target_key"] == "detail_1_Chair"
+    assert result[0]["target_key"] == "chair-1"
+    assert result[0]["label"] == "Chair"
     assert result[0]["box_2d"] == [220, 260, 820, 900]
     assert result[0]["box_source"] == "detail_current_image_analysis"
-    assert "source_box_2d" not in result[0]
-    assert "crop_path" not in result[0]
-    assert "identity_profile" not in result[0]
-    assert "reference_features" not in result[0]
-    assert "placement_contract" not in result[0]
+    assert result[0]["source_box_2d"] == [100, 100, 700, 700]
+    assert result[0]["crop_path"] == "outputs/chair.png"
+    assert result[0]["identity_profile"] == {"silhouette": "rolled-arm"}
+    assert result[0]["reference_features"] == {"material_cues": ["boucle"]}
+    assert result[0]["placement_contract"] == {"zone": "left"}
     assert result[0]["volume_rank"] == 1

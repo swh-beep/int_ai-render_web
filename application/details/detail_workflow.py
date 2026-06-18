@@ -90,6 +90,11 @@ def run_generate_details_job(
         prefix_detail_user = build_s3_prefix(aud, "detailrendered", "user-photos")
         prefix_detail_rendered = build_s3_prefix(aud, "detailrendered", "rendered")
 
+        def _prefer_crop_extract_for_style(style_payload: dict | None) -> bool:
+            if aud != "external" or not isinstance(style_payload, dict):
+                return False
+            return str(style_payload.get("name") or "").startswith("Detail:")
+
         def _remaining_deadline_sec() -> float | None:
             if absolute_deadline_ts is None:
                 return None
@@ -258,7 +263,7 @@ def run_generate_details_job(
                                     unique_id,
                                     index + 1,
                                     analyzed_items,
-                                    prefer_crop_extract=False,
+                                    prefer_crop_extract=_prefer_crop_extract_for_style(style_payload),
                                 ),
                             )
                         )
@@ -281,7 +286,7 @@ def run_generate_details_job(
                         unique_id,
                         index + 1,
                         analyzed_items,
-                        prefer_crop_extract=False,
+                        prefer_crop_extract=_prefer_crop_extract_for_style(style_payload),
                     )
                     _append_detail_result(index, style_payload, result)
         else:
@@ -299,7 +304,7 @@ def run_generate_details_job(
                                 unique_id,
                                 index + 1,
                                 analyzed_items,
-                                prefer_crop_extract=False,
+                                prefer_crop_extract=_prefer_crop_extract_for_style(style),
                             ),
                         )
                     )

@@ -12,7 +12,7 @@ from application.render.render_scale_stage import run_render_scale_stage
 from application.render.render_variant_stage import run_render_variant_stage
 from application.render.qc_gate_stage import annotate_variant_reviews, select_rankable_paths, sort_variant_paths
 from application.render.scale_plan_support import build_scale_plan
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import resolve_item_family
 from application.render.two_pass_strategy_stage import apply_two_pass_strategy
 from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
@@ -115,15 +115,7 @@ def _resolve_style_prompt(style_map: dict | None, style_name: Any) -> Any:
 
 
 def _placement_family_for_item(item: dict) -> str:
-    identity = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
-    family = str(
-        identity.get("family")
-        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
-        or item.get("category_canonical")
-        or item.get("category")
-        or item.get("label")
-        or ""
-    ).strip().lower()
+    family = resolve_item_family(item)
     if family == "mirror":
         return "wall_attached"
     if family == "rug":
@@ -256,12 +248,27 @@ def _sync_furniture_specs_contracts(
                 item["archetype_strategy"] = dict(enriched.get("archetype_strategy") or {})
             if enriched.get("two_pass_strategy"):
                 item["two_pass_strategy"] = dict(enriched.get("two_pass_strategy") or {})
+            for metadata_key in (
+                "category_path",
+                "category_source",
+                "main_category",
+                "sub_category",
+                "mainCategory",
+                "subCategory",
+                "product_type",
+            ):
+                if enriched.get(metadata_key) not in (None, ""):
+                    item[metadata_key] = enriched.get(metadata_key)
             if enriched.get("anchor_eligible") is not None:
                 item["anchor_eligible"] = bool(enriched.get("anchor_eligible"))
             if enriched.get("pass_role"):
                 item["pass_role"] = enriched.get("pass_role")
             if enriched.get("strategy_priority") is not None:
                 item["strategy_priority"] = int(enriched.get("strategy_priority") or 0)
+            if enriched.get("requires_identity_validation") is not None:
+                item["requires_identity_validation"] = bool(enriched.get("requires_identity_validation"))
+            if enriched.get("identity_validation_reason"):
+                item["identity_validation_reason"] = enriched.get("identity_validation_reason")
         synced_items.append(item)
     payload["items"] = synced_items
     def _sync_primary_payload(primary_payload: dict | None) -> dict | None:
@@ -284,11 +291,20 @@ def _sync_furniture_specs_contracts(
             "two_pass_strategy",
             "layout_envelope",
             "placement_contract",
+            "category_path",
+            "category_source",
+            "main_category",
+            "sub_category",
+            "mainCategory",
+            "subCategory",
+            "product_type",
             "identity_confidence",
             "identity_strictness",
             "anchor_eligible",
             "pass_role",
             "strategy_priority",
+            "requires_identity_validation",
+            "identity_validation_reason",
         ):
             if fallback.get(key) is not None:
                 merged[key] = fallback.get(key)
@@ -329,6 +345,13 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "name",
     "category",
     "category_canonical",
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
     "qty",
     "dims_mm",
     "requested_dims_mm",
@@ -349,6 +372,8 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "identity_strictness",
     "pass_role",
     "strategy_priority",
+    "requires_identity_validation",
+    "identity_validation_reason",
     "two_pass_strategy",
 )
 
@@ -481,6 +506,22 @@ def _split_generation_specs_for_render_passes(furniture_specs_json: dict | None)
         "Preserve the already furnished room exactly and add only these secondary detail items."
     )
     return pass1_payload, pass2_payload
+
+
+def _item_requires_identity_validation(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    strategy = item.get("two_pass_strategy") if isinstance(item.get("two_pass_strategy"), dict) else {}
+    return bool(item.get("requires_identity_validation") or (strategy or {}).get("requires_identity_validation"))
+
+
+def _pass2_requires_identity_validation(furniture_specs_json: dict | None) -> bool:
+    if not isinstance(furniture_specs_json, dict):
+        return False
+    if any(_item_requires_identity_validation(item) for item in (furniture_specs_json.get("items") or []) if isinstance(item, dict)):
+        return True
+    summary = furniture_specs_json.get("two_pass_strategy") if isinstance(furniture_specs_json.get("two_pass_strategy"), dict) else {}
+    return bool((summary or {}).get("identity_validation_required_keys"))
 
 
 def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> str | None:
@@ -1424,6 +1465,7 @@ def run_render_room_workflow(
             if pass2_generation_specs_json and generated_results:
                 deps.runtime.log_section("[Stage 2B] additive detail generation start (pass2)")
                 pass2_specs_text = _build_compact_generation_specs_text(pass2_generation_specs_json)
+                pass2_identity_validation_required = _pass2_requires_identity_validation(pass2_generation_specs_json)
                 pass2_placement = "\n".join(
                     part
                     for part in (
@@ -1454,11 +1496,11 @@ def run_render_room_workflow(
                     room_planes=room_planes,
                     windows_present=windows_present,
                     room_analysis_text=room_analysis_text,
-                    enable_scale_check=False,
+                    enable_scale_check=pass2_identity_validation_required,
                     generate_furnished_room=deps.generation.generate_furnished_room,
                     max_variants=1,
                     max_workers=1,
-                    max_generation_attempts=1,
+                    max_generation_attempts=2 if pass2_identity_validation_required else 1,
                     start_index=20,
                 )
                 pass2_paths = [

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import resolve_item_family
 from application.render.render_contracts import PlacementPlan
 
 
@@ -23,15 +23,7 @@ def _coerce_ratio(value: Any) -> float | None:
 
 
 def _item_family(item: dict) -> str:
-    identity = (item.get("product_identity") or item.get("identity_profile") or {}) if isinstance(item, dict) else {}
-    return str(
-        identity.get("family")
-        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
-        or item.get("category_canonical")
-        or item.get("category")
-        or item.get("label")
-        or ""
-    ).strip().lower()
+    return resolve_item_family(item)
 
 
 def _room_width_ratio_hint(item: dict) -> float | None:
