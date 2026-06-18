@@ -1644,6 +1644,8 @@ def generate_furnished_room(
         generation_model_name=MAIN_IMAGE_MODEL_NAME,
         call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
         repair_model_name=REPAIR_IMAGE_MODEL_NAME,
+        call_lighting_review_with_failover=call_gemini_with_failover,
+        lighting_review_model_name=ANALYSIS_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
     )

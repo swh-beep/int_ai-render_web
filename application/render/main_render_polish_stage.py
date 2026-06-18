@@ -54,6 +54,8 @@ def polish_main_render(
             "Make the image cleaner, more expensive, and editorial, but still natural. "
             "Preserve all furniture/decor identities, shapes, proportions, placement, colors, material textures, room structure, camera angle, and framing. "
             "Do not move, replace, resize, repaint, restyle, simplify, or add/remove any object. "
+            "Do not add wall sconces, pendant lights, ceiling lights, recessed lights, cove lights, indirect ceiling trough lights, LED strips, glowing panels, extra lamps, bulbs, or any new light fixture. "
+            "If a lamp shade or diffuser is opaque/fabric, preserve its original material color; warm/cool light may affect emitted light only, not the shade, base, stem, body, or fixture geometry. "
             "Do not make surfaces clay-like, waxy, plastic, CGI, overly smooth, over-airbrushed, or illustration-like. "
             "Return a single realistic interior photograph with cohesive lighting, believable cast shadows, clean material detail, and no visible compositing seams."
         )

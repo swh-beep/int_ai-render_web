@@ -57,6 +57,8 @@ def test_polish_main_render_uses_compositing_realism_prompt_and_auto_quality_opt
         assert "same color-grading family as the room" in captured["prompt"]
         assert "Prevent objects from floating" in captured["prompt"]
         assert "Do not move, replace, resize, repaint, restyle" in captured["prompt"]
+        assert "Do not add wall sconces, pendant lights, ceiling lights, recessed lights, cove lights" in captured["prompt"]
+        assert "warm/cool light may affect emitted light only, not the shade" in captured["prompt"]
         assert "Only adjust exposure, white balance, contrast, shadows, highlights, and subtle lens realism." not in captured["prompt"]
         assert "Enhance the light, shadows, contrast, white balance, material texture" not in captured["prompt"]
         assert len(captured["content"]) == 2

@@ -174,13 +174,116 @@ _LIGHTING_INTENT_BOUNDARY = (
     "\n<LIGHTING INTENT BOUNDARY>\n"
     "User lighting requests such as 'turn on the lights', 'night', 'cozy warm lighting', 'bright and airy', or similar mood notes are scene illumination instructions only.\n"
     "A lighting mood instruction alone is not permission to add fixture geometry.\n"
-    "Do NOT add wall sconces, pendant lights, ceiling lights, LED strips, floor lamps, table lamps, bulbs, glowing panels, or any new light fixture unless that fixture is an explicit listed product/reference item in this render pass or already exists visibly in the input room.\n"
+    "Do NOT add wall sconces, pendant lights, ceiling lights, recessed lights, cove lights, indirect ceiling trough lights, LED strips, floor lamps, table lamps, bulbs, glowing panels, or any new light fixture unless that fixture is an explicit listed product/reference item in this render pass or already exists visibly in the input room.\n"
     "If the user asks to turn lights on, use only existing visible fixtures and listed product lamps; otherwise adjust ambient exposure, window balance, global grade, and emitted light.\n"
     "Lampshade and diffuser color/material are product identity. For opaque or fabric shades, preserve the reference shade color/material exactly; change emitted light only.\n"
     "Do not recolor an opaque lampshade, sconce shade, pendant shade, diffuser, base, stem, or fixture body to match warm/cool light color.\n"
     "Allowed exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material may show light color through the material, while the underlying product color and geometry remain unchanged.\n"
     "--------------------------------------------------\n"
 )
+
+_LIGHTING_INTENT_PATTERNS = (
+    "turn on the light",
+    "turn on lights",
+    "lights on",
+    "lighting",
+    "illuminat",
+    "night",
+    "nighttime",
+    "evening",
+    "cozy light",
+    "warm light",
+    "bright and airy",
+    "조명",
+    "불 켜",
+    "불켜",
+    "켜줘",
+    "켜달",
+    "밤",
+    "야간",
+    "따뜻한 조명",
+    "따뜻하고",
+    "아늑",
+    "화사",
+    "밝고",
+)
+
+
+def _safe_json_object_from_text(text: str) -> dict:
+    if not text:
+        return {}
+    candidate = str(text or "").strip()
+    if "```json" in candidate:
+        candidate = candidate.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in candidate and candidate.count("```") >= 2:
+        candidate = candidate.split("```", 1)[1].split("```", 1)[0].strip()
+    try:
+        parsed = json.loads(candidate)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    try:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start >= 0 and end > start:
+            parsed = json.loads(candidate[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _has_lighting_intent(*texts: Any) -> bool:
+    combined = " ".join(str(text or "") for text in texts if str(text or "").strip()).strip().lower()
+    if not combined:
+        return False
+    return any(pattern in combined for pattern in _LIGHTING_INTENT_PATTERNS)
+
+
+def _item_is_light_fixture(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    fields = [
+        item.get("category_canonical"),
+        item.get("category"),
+        item.get("type"),
+        ((item.get("identity_profile") or {}).get("family") if isinstance(item.get("identity_profile"), dict) else None),
+        ((item.get("product_identity") or {}).get("family") if isinstance(item.get("product_identity"), dict) else None),
+        item.get("label"),
+    ]
+    text = " ".join(str(value or "") for value in fields).lower()
+    return any(token in text for token in ("lamp", "light", "sconce", "pendant", "chandelier", "조명", "램프"))
+
+
+def _listed_light_fixture_summary(furniture_specs_json: dict | None) -> str:
+    if not isinstance(furniture_specs_json, dict):
+        return "(none)"
+    labels = []
+    for item in furniture_specs_json.get("items") or []:
+        if not _item_is_light_fixture(item):
+            continue
+        label = str((item or {}).get("label") or (item or {}).get("target_key") or "listed light").strip()
+        category = _item_category_for_prompt(item)
+        labels.append(f"- {label}: category={category}")
+    return "\n".join(labels[:10]) if labels else "(none)"
+
+
+def _lighting_review_failure(parsed: dict) -> tuple[bool, list[str], str]:
+    if not isinstance(parsed, dict):
+        return False, [], ""
+    try:
+        confidence = float(parsed.get("confidence") if parsed.get("confidence") is not None else 1.0)
+    except Exception:
+        confidence = 1.0
+    if confidence < 0.55:
+        return False, [], ""
+    failed_rules = []
+    if bool(parsed.get("has_new_unlisted_light_fixture")):
+        failed_rules.append("lighting_fixture_drift")
+    if bool(parsed.get("lampshade_color_drift")):
+        failed_rules.append("lampshade_color_drift")
+    reason = str(parsed.get("reason") or parsed.get("summary") or "").strip()
+    return bool(failed_rules), failed_rules, reason
 
 
 def _category_prompt_guardrails(category: str) -> list[str]:
@@ -735,9 +838,11 @@ def _build_repair_focus_context(
 ) -> str:
     if not isinstance(diagnostics, dict):
         return ""
+    failed_rule_values = [str(rule) for rule in (diagnostics.get("failed_rules") or []) if str(rule).strip()]
+    lighting_failed = any(rule in {"lighting_fixture_drift", "lampshade_color_drift"} for rule in failed_rule_values)
     repair_plan = repair_plan if isinstance(repair_plan, dict) else build_repair_strategy_plan(diagnostics, furniture_specs_json, limit=4)
     repair_targets = [row for row in (repair_plan.get("repair_targets") or []) if isinstance(row, dict)]
-    if not repair_targets and not (diagnostics.get("failed_rules") or []):
+    if not repair_targets and not failed_rule_values:
         return ""
 
     by_key = {}
@@ -789,16 +894,33 @@ def _build_repair_focus_context(
             cue_bits.append(f"room_width_ratio={envelope.get('room_width_ratio')}")
         lines.append(f"- {row.get('label')}: " + "; ".join(cue_bits))
 
+    if not lines and lighting_failed:
+        failed_rules = ", ".join(failed_rule_values[:8])
+        return (
+            "\n<LIGHTING DRIFT REPAIR FOR NEXT RETRY>\n"
+            "The previous attempt violated the lighting intent boundary.\n"
+            "Remove any newly invented wall sconce, pendant, ceiling fixture, recessed/cove light, LED strip, glowing panel, or extra lamp that was not visible in the input room and not listed as a product reference.\n"
+            "If the user asked to turn lights on, use only listed product lamps and existing visible room fixtures; otherwise change only ambient exposure, window darkness, emitted light, and global grade.\n"
+            "Preserve opaque lampshade/diffuser/body colors and materials exactly; warm light must affect emitted light only.\n"
+            + (f"Failed rules: {failed_rules}\n" if failed_rules else "")
+            + "--------------------------------------------------\n"
+        )
     if not lines:
         return ""
 
-    failed_rules = ", ".join([str(rule) for rule in (diagnostics.get("failed_rules") or [])[:8]])
+    failed_rules = ", ".join(failed_rule_values[:8])
+    lighting_focus = (
+        "Lighting rule: do not add newly invented wall/ceiling/pendant/recessed/cove/LED fixtures, and do not recolor opaque lampshades or diffuser bodies.\n"
+        if lighting_failed
+        else ""
+    )
     return (
         "\n<REPAIR FOCUS FOR NEXT RETRY>\n"
         "The previous attempt drifted on these items. Keep the room frozen and correct ONLY these objects.\n"
         + "\n".join(lines)
         + (f"\nFailed rules: {failed_rules}" if failed_rules else "")
         + ("\nMirror rule: mirrors must stay wall-attached and reflect the opposite room consistently.\n" if mirror_present else "")
+        + lighting_focus
         + "Do not redesign silhouettes, legs, support geometry, or materials.\n"
         + "--------------------------------------------------\n"
     )
@@ -1164,6 +1286,8 @@ def generate_furnished_room(
     generation_model_name: str | None = None,
     call_repair_with_failover: Callable[..., Any] | None = None,
     repair_model_name: str | None = None,
+    call_lighting_review_with_failover: Callable[..., Any] | None = None,
+    lighting_review_model_name: str | None = None,
     call_gemini_with_failover: Callable[..., Any] | None = None,
     model_name: str | None = None,
     match_aspect_to_target: Callable[[str, str], str | None],
@@ -1198,14 +1322,18 @@ def generate_furnished_room(
         system_instruction = "You are an expert interior designer AI."
         generation_call = call_generation_with_failover or call_gemini_with_failover
         repair_call = call_repair_with_failover or call_gemini_with_failover or generation_call
+        lighting_review_call = call_lighting_review_with_failover
         resolved_generation_model = generation_model_name or model_name
         resolved_repair_model = repair_model_name or model_name or resolved_generation_model
+        resolved_lighting_review_model = lighting_review_model_name
         if generation_call is None:
             raise TypeError(
                 "generate_furnished_room requires call_generation_with_failover or call_gemini_with_failover"
             )
         if resolved_generation_model is None:
             raise TypeError("generate_furnished_room requires generation_model_name or model_name")
+
+        lighting_intent_requested = _has_lighting_intent(normalized_style_prompt, placement_instructions)
 
         def _remaining_timeout_sec() -> float:
             try:
@@ -2098,6 +2226,8 @@ def generate_furnished_room(
 
         b_lite_runtime = strict_scale_requested
         max_attempts = effective_generation_attempts if effective_generation_attempts is not None else (1 if b_lite_runtime else 3)
+        if lighting_intent_requested and callable(lighting_review_call) and resolved_lighting_review_model:
+            max_attempts = max(2, int(max_attempts or 1))
         guide_attached_to_prompt = False
         last_path = None
         last_success_path = None
@@ -2111,6 +2241,123 @@ def generate_furnished_room(
         repair_applied = False
         repair_target_keys: list[str] = []
         repair_target_labels: list[str] = []
+
+        def _validate_lighting_candidate(candidate_path: str) -> dict:
+            if not (
+                lighting_intent_requested
+                and callable(lighting_review_call)
+                and resolved_lighting_review_model
+                and candidate_path
+                and os.path.exists(candidate_path)
+            ):
+                return {"ok": True, "issues": [], "diagnostics": {}}
+            if _remaining_timeout_sec() < 8.0:
+                return {
+                    "ok": True,
+                    "issues": [],
+                    "diagnostics": {"lighting_review_skipped_due_to_budget": True},
+                }
+            opened = []
+            try:
+                source_img = Image.open(room_path)
+                candidate_img = Image.open(candidate_path)
+                for img in (source_img, candidate_img):
+                    try:
+                        img.thumbnail((768, 768), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    opened.append(img)
+
+                content = [
+                    (
+                        "You are a strict visual QA reviewer for an interior image edit.\n"
+                        "Compare the INPUT ROOM/PREVIOUS PASS image against the CANDIDATE RENDER.\n"
+                        "The user requested lighting mood only, not new fixture geometry.\n\n"
+                        "Fail ONLY when the candidate introduced a new wall, ceiling, pendant, sconce, LED strip, recessed/cove light, glowing panel, or extra lamp that was not visible in the input room and is not one of the listed product light fixtures.\n"
+                        "Also fail when an opaque/fabric lampshade, diffuser, base, stem, or fixture body has been recolored to the warm/cool light color instead of preserving the product material color.\n"
+                        "Do NOT fail for darker windows, warmer emitted light, adjusted exposure, stronger shadows, or listed/existing lamps being turned on.\n\n"
+                        f"USER LIGHTING NOTE:\n{placement_instructions or normalized_style_prompt or '(none)'}\n\n"
+                        "LISTED PRODUCT LIGHT FIXTURES:\n"
+                        f"{_listed_light_fixture_summary(furniture_specs_json)}\n\n"
+                        "Return STRICT JSON ONLY:\n"
+                        "{\"has_new_unlisted_light_fixture\": false, \"lampshade_color_drift\": false, \"confidence\": 0.0, \"reason\": \"...\", \"evidence\": []}"
+                    ),
+                    "INPUT ROOM / PREVIOUS PASS (source of allowed existing fixtures):",
+                    source_img,
+                    "CANDIDATE RENDER (review this):",
+                    candidate_img,
+                ]
+
+                light_ref_count = 0
+                if isinstance(furniture_specs_json, dict):
+                    for item in furniture_specs_json.get("items") or []:
+                        if light_ref_count >= 8 or not _item_is_light_fixture(item):
+                            continue
+                        crop_path = str((item or {}).get("crop_path") or "").strip()
+                        if not crop_path or not os.path.exists(crop_path):
+                            continue
+                        ref_img = Image.open(crop_path)
+                        try:
+                            ref_img.thumbnail((384, 384), Image.Resampling.LANCZOS)
+                        except Exception:
+                            pass
+                        opened.append(ref_img)
+                        light_ref_count += 1
+                        content.extend(
+                            [
+                                f"Listed light fixture reference #{light_ref_count}: {(item or {}).get('label') or 'light'}",
+                                ref_img,
+                            ]
+                        )
+
+                response = lighting_review_call(
+                    resolved_lighting_review_model,
+                    content,
+                    {
+                        "timeout": max(8, int(min(30.0, _remaining_timeout_sec()))),
+                        "max_attempts": 1,
+                        "response_mime_type": "application/json",
+                    },
+                    allow_all_safety_settings(),
+                    None,
+                    log_tag="Stage2.LightingReview",
+                )
+                parsed = _safe_json_object_from_text(response.text if response and hasattr(response, "text") else "")
+                failed, failed_rules, reason = _lighting_review_failure(parsed)
+                diagnostics = {
+                    "lighting_review": parsed,
+                    "failed_rules": list(failed_rules if failed else []),
+                    "matched_items": {},
+                    "unmatched_items": [],
+                    "rule_details": {"lighting_review": parsed},
+                }
+                if not failed:
+                    return {"ok": True, "issues": [], "diagnostics": diagnostics}
+                issue_text = "; ".join(f"{rule}: {reason or 'lighting intent boundary violated'}" for rule in failed_rules)
+                diagnostics["issue_records"] = [
+                    {
+                        "rule_id": rule,
+                        "rule_kind": rule,
+                        "severity": 1.0,
+                        "confidence": parsed.get("confidence", 1.0),
+                        "weighted_score": 10.0,
+                        "reason": reason,
+                    }
+                    for rule in failed_rules
+                ]
+                return {"ok": False, "issues": [issue_text], "diagnostics": diagnostics}
+            except Exception as exc:
+                return {
+                    "ok": True,
+                    "issues": [],
+                    "diagnostics": {"lighting_review_skipped_error": str(exc)},
+                }
+            finally:
+                for image in opened:
+                    try:
+                        image.close()
+                    except Exception:
+                        pass
 
         def _validate_candidate(
             candidate_path: str,
@@ -2129,8 +2376,11 @@ def generate_furnished_room(
                         "rule_details": {},
                     },
                 }
+            lighting_validation = _validate_lighting_candidate(candidate_path)
+            if not lighting_validation["ok"]:
+                return lighting_validation
             if not (enable_scale_check and furniture_specs_json and room_dims_parsed):
-                return {"ok": True, "issues": [], "diagnostics": {}}
+                return lighting_validation
             if _remaining_timeout_sec() <= 0.0:
                 return _deadline_validation_result()
             try:
@@ -2157,6 +2407,9 @@ def generate_furnished_room(
                     diagnostics = {}
                 else:
                     ok, issues, diagnostics = False, ["validator returned invalid result"], {}
+                if lighting_validation.get("diagnostics"):
+                    diagnostics = dict(diagnostics or {})
+                    diagnostics["lighting_review"] = dict((lighting_validation.get("diagnostics") or {}).get("lighting_review") or {})
                 return {"ok": bool(ok), "issues": list(issues or []), "diagnostics": dict(diagnostics or {})}
             except Exception as exc:
                 return {
