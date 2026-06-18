@@ -63,7 +63,16 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.created_paths.append(str(path))
         return str(path)
 
-    def _run_workflow_case(self, *, audience: str, unique_id: str, moodboard_items=None, analyze_cropped_item=None):
+    def _run_workflow_case(
+        self,
+        *,
+        audience: str,
+        unique_id: str,
+        moodboard_items=None,
+        analyze_cropped_item=None,
+        refresh_item_boxes_from_main_render=None,
+        polish_main_image=None,
+    ):
         generated_calls = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
@@ -74,11 +83,13 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             generated_calls.append(path)
             return path
 
-        def polish_main_image(source_path, **kwargs):
+        def default_polish_main_image(source_path, **kwargs):
             polished_calls.append((source_path, dict(kwargs)))
             if audience == "internal":
                 return self._touch(f"{Path(source_path).stem}_polished.png")
             return self._touch("polished-best.png")
+
+        polish_main_image = polish_main_image or default_polish_main_image
 
         generation = RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: (self._touch("empty.png"), self._touch("empty-raw.png")),
@@ -131,7 +142,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             generation=generation,
             postprocess=RenderWorkflowPostprocessServices(
                 rank_best_variant=lambda candidates, _items: 1,
-                refresh_item_boxes_from_main_render=lambda _path, items: items,
+                refresh_item_boxes_from_main_render=refresh_item_boxes_from_main_render
+                or (lambda _path, items: items),
                 attach_volume_ranks=lambda items: items,
                 volume_ranking_snapshot=lambda _items: [],
             ),
@@ -211,3 +223,146 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.assertEqual(Path(generated_calls[-1]).name, "twopass01_p2_v21.png")
         self.assertEqual(Path(polished_calls[-1][0]).name, "twopass01_p2_v21.png")
         self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/polished-best.png")
+
+    def test_external_render_refreshes_item_boxes_after_pass2_polish(self):
+        def analyze_cropped_item(_path, item, *_args, **_kwargs):
+            label = str((item or {}).get("label") or "")
+            if "Layer Lamp" in label:
+                return {
+                    **dict(item or {}),
+                    "description": "Stacked layered table lamp",
+                    "category": "table_lamp",
+                    "category_canonical": "table_lamp",
+                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "requires_identity_validation": True,
+                }
+            return {
+                **dict(item or {}),
+                "description": "Large cream sofa",
+                "category": "sofa",
+                "category_canonical": "sofa",
+                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
+            }
+
+        refresh_calls = []
+
+        def refresh_boxes(path, items):
+            refresh_calls.append(
+                (
+                    Path(path).name,
+                    [
+                        (item.get("target_key"), item.get("label"), item.get("category"), item.get("category_canonical"), item.get("box_source"), item.get("box_2d"))
+                        for item in items
+                    ],
+                )
+            )
+            if len(refresh_calls) == 1:
+                return items
+            return [
+                (
+                    {
+                        **dict(item),
+                        "box_2d": [320, 120, 520, 240],
+                        "box_source": "main_render",
+                        "box_label_detected": "Layer Lamp",
+                    }
+                    if item.get("label") == "Layer Lamp"
+                    else item
+                )
+                for item in items
+            ]
+
+        polished_index = {"count": 0}
+
+        def polish(source_path, **kwargs):
+            polished_index["count"] += 1
+            return self._touch(f"{Path(source_path).stem}_polished_{polished_index['count']}.png")
+
+        payload, _generated_calls, _polished_calls = self._run_workflow_case(
+            audience="external",
+            unique_id="pass2box",
+            moodboard_items=[
+                {"label": "Sofa", "path": "https://example.com/sofa.png", "target_key": "cart_sofa_001"},
+                {"label": "Layer Lamp", "path": "https://example.com/layer-lamp.png", "target_key": "cart_layer-lamp_002"},
+            ],
+            analyze_cropped_item=analyze_cropped_item,
+            refresh_item_boxes_from_main_render=refresh_boxes,
+            polish_main_image=polish,
+        )
+
+        self.assertGreaterEqual(len(refresh_calls), 2)
+        layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
+        self.assertEqual(layer_lamp["box_source"], "main_render")
+        self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")
+
+    def test_external_render_runs_focused_pass2_repair_for_missing_identity_item(self):
+        def analyze_cropped_item(_path, item, *_args, **_kwargs):
+            label = str((item or {}).get("label") or "")
+            if "Layer Lamp" in label:
+                return {
+                    **dict(item or {}),
+                    "description": "Stacked layered table lamp",
+                    "category": "table_lamp",
+                    "category_canonical": "table_lamp",
+                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "requires_identity_validation": True,
+                }
+            return {
+                **dict(item or {}),
+                "description": "Large cream sofa",
+                "category": "sofa",
+                "category_canonical": "sofa",
+                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
+            }
+
+        refresh_calls = []
+
+        def refresh_boxes(path, items):
+            refresh_calls.append(
+                (
+                    Path(path).name,
+                    [
+                        (item.get("target_key"), item.get("label"), item.get("category"), item.get("category_canonical"), item.get("box_source"), item.get("box_2d"))
+                        for item in items
+                    ],
+                )
+            )
+            if len(refresh_calls) < 3:
+                return items
+            return [
+                (
+                    {
+                        **dict(item),
+                        "box_2d": [320, 120, 520, 240],
+                        "box_source": "main_render",
+                        "box_label_detected": "Layer Lamp",
+                    }
+                    if item.get("label") == "Layer Lamp"
+                    else item
+                )
+                for item in items
+            ]
+
+        polished_index = {"count": 0}
+
+        def polish(source_path, **kwargs):
+            polished_index["count"] += 1
+            return self._touch(f"{Path(source_path).stem}_polished_{polished_index['count']}.png")
+
+        payload, generated_calls, _polished_calls = self._run_workflow_case(
+            audience="external",
+            unique_id="p2repair",
+            moodboard_items=[
+                {"label": "Sofa", "path": "https://example.com/sofa.png", "target_key": "cart_sofa_001"},
+                {"label": "Layer Lamp", "path": "https://example.com/layer-lamp.png", "target_key": "cart_layer-lamp_002"},
+            ],
+            analyze_cropped_item=analyze_cropped_item,
+            refresh_item_boxes_from_main_render=refresh_boxes,
+            polish_main_image=polish,
+        )
+
+        self.assertEqual(len(generated_calls), 5, refresh_calls)
+        self.assertGreaterEqual(len(refresh_calls), 3, refresh_calls)
+        layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
+        self.assertEqual(layer_lamp["box_source"], "main_render")
+        self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")

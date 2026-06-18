@@ -524,6 +524,135 @@ def _pass2_requires_identity_validation(furniture_specs_json: dict | None) -> bo
     return bool((summary or {}).get("identity_validation_required_keys"))
 
 
+def _has_localized_render_box(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("box_source") or "").strip() == "source_reference":
+        return False
+    box = item.get("box_2d")
+    if not isinstance(box, list) or len(box) != 4:
+        return False
+    try:
+        ymin, xmin, ymax, xmax = [float(value) for value in box]
+    except Exception:
+        return False
+    if ymax <= ymin or xmax <= xmin:
+        return False
+    return not (ymin <= 1 and xmin <= 1 and ymax >= 999 and xmax >= 999)
+
+
+def _missing_pass2_identity_item_keys(full_analyzed_data: list[dict] | None, pass2_specs_json: dict | None) -> list[str]:
+    if not isinstance(pass2_specs_json, dict):
+        return []
+    rows_by_key = {
+        _item_target_key(row): row
+        for row in (full_analyzed_data or [])
+        if isinstance(row, dict) and _item_target_key(row)
+    }
+    summary = pass2_specs_json.get("two_pass_strategy") if isinstance(pass2_specs_json.get("two_pass_strategy"), dict) else {}
+    summary_identity_keys = {
+        str(key or "").strip()
+        for key in (summary or {}).get("identity_validation_required_keys") or []
+        if str(key or "").strip()
+    }
+    missing: list[str] = []
+    for item in pass2_specs_json.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        item_key = _item_target_key(item)
+        if not item_key:
+            continue
+        family_values = {
+            str(value or "").strip().lower()
+            for value in (
+                item.get("category_canonical"),
+                item.get("category"),
+                ((item.get("two_pass_strategy") or {}).get("family") if isinstance(item.get("two_pass_strategy"), dict) else ""),
+            )
+            if str(value or "").strip()
+        }
+        role = _item_pass_role(item)
+        sensitive_family_present = bool(
+            family_values & {"table_lamp", "floor_lamp", "table", "storage", "storage_cabinet_shelf", "light"}
+        )
+        needs_presence_validation = (
+            _item_requires_identity_validation(item)
+            or item_key in summary_identity_keys
+            or sensitive_family_present
+            or (role.startswith("pass2_") and sensitive_family_present)
+        )
+        if not needs_presence_validation:
+            continue
+        if not _has_localized_render_box(rows_by_key.get(item_key)):
+            missing.append(item_key)
+    return missing
+
+
+def _filter_generation_specs_to_item_keys(furniture_specs_json: dict | None, item_keys: list[str] | set[str]) -> dict | None:
+    if not isinstance(furniture_specs_json, dict):
+        return None
+    key_set = {str(key or "").strip() for key in item_keys or [] if str(key or "").strip()}
+    if not key_set:
+        return None
+    filtered_items = [
+        dict(item)
+        for item in (furniture_specs_json.get("items") or [])
+        if isinstance(item, dict) and _item_target_key(item) in key_set
+    ]
+    if not filtered_items:
+        return None
+    payload = dict(furniture_specs_json)
+    payload["items"] = filtered_items
+    summary = payload.get("two_pass_strategy") if isinstance(payload.get("two_pass_strategy"), dict) else None
+    if isinstance(summary, dict):
+        summary = dict(summary)
+        summary["pass2_detail_keys"] = [key for key in (summary.get("pass2_detail_keys") or []) if str(key or "").strip() in key_set]
+        summary["identity_validation_required_keys"] = [
+            key for key in (summary.get("identity_validation_required_keys") or []) if str(key or "").strip() in key_set
+        ]
+        payload["two_pass_strategy"] = summary
+    return payload
+
+
+def _select_focused_pass2_repair_keys(
+    pass2_specs_json: dict | None,
+    missing_keys: list[str] | set[str],
+    *,
+    max_items: int = 4,
+) -> list[str]:
+    if not isinstance(pass2_specs_json, dict):
+        return []
+    missing_set = {str(key or "").strip() for key in missing_keys or [] if str(key or "").strip()}
+    if not missing_set:
+        return []
+    sensitive_keys: list[str] = []
+    fallback_keys: list[str] = []
+    for item in pass2_specs_json.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        item_key = _item_target_key(item)
+        if item_key not in missing_set:
+            continue
+        family_values = {
+            str(value or "").strip().lower()
+            for value in (
+                item.get("category_canonical"),
+                item.get("category"),
+                ((item.get("two_pass_strategy") or {}).get("family") if isinstance(item.get("two_pass_strategy"), dict) else ""),
+            )
+            if str(value or "").strip()
+        }
+        if family_values & {"table_lamp", "floor_lamp", "table", "storage", "storage_cabinet_shelf", "light"}:
+            sensitive_keys.append(item_key)
+        else:
+            fallback_keys.append(item_key)
+    limit = max(1, int(max_items or 1))
+    selected = sensitive_keys[:limit]
+    if not selected:
+        selected = fallback_keys[:limit]
+    return selected
+
+
 def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> str | None:
     if not isinstance(furniture_specs_json, dict):
         return None
@@ -1519,6 +1648,93 @@ def run_render_room_workflow(
                     )
                     selected_result_index = 0
                     selected_result_reason = f"{selected_result_reason}_after_pass2"
+                    if generated_results:
+                        try:
+                            full_analyzed_data = deps.postprocess.refresh_item_boxes_from_main_render(
+                                generated_results[0],
+                                full_analyzed_data,
+                            )
+                            full_analyzed_data = deps.postprocess.attach_volume_ranks(full_analyzed_data)
+                            volume_ranking = deps.postprocess.volume_ranking_snapshot(full_analyzed_data)
+                        except Exception as exc:
+                            deps.runtime.logger.exception(f"[Postprocess] pass2 box refresh failed: {exc}")
+                    missing_pass2_identity_keys = _missing_pass2_identity_item_keys(
+                        full_analyzed_data,
+                        pass2_generation_specs_json,
+                    )
+                    focused_pass2_repair_keys = _select_focused_pass2_repair_keys(
+                        pass2_generation_specs_json,
+                        missing_pass2_identity_keys,
+                    )
+                    focused_pass2_specs_json = _filter_generation_specs_to_item_keys(
+                        pass2_generation_specs_json,
+                        focused_pass2_repair_keys,
+                    )
+                    if focused_pass2_specs_json and generated_results:
+                        deps.runtime.log_section("[Stage 2C] focused pass2 identity repair start")
+                        focused_pass2_specs_text = _build_compact_generation_specs_text(focused_pass2_specs_json)
+                        focused_pass2_placement = "\n".join(
+                            part
+                            for part in (
+                                pass2_placement,
+                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Add these missing items only, preserving all existing furniture and camera exactly.",
+                            )
+                            if part
+                        )
+                        focused_pass2_results = run_render_variant_stage(
+                            step1_img=generated_results[0],
+                            style_prompt=resolved_style_prompt,
+                            ref_input=ref_input,
+                            unique_id=f"{unique_id}_p2r",
+                            furniture_specs_text=focused_pass2_specs_text,
+                            furniture_specs_json=focused_pass2_specs_json,
+                            dimensions=generation_dimensions,
+                            placement=focused_pass2_placement,
+                            scale_guide_path=scale_guide_path,
+                            primary_item=primary_item,
+                            room_dims_parsed=room_dims_parsed,
+                            wall_span_norm=wall_span_norm,
+                            size_hierarchy=size_hierarchy,
+                            scale_plan=scale_plan_dict,
+                            geometry_contract=geometry_contract_dict,
+                            scene_contract=scene_contract_dict,
+                            placement_plan=placement_plan_dict,
+                            start_time=start_time,
+                            room_planes=room_planes,
+                            windows_present=windows_present,
+                            room_analysis_text=room_analysis_text,
+                            enable_scale_check=True,
+                            generate_furnished_room=deps.generation.generate_furnished_room,
+                            max_variants=1,
+                            max_workers=1,
+                            max_generation_attempts=2,
+                            start_index=40,
+                        )
+                        focused_pass2_paths = [
+                            str((row or {}).get("path") or "")
+                            for row in focused_pass2_results or []
+                            if isinstance(row, dict) and (row or {}).get("path")
+                        ]
+                        if focused_pass2_paths:
+                            generated_results, selected_result_reason = _polish_selected_best_result(
+                                focused_pass2_paths,
+                                audience=aud,
+                                unique_id=f"{unique_id}_p2r",
+                                selected_result_reason="pass2_focused_identity_repair",
+                                polish_main_image=deps.generation.polish_main_image,
+                                logger=deps.runtime.logger,
+                            )
+                            selected_result_index = 0
+                            selected_result_reason = f"{selected_result_reason}_after_pass2_repair"
+                            try:
+                                full_analyzed_data = deps.postprocess.refresh_item_boxes_from_main_render(
+                                    generated_results[0],
+                                    full_analyzed_data,
+                                )
+                                full_analyzed_data = deps.postprocess.attach_volume_ranks(full_analyzed_data)
+                                volume_ranking = deps.postprocess.volume_ranking_snapshot(full_analyzed_data)
+                            except Exception as exc:
+                                deps.runtime.logger.exception(f"[Postprocess] focused pass2 box refresh failed: {exc}")
         if selected_variant_review:
             full_analyzed_data = _apply_selected_review_boxes_to_analyzed_items(
                 full_analyzed_data,

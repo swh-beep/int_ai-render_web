@@ -8,6 +8,7 @@ from application.render.render_room_workflow import (
     _build_simple_generation_specs,
     _split_generation_specs_for_render_passes,
     _polish_selected_best_result,
+    _select_focused_pass2_repair_keys,
     run_render_room_workflow,
 )
 from application.render.render_workflow_contracts import (
@@ -150,6 +151,25 @@ def test_split_generation_specs_keeps_core_items_in_pass1_and_details_in_pass2()
     assert [item["target_key"] for item in pass2_specs["items"]] == ["lamp-1", "art-1"]
     assert pass2_specs["render_pass_mode"] == "pass2_additive_edit"
     assert pass2_specs["primary"]["target_key"] == "sofa-1"
+
+
+def test_select_focused_pass2_repair_keys_prioritizes_shape_sensitive_items_over_decor():
+    specs = {
+        "items": [
+            {"target_key": "table-1", "label": "Bowler Table", "category": "table"},
+            {"target_key": "decor-1", "label": "Book Stack", "category": "decor", "requires_identity_validation": True},
+            {"target_key": "decor-2", "label": "Art Print", "category": "decor", "requires_identity_validation": True},
+            {"target_key": "lamp-1", "label": "Layer Lamp", "category": "table_lamp"},
+            {"target_key": "lamp-2", "label": "Taccia Lamp", "category_canonical": "table_lamp"},
+            {"target_key": "stool-1", "label": "Figreco", "category": "table"},
+        ]
+    }
+
+    assert _select_focused_pass2_repair_keys(
+        specs,
+        ["table-1", "decor-1", "decor-2", "lamp-1", "lamp-2", "stool-1"],
+        max_items=4,
+    ) == ["table-1", "lamp-1", "lamp-2", "stool-1"]
 
 
 def test_polish_selected_best_result_keeps_selected_candidate_when_polish_fails():
