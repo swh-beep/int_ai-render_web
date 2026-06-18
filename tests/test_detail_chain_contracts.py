@@ -46,6 +46,37 @@ class DetailChainContractsTests(unittest.TestCase):
             ["Detail: item-1", "Detail: item-4", "Detail: item-2", "Detail: item-3"],
         )
 
+    def test_select_external_detail_styles_prefers_product_backed_targets_before_generic_detections(self):
+        styles = [
+            {"name": "Detail: Sofa", "target_key": "cart_product-1_sofa_001", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Bearbrick", "target_key": "detail_bearbrick_004"},
+            {"name": "Detail: Tolomeo Mega Floor", "target_key": "cart_product-2_tolomeo_002", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Unknown Star Decor", "target_key": "detail_star-decor_006"},
+            {"name": "Detail: Speaker", "target_key": "cart_product-3_speaker_003", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Books", "target_key": "detail_books_008"},
+        ]
+
+        selected = select_external_detail_styles(styles, limit=4)
+
+        self.assertEqual(
+            [style["name"] for style in selected],
+            [
+                "Detail: Sofa",
+                "Detail: Speaker",
+                "Detail: Tolomeo Mega Floor",
+            ],
+        )
+
+    def test_select_external_detail_styles_falls_back_to_generic_when_no_product_backed_targets_exist(self):
+        styles = [{"name": f"Detail: generic-{idx}", "target_key": f"detail_{idx:03d}"} for idx in range(1, 5)]
+
+        selected = select_external_detail_styles(styles, limit=3)
+
+        self.assertEqual(
+            [style["name"] for style in selected],
+            ["Detail: generic-1", "Detail: generic-4", "Detail: generic-2"],
+        )
+
     def test_build_detail_payload_preserves_itemized_context(self):
         render_result = {
             "result_urls": ["https://cdn.example/rendered/main-1.png"],

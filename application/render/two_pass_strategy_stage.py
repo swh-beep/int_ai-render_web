@@ -224,6 +224,8 @@ def _pass_role_for_item(item: dict, *, anchor_key: str | None) -> str:
         return "pass1_anchor"
     if family == "rug":
         return "pass1_footprint"
+    if _pass1_identity_reason(item, family=family, placement_family=placement_family, archetype=archetype):
+        return "pass1_footprint"
     if placement_family == "wall_attached":
         return "pass2_wall"
     if placement_family == "surface_placed":
@@ -273,10 +275,18 @@ def _reference_feature_signal_count(item: dict) -> int:
 def _is_product_backed_item(item: dict) -> bool:
     if not isinstance(item, dict):
         return False
+    raw_target_key = str(item.get("target_key") or "").strip().lower()
+    raw_item_id = str(item.get("item_id") or "").strip().lower()
     target_key = normalize_label_for_match(item.get("target_key") or "")
     item_id = normalize_label_for_match(item.get("item_id") or "")
     crop_path = str(item.get("crop_path") or "").strip()
-    return bool(target_key.startswith("cart_product") or item_id.startswith("product_") or crop_path)
+    return bool(
+        raw_target_key.startswith(("cart_product", "cart_"))
+        or raw_item_id.startswith("product_")
+        or target_key.startswith(("cart product", "cart "))
+        or item_id.startswith("product ")
+        or crop_path
+    )
 
 
 def _identity_rich_reason(item: dict) -> str:
@@ -305,6 +315,43 @@ def _identity_rich_reason(item: dict) -> str:
         return "reference_feature_contract"
     if _is_product_backed_item(item) and family in {"table", "table_lamp", "floor_lamp", "storage"} and has_shape_language:
         return "product_shape_contract"
+    if _is_product_backed_item(item) and family == "electronics" and (
+        signal_count >= 1
+        or any(token in text for token in ("speaker", "audio", "beolab", "bearbrick", "tv", "television"))
+    ):
+        return "product_shape_contract"
+    return ""
+
+
+def _pass1_identity_reason(item: dict, *, family: str | None = None, placement_family: str | None = None, archetype: str | None = None) -> str:
+    resolved_family = family or _resolve_family(item)
+    if resolved_family not in {"table", "table_lamp", "floor_lamp", "storage", "electronics"}:
+        return ""
+    if not _is_product_backed_item(item):
+        return ""
+
+    reason = _identity_rich_reason(item)
+    if not reason:
+        return ""
+
+    resolved_placement = placement_family or _placement_family(item)
+    resolved_archetype = archetype or _structural_archetype(item)
+    dims = _resolve_dims(item)
+    max_dim = max(dims["width_mm"], dims["depth_mm"], dims["height_mm"], dims["radius_mm"])
+    height_mm = dims["height_mm"]
+
+    if resolved_family == "storage":
+        return reason
+    if resolved_family == "electronics" and max_dim >= 250:
+        return reason
+    if resolved_family == "table":
+        return reason
+    if resolved_family == "floor_lamp" and height_mm >= 900:
+        return reason
+    if resolved_family == "table_lamp" and max_dim >= 250 and resolved_placement == "surface_placed":
+        return reason
+    if resolved_archetype == "tiny_absolute_scale_object" and max_dim <= 180:
+        return ""
     return ""
 
 
@@ -375,6 +422,9 @@ def build_two_pass_strategy(
             "pass_role": pass_role,
             "strategy_priority": _strategy_priority(pass_role),
         }
+        pass1_identity_reason = _pass1_identity_reason(item) if pass_role == "pass1_footprint" else ""
+        if pass1_identity_reason:
+            strategy["pass1_identity_reason"] = pass1_identity_reason
         if requires_identity_validation:
             strategy["requires_identity_validation"] = True
             strategy["identity_validation_reason"] = _identity_rich_reason(item)

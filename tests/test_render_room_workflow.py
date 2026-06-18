@@ -220,10 +220,12 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.assertEqual(len(generated_calls), 4)
         self.assertEqual(Path(generated_calls[-1]).name, "twopass01_p2_v21.png")
         self.assertEqual(Path(self.generated_call_sources[-1]).name, "twopass01_v2.png")
-        self.assertEqual(Path(polished_calls[-1][0]).name, "twopass01_p2_v21.png")
-        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/polished-best.png")
+        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
+        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
+        self.assertEqual(polished_calls, [])
+        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/twopass01_p2_v21.png")
 
-    def test_external_render_refreshes_item_boxes_after_pass2_polish(self):
+    def test_external_render_refreshes_item_boxes_after_unpolished_pass2(self):
         def analyze_cropped_item(_path, item, *_args, **_kwargs):
             label = str((item or {}).get("label") or "")
             if "Layer Lamp" in label:
@@ -275,12 +277,6 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 for item in items
             ]
 
-        polished_index = {"count": 0}
-
-        def polish(source_path, **kwargs):
-            polished_index["count"] += 1
-            return self._touch(f"{Path(source_path).stem}_polished_{polished_index['count']}.png")
-
         payload, _generated_calls, _polished_calls = self._run_workflow_case(
             audience="external",
             unique_id="pass2box",
@@ -290,15 +286,16 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             ],
             analyze_cropped_item=analyze_cropped_item,
             refresh_item_boxes_from_main_render=refresh_boxes,
-            polish_main_image=polish,
         )
 
         self.assertGreaterEqual(len(refresh_calls), 2)
+        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
+        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
         layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
         self.assertEqual(layer_lamp["box_source"], "main_render")
         self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")
 
-    def test_external_render_runs_focused_pass2_repair_for_missing_identity_item(self):
+    def test_external_render_marks_missing_pass2_identity_without_whole_image_repair(self):
         def analyze_cropped_item(_path, item, *_args, **_kwargs):
             label = str((item or {}).get("label") or "")
             if "Layer Lamp" in label:
@@ -350,12 +347,6 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 for item in items
             ]
 
-        polished_index = {"count": 0}
-
-        def polish(source_path, **kwargs):
-            polished_index["count"] += 1
-            return self._touch(f"{Path(source_path).stem}_polished_{polished_index['count']}.png")
-
         payload, generated_calls, _polished_calls = self._run_workflow_case(
             audience="external",
             unique_id="p2repair",
@@ -365,18 +356,14 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             ],
             analyze_cropped_item=analyze_cropped_item,
             refresh_item_boxes_from_main_render=refresh_boxes,
-            polish_main_image=polish,
         )
 
-        self.assertEqual(len(generated_calls), 5, refresh_calls)
-        self.assertGreaterEqual(len(refresh_calls), 3, refresh_calls)
-        focused_call = self.generated_call_kwargs[-1]
-        self.assertIn("FOCUSED PASS2 IDENTITY REPAIR", focused_call["placement_instructions"])
-        self.assertIn("generic same-family substitute is invalid", focused_call["placement_instructions"])
-        self.assertIn("Replace or remove wrong same-family substitutes", focused_call["placement_instructions"])
-        self.assertIn("Do not create a second copy", focused_call["placement_instructions"])
-        self.assertIn("topology=stacked layered shade profile, parallel horizontal discs", focused_call["furniture_specs"])
-        self.assertIn("parts=visible vertical rods", focused_call["furniture_specs"])
+        self.assertEqual(len(generated_calls), 4, refresh_calls)
+        self.assertGreaterEqual(len(refresh_calls), 2, refresh_calls)
+        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
+        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
+        self.assertNotIn("FOCUSED PASS2 IDENTITY REPAIR", self.generated_call_kwargs[-1]["placement_instructions"])
         layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
-        self.assertEqual(layer_lamp["box_source"], "main_render")
-        self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")
+        self.assertTrue(layer_lamp["pass2_identity_unlocalized"])
+        self.assertEqual(layer_lamp["pass2_identity_failure_reason"], "missing_product_localization")
+        self.assertEqual(layer_lamp["box_source"], "source_reference")

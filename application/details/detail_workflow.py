@@ -22,8 +22,22 @@ DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
 EXTERNAL_DETAIL_STYLE_LIMIT = 6
 
 
-def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
-    styles = list(dynamic_styles or [])
+def _is_product_backed_external_style(style: dict | None) -> bool:
+    if not isinstance(style, dict):
+        return False
+    detail_mode = str(style.get("detail_mode") or "").strip().lower()
+    if detail_mode in {"product_identity_lock", "anchored_editorial_reframe"}:
+        return True
+    target_key = str(style.get("target_key") or "").strip().lower()
+    item_id = str(style.get("item_id") or "").strip().lower()
+    return bool(
+        target_key.startswith("cart_product")
+        or target_key.startswith("product_")
+        or item_id.startswith("product_")
+    )
+
+
+def _interleaved_detail_styles(styles: list[dict], limit: int) -> list[dict]:
     max_count = max(0, int(limit or 0))
     if max_count <= 0:
         return []
@@ -38,6 +52,19 @@ def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTER
             selected.append(styles[right])
             right -= 1
     return selected
+
+
+def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
+    styles = list(dynamic_styles or [])
+    max_count = max(0, int(limit or 0))
+    if max_count <= 0:
+        return []
+
+    product_backed = [style for style in styles if _is_product_backed_external_style(style)]
+    if not product_backed:
+        return _interleaved_detail_styles(styles, max_count)
+
+    return _interleaved_detail_styles(product_backed, max_count)
 
 
 def run_generate_details_job(
@@ -204,18 +231,26 @@ def run_generate_details_job(
             if not result:
                 return
             if isinstance(result, dict):
-                generated_paths.append(
-                    {
-                        "index": index,
-                        "path": result.get("path"),
-                        "style_name": result.get("style_name") or style_payload.get("name"),
-                        "style_ratio": result.get("aspect_ratio") or style_payload.get("ratio"),
-                        "style_target_key": style_payload.get("target_key"),
-                        "style_target_label": style_payload.get("target_label"),
-                        "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
-                        "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
-                    }
-                )
+                row = {
+                    "index": index,
+                    "path": result.get("path"),
+                    "style_name": result.get("style_name") or style_payload.get("name"),
+                    "style_ratio": result.get("aspect_ratio") or style_payload.get("ratio"),
+                    "style_target_key": style_payload.get("target_key"),
+                    "style_target_label": style_payload.get("target_label"),
+                    "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
+                    "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
+                }
+                for key in (
+                    "generation_mode",
+                    "product_pixel_lock",
+                    "locked_target_box_2d",
+                    "crop_bounds_px",
+                    "source_operation",
+                ):
+                    if key in result:
+                        row[key] = result.get(key)
+                generated_paths.append(row)
                 return
             generated_paths.append(
                 {

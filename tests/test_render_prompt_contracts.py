@@ -1528,6 +1528,8 @@ def test_generate_furnished_room_bounds_user_lighting_requests_to_emission_not_f
         assert "Lampshade and diffuser color/material are product identity" in prompt
         assert "change emitted light only" in prompt
         assert "exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material" in prompt
+        assert "Existing visible recessed/down lights may be turned on only when their count and ceiling positions match the input room" in prompt
+        assert "Do not invent new ceiling light positions to create a night mood" in prompt
         assert "preserve_lampshade_material_color" in prompt
         assert "light_color_changes_emission_only_not_shade" in prompt
         assert output_path.exists()
@@ -1613,6 +1615,106 @@ def test_generate_furnished_room_keeps_topology_cues_in_compact_cards(tmp_path, 
         prompt = captured["prompt"]
         assert "Crest Rail Chair: reference_image=authoritative_cutout" in prompt
         assert "same_family_substitute=invalid" in prompt
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_adds_seating_and_electronics_count_pose_guards(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    sofa_ref = tmp_path / "sofa.png"
+    speaker_ref = tmp_path / "speaker.png"
+    sofa_ref.write_bytes(_make_png_bytes(80, 80))
+    speaker_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 6550.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["prompt"] = content[0]
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Dark night mood, turn on only the existing lights."},
+        str(sofa_ref),
+        "prompt-contract-count-pose-guards",
+        furniture_specs_json={
+            "items": [
+                {
+                    "target_key": "sofa-1",
+                    "label": "Modular Lounge Sofa",
+                    "category": "sofa",
+                    "category_canonical": "sofa",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 3200, "depth_mm": 950, "height_mm": 760},
+                    "requested_dims_mm": {"width_mm": 3200, "depth_mm": 950, "height_mm": 760},
+                    "crop_path": str(sofa_ref),
+                    "identity_profile": {
+                        "family": "sofa",
+                        "distinctive_parts": ["four back cushions", "left chaise module"],
+                        "preserve_rules": ["keep four back cushions", "no ottoman"],
+                    },
+                    "product_identity": {"family": "sofa"},
+                },
+                {
+                    "target_key": "speaker-1",
+                    "label": "Tall Ribbed Speaker",
+                    "category": "speaker",
+                    "category_canonical": "electronics",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 220, "depth_mm": 180, "height_mm": 1150},
+                    "requested_dims_mm": {"width_mm": 220, "depth_mm": 180, "height_mm": 1150},
+                    "crop_path": str(speaker_ref),
+                    "identity_profile": {
+                        "family": "electronics",
+                        "distinctive_parts": ["single tall ribbed column"],
+                    },
+                    "product_identity": {"family": "electronics"},
+                },
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Modular Lounge Sofa"},
+        },
+        room_dimensions="5200x4200x2500",
+        primary_item={"target_key": "sofa-1", "label": "Modular Lounge Sofa"},
+        room_dims_parsed={"width_mm": 5200, "depth_mm": 4200, "height_mm": 2500},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=6550.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 5200, "depth_mm": 4200, "height_mm": 2500},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        call_repair_with_failover=lambda *args, **kwargs: _response(),
+        repair_model_name="repair-model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        assert "no_extra_ottoman_or_stool" in prompt
+        assert "preserve_seat_back_arm_module_count" in prompt
+        assert "preserve_chair_sofa_facing_direction" in prompt
+        assert "electronics_count_location_lock" in prompt
+        assert "no_duplicate_speakers_or_screens" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():

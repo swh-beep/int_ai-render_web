@@ -62,8 +62,8 @@
   ],
   "expected": {
     "cart_product-39555_montana-free_001": {"family": "storage", "pass_role": "pass1_footprint"},
-    "cart_product-39553_bowler_003": {"pass_role": "pass2_floor_secondary", "requires_identity_validation": true},
-    "cart_product-38173_taccia-small_011": {"pass_role": "pass2_support_sensitive", "requires_identity_validation": true},
-    "cart_product-41002_layer-lamp_012": {"pass_role": "pass2_support_sensitive", "requires_identity_validation": true}
+    "cart_product-39553_bowler_003": {"pass_role": "pass1_footprint", "pass1_identity_reason": "reference_feature_contract"},
+    "cart_product-38173_taccia-small_011": {"pass_role": "pass1_footprint", "pass1_identity_reason": "reference_feature_contract"},
+    "cart_product-41002_layer-lamp_012": {"pass_role": "pass1_footprint", "pass1_identity_reason": "reference_feature_contract"}
   }
 }

@@ -193,7 +193,7 @@ def test_apply_two_pass_strategy_routes_large_decor_shelving_as_pass1_storage():
     assert summary["pass2_detail_keys"] == []
 
 
-def test_apply_two_pass_strategy_marks_identity_rich_pass2_items_for_validation():
+def test_apply_two_pass_strategy_promotes_identity_rich_small_products_to_pass1():
     items = [
         {
             "target_key": "sofa-1",
@@ -233,13 +233,60 @@ def test_apply_two_pass_strategy_marks_identity_rich_pass2_items_for_validation(
     enriched, summary = apply_two_pass_strategy(items)
     by_key = {row["target_key"]: row for row in enriched}
 
-    assert by_key["cart_product-39553_bowler_003"]["pass_role"] == "pass2_floor_secondary"
-    assert by_key["cart_product-39553_bowler_003"]["two_pass_strategy"]["requires_identity_validation"] is True
-    assert by_key["cart_product-38173_taccia-small_011"]["pass_role"] == "pass2_support_sensitive"
-    assert by_key["cart_product-38173_taccia-small_011"]["two_pass_strategy"]["requires_identity_validation"] is True
-    assert set(summary["identity_validation_required_keys"]) == {
+    assert by_key["cart_product-39553_bowler_003"]["pass_role"] == "pass1_footprint"
+    assert by_key["cart_product-39553_bowler_003"]["two_pass_strategy"]["pass1_identity_reason"] == "reference_feature_contract"
+    assert by_key["cart_product-38173_taccia-small_011"]["pass_role"] == "pass1_footprint"
+    assert by_key["cart_product-38173_taccia-small_011"]["two_pass_strategy"]["pass1_identity_reason"] == "reference_feature_contract"
+    assert set(summary["pass1_support_keys"]) >= {
         "cart_product-39553_bowler_003",
         "cart_product-38173_taccia-small_011",
+    }
+    assert summary["identity_validation_required_keys"] == []
+
+
+def test_apply_two_pass_strategy_promotes_identity_rich_electronics_to_pass1():
+    items = [
+        {
+            "target_key": "sofa-1",
+            "label": "Main Sofa",
+            "category": "sofa",
+            "requested_dims_mm": {"width_mm": 2400, "depth_mm": 1000, "height_mm": 800},
+            "identity_profile": {"family": "sofa"},
+            "layout_envelope": {"placement_family": "floor_placed", "room_width_ratio": 0.6, "footprint_ratio": 0.15},
+        },
+        {
+            "target_key": "cart_39181_bearbrick-speaker_002",
+            "label": "Bearbrick Audio Portable Bluetooth Speaker",
+            "category": "electronics",
+            "requested_dims_mm": {"width_mm": 160, "depth_mm": 110, "height_mm": 280},
+            "reference_features": {
+                "silhouette_cues": ["black Bearbrick figurine speaker with rounded ears and blocky bear body"],
+            },
+            "layout_envelope": {"placement_family": "surface_placed", "room_width_ratio": 0.03, "footprint_ratio": 0.001},
+        },
+        {
+            "target_key": "cart_38860_beolab-18_006",
+            "label": "Beolab 18",
+            "category": "electronics",
+            "requested_dims_mm": {"width_mm": 200, "depth_mm": 200, "height_mm": 1324},
+            "reference_features": {
+                "silhouette_cues": ["tall slim freestanding Bang & Olufsen Beolab speaker column"],
+                "distinctive_parts": ["vertical wood front panel", "slender floor-standing profile"],
+            },
+            "layout_envelope": {"placement_family": "floor_placed", "room_width_ratio": 0.04, "footprint_ratio": 0.002},
+        },
+    ]
+
+    enriched, summary = apply_two_pass_strategy(items)
+    by_key = {row["target_key"]: row for row in enriched}
+
+    assert by_key["cart_39181_bearbrick-speaker_002"]["pass_role"] == "pass1_footprint"
+    assert by_key["cart_39181_bearbrick-speaker_002"]["two_pass_strategy"]["pass1_identity_reason"] == "product_shape_contract"
+    assert by_key["cart_38860_beolab-18_006"]["pass_role"] == "pass1_footprint"
+    assert by_key["cart_38860_beolab-18_006"]["two_pass_strategy"]["pass1_identity_reason"] == "reference_feature_contract"
+    assert set(summary["pass1_support_keys"]) >= {
+        "cart_39181_bearbrick-speaker_002",
+        "cart_38860_beolab-18_006",
     }
 
 
@@ -255,12 +302,13 @@ def test_result590_fixture_preserves_product_identity_contracts():
         if "family" in expected:
             assert strategy["family"] == expected["family"]
         assert strategy["pass_role"] == expected["pass_role"]
-        if expected.get("requires_identity_validation"):
-            assert strategy["requires_identity_validation"] is True
+        if expected.get("pass1_identity_reason"):
+            assert strategy["pass1_identity_reason"] == expected["pass1_identity_reason"]
 
     assert "cart_product-39555_montana-free_001" in summary["pass1_support_keys"]
-    assert set(summary["identity_validation_required_keys"]) >= {
+    assert set(summary["pass1_support_keys"]) >= {
         "cart_product-39553_bowler_003",
         "cart_product-38173_taccia-small_011",
         "cart_product-41002_layer-lamp_012",
     }
+    assert summary["identity_validation_required_keys"] == []

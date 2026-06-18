@@ -588,6 +588,30 @@ def _missing_pass2_identity_item_keys(full_analyzed_data: list[dict] | None, pas
     return missing
 
 
+def _annotate_missing_pass2_identity_items(full_analyzed_data: list[dict] | None, missing_keys: list[str] | set[str]) -> list[dict]:
+    missing_set = {str(key or "").strip() for key in missing_keys or [] if str(key or "").strip()}
+    if not missing_set:
+        return list(full_analyzed_data or [])
+    rows: list[dict] = []
+    for item in full_analyzed_data or []:
+        if not isinstance(item, dict):
+            rows.append(item)
+            continue
+        item_key = _item_target_key(item)
+        if item_key not in missing_set:
+            rows.append(item)
+            continue
+        updated = dict(item)
+        updated["pass2_identity_unlocalized"] = True
+        updated["pass2_identity_failure_reason"] = "missing_product_localization"
+        updated["requires_manual_identity_review"] = True
+        updated["box_source"] = "source_reference"
+        if not _has_localized_render_box(updated):
+            updated["box_2d"] = [0, 0, 1000, 1000]
+        rows.append(updated)
+    return rows
+
+
 def _filter_generation_specs_to_item_keys(furniture_specs_json: dict | None, item_keys: list[str] | set[str]) -> dict | None:
     if not isinstance(furniture_specs_json, dict):
         return None
@@ -1629,7 +1653,6 @@ def run_render_room_workflow(
             if pass2_generation_specs_json and generated_results:
                 deps.runtime.log_section("[Stage 2B] additive detail generation start (pass2)")
                 pass2_specs_text = _build_compact_generation_specs_text(pass2_generation_specs_json)
-                pass2_identity_validation_required = _pass2_requires_identity_validation(pass2_generation_specs_json)
                 pass2_placement = "\n".join(
                     part
                     for part in (
@@ -1660,11 +1683,11 @@ def run_render_room_workflow(
                     room_planes=room_planes,
                     windows_present=windows_present,
                     room_analysis_text=room_analysis_text,
-                    enable_scale_check=pass2_identity_validation_required,
+                    enable_scale_check=False,
                     generate_furnished_room=deps.generation.generate_furnished_room,
                     max_variants=1,
                     max_workers=1,
-                    max_generation_attempts=2 if pass2_identity_validation_required else 1,
+                    max_generation_attempts=1,
                     start_index=20,
                 )
                 pass2_paths = [
@@ -1673,16 +1696,9 @@ def run_render_room_workflow(
                     if isinstance(row, dict) and (row or {}).get("path")
                 ]
                 if pass2_paths:
-                    generated_results, selected_result_reason = _polish_selected_best_result(
-                        pass2_paths,
-                        audience=aud,
-                        unique_id=f"{unique_id}_p2",
-                        selected_result_reason="pass2_additive_edit",
-                        polish_main_image=deps.generation.polish_main_image,
-                        logger=deps.runtime.logger,
-                    )
+                    generated_results = list(pass2_paths)
                     selected_result_index = 0
-                    selected_result_reason = f"{selected_result_reason}_after_pass2"
+                    selected_result_reason = "pass2_additive_edit_unpolished"
                     if generated_results:
                         try:
                             full_analyzed_data = deps.postprocess.refresh_item_boxes_from_main_render(
@@ -1697,79 +1713,18 @@ def run_render_room_workflow(
                         full_analyzed_data,
                         pass2_generation_specs_json,
                     )
-                    focused_pass2_repair_keys = _select_focused_pass2_repair_keys(
-                        pass2_generation_specs_json,
-                        missing_pass2_identity_keys,
-                    )
-                    focused_pass2_specs_json = _filter_generation_specs_to_item_keys(
-                        pass2_generation_specs_json,
-                        focused_pass2_repair_keys,
-                    )
-                    if focused_pass2_specs_json and generated_results:
-                        deps.runtime.log_section("[Stage 2C] focused pass2 identity repair start")
-                        focused_pass2_specs_text = _build_compact_generation_specs_text(focused_pass2_specs_json)
-                        focused_pass2_placement = "\n".join(
-                            part
-                            for part in (
-                                pass2_placement,
-                                "FOCUSED PASS2 IDENTITY REPAIR: the listed product-backed items were not localized in the current image. Replace or remove wrong same-family substitutes before adding the exact product-backed item, preserving all correct existing furniture and camera exactly. A generic same-family substitute is invalid; the visible topology, distinctive parts, and materials must match the product reference. Do not create a second copy of a product when a wrong generic lamp, table, decor, or object is occupying that item's intended surface/zone; replace that wrong substitute with the exact reference instead.",
-                            )
-                            if part
+                    if missing_pass2_identity_keys:
+                        full_analyzed_data = _annotate_missing_pass2_identity_items(
+                            full_analyzed_data,
+                            missing_pass2_identity_keys,
                         )
-                        focused_pass2_results = run_render_variant_stage(
-                            step1_img=generated_results[0],
-                            style_prompt=resolved_style_prompt,
-                            ref_input=ref_input,
-                            unique_id=f"{unique_id}_p2r",
-                            furniture_specs_text=focused_pass2_specs_text,
-                            furniture_specs_json=focused_pass2_specs_json,
-                            dimensions=generation_dimensions,
-                            placement=focused_pass2_placement,
-                            scale_guide_path=scale_guide_path,
-                            primary_item=primary_item,
-                            room_dims_parsed=room_dims_parsed,
-                            wall_span_norm=wall_span_norm,
-                            size_hierarchy=size_hierarchy,
-                            scale_plan=scale_plan_dict,
-                            geometry_contract=geometry_contract_dict,
-                            scene_contract=scene_contract_dict,
-                            placement_plan=placement_plan_dict,
-                            start_time=start_time,
-                            room_planes=room_planes,
-                            windows_present=windows_present,
-                            room_analysis_text=room_analysis_text,
-                            enable_scale_check=True,
-                            generate_furnished_room=deps.generation.generate_furnished_room,
-                            max_variants=1,
-                            max_workers=1,
-                            max_generation_attempts=2,
-                            start_index=40,
-                        )
-                        focused_pass2_paths = [
-                            str((row or {}).get("path") or "")
-                            for row in focused_pass2_results or []
-                            if isinstance(row, dict) and (row or {}).get("path")
-                        ]
-                        if focused_pass2_paths:
-                            generated_results, selected_result_reason = _polish_selected_best_result(
-                                focused_pass2_paths,
-                                audience=aud,
-                                unique_id=f"{unique_id}_p2r",
-                                selected_result_reason="pass2_focused_identity_repair",
-                                polish_main_image=deps.generation.polish_main_image,
-                                logger=deps.runtime.logger,
+                        try:
+                            deps.runtime.logger.warning(
+                                "[Pass2Identity] missing localized product boxes after additive pass: %s",
+                                ", ".join(missing_pass2_identity_keys),
                             )
-                            selected_result_index = 0
-                            selected_result_reason = f"{selected_result_reason}_after_pass2_repair"
-                            try:
-                                full_analyzed_data = deps.postprocess.refresh_item_boxes_from_main_render(
-                                    generated_results[0],
-                                    full_analyzed_data,
-                                )
-                                full_analyzed_data = deps.postprocess.attach_volume_ranks(full_analyzed_data)
-                                volume_ranking = deps.postprocess.volume_ranking_snapshot(full_analyzed_data)
-                            except Exception as exc:
-                                deps.runtime.logger.exception(f"[Postprocess] focused pass2 box refresh failed: {exc}")
+                        except Exception:
+                            pass
         if selected_variant_review:
             full_analyzed_data = _apply_selected_review_boxes_to_analyzed_items(
                 full_analyzed_data,

@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from PIL import Image
 from application.render.placement_support import build_placement_prompt_block
+from application.render.postprocess_support import category_match_family
 from application.render.repair_strategy_stage import build_repair_strategy_plan
 from shared.image_canvas import (
     get_image_size,
@@ -176,6 +177,7 @@ _LIGHTING_INTENT_BOUNDARY = (
     "A lighting mood instruction alone is not permission to add fixture geometry.\n"
     "Do NOT add wall sconces, pendant lights, ceiling lights, recessed lights, cove lights, indirect ceiling trough lights, LED strips, floor lamps, table lamps, bulbs, glowing panels, or any new light fixture unless that fixture is an explicit listed product/reference item in this render pass or already exists visibly in the input room.\n"
     "If the user asks to turn lights on, use only existing visible fixtures and listed product lamps; otherwise adjust ambient exposure, window balance, global grade, and emitted light.\n"
+    "Existing visible recessed/down lights may be turned on only when their count and ceiling positions match the input room. Do not invent new ceiling light positions to create a night mood.\n"
     "Lampshade and diffuser color/material are product identity. For opaque or fabric shades, preserve the reference shade color/material exactly; change emitted light only.\n"
     "Do not recolor an opaque lampshade, sconce shade, pendant shade, diffuser, base, stem, or fixture body to match warm/cool light color.\n"
     "Allowed exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material may show light color through the material, while the underlying product color and geometry remain unchanged.\n"
@@ -291,11 +293,32 @@ def _lighting_review_failure(parsed: dict) -> tuple[bool, list[str], str]:
 
 def _category_prompt_guardrails(category: str) -> list[str]:
     text = str(category or "").strip().lower()
+    family = category_match_family(text) or text
     rules: list[str] = []
     if "mirror" in text:
         rules.extend(["wall_attached_or_leaning_as_reference", "preserve_reflective_face"])
     if "rug" in text or "carpet" in text:
         rules.extend(["floor_flat", "keep_footprint_shape", "not_wall_to_wall_unless_dimensions_require"])
+    if family in {"sofa", "lounge_sofa", "lounge_seating"}:
+        rules.extend([
+            "preserve_seat_back_arm_module_count",
+            "preserve_chair_sofa_facing_direction",
+            "no_extra_ottoman_or_stool",
+            "no_sectional_or_chaise_change_unless_reference_has_it",
+        ])
+    if family in {"chair", "lounge_chair"}:
+        rules.extend([
+            "preserve_chair_sofa_facing_direction",
+            "preserve_armrest_count_and_side",
+            "no_extra_ottoman_or_stool",
+            "no_generic_lounge_chair_substitution",
+        ])
+    if family == "electronics":
+        rules.extend([
+            "electronics_count_location_lock",
+            "no_duplicate_speakers_or_screens",
+            "preserve_stand_or_wall_relationship",
+        ])
     if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
         rules.extend([
             "preserve_lampshade_material_color",
@@ -2277,6 +2300,7 @@ def generate_furnished_room(
                         "Compare the INPUT ROOM/PREVIOUS PASS image against the CANDIDATE RENDER.\n"
                         "The user requested lighting mood only, not new fixture geometry.\n\n"
                         "Fail ONLY when the candidate introduced a new wall, ceiling, pendant, sconce, LED strip, recessed/cove light, glowing panel, or extra lamp that was not visible in the input room and is not one of the listed product light fixtures.\n"
+                        "Existing recessed/down lights are allowed to turn on only when the count and ceiling positions match visible fixtures in the input room; new count or new positions are lighting_fixture_drift.\n"
                         "Also fail when an opaque/fabric lampshade, diffuser, base, stem, or fixture body has been recolored to the warm/cool light color instead of preserving the product material color.\n"
                         "Do NOT fail for darker windows, warmer emitted light, adjusted exposure, stronger shadows, or listed/existing lamps being turned on.\n\n"
                         f"USER LIGHTING NOTE:\n{placement_instructions or normalized_style_prompt or '(none)'}\n\n"
@@ -2612,6 +2636,7 @@ def generate_furnished_room(
                         + (f"Failed rules: {failed_rules}\n" if failed_rules else "")
                         + (f"Reviewer reason: {reason}\n" if reason else "")
                         + "\nRemove or paint out only newly invented wall sconces, pendant lights, ceiling fixtures, recessed/down lights, cove lights, indirect ceiling trough lights, LED strips, glowing panels, extra bulbs, or extra lamps that are not visible in the source room and not listed product fixtures.\n"
+                        "Keep source-visible recessed/down lights only if their count and ceiling positions match the source room; do not add new positions.\n"
                         "Restore the affected ceiling/wall/window-edge surfaces to match the source room architecture and material continuity.\n"
                         "Keep the night/lighting mood using only ambient exposure, darker windows, existing visible fixtures, and listed product lamps.\n"
                         "Do not remove, move, resize, recolor, restyle, or replace any furniture, decor, rug, art, plant, electronics, or listed product lamp.\n"

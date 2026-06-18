@@ -61,6 +61,23 @@ def _normalized_label(value) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def _has_product_reference(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    crop_path = str(item.get("crop_path") or "").strip()
+    raw_target_key = str(item.get("target_key") or "").strip().lower()
+    raw_item_id = str(item.get("item_id") or "").strip().lower()
+    target_key = _normalized_label(item.get("target_key"))
+    item_id = _normalized_label(item.get("item_id"))
+    return bool(
+        raw_target_key.startswith(("cart_", "cart_product", "product_"))
+        or raw_item_id.startswith("product_")
+        or target_key.startswith(("cart ", "cart product", "product "))
+        or item_id.startswith("product ")
+        or (crop_path and raw_item_id.isdigit())
+    )
+
+
 _GENERIC_DECOR_DETAIL_KEYS = {
     "accessory",
     "accessories",
@@ -148,9 +165,7 @@ def _is_source_backed_detail_target(item) -> bool:
         return False
 
     crop_path = str(item.get("crop_path") or "").strip()
-    item_id = _normalized_label((item or {}).get("item_id"))
-    target_key = _normalized_label((item or {}).get("target_key"))
-    has_product_reference = bool(item_id.startswith("product_") or target_key.startswith("cart_product"))
+    has_product_reference = _has_product_reference(item)
 
     if _has_localized_render_box(item) and has_product_reference:
         return True
