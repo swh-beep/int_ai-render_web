@@ -4,9 +4,15 @@ from PIL import Image
 
 from application.render.furnished_generation_stage import (
     _build_grouped_small_item_sheet_reference,
+    _is_grouped_small_item_category,
     _select_grouped_small_item_sheet_items,
     _split_cutout_reference_items_for_generation,
 )
+
+
+KOREAN_PROP_CATEGORY = "\uc18c\ud488"
+KOREAN_FURNITURE_CATEGORY = "\uac00\uad6c"
+KOREAN_LIGHTING_CATEGORY = "\uc870\uba85"
 
 
 def _item(key, *, main_category, dims_sum, crop_path="crop.png"):
@@ -17,7 +23,7 @@ def _item(key, *, main_category, dims_sum, crop_path="crop.png"):
         "target_key": key,
         "label": key,
         "mainCategory": main_category,
-        "category": "decor" if main_category == "소품" else "table_lamp",
+        "category": "decor" if main_category == KOREAN_PROP_CATEGORY else "table_lamp",
         "dims_mm": {
             "width_mm": width,
             "depth_mm": depth,
@@ -29,12 +35,12 @@ def _item(key, *, main_category, dims_sum, crop_path="crop.png"):
 
 def test_grouped_small_item_sheet_prefers_props_before_smaller_non_props():
     items = [
-        _item("sofa", main_category="소파", dims_sum=9000),
-        _item("small_lamp_1", main_category="조명", dims_sum=300),
-        _item("small_lamp_2", main_category="조명", dims_sum=350),
-        _item("prop_large_plant", main_category="소품", dims_sum=2000),
-        _item("prop_large_frame_1", main_category="소품", dims_sum=1500),
-        _item("prop_large_frame_2", main_category="소품", dims_sum=1800),
+        _item("sofa", main_category=KOREAN_FURNITURE_CATEGORY, dims_sum=9000),
+        _item("small_lamp_1", main_category=KOREAN_LIGHTING_CATEGORY, dims_sum=300),
+        _item("small_lamp_2", main_category=KOREAN_LIGHTING_CATEGORY, dims_sum=350),
+        _item("prop_large_plant", main_category=KOREAN_PROP_CATEGORY, dims_sum=2000),
+        _item("prop_large_frame_1", main_category=KOREAN_PROP_CATEGORY, dims_sum=1500),
+        _item("prop_large_frame_2", main_category=KOREAN_PROP_CATEGORY, dims_sum=1800),
     ]
 
     selected = _select_grouped_small_item_sheet_items(items, sheet_count=4)
@@ -55,8 +61,8 @@ def test_grouped_small_item_sheet_reference_labels_each_item(tmp_path: Path):
         paths.append(path)
 
     items = [
-        _item("prop_vase", main_category="소품", dims_sum=450, crop_path=str(paths[0])),
-        _item("prop_frame", main_category="소품", dims_sum=900, crop_path=str(paths[1])),
+        _item("prop_vase", main_category=KOREAN_PROP_CATEGORY, dims_sum=450, crop_path=str(paths[0])),
+        _item("prop_frame", main_category=KOREAN_PROP_CATEGORY, dims_sum=900, crop_path=str(paths[1])),
     ]
 
     header, sheet = _build_grouped_small_item_sheet_reference(items)
@@ -71,7 +77,7 @@ def test_grouped_small_item_sheet_reference_labels_each_item(tmp_path: Path):
 def test_twenty_cutouts_fit_gemini_image_prompt_limit():
     items = []
     for index in range(20):
-        main_category = "소품" if index >= 12 else "가구"
+        main_category = KOREAN_PROP_CATEGORY if index >= 12 else KOREAN_FURNITURE_CATEGORY
         items.append(
             _item(
                 f"item_{index:02d}",
@@ -89,3 +95,12 @@ def test_twenty_cutouts_fit_gemini_image_prompt_limit():
     assert len(direct_items) == 12
     assert len(sheet_items) == 8
     assert 1 + len(direct_items) + 1 == 14
+
+
+def test_grouped_small_item_category_recognizes_korean_props_without_english_fallback():
+    assert _is_grouped_small_item_category(
+        {
+            "mainCategory": KOREAN_PROP_CATEGORY,
+            "category": "\uc561\uc790",
+        }
+    )

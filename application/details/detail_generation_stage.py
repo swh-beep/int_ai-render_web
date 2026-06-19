@@ -8,6 +8,8 @@ from application.render.postprocess_support import category_match_family
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
+DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "400") or "400"))
+DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "500") or "500"))
 
 
 def _normalize_ratio_string(value: str | None, default: str = "4:5") -> str:
@@ -322,6 +324,60 @@ def _fit_bounds_to_ratio(
     return _clamp_bounds((left, top, right, bottom), image_size)
 
 
+def _enforce_minimum_crop_bounds(
+    bounds: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+    *,
+    target_ratio: tuple[int, int],
+    min_width_px: int = DETAIL_CROP_MIN_SOURCE_WIDTH_PX,
+    min_height_px: int = DETAIL_CROP_MIN_SOURCE_HEIGHT_PX,
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = bounds
+    img_w, img_h = image_size
+    target_w, target_h = target_ratio
+    desired_ratio = float(target_w) / float(target_h)
+
+    crop_w = max(float(right - left), float(min_width_px))
+    crop_h = max(float(bottom - top), float(min_height_px))
+    center_x = (float(left) + float(right)) / 2.0
+    center_y = (float(top) + float(bottom)) / 2.0
+
+    if crop_w / crop_h > desired_ratio:
+        crop_h = crop_w / desired_ratio
+    else:
+        crop_w = crop_h * desired_ratio
+
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
+    if crop_h > float(img_h):
+        crop_h = float(img_h)
+        crop_w = crop_h * desired_ratio
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
+
+    left = center_x - crop_w / 2.0
+    right = center_x + crop_w / 2.0
+    top = center_y - crop_h / 2.0
+    bottom = center_y + crop_h / 2.0
+
+    if left < 0.0:
+        right -= left
+        left = 0.0
+    if right > img_w:
+        left -= right - img_w
+        right = float(img_w)
+    if top < 0.0:
+        bottom -= top
+        top = 0.0
+    if bottom > img_h:
+        top -= bottom - img_h
+        bottom = float(img_h)
+
+    return _clamp_bounds((left, top, right, bottom), image_size)
+
+
 def _render_crop_detail(
     original_image_path: str,
     style_config: dict,
@@ -342,6 +398,7 @@ def _render_crop_detail(
         bounds = _box_to_pixels(box_2d, canvas.size)
         bounds = _expand_bounds(bounds, canvas.size, family=family)
         bounds = _fit_bounds_to_ratio(bounds, canvas.size, target_ratio=target_ratio)
+        bounds = _enforce_minimum_crop_bounds(bounds, canvas.size, target_ratio=target_ratio)
         crop = canvas.crop(bounds)
 
         max_edge = max(crop.size)

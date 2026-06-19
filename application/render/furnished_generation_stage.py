@@ -4,7 +4,7 @@ import os
 import time
 from typing import Any, Callable
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from application.render.placement_support import build_placement_prompt_block
 from shared.image_canvas import (
     get_image_size,
@@ -478,6 +478,10 @@ def _build_grouped_small_item_sheet_reference(items: list[dict]) -> tuple[str, I
     sheet_size = _GROUPED_SMALL_ITEM_SHEET_SIZE
     sheet = Image.new("RGB", (sheet_size, sheet_size), "white")
     draw = ImageDraw.Draw(sheet)
+    try:
+        slot_font = ImageFont.truetype("arialbd.ttf", 38)
+    except Exception:
+        slot_font = ImageFont.load_default()
     margin = 96
     gap = 48
     cols = 4
@@ -496,8 +500,8 @@ def _build_grouped_small_item_sheet_reference(items: list[dict]) -> tuple[str, I
         right = left + cell_w
         bottom = top + cell_h
         draw.rectangle((left, top, right, bottom), outline=(200, 200, 200), width=3)
-        draw.rectangle((left, top, left + 92, top + 56), fill=(0, 0, 0))
-        draw.text((left + 20, top + 16), slot, fill=(255, 255, 255))
+        draw.rectangle((left, top, left + 118, top + 72), fill=(0, 0, 0))
+        draw.text((left + 22, top + 16), slot, fill=(255, 255, 255), font=slot_font)
 
         crop_path = str(item.get("crop_path") or "").strip()
         if not crop_path or not os.path.exists(crop_path):

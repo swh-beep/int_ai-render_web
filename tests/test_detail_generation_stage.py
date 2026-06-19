@@ -608,6 +608,57 @@ def test_generate_detail_view_defaults_ratio_less_detail_crop_to_vertical_canvas
             output_path.unlink()
 
 
+def test_generate_detail_view_crop_first_enforces_minimum_source_crop_area(tmp_path):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1376, 768), color=(245, 245, 245)).save(source_path, format="PNG")
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Detail: Small Side Table",
+            "target_key": "side_table_01",
+            "target_label": "Small Side Table",
+            "ratio": "4:5",
+            "prompt": "unused because crop-first path should win",
+        },
+        "min-crop-case",
+        4,
+        furniture_data=[
+            {
+                "label": "Small Side Table",
+                "target_key": "side_table_01",
+                "category": "side_table",
+                "box_2d": [485, 630, 545, 712],
+                "box_source": "product_reference_localization",
+            }
+        ],
+        prefer_crop_extract=True,
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not materialize cutouts")
+        ),
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not request model safety settings")
+        ),
+        call_gemini_with_failover=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crop-first detail extraction should not call the generation model")
+        ),
+        model_name="unused",
+    )
+
+    output_path = Path(result["path"])
+    try:
+        left, top, right, bottom = result["crop_bounds_px"]
+        assert right - left >= 400
+        assert bottom - top >= 500
+        with Image.open(output_path) as rendered:
+            assert rendered.size[1] == 1600
+            assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
 def test_generate_detail_view_crop_first_rejects_full_image_box(tmp_path):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (2752, 1536), color=(245, 245, 245)).save(source_path, format="PNG")
