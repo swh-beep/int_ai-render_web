@@ -3,17 +3,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 
-_CATEGORY_METADATA_FIELDS = (
-    "category_path",
-    "category_source",
-    "main_category",
-    "sub_category",
-    "mainCategory",
-    "subCategory",
-    "product_type",
-)
-
-
 @dataclass
 class RenderInputs:
     file_path: str
@@ -91,11 +80,6 @@ def collect_local_moodboard_items(
                         "item_id": item.get("item_id"),
                         "payload_index": item.get("payload_index"),
                         "target_key": item.get("target_key"),
-                        **{
-                            field: item.get(field)
-                            for field in _CATEGORY_METADATA_FIELDS
-                            if item.get(field) not in (None, "")
-                        },
                     }
                 )
                 if os.path.basename(local_path).startswith("mood_"):

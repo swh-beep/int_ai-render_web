@@ -12,7 +12,7 @@ from application.render.render_scale_stage import run_render_scale_stage
 from application.render.render_variant_stage import run_render_variant_stage
 from application.render.qc_gate_stage import annotate_variant_reviews, select_rankable_paths, sort_variant_paths
 from application.render.scale_plan_support import build_scale_plan
-from application.render.postprocess_support import resolve_item_family
+from application.render.postprocess_support import category_match_family
 from application.render.two_pass_strategy_stage import apply_two_pass_strategy
 from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
@@ -115,7 +115,15 @@ def _resolve_style_prompt(style_map: dict | None, style_name: Any) -> Any:
 
 
 def _placement_family_for_item(item: dict) -> str:
-    family = resolve_item_family(item)
+    identity = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
+    family = str(
+        identity.get("family")
+        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
+        or item.get("category_canonical")
+        or item.get("category")
+        or item.get("label")
+        or ""
+    ).strip().lower()
     if family == "mirror":
         return "wall_attached"
     if family == "rug":
@@ -248,27 +256,12 @@ def _sync_furniture_specs_contracts(
                 item["archetype_strategy"] = dict(enriched.get("archetype_strategy") or {})
             if enriched.get("two_pass_strategy"):
                 item["two_pass_strategy"] = dict(enriched.get("two_pass_strategy") or {})
-            for metadata_key in (
-                "category_path",
-                "category_source",
-                "main_category",
-                "sub_category",
-                "mainCategory",
-                "subCategory",
-                "product_type",
-            ):
-                if enriched.get(metadata_key) not in (None, ""):
-                    item[metadata_key] = enriched.get(metadata_key)
             if enriched.get("anchor_eligible") is not None:
                 item["anchor_eligible"] = bool(enriched.get("anchor_eligible"))
             if enriched.get("pass_role"):
                 item["pass_role"] = enriched.get("pass_role")
             if enriched.get("strategy_priority") is not None:
                 item["strategy_priority"] = int(enriched.get("strategy_priority") or 0)
-            if enriched.get("requires_identity_validation") is not None:
-                item["requires_identity_validation"] = bool(enriched.get("requires_identity_validation"))
-            if enriched.get("identity_validation_reason"):
-                item["identity_validation_reason"] = enriched.get("identity_validation_reason")
         synced_items.append(item)
     payload["items"] = synced_items
     def _sync_primary_payload(primary_payload: dict | None) -> dict | None:
@@ -291,20 +284,11 @@ def _sync_furniture_specs_contracts(
             "two_pass_strategy",
             "layout_envelope",
             "placement_contract",
-            "category_path",
-            "category_source",
-            "main_category",
-            "sub_category",
-            "mainCategory",
-            "subCategory",
-            "product_type",
             "identity_confidence",
             "identity_strictness",
             "anchor_eligible",
             "pass_role",
             "strategy_priority",
-            "requires_identity_validation",
-            "identity_validation_reason",
         ):
             if fallback.get(key) is not None:
                 merged[key] = fallback.get(key)
@@ -345,13 +329,6 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "name",
     "category",
     "category_canonical",
-    "category_path",
-    "category_source",
-    "main_category",
-    "sub_category",
-    "mainCategory",
-    "subCategory",
-    "product_type",
     "qty",
     "dims_mm",
     "requested_dims_mm",
@@ -370,22 +347,8 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "placement_contract",
     "identity_confidence",
     "identity_strictness",
-    "pass_role",
-    "strategy_priority",
-    "requires_identity_validation",
-    "identity_validation_reason",
     "two_pass_strategy",
 )
-
-_PASS2_RENDER_ROLES = {
-    "pass2_wall",
-    "pass2_support_sensitive",
-    "pass2_small",
-    "pass2_floor_secondary",
-    "pass2_decor",
-    "pass2_detail",
-}
-_MAX_PASS1_RENDER_ITEMS = 10
 
 
 def _build_main_prompt_item_payload(src: dict | None) -> dict:
@@ -446,253 +409,9 @@ def _build_simple_generation_specs(furniture_specs_json: dict | None) -> dict | 
     return simple_payload
 
 
-def _item_target_key(item: dict | None) -> str:
-    return str((item or {}).get("target_key") or "").strip()
-
-
-def _item_pass_role(item: dict | None) -> str:
-    if not isinstance(item, dict):
-        return ""
-    role = str(item.get("pass_role") or "").strip().lower()
-    if role:
-        return role
-    strategy = item.get("two_pass_strategy") if isinstance(item.get("two_pass_strategy"), dict) else {}
-    return str((strategy or {}).get("pass_role") or "").strip().lower()
-
-
-def _split_generation_specs_for_render_passes(furniture_specs_json: dict | None) -> tuple[dict | None, dict | None]:
-    simple_payload = _build_simple_generation_specs(furniture_specs_json)
-    if not isinstance(simple_payload, dict):
-        return simple_payload, None
-
-    items = [item for item in (simple_payload.get("items") or []) if isinstance(item, dict)]
-    if not items:
-        return simple_payload, None
-
-    two_pass_summary = simple_payload.get("two_pass_strategy") if isinstance(simple_payload.get("two_pass_strategy"), dict) else {}
-    pass2_keys = {
-        str(key or "").strip()
-        for key in (two_pass_summary or {}).get("pass2_detail_keys") or []
-        if str(key or "").strip()
-    }
-
-    pass1_items: list[dict] = []
-    pass2_items: list[dict] = []
-    for item in items:
-        item_key = _item_target_key(item)
-        role = _item_pass_role(item)
-        if role in _PASS2_RENDER_ROLES or (item_key and item_key in pass2_keys):
-            pass2_items.append(item)
-        else:
-            pass1_items.append(item)
-
-    if not pass1_items and pass2_items:
-        pass1_items.append(pass2_items.pop(0))
-    if len(pass1_items) > _MAX_PASS1_RENDER_ITEMS:
-        pass2_items = pass1_items[_MAX_PASS1_RENDER_ITEMS:] + pass2_items
-        pass1_items = pass1_items[:_MAX_PASS1_RENDER_ITEMS]
-
-    pass1_payload = dict(simple_payload)
-    pass1_payload["items"] = [dict(item) for item in pass1_items]
-
-    if not pass2_items:
-        return pass1_payload, None
-
-    pass2_payload = dict(simple_payload)
-    pass2_payload["items"] = [dict(item) for item in pass2_items]
-    pass2_payload["render_pass_mode"] = "pass2_additive_edit"
-    pass2_payload["pass2_source_pass1_item_count"] = len(pass1_items)
-    pass2_payload["pass2_additive_instruction"] = (
-        "Preserve the already furnished room exactly and add only these secondary detail items."
-    )
-    return pass1_payload, pass2_payload
-
-
-def _item_requires_identity_validation(item: dict | None) -> bool:
-    if not isinstance(item, dict):
-        return False
-    strategy = item.get("two_pass_strategy") if isinstance(item.get("two_pass_strategy"), dict) else {}
-    return bool(item.get("requires_identity_validation") or (strategy or {}).get("requires_identity_validation"))
-
-
-def _pass2_requires_identity_validation(furniture_specs_json: dict | None) -> bool:
-    if not isinstance(furniture_specs_json, dict):
-        return False
-    if any(_item_requires_identity_validation(item) for item in (furniture_specs_json.get("items") or []) if isinstance(item, dict)):
-        return True
-    summary = furniture_specs_json.get("two_pass_strategy") if isinstance(furniture_specs_json.get("two_pass_strategy"), dict) else {}
-    return bool((summary or {}).get("identity_validation_required_keys"))
-
-
-def _has_localized_render_box(item: dict | None) -> bool:
-    if not isinstance(item, dict):
-        return False
-    if str(item.get("box_source") or "").strip() == "source_reference":
-        return False
-    box = item.get("box_2d")
-    if not isinstance(box, list) or len(box) != 4:
-        return False
-    try:
-        ymin, xmin, ymax, xmax = [float(value) for value in box]
-    except Exception:
-        return False
-    if ymax <= ymin or xmax <= xmin:
-        return False
-    return not (ymin <= 1 and xmin <= 1 and ymax >= 999 and xmax >= 999)
-
-
-def _missing_pass2_identity_item_keys(full_analyzed_data: list[dict] | None, pass2_specs_json: dict | None) -> list[str]:
-    if not isinstance(pass2_specs_json, dict):
-        return []
-    rows_by_key = {
-        _item_target_key(row): row
-        for row in (full_analyzed_data or [])
-        if isinstance(row, dict) and _item_target_key(row)
-    }
-    summary = pass2_specs_json.get("two_pass_strategy") if isinstance(pass2_specs_json.get("two_pass_strategy"), dict) else {}
-    summary_identity_keys = {
-        str(key or "").strip()
-        for key in (summary or {}).get("identity_validation_required_keys") or []
-        if str(key or "").strip()
-    }
-    missing: list[str] = []
-    for item in pass2_specs_json.get("items") or []:
-        if not isinstance(item, dict):
-            continue
-        item_key = _item_target_key(item)
-        if not item_key:
-            continue
-        family_values = {
-            str(value or "").strip().lower()
-            for value in (
-                item.get("category_canonical"),
-                item.get("category"),
-                ((item.get("two_pass_strategy") or {}).get("family") if isinstance(item.get("two_pass_strategy"), dict) else ""),
-            )
-            if str(value or "").strip()
-        }
-        role = _item_pass_role(item)
-        sensitive_family_present = bool(
-            family_values & {"table_lamp", "floor_lamp", "table", "storage", "storage_cabinet_shelf", "light"}
-        )
-        needs_presence_validation = (
-            _item_requires_identity_validation(item)
-            or item_key in summary_identity_keys
-            or sensitive_family_present
-            or (role.startswith("pass2_") and sensitive_family_present)
-        )
-        if not needs_presence_validation:
-            continue
-        if not _has_localized_render_box(rows_by_key.get(item_key)):
-            missing.append(item_key)
-    return missing
-
-
-def _annotate_missing_pass2_identity_items(full_analyzed_data: list[dict] | None, missing_keys: list[str] | set[str]) -> list[dict]:
-    missing_set = {str(key or "").strip() for key in missing_keys or [] if str(key or "").strip()}
-    if not missing_set:
-        return list(full_analyzed_data or [])
-    rows: list[dict] = []
-    for item in full_analyzed_data or []:
-        if not isinstance(item, dict):
-            rows.append(item)
-            continue
-        item_key = _item_target_key(item)
-        if item_key not in missing_set:
-            rows.append(item)
-            continue
-        updated = dict(item)
-        updated["pass2_identity_unlocalized"] = True
-        updated["pass2_identity_failure_reason"] = "missing_product_localization"
-        updated["requires_manual_identity_review"] = True
-        updated["box_source"] = "source_reference"
-        if not _has_localized_render_box(updated):
-            updated["box_2d"] = [0, 0, 1000, 1000]
-        rows.append(updated)
-    return rows
-
-
-def _filter_generation_specs_to_item_keys(furniture_specs_json: dict | None, item_keys: list[str] | set[str]) -> dict | None:
-    if not isinstance(furniture_specs_json, dict):
-        return None
-    key_set = {str(key or "").strip() for key in item_keys or [] if str(key or "").strip()}
-    if not key_set:
-        return None
-    filtered_items = [
-        dict(item)
-        for item in (furniture_specs_json.get("items") or [])
-        if isinstance(item, dict) and _item_target_key(item) in key_set
-    ]
-    if not filtered_items:
-        return None
-    payload = dict(furniture_specs_json)
-    payload["items"] = filtered_items
-    summary = payload.get("two_pass_strategy") if isinstance(payload.get("two_pass_strategy"), dict) else None
-    if isinstance(summary, dict):
-        summary = dict(summary)
-        summary["pass2_detail_keys"] = [key for key in (summary.get("pass2_detail_keys") or []) if str(key or "").strip() in key_set]
-        summary["identity_validation_required_keys"] = [
-            key for key in (summary.get("identity_validation_required_keys") or []) if str(key or "").strip() in key_set
-        ]
-        payload["two_pass_strategy"] = summary
-    return payload
-
-
-def _select_focused_pass2_repair_keys(
-    pass2_specs_json: dict | None,
-    missing_keys: list[str] | set[str],
-    *,
-    max_items: int = 4,
-) -> list[str]:
-    if not isinstance(pass2_specs_json, dict):
-        return []
-    missing_set = {str(key or "").strip() for key in missing_keys or [] if str(key or "").strip()}
-    if not missing_set:
-        return []
-    sensitive_keys: list[str] = []
-    fallback_keys: list[str] = []
-    for item in pass2_specs_json.get("items") or []:
-        if not isinstance(item, dict):
-            continue
-        item_key = _item_target_key(item)
-        if item_key not in missing_set:
-            continue
-        family_values = {
-            str(value or "").strip().lower()
-            for value in (
-                item.get("category_canonical"),
-                item.get("category"),
-                ((item.get("two_pass_strategy") or {}).get("family") if isinstance(item.get("two_pass_strategy"), dict) else ""),
-            )
-            if str(value or "").strip()
-        }
-        if family_values & {"table_lamp", "floor_lamp", "table", "storage", "storage_cabinet_shelf", "light"}:
-            sensitive_keys.append(item_key)
-        else:
-            fallback_keys.append(item_key)
-    limit = max(1, int(max_items or 1))
-    selected = sensitive_keys[:limit]
-    if not selected:
-        selected = fallback_keys[:limit]
-    return selected
-
-
 def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> str | None:
     if not isinstance(furniture_specs_json, dict):
         return None
-
-    def _cue_list(value, limit: int = 4) -> str:
-        if not isinstance(value, list):
-            return ""
-        values: list[str] = []
-        for raw in value:
-            text = str(raw or "").strip()
-            if not text or text in values:
-                continue
-            values.append(text)
-            if len(values) >= limit:
-                break
-        return ", ".join(values)
 
     rows: list[str] = []
     for index, item in enumerate(furniture_specs_json.get("items") or [], start=1):
@@ -726,36 +445,6 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
             bits.append(f"category={family}")
         if dims_bits:
             bits.append(", ".join(dims_bits))
-        profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
-        product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
-        reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
-        topology = (
-            _cue_list(product_identity.get("topology_cues"))
-            or _cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
-            or _cue_list(reference_features.get("silhouette_cues"))
-        )
-        parts = (
-            _cue_list(profile.get("distinctive_parts"))
-            or _cue_list(reference_features.get("distinctive_parts"))
-            or _cue_list(product_identity.get("support_geometry"))
-        )
-        materials = _cue_list(profile.get("material_cues")) or _cue_list(reference_features.get("material_cues"))
-        preserve = (
-            _cue_list(product_identity.get("preserve_rules"))
-            or _cue_list(profile.get("preserve_rules"))
-            or _cue_list(reference_features.get("preserve_rules"))
-        )
-        if topology:
-            bits.append(f"topology={topology}")
-        if parts:
-            bits.append(f"parts={parts}")
-        if materials:
-            bits.append(f"materials={materials}")
-        if preserve:
-            bits.append(f"preserve={preserve}")
-        if item.get("requires_identity_validation") or ((item.get("two_pass_strategy") or {}).get("requires_identity_validation") if isinstance(item.get("two_pass_strategy"), dict) else False):
-            bits.append("identity=exact_reference_crop")
-            bits.append("generic_same_family_substitute=invalid")
         rows.append(f"{index}. {label}{qty_text}: " + " | ".join(bits))
     text = "\n".join(rows).strip()
     return text or None
@@ -1530,7 +1219,7 @@ def run_render_room_workflow(
         ref_input = ref_paths if len(ref_paths) > 1 else (ref_paths[0] if ref_paths else None)
         resolved_style_prompt = _resolve_style_prompt(deps.runtime.style_map, request.style)
         deps.runtime.log_section("[Stage 2] unified main generation start (best-of-3)")
-        generation_specs_json, pass2_generation_specs_json = _split_generation_specs_for_render_passes(furniture_specs_json)
+        generation_specs_json = _build_simple_generation_specs(furniture_specs_json)
         generation_specs_text = _build_compact_generation_specs_text(generation_specs_json) or furniture_specs_text
         primary_item = _hydrate_item_dims(
             primary_item,
@@ -1650,81 +1339,6 @@ def run_render_room_workflow(
         if not strict_final_result_blocked:
             if aud == "external":
                 generated_results = list(generated_results[:1])
-            if pass2_generation_specs_json and generated_results:
-                deps.runtime.log_section("[Stage 2B] additive detail generation start (pass2)")
-                pass2_specs_text = _build_compact_generation_specs_text(pass2_generation_specs_json)
-                pass2_placement = "\n".join(
-                    part
-                    for part in (
-                        str(request.placement or "").strip(),
-                        "SECOND PASS ADDITIVE EDIT: preserve the current furnished room, architecture, camera, lighting, and all first-pass furniture exactly. Add only the listed secondary decor/detail items. Do not move, remove, resize, recolor, or replace existing furniture.",
-                    )
-                    if part
-                )
-                pass2_results = run_render_variant_stage(
-                    step1_img=generated_results[0],
-                    style_prompt=resolved_style_prompt,
-                    ref_input=ref_input,
-                    unique_id=f"{unique_id}_p2",
-                    furniture_specs_text=pass2_specs_text,
-                    furniture_specs_json=pass2_generation_specs_json,
-                    dimensions=generation_dimensions,
-                    placement=pass2_placement,
-                    scale_guide_path=scale_guide_path,
-                    primary_item=primary_item,
-                    room_dims_parsed=room_dims_parsed,
-                    wall_span_norm=wall_span_norm,
-                    size_hierarchy=size_hierarchy,
-                    scale_plan=scale_plan_dict,
-                    geometry_contract=geometry_contract_dict,
-                    scene_contract=scene_contract_dict,
-                    placement_plan=placement_plan_dict,
-                    start_time=start_time,
-                    room_planes=room_planes,
-                    windows_present=windows_present,
-                    room_analysis_text=room_analysis_text,
-                    enable_scale_check=False,
-                    generate_furnished_room=deps.generation.generate_furnished_room,
-                    max_variants=1,
-                    max_workers=1,
-                    max_generation_attempts=1,
-                    start_index=20,
-                )
-                pass2_paths = [
-                    str((row or {}).get("path") or "")
-                    for row in pass2_results or []
-                    if isinstance(row, dict) and (row or {}).get("path")
-                ]
-                if pass2_paths:
-                    generated_results = list(pass2_paths)
-                    selected_result_index = 0
-                    selected_result_reason = "pass2_additive_edit_unpolished"
-                    if generated_results:
-                        try:
-                            full_analyzed_data = deps.postprocess.refresh_item_boxes_from_main_render(
-                                generated_results[0],
-                                full_analyzed_data,
-                            )
-                            full_analyzed_data = deps.postprocess.attach_volume_ranks(full_analyzed_data)
-                            volume_ranking = deps.postprocess.volume_ranking_snapshot(full_analyzed_data)
-                        except Exception as exc:
-                            deps.runtime.logger.exception(f"[Postprocess] pass2 box refresh failed: {exc}")
-                    missing_pass2_identity_keys = _missing_pass2_identity_item_keys(
-                        full_analyzed_data,
-                        pass2_generation_specs_json,
-                    )
-                    if missing_pass2_identity_keys:
-                        full_analyzed_data = _annotate_missing_pass2_identity_items(
-                            full_analyzed_data,
-                            missing_pass2_identity_keys,
-                        )
-                        try:
-                            deps.runtime.logger.warning(
-                                "[Pass2Identity] missing localized product boxes after additive pass: %s",
-                                ", ".join(missing_pass2_identity_keys),
-                            )
-                        except Exception:
-                            pass
         if selected_variant_review:
             full_analyzed_data = _apply_selected_review_boxes_to_analyzed_items(
                 full_analyzed_data,

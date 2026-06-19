@@ -2,7 +2,6 @@ import copy
 import json
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,24 +22,12 @@ def _json_default(value: Any) -> Any:
 
 def _save_video_jobs_locked() -> None:
     VIDEO_JOB_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = VIDEO_JOB_STORE_PATH.with_name(
-        f"{VIDEO_JOB_STORE_PATH.name}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
-    )
+    temp_path = VIDEO_JOB_STORE_PATH.with_suffix(".tmp")
     temp_path.write_text(
         json.dumps(video_jobs, ensure_ascii=False, indent=2, sort_keys=True, default=_json_default),
         encoding="utf-8",
     )
-    try:
-        for attempt in range(3):
-            try:
-                temp_path.replace(VIDEO_JOB_STORE_PATH)
-                return
-            except PermissionError:
-                if attempt == 2:
-                    raise
-                time.sleep(0.05 * (attempt + 1))
-    finally:
-        temp_path.unlink(missing_ok=True)
+    temp_path.replace(VIDEO_JOB_STORE_PATH)
 
 
 def _local_output_path(output_url: str | None) -> Path | None:

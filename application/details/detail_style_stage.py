@@ -61,23 +61,6 @@ def _normalized_label(value) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _has_product_reference(item) -> bool:
-    if not isinstance(item, dict):
-        return False
-    crop_path = str(item.get("crop_path") or "").strip()
-    raw_target_key = str(item.get("target_key") or "").strip().lower()
-    raw_item_id = str(item.get("item_id") or "").strip().lower()
-    target_key = _normalized_label(item.get("target_key"))
-    item_id = _normalized_label(item.get("item_id"))
-    return bool(
-        raw_target_key.startswith(("cart_", "cart_product", "product_"))
-        or raw_item_id.startswith("product_")
-        or target_key.startswith(("cart ", "cart product", "product "))
-        or item_id.startswith("product ")
-        or (crop_path and raw_item_id.isdigit())
-    )
-
-
 _GENERIC_DECOR_DETAIL_KEYS = {
     "accessory",
     "accessories",
@@ -165,19 +148,14 @@ def _is_source_backed_detail_target(item) -> bool:
         return False
 
     crop_path = str(item.get("crop_path") or "").strip()
-    has_product_reference = _has_product_reference(item)
+    item_id = _normalized_label((item or {}).get("item_id"))
+    target_key = _normalized_label((item or {}).get("target_key"))
+    has_product_reference = bool(crop_path or item_id or (target_key and not target_key.startswith("detail_")))
 
     if _has_localized_render_box(item) and has_product_reference:
         return True
 
-    if (
-        has_product_reference
-        and _normalize_box(item.get("source_box_2d")) is not None
-        and not _is_full_frame_box(item.get("source_box_2d"))
-    ):
-        return True
-
-    if has_product_reference and crop_path:
+    if _normalize_box(item.get("source_box_2d")) is not None and not _is_full_frame_box(item.get("source_box_2d")):
         return True
 
     return False
@@ -304,33 +282,26 @@ def construct_dynamic_styles(analyzed_items):
 
         label = item["label"]
 
-        source_backed = _is_source_backed_detail_target(item)
-        style = {
-            "name": f"Detail: {label}",
-            "target_label": label,
-            "target_key": item.get("target_key"),
-            "source_index": item.get("source_index"),
-            "detail_index": count + 1,
-            "target_category": item.get("category") or "",
-            "target_category_canonical": item.get("category_canonical") or "",
-            "target_box_2d": item.get("box_2d"),
-            "target_source_box_2d": item.get("source_box_2d"),
-            "target_box_source": item.get("box_source"),
-            "target_crop_path": item.get("crop_path"),
-            "target_reference_features": item.get("reference_features"),
-            "prompt": (
-                f"Create a detailed editorial furniture-magazine photograph focused on the {label} area in this exact room. "
-                "Use the provided main image as the sole source of truth. Preserve the furniture shape, count, placement, "
-                "material, color, lighting direction, and room architecture. Do not add, remove, replace, or rearrange anything."
-            ),
-            "ratio": "4:5",
-        }
-        if source_backed:
-            style["detail_mode"] = "product_identity_lock"
-            style["prompt"] += (
-                " Keep the product-backed target key, source crop, and reference feature contract locked to this same object."
-            )
-        styles.append(style)
+        styles.append(
+            {
+                "name": f"Detail: {label}",
+                "target_label": label,
+                "target_key": item.get("target_key"),
+                "source_index": item.get("source_index"),
+                "detail_index": count + 1,
+                "target_category": item.get("category") or "",
+                "target_category_canonical": item.get("category_canonical") or "",
+                "target_box_2d": item.get("box_2d"),
+                "target_box_source": item.get("box_source"),
+                "prompt": (
+                    f"Create a detailed editorial furniture-magazine photograph focused on the {label} area in this exact room. "
+                    "Use the provided main image as the sole source of truth. Preserve the furniture shape, count, placement, "
+                    "material, color, lighting direction, and room architecture. Do not add, remove, replace, or rearrange anything."
+                ),
+                "ratio": "4:5",
+                "simple_scene_detail": True,
+            }
+        )
         count += 1
         accepted_detail_targets.append(item)
 

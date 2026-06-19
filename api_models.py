@@ -41,13 +41,6 @@ class CartItem(BaseModel):
     dims_mm: Optional[Dict[str, Any]] = None
     name: Optional[str] = None
     options: Optional[Any] = None
-    category_path: Optional[str] = None
-    category_source: Optional[str] = None
-    main_category: Optional[str] = None
-    sub_category: Optional[str] = None
-    mainCategory: Optional[str] = None
-    subCategory: Optional[str] = None
-    product_type: Optional[str] = None
 
 
 class CartRenderRequest(BaseModel):

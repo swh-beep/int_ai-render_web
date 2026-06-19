@@ -37,9 +37,6 @@ class DetailMetadataTests(unittest.TestCase):
                 "style_target_label": "Accent Chair",
                 "cutout_ref_count": 1,
                 "cutout_ref_labels": ["Accent Chair"],
-                "generation_mode": "product_locked_reframe",
-                "product_pixel_lock": True,
-                "crop_bounds_px": [100, 200, 500, 700],
             }
         ]
         output = build_detail_generation_output(
@@ -57,9 +54,6 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail["target_key"], "cart_product-1_accent-chair_001")
         self.assertEqual(detail["target_box_source"], "main_render")
         self.assertEqual(detail["target_box_2d"], [10, 10, 20, 20])
-        self.assertEqual(detail["generation_mode"], "product_locked_reframe")
-        self.assertIs(detail["product_pixel_lock"], True)
-        self.assertEqual(detail["crop_bounds_px"], [100, 200, 500, 700])
         self.assertEqual(output["furniture_data"][0]["target_key"], "cart_product-1_accent-chair_001")
         self.assertEqual(output["furniture_data"][0]["description"], "Soft boucle accent chair")
         self.assertNotIn("_normalized_label", output["furniture_data"][0])
@@ -146,7 +140,7 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(enriched["target_box_source"], "main_render")
         self.assertEqual(enriched["resolved_target_label"], "Accent Chair")
 
-    def test_construct_dynamic_styles_returns_editorial_detail_targets(self):
+    def test_construct_dynamic_styles_returns_only_simple_detail_targets(self):
         styles = construct_dynamic_styles(
             [
                 {
@@ -161,54 +155,9 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(len(styles), 1)
         self.assertEqual(styles[0]["name"], "Detail: Accent Chair")
         self.assertEqual(styles[0]["ratio"], "4:5")
-        self.assertNotIn("simple_scene_detail", styles[0])
+        self.assertIs(styles[0]["simple_scene_detail"], True)
         self.assertEqual(styles[0]["target_category_canonical"], "")
         self.assertNotIn("TARGET COORDINATES", styles[0]["prompt"])
-
-    def test_construct_dynamic_styles_uses_full_detail_contract_for_product_backed_targets(self):
-        styles = construct_dynamic_styles(
-            [
-                {
-                    "label": "Taccia Small Table Lamp",
-                    "target_key": "cart_product-38173_taccia-small_011",
-                    "item_id": "product_38173",
-                    "category": "table_lamp",
-                    "category_canonical": "table_lamp",
-                    "box_2d": [422, 798, 558, 858],
-                    "box_source": "detail_current_image_analysis",
-                    "source_box_2d": [410, 790, 565, 865],
-                    "crop_path": "outputs/taccia-reference.png",
-                    "reference_features": {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]},
-                }
-            ]
-        )
-
-        self.assertEqual(styles[0]["target_key"], "cart_product-38173_taccia-small_011")
-        self.assertNotIn("simple_scene_detail", styles[0])
-        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
-        self.assertEqual(styles[0]["target_crop_path"], "outputs/taccia-reference.png")
-        self.assertEqual(styles[0]["target_reference_features"], {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]})
-
-    def test_construct_dynamic_styles_treats_cart_keys_with_cutouts_as_product_backed(self):
-        styles = construct_dynamic_styles(
-            [
-                {
-                    "label": "Layer Table Lamp",
-                    "target_key": "cart_38172_layer-table-lamp_012",
-                    "item_id": "38172",
-                    "category": "table_lamp",
-                    "category_canonical": "table_lamp",
-                    "box_2d": [422, 798, 558, 858],
-                    "box_source": "main_render",
-                    "crop_path": "outputs/layer-reference.png",
-                    "reference_features": {"silhouette_cues": ["layered shade profile"]},
-                }
-            ]
-        )
-
-        self.assertEqual(styles[0]["target_key"], "cart_38172_layer-table-lamp_012")
-        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
-        self.assertEqual(styles[0]["target_crop_path"], "outputs/layer-reference.png")
 
     def test_construct_dynamic_styles_preserves_target_category_metadata(self):
         styles = construct_dynamic_styles(

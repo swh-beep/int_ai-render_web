@@ -6,9 +6,7 @@ from application.render.geometry_contract_stage import build_geometry_contract
 from application.render.room_dimension_estimation_stage import estimate_room_dims_contract
 from application.render.render_room_workflow import (
     _build_simple_generation_specs,
-    _split_generation_specs_for_render_passes,
     _polish_selected_best_result,
-    _select_focused_pass2_repair_keys,
     run_render_room_workflow,
 )
 from application.render.render_workflow_contracts import (
@@ -103,73 +101,6 @@ def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata()
     assert simple["two_pass_strategy"] == {"pass1_primary_keys": ["chair-1"]}
     assert simple["size_hierarchy_scale"] == ["Chair"]
     assert simple["primary"]["target_key"] == "chair-1"
-
-
-def test_split_generation_specs_keeps_core_items_in_pass1_and_details_in_pass2():
-    specs = {
-        "items": [
-            {
-                "target_key": "sofa-1",
-                "label": "Sofa",
-                "category": "sofa",
-                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
-                "two_pass_strategy": {"pass_role": "pass1_anchor"},
-            },
-            {
-                "target_key": "chair-1",
-                "label": "Lounge Chair",
-                "category": "lounge_chair",
-                "dims_mm": {"width_mm": 760, "depth_mm": 820, "height_mm": 780},
-                "two_pass_strategy": {"pass_role": "pass1_footprint"},
-            },
-            {
-                "target_key": "lamp-1",
-                "label": "Small Table Lamp",
-                "category": "table_lamp",
-                "dims_mm": {"width_mm": 240, "depth_mm": 240, "height_mm": 430},
-                "two_pass_strategy": {"pass_role": "pass2_small"},
-            },
-            {
-                "target_key": "art-1",
-                "label": "Framed Artwork",
-                "category": "artwork",
-                "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
-                "two_pass_strategy": {"pass_role": "pass2_wall"},
-            },
-        ],
-        "primary_scale": {"target_key": "sofa-1"},
-        "two_pass_strategy": {
-            "pass1_primary_keys": ["sofa-1"],
-            "pass1_support_keys": ["chair-1"],
-            "pass2_detail_keys": ["lamp-1", "art-1"],
-        },
-    }
-
-    pass1_specs, pass2_specs = _split_generation_specs_for_render_passes(specs)
-
-    assert [item["target_key"] for item in pass1_specs["items"]] == ["sofa-1", "chair-1"]
-    assert [item["target_key"] for item in pass2_specs["items"]] == ["lamp-1", "art-1"]
-    assert pass2_specs["render_pass_mode"] == "pass2_additive_edit"
-    assert pass2_specs["primary"]["target_key"] == "sofa-1"
-
-
-def test_select_focused_pass2_repair_keys_prioritizes_shape_sensitive_items_over_decor():
-    specs = {
-        "items": [
-            {"target_key": "table-1", "label": "Bowler Table", "category": "table"},
-            {"target_key": "decor-1", "label": "Book Stack", "category": "decor", "requires_identity_validation": True},
-            {"target_key": "decor-2", "label": "Art Print", "category": "decor", "requires_identity_validation": True},
-            {"target_key": "lamp-1", "label": "Layer Lamp", "category": "table_lamp"},
-            {"target_key": "lamp-2", "label": "Taccia Lamp", "category_canonical": "table_lamp"},
-            {"target_key": "stool-1", "label": "Figreco", "category": "table"},
-        ]
-    }
-
-    assert _select_focused_pass2_repair_keys(
-        specs,
-        ["table-1", "decor-1", "decor-2", "lamp-1", "lamp-2", "stool-1"],
-        max_items=4,
-    ) == ["table-1", "lamp-1", "lamp-2", "stool-1"]
 
 
 def test_polish_selected_best_result_keeps_selected_candidate_when_polish_fails():
@@ -877,13 +808,12 @@ def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but
 
     assert detect_calls == [str(source_path)]
     assert len(analyze_calls) == 0
-    assert result[0]["target_key"] == "chair-1"
-    assert result[0]["label"] == "Chair"
+    assert result[0]["target_key"] == "detail_1_Chair"
     assert result[0]["box_2d"] == [220, 260, 820, 900]
     assert result[0]["box_source"] == "detail_current_image_analysis"
-    assert result[0]["source_box_2d"] == [100, 100, 700, 700]
-    assert result[0]["crop_path"] == "outputs/chair.png"
-    assert result[0]["identity_profile"] == {"silhouette": "rolled-arm"}
-    assert result[0]["reference_features"] == {"material_cues": ["boucle"]}
-    assert result[0]["placement_contract"] == {"zone": "left"}
+    assert "source_box_2d" not in result[0]
+    assert "crop_path" not in result[0]
+    assert "identity_profile" not in result[0]
+    assert "reference_features" not in result[0]
+    assert "placement_contract" not in result[0]
     assert result[0]["volume_rank"] == 1

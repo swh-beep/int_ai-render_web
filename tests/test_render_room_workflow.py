@@ -63,19 +63,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.created_paths.append(str(path))
         return str(path)
 
-    def _run_workflow_case(
-        self,
-        *,
-        audience: str,
-        unique_id: str,
-        moodboard_items=None,
-        analyze_cropped_item=None,
-        refresh_item_boxes_from_main_render=None,
-        polish_main_image=None,
-    ):
+    def _run_workflow_case(self, *, audience: str, unique_id: str):
         generated_calls = []
-        self.generated_call_sources = []
-        self.generated_call_kwargs = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
 
@@ -83,17 +72,13 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             variant_id = str(args[3])
             path = self._touch(f"{variant_id}.png")
             generated_calls.append(path)
-            self.generated_call_sources.append(args[0])
-            self.generated_call_kwargs.append(dict(kwargs))
             return path
 
-        def default_polish_main_image(source_path, **kwargs):
+        def polish_main_image(source_path, **kwargs):
             polished_calls.append((source_path, dict(kwargs)))
             if audience == "internal":
                 return self._touch(f"{Path(source_path).stem}_polished.png")
             return self._touch("polished-best.png")
-
-        polish_main_image = polish_main_image or default_polish_main_image
 
         generation = RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: (self._touch("empty.png"), self._touch("empty-raw.png")),
@@ -136,7 +121,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 canonical_category=lambda category: category or "",
                 detect_furniture_boxes=lambda _path: [],
                 analyze_room_structure=lambda *_args, **_kwargs: {"room_text": "", "windows_present": False},
-                analyze_cropped_item=analyze_cropped_item or (lambda *_args, **_kwargs: {"description": "chair"}),
+                analyze_cropped_item=lambda *_args, **_kwargs: {"description": "chair"},
                 normalize_dims_dict=lambda dims: dims or {},
                 parse_object_dimensions_mm=lambda _text: {},
                 build_furniture_specs_json=lambda items: {"items": items},
@@ -146,8 +131,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             generation=generation,
             postprocess=RenderWorkflowPostprocessServices(
                 rank_best_variant=lambda candidates, _items: 1,
-                refresh_item_boxes_from_main_render=refresh_item_boxes_from_main_render
-                or (lambda _path, items: items),
+                refresh_item_boxes_from_main_render=lambda _path, items: items,
                 attach_volume_ranks=lambda items: items,
                 volume_ranking_snapshot=lambda _items: [],
             ),
@@ -160,7 +144,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 style="Customize",
                 variant="1",
                 audience=audience,
-                moodboard_items=moodboard_items or [{"label": "Chair", "path": "https://example.com/chair.png"}],
+                moodboard_items=[{"label": "Chair", "path": "https://example.com/chair.png"}],
             ),
             deps,
         )
@@ -187,183 +171,3 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["result_url"], "url://internal/mainrendered/rendered/int12345_v2.png")
-
-    def test_external_render_adds_pass2_detail_items_after_primary_pass(self):
-        def analyze_cropped_item(_path, item, *_args, **_kwargs):
-            label = str((item or {}).get("label") or "")
-            if "Artwork" in label:
-                return {
-                    **dict(item or {}),
-                    "description": "Framed blue artwork",
-                    "category": "artwork",
-                    "category_canonical": "artwork",
-                    "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
-                }
-            return {
-                **dict(item or {}),
-                "description": "Large cream sofa",
-                "category": "sofa",
-                "category_canonical": "sofa",
-                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
-            }
-
-        payload, generated_calls, polished_calls = self._run_workflow_case(
-            audience="external",
-            unique_id="twopass01",
-            moodboard_items=[
-                {"label": "Sofa", "path": "https://example.com/sofa.png"},
-                {"label": "Artwork", "path": "https://example.com/art.png"},
-            ],
-            analyze_cropped_item=analyze_cropped_item,
-        )
-
-        self.assertEqual(len(generated_calls), 4)
-        self.assertEqual(Path(generated_calls[-1]).name, "twopass01_p2_v21.png")
-        self.assertEqual(Path(self.generated_call_sources[-1]).name, "twopass01_v2.png")
-        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
-        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
-        self.assertEqual(polished_calls, [])
-        self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/twopass01_p2_v21.png")
-
-    def test_external_render_refreshes_item_boxes_after_unpolished_pass2(self):
-        def analyze_cropped_item(_path, item, *_args, **_kwargs):
-            label = str((item or {}).get("label") or "")
-            if "Layer Lamp" in label:
-                return {
-                    **dict(item or {}),
-                    "description": "Stacked layered table lamp",
-                    "category": "table_lamp",
-                    "category_canonical": "table_lamp",
-                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
-                    "requires_identity_validation": True,
-                    "reference_features": {
-                        "silhouette_cues": ["stacked layered shade profile", "parallel horizontal discs"],
-                        "distinctive_parts": ["visible vertical rods"],
-                    },
-                }
-            return {
-                **dict(item or {}),
-                "description": "Large cream sofa",
-                "category": "sofa",
-                "category_canonical": "sofa",
-                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
-            }
-
-        refresh_calls = []
-
-        def refresh_boxes(path, items):
-            refresh_calls.append(
-                (
-                    Path(path).name,
-                    [
-                        (item.get("target_key"), item.get("label"), item.get("category"), item.get("category_canonical"), item.get("box_source"), item.get("box_2d"))
-                        for item in items
-                    ],
-                )
-            )
-            if len(refresh_calls) == 1:
-                return items
-            return [
-                (
-                    {
-                        **dict(item),
-                        "box_2d": [320, 120, 520, 240],
-                        "box_source": "main_render",
-                        "box_label_detected": "Layer Lamp",
-                    }
-                    if item.get("label") == "Layer Lamp"
-                    else item
-                )
-                for item in items
-            ]
-
-        payload, _generated_calls, _polished_calls = self._run_workflow_case(
-            audience="external",
-            unique_id="pass2box",
-            moodboard_items=[
-                {"label": "Sofa", "path": "https://example.com/sofa.png", "target_key": "cart_sofa_001"},
-                {"label": "Layer Lamp", "path": "https://example.com/layer-lamp.png", "target_key": "cart_layer-lamp_002"},
-            ],
-            analyze_cropped_item=analyze_cropped_item,
-            refresh_item_boxes_from_main_render=refresh_boxes,
-        )
-
-        self.assertGreaterEqual(len(refresh_calls), 2)
-        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
-        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
-        layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
-        self.assertEqual(layer_lamp["box_source"], "main_render")
-        self.assertEqual(layer_lamp["box_label_detected"], "Layer Lamp")
-
-    def test_external_render_marks_missing_pass2_identity_without_whole_image_repair(self):
-        def analyze_cropped_item(_path, item, *_args, **_kwargs):
-            label = str((item or {}).get("label") or "")
-            if "Layer Lamp" in label:
-                return {
-                    **dict(item or {}),
-                    "description": "Stacked layered table lamp",
-                    "category": "table_lamp",
-                    "category_canonical": "table_lamp",
-                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
-                    "requires_identity_validation": True,
-                    "reference_features": {
-                        "silhouette_cues": ["stacked layered shade profile", "parallel horizontal discs"],
-                        "distinctive_parts": ["visible vertical rods"],
-                    },
-                }
-            return {
-                **dict(item or {}),
-                "description": "Large cream sofa",
-                "category": "sofa",
-                "category_canonical": "sofa",
-                "dims_mm": {"width_mm": 2200, "depth_mm": 950, "height_mm": 780},
-            }
-
-        refresh_calls = []
-
-        def refresh_boxes(path, items):
-            refresh_calls.append(
-                (
-                    Path(path).name,
-                    [
-                        (item.get("target_key"), item.get("label"), item.get("category"), item.get("category_canonical"), item.get("box_source"), item.get("box_2d"))
-                        for item in items
-                    ],
-                )
-            )
-            if len(refresh_calls) < 3:
-                return items
-            return [
-                (
-                    {
-                        **dict(item),
-                        "box_2d": [320, 120, 520, 240],
-                        "box_source": "main_render",
-                        "box_label_detected": "Layer Lamp",
-                    }
-                    if item.get("label") == "Layer Lamp"
-                    else item
-                )
-                for item in items
-            ]
-
-        payload, generated_calls, _polished_calls = self._run_workflow_case(
-            audience="external",
-            unique_id="p2repair",
-            moodboard_items=[
-                {"label": "Sofa", "path": "https://example.com/sofa.png", "target_key": "cart_sofa_001"},
-                {"label": "Layer Lamp", "path": "https://example.com/layer-lamp.png", "target_key": "cart_layer-lamp_002"},
-            ],
-            analyze_cropped_item=analyze_cropped_item,
-            refresh_item_boxes_from_main_render=refresh_boxes,
-        )
-
-        self.assertEqual(len(generated_calls), 4, refresh_calls)
-        self.assertGreaterEqual(len(refresh_calls), 2, refresh_calls)
-        self.assertEqual(self.generated_call_kwargs[-1]["max_generation_attempts"], 1)
-        self.assertFalse(self.generated_call_kwargs[-1]["enable_scale_check"])
-        self.assertNotIn("FOCUSED PASS2 IDENTITY REPAIR", self.generated_call_kwargs[-1]["placement_instructions"])
-        layer_lamp = next(row for row in payload["furniture_data"] if row.get("label") == "Layer Lamp")
-        self.assertTrue(layer_lamp["pass2_identity_unlocalized"])
-        self.assertEqual(layer_lamp["pass2_identity_failure_reason"], "missing_product_localization")
-        self.assertEqual(layer_lamp["box_source"], "source_reference")

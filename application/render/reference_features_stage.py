@@ -1,5 +1,4 @@
 import os
-import re
 import time
 from typing import Any, Callable
 
@@ -65,22 +64,6 @@ _HIGH_PRIORITY_REFERENCE_REASONS = {
 _MEDIUM_PRIORITY_REFERENCE_REASONS = {
     "thin_floor_footprint_object",
     "tiny_absolute_scale_object",
-    "general_reference_identity_object",
-}
-
-_GENERIC_FEATURE_TOKENS = {
-    "art",
-    "chair",
-    "decor",
-    "desk",
-    "furniture",
-    "item",
-    "lamp",
-    "light",
-    "object",
-    "rug",
-    "sofa",
-    "table",
 }
 
 
@@ -182,7 +165,7 @@ def should_extract_reference_features(
         return True, "support_geometry_object"
     if max(width_mm, depth_mm) >= 1400:
         return True, "large_anchor_candidate"
-    return True, "general_reference_identity_object"
+    return False, "fallback_only"
 
 
 def _remaining_deadline_sec(absolute_deadline_ts: float | None) -> float | None:
@@ -286,79 +269,6 @@ def _fallback_reference_features(
     }
 
 
-def _build_reference_feature_prompt(
-    *,
-    label: str,
-    category: str | None,
-    description: str,
-    dims_mm: dict | None,
-) -> str:
-    dims = dims_mm or {}
-    return (
-        "REFERENCE PRODUCT IDENTITY ANALYSIS TASK.\n"
-        "Analyze ONLY the provided product crop/reference image. Do not describe the room, camera, background, or styling.\n"
-        "Return compact, concrete visual identity cues that help a later image model recreate the same product.\n"
-        f"Label: {label or 'Item'}\n"
-        f"Category: {category or 'unknown'}\n"
-        f"Description: {description or ''}\n"
-        f"Dims(mm): W={dims.get('width_mm')}, D={dims.get('depth_mm')}, H={dims.get('height_mm')}\n"
-        "Return STRICT JSON ONLY with keys: "
-        "\"silhouette_cues\", \"material_cues\", \"distinctive_parts\", \"preserve_rules\", \"reflective_surface\".\n"
-        "For silhouette_cues, include visible shape/proportion/topology such as back shape, arm profile, shade shape, base type, leg/support structure, tabletop outline, openings, gaps, or frame geometry.\n"
-        "For material_cues, include visible finish/color/material such as chrome, brass, marble, smoked glass, black leather, boucle fabric, cane, walnut, or matte ceramic.\n"
-        "For distinctive_parts, name product-specific parts that make this item recognizable. Do not output only generic category words.\n"
-        "For preserve_rules, write short imperative rules for what must remain visually unchanged in generation.\n"
-        "Do not invent brand/model names. Do not return vague words like furniture, object, chair, table, lamp, or decor as the only cue."
-    )
-
-
-def _is_generic_feature_text(value: str, *, label: str, category: str | None) -> bool:
-    text = str(value or "").strip().lower()
-    if not text:
-        return True
-    if len(text) < 5:
-        return True
-    normalized = re.sub(r"[^a-z0-9가-힣]+", " ", text).strip()
-    if normalized in _GENERIC_FEATURE_TOKENS:
-        return True
-    category_family = str(category_match_family(category or label) or "").strip().lower().replace("_", " ")
-    if category_family and normalized in {category_family, category_family.replace(" ", "")}:
-        return True
-    label_text = re.sub(r"[^a-z0-9가-힣]+", " ", str(label or "").lower()).strip()
-    if label_text and normalized == label_text:
-        return True
-    return False
-
-
-def _reference_features_sufficient(features: dict, *, label: str, category: str | None) -> bool:
-    if not isinstance(features, dict):
-        return False
-    silhouette = _coerce_str_list(features.get("silhouette_cues"))
-    materials = _coerce_str_list(features.get("material_cues"))
-    distinctive = _coerce_str_list(features.get("distinctive_parts"))
-    preserve_rules = _coerce_str_list(features.get("preserve_rules"))
-    specific_silhouette = [
-        cue for cue in silhouette if not _is_generic_feature_text(cue, label=label, category=category)
-    ]
-    specific_distinctive = [
-        cue for cue in distinctive if not _is_generic_feature_text(cue, label=label, category=category)
-    ]
-    specific_rules = [
-        rule for rule in preserve_rules if not _is_generic_feature_text(rule, label=label, category=category)
-    ]
-    return bool(len(specific_silhouette) >= 2 and materials and specific_distinctive and specific_rules)
-
-
-def _normalize_reference_feature_payload(parsed: dict, fallback: dict) -> dict:
-    return {
-        "silhouette_cues": _coerce_str_list(parsed.get("silhouette_cues")) or fallback["silhouette_cues"],
-        "material_cues": _coerce_str_list(parsed.get("material_cues")) or fallback["material_cues"],
-        "distinctive_parts": _coerce_str_list(parsed.get("distinctive_parts")),
-        "preserve_rules": _coerce_str_list(parsed.get("preserve_rules")),
-        "reflective_surface": _coerce_bool(parsed.get("reflective_surface"), fallback["reflective_surface"]),
-    }
-
-
 def extract_reference_features(
     *,
     crop_path: str | None,
@@ -390,44 +300,39 @@ def extract_reference_features(
         bounded_timeout = _bounded_timeout(25.0, absolute_deadline_ts=absolute_deadline_ts)
         if bounded_timeout is None:
             return fallback
-        prompt = _build_reference_feature_prompt(
-            label=label,
-            category=category,
-            description=description,
-            dims_mm=dims_mm,
+        dims = dims_mm or {}
+        prompt = (
+            "REFERENCE FEATURE EXTRACTION TASK.\n"
+            "Analyze this furniture crop and return compact structural cues for fidelity preservation.\n"
+            f"Label: {label or 'Item'}\n"
+            f"Category: {category or 'unknown'}\n"
+            f"Description: {description or ''}\n"
+            f"Dims(mm): W={dims.get('width_mm')}, D={dims.get('depth_mm')}, H={dims.get('height_mm')}\n"
+            "Return STRICT JSON ONLY with keys: "
+            "\"silhouette_cues\", \"material_cues\", \"distinctive_parts\", \"preserve_rules\", \"reflective_surface\".\n"
+            "Focus on topology, frame/support shape, openings/gaps, tabletop/base shape, and reflective behavior.\n"
+            "Do not describe the room or camera."
         )
         crop_img = _normalize_crop_for_prompt(crop_path)
-        last_features = None
-        for attempt_index in range(1, 4):
-            response = call_gemini_with_failover(
-                analysis_model_name,
-                [prompt, crop_img],
-                {"timeout": int(bounded_timeout), "max_attempts": 1},
-                {},
-                log_tag="Analysis.ReferenceFeatures",
-            )
-            if not response or not getattr(response, "text", None):
-                continue
-            parsed = safe_json_from_model_text(response.text) or {}
-            if not isinstance(parsed, dict):
-                continue
-            features = _normalize_reference_feature_payload(parsed, fallback)
-            last_features = features
-            if _reference_features_sufficient(features, label=label, category=category):
-                features["analysis_attempts"] = attempt_index
-                features["analysis_retry_count"] = max(0, attempt_index - 1)
-                features["analysis_quality"] = "model_sufficient"
-                return features
-        result = dict(fallback)
-        if isinstance(last_features, dict) and "reflective_surface" in last_features:
-            result["reflective_surface"] = _coerce_bool(
-                last_features.get("reflective_surface"),
-                fallback["reflective_surface"],
-            )
-        result["analysis_attempts"] = 3
-        result["analysis_retry_count"] = 2
-        result["analysis_quality"] = "fallback_after_weak_model" if last_features else "fallback_after_empty_model"
-        return result
+        response = call_gemini_with_failover(
+            analysis_model_name,
+            [prompt, crop_img],
+            {"timeout": int(bounded_timeout), "max_attempts": 1},
+            {},
+            log_tag="Analysis.ReferenceFeatures",
+        )
+        if not response or not getattr(response, "text", None):
+            return fallback
+        parsed = safe_json_from_model_text(response.text) or {}
+        if not isinstance(parsed, dict):
+            return fallback
+        return {
+            "silhouette_cues": _coerce_str_list(parsed.get("silhouette_cues")) or fallback["silhouette_cues"],
+            "material_cues": _coerce_str_list(parsed.get("material_cues")) or fallback["material_cues"],
+            "distinctive_parts": _coerce_str_list(parsed.get("distinctive_parts")),
+            "preserve_rules": _coerce_str_list(parsed.get("preserve_rules")),
+            "reflective_surface": _coerce_bool(parsed.get("reflective_surface"), fallback["reflective_surface"]),
+        }
     except Exception as exc:
         if not log_brief:
             print(f"[ReferenceFeatures] fallback for {label}: {exc}", flush=True)

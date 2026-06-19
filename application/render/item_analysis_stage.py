@@ -225,46 +225,6 @@ def _stabilize_description(
     return stabilized
 
 
-def _options_reference_features(item_data: dict | None) -> dict:
-    if not isinstance(item_data, dict):
-        return {}
-    opts = item_data.get("options")
-    if not isinstance(opts, dict):
-        return {}
-    features = opts.get("reference_features")
-    return dict(features) if isinstance(features, dict) else {}
-
-
-def _merge_reference_feature_lists(*values, limit: int = 8) -> list[str]:
-    merged: list[str] = []
-    for value in values:
-        if not isinstance(value, list):
-            continue
-        for raw in value:
-            text = str(raw or "").strip()
-            if not text or text in merged:
-                continue
-            merged.append(text)
-            if len(merged) >= limit:
-                return merged
-    return merged
-
-
-def _merge_options_reference_features(reference_features: dict | None, item_data: dict | None) -> dict:
-    provided = _options_reference_features(item_data)
-    if not provided:
-        return reference_features if isinstance(reference_features, dict) else {}
-    merged = dict(reference_features or {})
-    for key in ("silhouette_cues", "material_cues", "distinctive_parts", "preserve_rules", "color_cues"):
-        merged[key] = _merge_reference_feature_lists(provided.get(key), merged.get(key))
-    if provided.get("reflective_surface") is not None:
-        merged["reflective_surface"] = provided.get("reflective_surface")
-    elif "reflective_surface" not in merged:
-        merged["reflective_surface"] = False
-    merged["options_reference_features_applied"] = True
-    return merged
-
-
 def detect_furniture_boxes(
     moodboard_path,
     *,
@@ -537,7 +497,6 @@ def analyze_cropped_item(
             if isinstance(reference_features, dict):
                 reference_features["extraction_mode"] = "model" if reference_model_allowed else "deterministic"
                 reference_features["extraction_reason"] = extraction_reason or "authoritative_reference_image"
-            reference_features = _merge_options_reference_features(reference_features, item_data)
             final_desc = _stabilize_description(
                 label=label,
                 category=item_data.get("category") or item_data.get("category_canonical"),
@@ -739,7 +698,6 @@ def analyze_cropped_item(
         if isinstance(reference_features, dict):
             reference_features["extraction_mode"] = "model" if extract_ref_features else "fallback"
             reference_features["extraction_reason"] = extraction_reason
-        reference_features = _merge_options_reference_features(reference_features, item_data)
         final_desc = _stabilize_description(
             label=label,
             category=item_data.get("category") or item_data.get("category_canonical"),
@@ -789,7 +747,6 @@ def analyze_cropped_item(
     if isinstance(fallback_reference_features, dict):
         fallback_reference_features["extraction_mode"] = "fallback"
         fallback_reference_features["extraction_reason"] = "analysis_exception"
-    fallback_reference_features = _merge_options_reference_features(fallback_reference_features, item_data)
 
     return {
         "label": item_data.get("label", "Furniture"),

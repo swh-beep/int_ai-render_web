@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import resolve_item_family
+from application.render.postprocess_support import category_match_family
 from application.render.render_contracts import ProductIdentity
 
 
@@ -122,7 +122,17 @@ def _extract_from_text(text: str, hints: tuple[str, ...], *, limit: int = 6) -> 
 
 
 def _family_for_item(item: dict) -> str:
-    return resolve_item_family(item)
+    profile = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
+    for candidate in (
+        profile.get("family"),
+        item.get("category"),
+        item.get("category_canonical"),
+        item.get("label"),
+    ):
+        family = category_match_family(candidate)
+        if family:
+            return str(family)
+    return str(item.get("category_canonical") or item.get("category") or item.get("label") or "").strip().lower()
 
 
 def _product_identity_summary(identity: ProductIdentity) -> str:

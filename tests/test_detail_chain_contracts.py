@@ -46,37 +46,6 @@ class DetailChainContractsTests(unittest.TestCase):
             ["Detail: item-1", "Detail: item-4", "Detail: item-2", "Detail: item-3"],
         )
 
-    def test_select_external_detail_styles_prefers_product_backed_targets_before_generic_detections(self):
-        styles = [
-            {"name": "Detail: Sofa", "target_key": "cart_product-1_sofa_001", "detail_mode": "product_identity_lock"},
-            {"name": "Detail: Bearbrick", "target_key": "detail_bearbrick_004"},
-            {"name": "Detail: Tolomeo Mega Floor", "target_key": "cart_product-2_tolomeo_002", "detail_mode": "product_identity_lock"},
-            {"name": "Detail: Unknown Star Decor", "target_key": "detail_star-decor_006"},
-            {"name": "Detail: Speaker", "target_key": "cart_product-3_speaker_003", "detail_mode": "product_identity_lock"},
-            {"name": "Detail: Books", "target_key": "detail_books_008"},
-        ]
-
-        selected = select_external_detail_styles(styles, limit=4)
-
-        self.assertEqual(
-            [style["name"] for style in selected],
-            [
-                "Detail: Sofa",
-                "Detail: Speaker",
-                "Detail: Tolomeo Mega Floor",
-            ],
-        )
-
-    def test_select_external_detail_styles_falls_back_to_generic_when_no_product_backed_targets_exist(self):
-        styles = [{"name": f"Detail: generic-{idx}", "target_key": f"detail_{idx:03d}"} for idx in range(1, 5)]
-
-        selected = select_external_detail_styles(styles, limit=3)
-
-        self.assertEqual(
-            [style["name"] for style in selected],
-            ["Detail: generic-1", "Detail: generic-4", "Detail: generic-2"],
-        )
-
     def test_build_detail_payload_preserves_itemized_context(self):
         render_result = {
             "result_urls": ["https://cdn.example/rendered/main-1.png"],
@@ -570,11 +539,9 @@ class DetailChainContractsTests(unittest.TestCase):
         finally:
             source_path.unlink(missing_ok=True)
 
-        self.assertEqual(captured["style_targets"], ["cached_table_001", "detail_002_armchair"])
+        self.assertEqual(captured["style_targets"], ["detail_001_coffee-table", "detail_002_armchair"])
         self.assertEqual(result["furniture_data"][0]["box_2d"], [420, 430, 640, 700])
-        self.assertEqual(result["furniture_data"][0]["source_box_2d"], [100, 120, 220, 320])
-        self.assertEqual(result["furniture_data"][0]["target_key"], "cached_table_001")
-        self.assertEqual(result["furniture_data"][0]["crop_path"], "cached-table.png")
+        self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_coffee-table")
         self.assertEqual(result["furniture_data"][1]["label"], "Armchair")
 
     def test_run_regenerate_single_detail_job_uses_simple_generation_for_detail_styles(self):
@@ -1130,21 +1097,19 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_styles[3].get("camera_mode") == "side_angle"
     assert recorded_styles[3].get("focus_side") == "right"
     assert recorded_styles[4].get("ratio") == "4:5"
-    assert "simple_scene_detail" not in recorded_styles[4]
+    assert recorded_styles[4].get("simple_scene_detail") is True
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
 
-def test_external_generate_details_job_uses_model_generation_for_detail_targets(tmp_path):
+def test_external_generate_details_job_keeps_only_simple_detail_targets(tmp_path):
     image_path = tmp_path / "detail-src.png"
     image_path.write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     recorded_styles = {}
-    recorded_crop_preferences = {}
 
     def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
         recorded_styles[int(index)] = dict(style_config)
-        recorded_crop_preferences[int(index)] = kwargs.get("prefer_crop_extract")
         return {
             "path": original_image_path,
             "style_name": style_config.get("name"),
@@ -1176,8 +1141,7 @@ def test_external_generate_details_job_uses_model_generation_for_detail_targets(
     )
 
     assert [row["style_name"] for row in result["details"]] == ["Detail: Accent Chair"]
-    assert "simple_scene_detail" not in recorded_styles[1]
-    assert recorded_crop_preferences == {1: False}
+    assert recorded_styles[1].get("simple_scene_detail") is True
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):

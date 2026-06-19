@@ -118,15 +118,6 @@ def _build_detail_entries(
             "aspect_ratio": item.get("style_ratio"),
             "cutout_ref_count": int(item.get("cutout_ref_count") or 0),
         }
-        for key in (
-            "generation_mode",
-            "product_pixel_lock",
-            "locked_target_box_2d",
-            "crop_bounds_px",
-            "source_operation",
-        ):
-            if key in item:
-                detail_obj[key] = item.get(key)
         labels = item.get("cutout_ref_labels") or []
         if labels:
             detail_obj["cutout_ref_labels"] = labels

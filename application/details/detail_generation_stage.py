@@ -165,25 +165,6 @@ def _target_family(item: dict | None) -> str:
     return ""
 
 
-def _is_product_backed_detail(style_config: dict | None, target_item: dict | None) -> bool:
-    style_config = style_config if isinstance(style_config, dict) else {}
-    target_item = target_item if isinstance(target_item, dict) else {}
-    detail_mode = str(style_config.get("detail_mode") or target_item.get("detail_mode") or "").strip().lower()
-    if detail_mode in {"product_identity_lock", "anchored_editorial_reframe"}:
-        return True
-    for source in (style_config, target_item):
-        raw_target_key = str(source.get("target_key") or "").strip().lower()
-        raw_item_id = str(source.get("item_id") or "").strip().lower()
-        crop_path = str(source.get("crop_path") or source.get("target_crop_path") or "").strip()
-        if (
-            raw_target_key.startswith(("cart_", "cart_product", "product_"))
-            or raw_item_id.startswith("product_")
-            or (crop_path and raw_item_id.isdigit())
-        ):
-            return True
-    return False
-
-
 def _find_target_item(style_config: dict, furniture_data, normalize_label_for_match: Callable[[str], str]) -> dict | None:
     style_name = str(style_config.get("name") or "")
     style_target_key = str(style_config.get("target_key") or "").strip()
@@ -385,62 +366,6 @@ def _render_crop_detail(
         "cutout_ref_labels": [],
         "generation_mode": "crop_extract",
         "crop_bounds_px": list(bounds),
-    }
-
-
-def _detail_output_size(target_ratio: tuple[int, int], *, long_edge: int = 2304) -> tuple[int, int]:
-    ratio_w, ratio_h = target_ratio
-    if ratio_w <= ratio_h:
-        height = int(long_edge)
-        width = max(1, int(round(float(height) * float(ratio_w) / float(ratio_h))))
-    else:
-        width = int(long_edge)
-        height = max(1, int(round(float(width) * float(ratio_h) / float(ratio_w))))
-    return width, height
-
-
-def _render_product_locked_reframe_detail(
-    original_image_path: str,
-    style_config: dict,
-    unique_id: str,
-    index: int,
-    target_item: dict,
-) -> dict | None:
-    box_2d = _eligible_crop_box_2d(target_item)
-    if box_2d is None:
-        return None
-
-    style_name = str(style_config.get("name") or f"Detail{index}")
-    family = _target_family(target_item)
-    target_ratio = _parse_ratio(style_config.get("ratio"))
-
-    with Image.open(original_image_path) as img:
-        canvas = ImageOps.exif_transpose(img).convert("RGB")
-        bounds = _box_to_pixels(box_2d, canvas.size)
-        bounds = _expand_bounds(bounds, canvas.size, family=family)
-        bounds = _fit_bounds_to_ratio(bounds, canvas.size, target_ratio=target_ratio)
-        crop = canvas.crop(bounds)
-        output_size = _detail_output_size(target_ratio)
-        if crop.size != output_size:
-            crop = crop.resize(output_size, Image.Resampling.LANCZOS)
-
-        timestamp = int(time.time())
-        safe_style_name = "".join([c for c in style_name if c.isalnum()])[:20] or f"detail{index}"
-        filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
-        path = os.path.join("outputs", filename)
-        crop.save(path, "PNG")
-
-    return {
-        "path": path,
-        "style_name": style_name,
-        "aspect_ratio": _normalize_ratio_string(style_config.get("ratio")),
-        "cutout_ref_count": 0,
-        "cutout_ref_labels": [],
-        "generation_mode": "product_locked_reframe",
-        "product_pixel_lock": True,
-        "locked_target_box_2d": [float(value) for value in box_2d],
-        "crop_bounds_px": list(bounds),
-        "source_operation": "crop_reframe_resize",
     }
 
 
@@ -688,15 +613,6 @@ def generate_detail_view(
         target_ratio = _normalize_ratio_string(style_config.get("ratio"))
         camera_mode = str(style_config.get("camera_mode") or "").strip().lower()
         focus_side = str(style_config.get("focus_side") or "").strip().lower()
-        product_backed_detail = _is_product_backed_detail(style_config, target_item)
-        if product_backed_detail and style_name.startswith("Detail:"):
-            return _render_product_locked_reframe_detail(
-                original_image_path,
-                style_config,
-                unique_id,
-                index,
-                target_item or {},
-            )
         if prefer_crop_extract and style_name.startswith("Detail:"):
             scene_lock_block = (
                 "<ABSOLUTE RULE #0 THIS IS THE SAME PHOTO>\n"
@@ -707,20 +623,6 @@ def generate_detail_view(
                 "Every pixel that is not affected by the crop/zoom MUST remain visually consistent with the input.\n"
             )
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
-        elif product_backed_detail and style_name.startswith("Detail:"):
-            scene_lock_block = (
-                "<ANCHORED EDITORIAL REFRAME>\n"
-                "Create a polished editorial detail shot by reframing the SAME main render around the provided target crop.\n"
-                "Do NOT create a new in-room camera position, restage the room, or reinterpret the target object.\n"
-                "Do NOT turn this into a simple raw crop: you may refine composition, crop ratio, slight zoom, depth-of-field, exposure, and micro-contrast.\n"
-                "The anchor crop is binding for target pose, count, silhouette, material, and co-visible context.\n"
-                "Anything visible in the target crop must stay in the same relative place; missing objects from the crop must not be invented, relocated, or replaced.\n"
-                "Forbidden failures: duplicating the target, changing chair/sofa facing direction, adding/removing arms/modules/stools, replacing lamp shades, or adding unlisted decor.\n"
-            )
-            camera_lock_line = (
-                "4. **ANCHOR CROP CAMERA:** Use crop/reframe/zoom/DOF only around the target crop. "
-                "Do not solve this by generating a new side view, new furniture pose, or new room layout.\n\n"
-            )
         elif camera_mode == "side_angle":
             scene_lock_block = (
                 "<SCENE LOCK: SAME ROOM, NEW SIDE CAMERA>\n"
@@ -899,9 +801,6 @@ def generate_detail_view(
             layout_envelope = _compact_prompt_metadata(target_item.get("layout_envelope"))
             if layout_envelope:
                 target_anchor_lines.append(f"- LAYOUT ENVELOPE: {layout_envelope}")
-            reference_features = _compact_prompt_metadata(target_item.get("reference_features"), max_chars=260)
-            if reference_features:
-                target_anchor_lines.append(f"- REFERENCE FEATURES: {reference_features}")
             if target_anchor_lines:
                 target_anchor_block = "<TARGET ANCHOR>\n" + "\n".join(target_anchor_lines) + "\n\n"
 
@@ -1155,7 +1054,7 @@ def generate_detail_view(
                         "aspect_ratio": requested_ratio,
                         "cutout_ref_count": cutout_ref_count,
                         "cutout_ref_labels": cutout_labels,
-                        "generation_mode": "anchored_editorial_reframe" if product_backed_detail and style_name.startswith("Detail:") else "model_regeneration",
+                        "generation_mode": "model_regeneration",
                     }
         return None
     except Exception as exc:

@@ -6,7 +6,6 @@ from typing import Any, Callable
 
 from PIL import Image
 from application.render.placement_support import build_placement_prompt_block
-from application.render.postprocess_support import category_match_family
 from application.render.repair_strategy_stage import build_repair_strategy_plan
 from shared.image_canvas import (
     get_image_size,
@@ -177,12 +176,12 @@ _LIGHTING_INTENT_BOUNDARY = (
     "A lighting mood instruction alone is not permission to add fixture geometry.\n"
     "Do NOT add wall sconces, pendant lights, ceiling lights, recessed lights, cove lights, indirect ceiling trough lights, LED strips, floor lamps, table lamps, bulbs, glowing panels, or any new light fixture unless that fixture is an explicit listed product/reference item in this render pass or already exists visibly in the input room.\n"
     "If the user asks to turn lights on, use only existing visible fixtures and listed product lamps; otherwise adjust ambient exposure, window balance, global grade, and emitted light.\n"
-    "Existing visible recessed/down lights may be turned on only when their count and ceiling positions match the input room. Do not invent new ceiling light positions to create a night mood.\n"
     "Lampshade and diffuser color/material are product identity. For opaque or fabric shades, preserve the reference shade color/material exactly; change emitted light only.\n"
     "Do not recolor an opaque lampshade, sconce shade, pendant shade, diffuser, base, stem, or fixture body to match warm/cool light color.\n"
     "Allowed exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material may show light color through the material, while the underlying product color and geometry remain unchanged.\n"
     "--------------------------------------------------\n"
 )
+
 
 _LIGHTING_INTENT_PATTERNS = (
     "turn on the light",
@@ -293,40 +292,21 @@ def _lighting_review_failure(parsed: dict) -> tuple[bool, list[str], str]:
 
 def _category_prompt_guardrails(category: str) -> list[str]:
     text = str(category or "").strip().lower()
-    family = category_match_family(text) or text
     rules: list[str] = []
     if "mirror" in text:
         rules.extend(["wall_attached_or_leaning_as_reference", "preserve_reflective_face"])
     if "rug" in text or "carpet" in text:
         rules.extend(["floor_flat", "keep_footprint_shape", "not_wall_to_wall_unless_dimensions_require"])
-    if family in {"sofa", "lounge_sofa", "lounge_seating"}:
-        rules.extend([
-            "preserve_seat_back_arm_module_count",
-            "preserve_chair_sofa_facing_direction",
-            "no_extra_ottoman_or_stool",
-            "no_sectional_or_chaise_change_unless_reference_has_it",
-        ])
-    if family in {"chair", "lounge_chair"}:
-        rules.extend([
-            "preserve_chair_sofa_facing_direction",
-            "preserve_armrest_count_and_side",
-            "no_extra_ottoman_or_stool",
-            "no_generic_lounge_chair_substitution",
-        ])
-    if family == "electronics":
-        rules.extend([
-            "electronics_count_location_lock",
-            "no_duplicate_speakers_or_screens",
-            "preserve_stand_or_wall_relationship",
-        ])
     if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
-        rules.extend([
-            "preserve_lampshade_material_color",
-            "light_color_changes_emission_only_not_shade",
-            "preserve_light_fixture_scale",
-            "do_not_convert_into_furniture",
-            "no_new_unlisted_light_fixture",
-        ])
+        rules.extend(
+            [
+                "preserve_lampshade_material_color",
+                "light_color_changes_emission_only_not_shade",
+                "preserve_light_fixture_scale",
+                "do_not_convert_into_furniture",
+                "no_new_unlisted_light_fixture",
+            ]
+        )
     if "table_lamp" in text:
         rules.extend(["exact_lampshade_shape", "exact_base_and_stem_geometry", "no_generic_lamp_substitution"])
     if "chair" in text:
@@ -717,41 +697,6 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
             bits.append(f"forbid={forbid}")
     bits.append("same_family_substitute=invalid")
     return f"- {label}: " + "; ".join(bits)
-
-
-def _build_reference_identity_suffix(item: dict | None) -> str:
-    if not isinstance(item, dict):
-        return ""
-    profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
-    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
-    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
-    topology = (
-        _prompt_cue_list(product_identity.get("topology_cues"))
-        or _prompt_cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
-        or _prompt_cue_list(reference_features.get("silhouette_cues"))
-    )
-    parts = (
-        _prompt_cue_list(profile.get("distinctive_parts"))
-        or _prompt_cue_list(reference_features.get("distinctive_parts"))
-        or _prompt_cue_list(product_identity.get("support_geometry"))
-    )
-    materials = _prompt_cue_list(profile.get("material_cues")) or _prompt_cue_list(reference_features.get("material_cues"))
-    preserve = (
-        _prompt_cue_list(product_identity.get("preserve_rules"))
-        or _prompt_cue_list(profile.get("preserve_rules"))
-        or _prompt_cue_list(reference_features.get("preserve_rules"))
-    )
-    fields = ["IdentityMustMatch=exact reference crop geometry"]
-    if topology:
-        fields.append(f"TopologyCues={topology}")
-    if parts:
-        fields.append(f"DistinctiveParts={parts}")
-    if materials:
-        fields.append(f"MaterialCues={materials}")
-    if preserve:
-        fields.append(f"PreserveRules={preserve}")
-    fields.append("InvalidIf=generic same-family substitute or missing listed topology/distinctive parts")
-    return " | " + " | ".join(fields)
 
 
 def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, primary_anchor_keys: list[str] | None = None) -> str:
@@ -1358,7 +1303,6 @@ def generate_furnished_room(
             )
         if resolved_generation_model is None:
             raise TypeError("generate_furnished_room requires generation_model_name or model_name")
-
         lighting_intent_requested = _has_lighting_intent(normalized_style_prompt, placement_instructions)
 
         def _remaining_timeout_sec() -> float:
@@ -1840,41 +1784,9 @@ def generate_furnished_room(
                 "Do NOT add curtains or blinds. Do NOT add or invent windows.\n\n"
             )
 
-        render_pass_mode = ""
-        if isinstance(furniture_specs_json, dict):
-            render_pass_mode = str(furniture_specs_json.get("render_pass_mode") or "").strip().lower()
-        is_pass2_additive_edit = render_pass_mode == "pass2_additive_edit"
-        room_input_label = (
-            "Furnished Room (Pass 1 Result - PRESERVE THIS):"
-            if is_pass2_additive_edit
-            else "Empty Room (Target Canvas - KEEP THIS):"
-        )
-        task_intro = (
-            "IMAGE MANIPULATION TASK (Second-pass Additive Edit):\n"
-            "Your goal is to KEEP the already furnished room image intact and add ONLY the listed secondary detail items.\n"
-            "The input room already contains the approved first-pass furniture. Do not restage it.\n\n"
-            "<PASS 2 PRESERVATION LOCK>\n"
-            "1. Preserve every existing first-pass furniture item exactly: same position, scale, color, material, silhouette, and lighting.\n"
-            "2. Do NOT move, delete, resize, recolor, replace, or simplify any existing furniture already visible in the input.\n"
-            "3. Add only the newly listed detail/decor items from the reference images. If an item cannot be placed cleanly, omit it rather than changing the room.\n"
-            "4. Treat this as a localized edit pass, not a new room generation.\n\n"
-            "<PASS 2 PRODUCT IDENTITY LOCK>\n"
-            "Every active pass2 cutout is an exact product reference; generic same-family substitutes are invalid.\n"
-            "A pass2 item is still wrong if only a generic lamp, table, shelf, art, or decor object appears while the listed topology, distinctive parts, or material cues are missing.\n\n"
-            if is_pass2_additive_edit
-            else (
-                "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
-                "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
-            )
-        )
-        listed_items_rule = (
-            "6. **ONLY NEW LISTED DETAIL ITEMS:** Add every listed secondary detail item exactly the requested quantity where it can be placed cleanly. Do NOT add unlisted new decor or generic substitutes. Keep all existing first-pass furniture visible even though it is not listed in this pass.\n"
-            if is_pass2_additive_edit
-            else "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
-        )
-
         user_original_prompt = (
-            f"{task_intro}"
+            "IMAGE MANIPULATION TASK (Virtual Staging - Overlay Only):\n"
+            "Your goal is to PLACE furniture into the EXISTING empty room image without changing the room itself.\n\n"
             "<CRITICAL: ARCHITECTURAL FREEZE (PRIORITY #1)>\n"
             "1. **DO NOT RE-GENERATE THE ROOM:** The walls, ceiling, floor pattern, and any visible openings/views must remain 100% IDENTICAL to the input image.\n"
             "2. **PERSPECTIVE LOCK:** You must use the EXACT same camera angle and perspective. Do not zoom in, do not zoom out.\n"
@@ -1900,7 +1812,7 @@ def generate_furnished_room(
             )
             +
             "5. **STYLE:** Match the intended style implied by the provided furniture items.\n"
-            f"{listed_items_rule}"
+            "6. **ONLY LISTED ITEMS:** Render every listed item exactly the requested quantity. Do NOT add extra furniture, extra rugs, or generic substitutes.\n"
             f"{window_context}"
             f"<CRITICAL: MATHEMATICAL SCALE ENFORCEMENT (PRIORITY #0)>\nYou are provided with ACTUAL DIMENSIONS, PRIMARY ANCHOR, and SIZE HIERARCHY. Do not ignore them.\nIMPORTANT: The 'PRIMARY ANCHOR' is the largest movable furniture reference (EXCLUDING rugs/carpets when possible).\nSIZE HIERARCHY (largest -> smallest, exclude rugs/carpets): {size_hierarchy_hint}\n\n"
             "You are provided with ACTUAL DIMENSIONS and item-to-room ratio guidance. Do not ignore them.\n"
@@ -1992,12 +1904,12 @@ def generate_furnished_room(
             prompt_override: str | None = None,
             reference_override: list | None = None,
             room_image_override=None,
-            room_label: str | None = None,
+            room_label: str = "Empty Room (Target Canvas - KEEP THIS):",
         ):
             prompt = prompt_override if prompt_override is not None else base_prompt + repair_focus_context
             image = room_image_override if room_image_override is not None else room_img
             refs = reference_override if reference_override is not None else reference_content
-            return [prompt, room_label or room_input_label, image, *list(refs or [])]
+            return [prompt, room_label, image, *list(refs or [])]
 
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
@@ -2013,8 +1925,6 @@ def generate_furnished_room(
                     for value in (two_pass_summary.get("pass2_detail_keys") or [])
                     if str(value or "").strip()
                 }
-                if is_pass2_additive_edit:
-                    pass2_detail_keys = set()
 
                 def _cutout_item_key(row: dict) -> str:
                     return str(row.get("target_key") or row.get("source_index") or row.get("label") or "").strip()
@@ -2097,8 +2007,6 @@ def generate_furnished_room(
                         pass
                     extra_imgs.append(cutout_img)
                     reference_header = "Furniture Cutout Reference (SECONDARY SUPPORT ITEM - KEEP PRODUCT IDENTITY AFTER PRIMARY LOCKS ARE CORRECT). "
-                    if is_pass2_additive_edit:
-                        reference_header = "Furniture Cutout Reference (ACTIVE PASS2 ADDITIVE ITEM - ADD THIS EXACT PRODUCT WITHOUT MOVING EXISTING ROOM). "
                     if item_key and item_key in anchor_key_set:
                         reference_header = "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
                     reference_entry = [
@@ -2109,7 +2017,6 @@ def generate_furnished_room(
                             + f"| Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "
                             f"| Options={opts_txt}"
-                            f"{_build_reference_identity_suffix(it)}"
                         ),
                         cutout_img,
                     ]
@@ -2300,7 +2207,6 @@ def generate_furnished_room(
                         "Compare the INPUT ROOM/PREVIOUS PASS image against the CANDIDATE RENDER.\n"
                         "The user requested lighting mood only, not new fixture geometry.\n\n"
                         "Fail ONLY when the candidate introduced a new wall, ceiling, pendant, sconce, LED strip, recessed/cove light, glowing panel, or extra lamp that was not visible in the input room and is not one of the listed product light fixtures.\n"
-                        "Existing recessed/down lights are allowed to turn on only when the count and ceiling positions match visible fixtures in the input room; new count or new positions are lighting_fixture_drift.\n"
                         "Also fail when an opaque/fabric lampshade, diffuser, base, stem, or fixture body has been recolored to the warm/cool light color instead of preserving the product material color.\n"
                         "Do NOT fail for darker windows, warmer emitted light, adjusted exposure, stronger shadows, or listed/existing lamps being turned on.\n\n"
                         f"USER LIGHTING NOTE:\n{placement_instructions or normalized_style_prompt or '(none)'}\n\n"
@@ -2450,12 +2356,6 @@ def generate_furnished_room(
                     },
                 }
 
-        def _is_lighting_validation_failure(issues: list[str] | None, diagnostics: dict | None) -> bool:
-            rules = set(_extract_failed_rule_ids(issues))
-            if isinstance(diagnostics, dict):
-                rules.update(str(rule) for rule in (diagnostics.get("failed_rules") or []) if str(rule).strip())
-            return bool(rules.intersection({"lighting_fixture_drift", "lampshade_color_drift"}))
-
         def _attempt_localized_repair(base_render_path: str, diagnostics: dict | None, repair_plan: dict | None = None):
             targets = _collect_repair_targets(
                 diagnostics,
@@ -2487,7 +2387,6 @@ def generate_furnished_room(
                         "Use the current staged image as the base image.\n"
                         "Keep the room architecture, lighting, camera framing, and untouched furniture unchanged.\n"
                         "Edit ONLY the listed furniture targets. Do not redesign silhouettes.\n"
-                        "Presence is not enough: a generic same-family substitute is invalid when topology, distinctive parts, or materials differ from the reference crop.\n"
                         "If a bbox is provided, confine the edit to that region with a small safety margin.\n"
                         "If a target is missing, insert it at plausible scale using the provided layout envelope.\n"
                         + (
@@ -2531,7 +2430,6 @@ def generate_furnished_room(
                                 if profile.get("distinctive_parts")
                                 else ""
                             )
-                            + _build_reference_identity_suffix(item)
                             + (
                                 f" | PreserveRules={', '.join((profile.get('preserve_rules') or [])[:4])}"
                                 if profile.get("preserve_rules")
@@ -2606,6 +2504,12 @@ def generate_furnished_room(
                     except Exception:
                         pass
 
+        def _is_lighting_validation_failure(issues: list[str] | None, diagnostics: dict | None) -> bool:
+            rules = set(_extract_failed_rule_ids(issues))
+            if isinstance(diagnostics, dict):
+                rules.update(str(rule) for rule in (diagnostics.get("failed_rules") or []) if str(rule).strip())
+            return bool(rules.intersection({"lighting_fixture_drift", "lampshade_color_drift"}))
+
         def _attempt_lighting_drift_repair(base_render_path: str, diagnostics: dict | None):
             if not (
                 base_render_path
@@ -2636,7 +2540,6 @@ def generate_furnished_room(
                         + (f"Failed rules: {failed_rules}\n" if failed_rules else "")
                         + (f"Reviewer reason: {reason}\n" if reason else "")
                         + "\nRemove or paint out only newly invented wall sconces, pendant lights, ceiling fixtures, recessed/down lights, cove lights, indirect ceiling trough lights, LED strips, glowing panels, extra bulbs, or extra lamps that are not visible in the source room and not listed product fixtures.\n"
-                        "Keep source-visible recessed/down lights only if their count and ceiling positions match the source room; do not add new positions.\n"
                         "Restore the affected ceiling/wall/window-edge surfaces to match the source room architecture and material continuity.\n"
                         "Keep the night/lighting mood using only ambient exposure, darker windows, existing visible fixtures, and listed product lamps.\n"
                         "Do not remove, move, resize, recolor, restyle, or replace any furniture, decor, rug, art, plant, electronics, or listed product lamp.\n"

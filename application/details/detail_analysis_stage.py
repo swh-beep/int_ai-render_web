@@ -380,6 +380,9 @@ def prepare_detail_generation_items(
             simple_generation_mode=simple_generation_mode,
         )
 
+    if simple_generation_mode:
+        return fresh_items
+
     if not furniture_data:
         return fresh_items
 

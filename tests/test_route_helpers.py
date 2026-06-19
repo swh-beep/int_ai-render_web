@@ -203,49 +203,6 @@ class RouteHelperTests(unittest.TestCase):
             "https://example.com/chair.png",
         )
 
-    def test_build_external_cart_job_preserves_product_category_metadata(self):
-        req = CartRenderRequest(
-            image_url="https://example.com/room.png",
-            items=[
-                CartItem(
-                    id="39555",
-                    category="decor",
-                    image_url="https://example.com/montana.png",
-                    qty=1,
-                    name="Montana Free 333000",
-                    category_path="수납·선반장 > 일반수납장",
-                    mainCategory="수납·선반장",
-                    subCategory="일반수납장",
-                    main_category="storage_shelf",
-                    sub_category="storage_cabinet",
-                )
-            ],
-            room="livingroom",
-            style="warm modern",
-        )
-
-        job_payload, kept, dropped = build_external_cart_job(
-            req,
-            cart_max_items=2,
-            apply_cart_limits=lambda items, limit: (items[:limit], []),
-            build_cart_summary=lambda items: "summary",
-            materialize_input=lambda url, prefix: f"C:/tmp/{prefix}.png",
-            normalize_item_image=lambda local_path, unique_id, index: f"C:/tmp/norm-{index}.png",
-            resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{path.split('/')[-1]}",
-            build_s3_prefix=lambda audience, category: f"{audience}/{category}/",
-            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
-        )
-
-        self.assertEqual(dropped, [])
-        self.assertEqual(kept[0]["category_path"], "수납·선반장 > 일반수납장")
-        item_ref = job_payload["render"]["moodboard_items"][0]
-        self.assertEqual(item_ref["category"], "decor")
-        self.assertEqual(item_ref["category_path"], "수납·선반장 > 일반수납장")
-        self.assertEqual(item_ref["mainCategory"], "수납·선반장")
-        self.assertEqual(item_ref["subCategory"], "일반수납장")
-        self.assertEqual(item_ref["main_category"], "storage_shelf")
-        self.assertEqual(item_ref["sub_category"], "storage_cabinet")
-
     def test_build_external_preset_job_requires_detail_generation(self):
         req = PresetRenderRequest(
             image_url="https://example.com/room.png",
