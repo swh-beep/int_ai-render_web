@@ -10,12 +10,6 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-_IMAGE_2K_MODELS = {
-    "gemini-3.1-flash-image",
-    "gemini-3.1-flash-image-preview",
-    "gemini-3-pro-image-preview",
-    "gemini-3-pro-image",
-}
 _HIGH_THINKING_LOG_TAGS = {
     "Analysis.CropItem",
     "Analysis.DetectFurniture",
@@ -187,9 +181,6 @@ def _build_generation_config(
         for key in _IMAGE_CONFIG_KEYS:
             if key in request_options and request_options[key] is not None:
                 image_config[key] = request_options.pop(key)
-        normalized_model = str(model_name or "").strip().lower()
-        if "image_size" not in image_config and normalized_model in _IMAGE_2K_MODELS:
-            image_config["image_size"] = "2K"
         if image_config:
             config["image_config"] = image_config
         config.setdefault("response_modalities", ["IMAGE"])

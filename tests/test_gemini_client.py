@@ -41,7 +41,7 @@ def test_call_gemini_with_failover_consumes_max_attempts_without_forwarding_it_t
     assert "max_attempts" not in captured["config"]
 
 
-def test_call_gemini_with_failover_applies_2k_image_defaults_for_default_pro_image_model(monkeypatch):
+def test_call_gemini_with_failover_does_not_apply_2k_image_defaults_for_pro_image_model(monkeypatch):
     captured = {}
     _install_fake_genai_client(monkeypatch, captured)
 
@@ -58,7 +58,7 @@ def test_call_gemini_with_failover_applies_2k_image_defaults_for_default_pro_ima
     )
 
     assert captured["config"]["response_modalities"] == ["IMAGE"]
-    assert captured["config"]["image_config"]["image_size"] == "2K"
+    assert "image_config" not in captured["config"]
 
 
 def test_call_gemini_with_failover_forwards_explicit_image_ratio_and_thinking_config(monkeypatch):
@@ -84,7 +84,7 @@ def test_call_gemini_with_failover_forwards_explicit_image_ratio_and_thinking_co
 
     assert captured["config"]["response_modalities"] == ["IMAGE"]
     assert captured["config"]["image_config"]["aspect_ratio"] == "4:5"
-    assert captured["config"]["image_config"]["image_size"] == "2K"
+    assert "image_size" not in captured["config"]["image_config"]
     assert captured["config"]["thinking_config"]["thinking_level"] == "high"
     assert captured["config"]["thinking_config"]["include_thoughts"] is False
 
