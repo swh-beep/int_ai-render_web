@@ -9,6 +9,10 @@ import main
 from application.render.render_audience_stage import run_render_audience_stage
 
 
+def test_external_cart_default_keeps_up_to_twenty_items():
+    assert main.CART_MAX_ITEMS == 20
+
+
 def _external_deps():
     def require_role(request, roles, api_auth_disabled, internal_api_keys, external_api_keys):
         return None

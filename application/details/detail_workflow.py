@@ -22,22 +22,40 @@ DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
 EXTERNAL_DETAIL_STYLE_LIMIT = 6
 
 
+def _is_product_backed_external_style(style: dict) -> bool:
+    if not isinstance(style, dict):
+        return False
+    target_key = str(style.get("target_key") or "").strip().lower()
+    detail_mode = str(style.get("detail_mode") or "").strip().lower()
+    return bool(
+        detail_mode == "product_identity_lock"
+        or target_key.startswith("cart_")
+        or target_key.startswith("cart_product")
+        or str(style.get("target_crop_path") or "").strip()
+    )
+
+
 def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
     styles = list(dynamic_styles or [])
     max_count = max(0, int(limit or 0))
     if max_count <= 0:
         return []
 
-    selected: list[dict] = []
-    left = 0
-    right = len(styles) - 1
-    while left <= right and len(selected) < max_count:
-        selected.append(styles[left])
-        left += 1
-        if left <= right and len(selected) < max_count:
-            selected.append(styles[right])
-            right -= 1
-    return selected
+    product_backed = [style for style in styles if _is_product_backed_external_style(style)]
+    fallback = [style for style in styles if not _is_product_backed_external_style(style)]
+    return [*product_backed, *fallback][:max_count]
+
+
+def _should_prefer_crop_extract_for_detail(style: dict, *, audience: str) -> bool:
+    if not isinstance(style, dict):
+        return False
+    if not str(style.get("name") or "").startswith("Detail:"):
+        return False
+    detail_mode = str(style.get("detail_mode") or "").strip().lower()
+    box_source = str(style.get("target_box_source") or "").strip().lower()
+    if detail_mode == "product_identity_lock" and box_source == "product_reference_localization":
+        return True
+    return str(audience or "").strip().lower() == "external" and _is_product_backed_external_style(style)
 
 
 def run_generate_details_job(
@@ -50,6 +68,7 @@ def run_generate_details_job(
     resolve_image_url: Callable[[str | None, str | None], str | None],
     log_section: Callable[[str], None],
     detect_furniture_boxes: Callable[[str], list],
+    detect_item_bbox_norm: Callable[..., object] | None = None,
     canonical_category: Callable[[Optional[str]], str],
     build_item_target_key: Callable[..., str],
     max_concurrency_analysis: int,
@@ -163,6 +182,7 @@ def run_generate_details_job(
             local_path=local_path,
             materialize_input=materialize_input,
             detect_furniture_boxes=detect_furniture_boxes,
+            detect_item_bbox_norm=detect_item_bbox_norm,
             canonical_category=canonical_category,
             build_item_target_key=build_item_target_key,
             max_concurrency_analysis=max_concurrency_analysis,
@@ -258,7 +278,7 @@ def run_generate_details_job(
                                     unique_id,
                                     index + 1,
                                     analyzed_items,
-                                    prefer_crop_extract=False,
+                                    prefer_crop_extract=_should_prefer_crop_extract_for_detail(style_payload, audience=aud),
                                 ),
                             )
                         )
@@ -281,7 +301,7 @@ def run_generate_details_job(
                         unique_id,
                         index + 1,
                         analyzed_items,
-                        prefer_crop_extract=False,
+                        prefer_crop_extract=_should_prefer_crop_extract_for_detail(style_payload, audience=aud),
                     )
                     _append_detail_result(index, style_payload, result)
         else:
@@ -299,7 +319,7 @@ def run_generate_details_job(
                                 unique_id,
                                 index + 1,
                                 analyzed_items,
-                                prefer_crop_extract=False,
+                                prefer_crop_extract=_should_prefer_crop_extract_for_detail(style, audience=aud),
                             ),
                         )
                     )

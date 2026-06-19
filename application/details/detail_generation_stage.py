@@ -92,6 +92,7 @@ _RENDER_LOCALIZED_BOX_SOURCES = frozenset(
     {
         "detail_current_image_analysis",
         "main_render",
+        "product_reference_localization",
         "selected_variant_review",
     }
 )
@@ -382,8 +383,9 @@ def _build_simple_scene_detail_prompt(target_label: str) -> str:
         "- Do not add, remove, replace, duplicate, resize, recolor, or rearrange any object.\n"
         "- The target must remain the same object in the same physical location, with nearby objects preserved as context.\n\n"
         "<CAMERA>\n"
-        "Shoot a close editorial detail from a natural in-room camera position. You may crop/reframe or move the virtual camera slightly "
-        "to make the target read clearly, but the scene itself must stay fixed.\n\n"
+        "Use a source-constrained crop/reframe from the main image camera. You may tighten framing, crop, slightly zoom, and add subtle depth of field "
+        "to make the target read clearly, but do not create a new camera angle that reveals unseen sides of furniture. "
+        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n\n"
         "<STYLE>\n"
         "High-end interior magazine photography: natural depth of field, clean composition, realistic texture, balanced shadows, no text, no watermark."
     )
@@ -395,7 +397,7 @@ def _is_gpt_image_model_name(model_name: str | None) -> bool:
 
 _DETAIL_CAMERA_RECIPES = (
     "Camera recipe: tight vertical crop from the left side, target closer to camera with original room context softly behind it.",
-    "Camera recipe: standing-height diagonal view from the right side, target off-center with natural parallax.",
+    "Camera recipe: stable standing-height crop weighted toward the right side, target off-center without changing object direction.",
     "Camera recipe: low camera height near floor or table level, looking slightly upward toward the target.",
     "Camera recipe: close crop, target larger in frame, no artificial obstruction.",
     "Camera recipe: natural side-light crop, target near one vertical third of the frame.",
@@ -491,70 +493,74 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
     focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
     is_overview = camera_mode == "overview_angle" or style_name == "High Angle Overview"
     is_side = camera_mode == "side_angle" or style_name.startswith("Side Composition")
-    relocation_guard = (
+    stability_guard = (
         "The camera may crop or hide objects, but it must never move any object into a new place. "
-        "If an object is not visible from the new camera angle, leave it out of frame instead of relocating it. "
-        "All objects must stay anchored to their original wall/floor/window relationships. "
+        "If an object is not visible in the safer reframe, leave it out of frame instead of relocating it. "
+        "All objects must stay anchored to their original wall/floor/window relationships, facing direction, footprint, and nearby-object distances. "
+        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead. "
     )
 
     if is_overview:
         return (
-            "Using the provided image as the only source, create a varied high-angle editorial photo of this exact space. "
-            "Use a clearly different camera height, distance, and framing from the source image, as if photographed from a natural elevated in-room position. "
+            "Using the provided image as the only source, create a source-constrained editorial overview reframe of this exact space. "
+            "Use stable crop, slight zoom, mild camera-height impression, and depth of field only when the source layout remains unchanged. "
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
-            f"{relocation_guard}"
+            f"{stability_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Only change camera position, framing, composition, distance, and focal depth for a high-angle view. "
+            "Do not create a new camera angle that reveals unseen sides of furniture. "
+            "Only change crop, framing, slight zoom, and focal depth. "
             "No text or watermark."
         )
 
     if is_side:
         side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
         return (
-            f"Using the provided image as the only source, create a varied editorial photo from the {side_text} area of this exact space. "
-            "Use a clearly different camera position, distance, height, and focal depth from the source image. "
-            "You may use diagonal composition, side parallax, or a closer side crop. "
+            f"Using the provided image as the only source, create a source-constrained editorial reframe weighted toward the {side_text} area of this exact space. "
+            "Use crop, slight zoom, and focal depth to make the side area read clearly. "
             f"{_NO_FAKE_FOREGROUND_GUARD}"
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
-            f"{relocation_guard}"
+            f"{stability_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Only change camera position, framing, composition, distance, and focal depth to focus on that side area. "
+            "Do not create a new camera angle that reveals unseen sides of furniture. "
+            "Only change crop, framing, slight zoom, and focal depth to focus on that side area. "
             "No text or watermark."
         )
 
     camera_recipe = _detail_camera_recipe(style_config, shot_index)
     if _is_small_decor_detail_target(style_config, clean_label):
         return (
-            f"Using the provided image as the only source, create a distinct editorial close-up photo centered on the {clean_label}, not another full-room view. "
+            f"Using the provided image as the only source, create a source-constrained editorial close-up reframe centered on the {clean_label}, not another full-room view. "
             f"The {clean_label} must be clearly visible and visually dominant in the frame. "
             "Include only enough surrounding room context to prove it is the same space. "
-            "This shot must look visually distinct from the source image and from the other detail shots. "
-            "Use a clearly different camera position, distance, height, and focal depth from the source image. "
+            "This shot may be less dynamic if that is required to preserve the main-shot furniture and layout. "
+            "Use crop, slight zoom, and focal depth from the source image. "
             f"{camera_recipe} "
-            "Follow the camera recipe exactly; do not fall back to a similar room overview. "
+            "Follow the camera recipe only when it does not conflict with layout stability. "
             f"{_NO_FAKE_FOREGROUND_GUARD}"
             "Use shallow depth of field or diagonal composition if helpful. "
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
-            f"{relocation_guard}"
+            f"{stability_guard}"
             f"Do not redesign, move, enlarge, duplicate, replace, or reinterpret the {clean_label}. "
             "Do not let nearby larger furniture become the main subject. "
-            "Only change camera position, framing, composition, distance, and focal depth. "
+            "Do not create a new camera angle that reveals unseen sides of furniture. "
+            "Only change crop, framing, slight zoom, and focal depth. "
             "No text or watermark."
         )
 
     return (
-        f"Using the provided image as the only source, create a distinct editorial detail photo around the {clean_label} area, not another full-room view. "
-        "This shot must look visually distinct from the source image and from the other detail shots. "
-        "Use a clearly different camera position, distance, height, and focal depth from the source image. "
+        f"Using the provided image as the only source, create a source-constrained editorial detail reframe around the {clean_label} area, not another full-room view. "
+        "This shot may be less dynamic if that is required to preserve the main-shot furniture and layout. "
+        "Use crop, slight zoom, and focal depth from the source image. "
         f"The {clean_label} area must be the visual anchor of the frame. "
         f"{camera_recipe} "
-        "Follow the camera recipe exactly; do not fall back to a similar room overview. "
+        "Follow the camera recipe only when it does not conflict with layout stability. "
         f"{_NO_FAKE_FOREGROUND_GUARD}"
         "Use shallow depth of field or diagonal composition if helpful. "
         "Keep every visible furniture/decor item's position, shape, size, count, color, material unchanged. "
-        f"{relocation_guard}"
+        f"{stability_guard}"
         "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-        "Only change camera position, framing, composition, distance, and focal depth. "
+        "Do not create a new camera angle that reveals unseen sides of furniture. "
+        "Only change crop, framing, slight zoom, and focal depth. "
         "No text or watermark."
     )
 
@@ -625,29 +631,29 @@ def generate_detail_view(
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
         elif camera_mode == "side_angle":
             scene_lock_block = (
-                "<SCENE LOCK: SAME ROOM, NEW SIDE CAMERA>\n"
-                "Create a NEW side-angle editorial photograph inside the EXACT SAME finished room.\n"
-                "Priority order: (1) visibly new side camera viewpoint, (2) same furniture identities, "
-                "(3) same relative furniture placement and room architecture.\n"
-                "Do NOT copy the source frame, do NOT use the same centered front-facing camera, and do NOT solve this as a crop/zoom.\n"
-                "The camera must move laterally enough to create real parallax and visible side planes without inventing foreground obstructions.\n"
-                "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT force every object from the source image to remain visible.\n"
+                "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED SIDE REFRAME>\n"
+                "Create a source-constrained editorial reframe of the exact same finished room.\n"
+                "Priority order: (1) same furniture identities, (2) same relative furniture placement and room architecture, "
+                "(3) a modest side-weighted framing if it can be achieved without changing the scene.\n"
+                "Do not create a new camera angle that reveals unseen sides of furniture.\n"
+                "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT relocate objects to keep them visible.\n"
                 "If a side-focus composition mask is provided, use it only to choose framing weight. Never duplicate, mirror, or copy furniture because of the mask.\n"
-                "Keep the room and objects recognizable, but the viewpoint must be materially different from the input image.\n"
+                "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n"
             )
             camera_lock_line = (
-                "4. **SIDE CAMERA REQUIRED:** Change camera position and yaw substantially enough that the output cannot be mistaken for the source frame. "
-                "Keep object placement fixed in the room, and do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
+                "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth to make the side area read clearly. "
+                "Keep object placement, facing direction, footprint, and room geometry fixed. Do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
             )
         else:
             scene_lock_block = (
-                "<SCENE LOCK: SAME ROOM, NEW CAMERA>\n"
-                "Create a NEW editorial close-up photographed inside the EXACT SAME finished room.\n"
-                "You may move the camera to a nearby in-room standing-height viewpoint and change focal length to create a fresh composition.\n"
-                "Keep the architecture, furniture placement, object scale, object identities, materials, and lighting direction consistent with the source image.\n"
-                "Do NOT turn this into a simple digital crop of the input.\n"
+                "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED REFRAME>\n"
+                "Create a source-constrained editorial reframe of the exact same finished room.\n"
+                "Use the main render as the visual source of truth. This is a crop/reframe/detail-polish task, not a restaging task.\n"
+                "Keep the architecture, furniture placement, object scale, object identities, materials, lighting direction, and nearby-object relationships unchanged.\n"
+                "Do not create a new camera angle that reveals unseen sides of furniture.\n"
+                "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n"
             )
-            camera_lock_line = "4. **NEW IN-ROOM VIEWPOINT IS ALLOWED:** You may change camera position, yaw, pitch, and focal length slightly, but the room layout and object placement must stay fixed.\n\n"
+            camera_lock_line = "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth. Keep object placement, facing direction, footprint, and room geometry fixed.\n\n"
 
         style_target_key = str(style_config.get("target_key") or "").strip()
         style_target_label = str(style_config.get("target_label") or "").strip()
@@ -835,6 +841,7 @@ def generate_detail_view(
             "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
             "3. **NO REMOVALS:** Do NOT remove existing objects either.\n"
             "3b. **PRESERVE THE MAIN-SHOT LAYOUT:** Keep the target object anchored to the same physical footprint, neighboring objects, wall/floor relationship, and room geometry seen in the main render.\n"
+            "3c. **NO OBJECT ROTATION:** Do not rotate sofas, chairs, lamps, tables, decor, or rugs to show a more attractive side. Keep each visible object's facing direction from the main render.\n"
             f"{camera_lock_line}"
             "<OUTPUT REQUIREMENTS>\n"
             "1. Generate a photorealistic high-quality detail view based on the selected camera shot.\n"

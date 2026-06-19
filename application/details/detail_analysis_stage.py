@@ -2,6 +2,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
+DETAIL_PRODUCT_LOCALIZATION_LIMIT = max(0, int(os.getenv("DETAIL_PRODUCT_LOCALIZATION_LIMIT", "10")))
+DETAIL_PRODUCT_LOCALIZATION_WORKERS = max(1, int(os.getenv("DETAIL_PRODUCT_LOCALIZATION_WORKERS", "4")))
+
 
 def _normalize_box(value) -> list[float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
@@ -35,6 +38,14 @@ def _box_iou(box_a, box_b) -> float:
     return inter / union
 
 
+def _is_full_frame_box(value) -> bool:
+    box = _normalize_box(value)
+    if not box:
+        return False
+    ymin, xmin, ymax, xmax = box
+    return ymin <= 1 and xmin <= 1 and ymax >= 999 and xmax >= 999
+
+
 def _structured_items_available(items: list | None) -> bool:
     for item in items or []:
         if not isinstance(item, dict):
@@ -54,6 +65,166 @@ def _label_counts(items: list, normalize_label_for_match: Callable[[str], str]) 
             continue
         counts[normalized] = counts.get(normalized, 0) + 1
     return counts
+
+
+def _normalized_key(value) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _is_product_backed_detail_item(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    crop_path = str(item.get("crop_path") or "").strip()
+    if not crop_path:
+        return False
+    target_key = _normalized_key(item.get("target_key"))
+    item_id = _normalized_key(item.get("item_id"))
+    return bool(
+        target_key.startswith("cart_")
+        or target_key.startswith("cart-product")
+        or target_key.startswith("cart_product")
+        or target_key.startswith("internal_")
+        or item_id.startswith("product_")
+        or item_id.startswith("cart_")
+    )
+
+
+def _box_from_bbox_norm(value) -> list[int] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        xmin, ymin, xmax, ymax = [float(v) for v in value]
+    except Exception:
+        return None
+    xmin = max(0.0, min(1.0, xmin))
+    ymin = max(0.0, min(1.0, ymin))
+    xmax = max(0.0, min(1.0, xmax))
+    ymax = max(0.0, min(1.0, ymax))
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    box = [int(round(ymin * 1000)), int(round(xmin * 1000)), int(round(ymax * 1000)), int(round(xmax * 1000))]
+    if _is_full_frame_box(box):
+        return None
+    return box
+
+
+def _mark_product_localization_unverified(item: dict, reason: str) -> dict:
+    row = dict(item or {})
+    current_box = _normalize_box(row.get("box_2d"))
+    if current_box is not None:
+        row["untrusted_box_2d"] = list(current_box)
+        if row.get("source_box_2d") in (None, []):
+            row["source_box_2d"] = list(current_box)
+    row["box_2d"] = None
+    row["box_source"] = "product_reference_unlocalized"
+    row["detail_localization_status"] = "unverified"
+    row["detail_skip_reason"] = reason
+    return row
+
+
+def _call_product_localizer(
+    *,
+    detect_item_bbox_norm: Callable[..., object] | None,
+    staged_path: str,
+    crop_path: str | None,
+    item: dict,
+) -> list[int] | None:
+    if detect_item_bbox_norm is None:
+        return None
+    label = str(item.get("label") or "").strip() or None
+    try:
+        bbox = detect_item_bbox_norm(
+            staged_path,
+            crop_path,
+            label,
+            item_context=item,
+            timeout_sec=20.0,
+        )
+    except TypeError:
+        bbox = detect_item_bbox_norm(staged_path, crop_path, label)
+    except Exception:
+        return None
+    return _box_from_bbox_norm(bbox)
+
+
+def _localize_product_backed_items(
+    *,
+    cached_items: list,
+    local_path: str,
+    materialize_input: Callable[[str | None, str], str | None],
+    detect_item_bbox_norm: Callable[..., object] | None,
+) -> list:
+    if not cached_items:
+        return []
+
+    rows = [dict(item) for item in cached_items if isinstance(item, dict)]
+    if detect_item_bbox_norm is None or not local_path or not os.path.exists(local_path):
+        return [
+            _mark_product_localization_unverified(row, "product_reference_localization_unavailable")
+            if _is_product_backed_detail_item(row)
+            else row
+            for row in rows
+        ]
+
+    candidate_indexes = [
+        index
+        for index, row in enumerate(rows)
+        if _is_product_backed_detail_item(row)
+    ]
+    try:
+        candidate_indexes.sort(key=lambda idx: int((rows[idx] or {}).get("volume_rank") or 10**9))
+    except Exception:
+        pass
+    if DETAIL_PRODUCT_LOCALIZATION_LIMIT > 0:
+        candidate_indexes = candidate_indexes[:DETAIL_PRODUCT_LOCALIZATION_LIMIT]
+    candidate_index_set = set(candidate_indexes)
+
+    def _localize(index: int) -> tuple[int, list[int] | None]:
+        item = rows[index]
+        crop_path = str(item.get("crop_path") or "").strip()
+        local_crop_path = crop_path
+        if crop_path:
+            try:
+                materialized = materialize_input(crop_path, f"detail_product_ref_{index + 1}")
+            except Exception:
+                materialized = None
+            if materialized:
+                local_crop_path = materialized
+        box = _call_product_localizer(
+            detect_item_bbox_norm=detect_item_bbox_norm,
+            staged_path=local_path,
+            crop_path=local_crop_path,
+            item=item,
+        )
+        return index, box
+
+    localized_boxes: dict[int, list[int] | None] = {}
+    if candidate_indexes:
+        max_workers = min(DETAIL_PRODUCT_LOCALIZATION_WORKERS, len(candidate_indexes))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for index, box in executor.map(_localize, candidate_indexes):
+                localized_boxes[index] = box
+
+    prepared: list[dict] = []
+    for index, row in enumerate(rows):
+        if not _is_product_backed_detail_item(row):
+            prepared.append(row)
+            continue
+        box = localized_boxes.get(index)
+        if index not in candidate_index_set or box is None:
+            prepared.append(_mark_product_localization_unverified(row, "product_reference_localization_missing"))
+            continue
+
+        old_box = _normalize_box(row.get("box_2d"))
+        if old_box is not None and row.get("source_box_2d") in (None, []):
+            row["source_box_2d"] = list(old_box)
+        row["box_2d"] = list(box)
+        row["box_source"] = "product_reference_localization"
+        row["detail_localization_status"] = "product_reference_verified"
+        row.pop("detail_skip_reason", None)
+        prepared.append(row)
+
+    return prepared
 
 
 def _merge_cached_identity_into_fresh_items(
@@ -349,8 +520,27 @@ def prepare_detail_generation_items(
     analyze_cropped_item: Callable[[str, dict], dict],
     attach_volume_ranks: Callable[[list], list],
     normalize_label_for_match: Callable[[str], str],
+    detect_item_bbox_norm: Callable[..., object] | None = None,
     simple_generation_mode: bool = False,
 ) -> list:
+    if furniture_data:
+        cached_items = [dict(item) for item in furniture_data if isinstance(item, dict)]
+        try:
+            cached_items = attach_volume_ranks(cached_items)
+        except Exception:
+            pass
+        localized_items = _localize_product_backed_items(
+            cached_items=cached_items,
+            local_path=local_path,
+            materialize_input=materialize_input,
+            detect_item_bbox_norm=detect_item_bbox_norm,
+        )
+        try:
+            localized_items = attach_volume_ranks(localized_items)
+        except Exception:
+            pass
+        return localized_items
+
     fresh_items = load_analyzed_items(
         furniture_data=None,
         moodboard_url=None if furniture_data else moodboard_url,

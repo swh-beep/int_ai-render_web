@@ -4,7 +4,7 @@ import os
 import time
 from typing import Any, Callable
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from application.render.placement_support import build_placement_prompt_block
 from shared.image_canvas import (
     get_image_size,
@@ -22,6 +22,29 @@ _FIDELITY_RULE_KINDS = {
     "reference_integration_drift",
     "reference_review_unresolved",
     "reflection_violation",
+}
+_DIRECT_CUTOUT_REFERENCE_LIMIT = 12
+_GROUPED_SMALL_ITEM_SHEET_LIMIT = 8
+_GROUPED_SMALL_ITEM_SHEET_SIZE = 2048
+_GROUPED_SMALL_ITEM_CATEGORY_KEYWORDS = {
+    "소품",
+    "decor",
+    "decoration",
+    "decorative",
+    "accessory",
+    "object",
+    "vase",
+    "plant",
+    "art",
+    "frame",
+    "wall_art",
+    "wall_decor",
+    "장식",
+    "오브제",
+    "화병",
+    "식물",
+    "액자",
+    "아트",
 }
 _GEOMETRY_RULE_KINDS = {"scale_fit_violation", "validation_exception", "low_confidence_match"}
 
@@ -338,6 +361,170 @@ def _item_dims_for_prompt(item: dict | None) -> dict:
         return {}
     dims = item.get("requested_dims_mm") or item.get("dims_mm") or {}
     return dims if isinstance(dims, dict) else {}
+
+
+def _safe_positive_int(value) -> int:
+    try:
+        number = int(value or 0)
+    except Exception:
+        return 0
+    return number if number > 0 else 0
+
+
+def _dimension_sum_for_grouped_sheet(item: dict | None) -> int | None:
+    dims = _item_dims_for_prompt(item)
+    values = [
+        _safe_positive_int(dims.get("width_mm")),
+        _safe_positive_int(dims.get("depth_mm")),
+        _safe_positive_int(dims.get("height_mm")),
+    ]
+    if not any(values):
+        return None
+    return sum(values)
+
+
+def _category_text_for_grouped_sheet(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    values = [
+        item.get("mainCategory"),
+        item.get("main_category"),
+        item.get("main_category_name"),
+        item.get("category_name"),
+        item.get("categoryName"),
+        item.get("category_canonical"),
+        item.get("category"),
+        item.get("subCategory"),
+        item.get("sub_category"),
+        item.get("type"),
+        product_identity.get("family"),
+        profile.get("family"),
+    ]
+    return " ".join(str(value or "").strip().lower() for value in values if str(value or "").strip())
+
+
+def _is_grouped_small_item_category(item: dict | None) -> bool:
+    text = _category_text_for_grouped_sheet(item)
+    if not text:
+        return False
+    return any(keyword in text for keyword in _GROUPED_SMALL_ITEM_CATEGORY_KEYWORDS)
+
+
+def _grouped_small_item_sheet_priority(pair: tuple[int, dict]) -> tuple:
+    original_index, item = pair
+    dimension_sum = _dimension_sum_for_grouped_sheet(item)
+    is_prop = _is_grouped_small_item_category(item)
+    return (
+        0 if is_prop else 1,
+        0 if dimension_sum is not None else 1,
+        dimension_sum if dimension_sum is not None else 10**12,
+        original_index,
+    )
+
+
+def _select_grouped_small_item_sheet_items(items: list[dict], sheet_count: int) -> list[dict]:
+    if sheet_count <= 0:
+        return []
+    candidates = [(index, item) for index, item in enumerate(items) if isinstance(item, dict)]
+    if not candidates:
+        return []
+    limit = min(max(0, int(sheet_count)), _GROUPED_SMALL_ITEM_SHEET_LIMIT)
+    return [item for _, item in sorted(candidates, key=_grouped_small_item_sheet_priority)[:limit]]
+
+
+def _split_cutout_reference_items_for_generation(
+    items: list[dict],
+    *,
+    direct_sort_key: Callable[[dict], tuple | int | float],
+) -> tuple[list[dict], list[dict]]:
+    valid_items = [item for item in (items or []) if isinstance(item, dict)]
+    grouped_sheet_count = max(0, len(valid_items) - _DIRECT_CUTOUT_REFERENCE_LIMIT)
+    grouped_sheet_items = _select_grouped_small_item_sheet_items(
+        valid_items,
+        sheet_count=grouped_sheet_count,
+    )
+    grouped_sheet_item_ids = {id(item) for item in grouped_sheet_items}
+    direct_items = [item for item in valid_items if id(item) not in grouped_sheet_item_ids]
+    direct_items.sort(key=direct_sort_key, reverse=True)
+    return direct_items[:_DIRECT_CUTOUT_REFERENCE_LIMIT], grouped_sheet_items
+
+
+def _format_grouped_sheet_item_row(slot: str, item: dict) -> str:
+    label = str(item.get("label") or item.get("category") or slot).strip() or slot
+    item_key = _item_target_key_for_prompt(item)
+    item_id = str(item.get("item_id") or "").strip()
+    source_index = str(item.get("source_index") or "").strip()
+    category = _item_category_for_prompt(item)
+    dims = _item_dims_for_prompt(item)
+    width = dims.get("width_mm")
+    depth = dims.get("depth_mm")
+    height = dims.get("height_mm")
+    dims_text = (
+        f"W={width if width is not None else 'null'}mm "
+        f"D={depth if depth is not None else 'null'}mm "
+        f"H={height if height is not None else 'null'}mm"
+    )
+    return (
+        f"{slot} = {item_key or label} | Label={label} | SourceIndex={source_index or 'null'} "
+        f"| ItemID={item_id or 'null'} | Category={category} | {dims_text}"
+        f"{_build_reference_identity_suffix(item)}"
+    )
+
+
+def _build_grouped_small_item_sheet_reference(items: list[dict]) -> tuple[str, Image.Image]:
+    selected = [item for item in (items or []) if isinstance(item, dict)][: _GROUPED_SMALL_ITEM_SHEET_LIMIT]
+    sheet_size = _GROUPED_SMALL_ITEM_SHEET_SIZE
+    sheet = Image.new("RGB", (sheet_size, sheet_size), "white")
+    draw = ImageDraw.Draw(sheet)
+    margin = 96
+    gap = 48
+    cols = 4
+    rows = 2
+    cell_w = (sheet_size - margin * 2 - gap * (cols - 1)) // cols
+    cell_h = (sheet_size - margin * 2 - gap * (rows - 1)) // rows
+    rows_text = []
+
+    for index, item in enumerate(selected, start=1):
+        slot = f"S{index}"
+        rows_text.append(_format_grouped_sheet_item_row(slot, item))
+        col = (index - 1) % cols
+        row = (index - 1) // cols
+        left = margin + col * (cell_w + gap)
+        top = margin + row * (cell_h + gap)
+        right = left + cell_w
+        bottom = top + cell_h
+        draw.rectangle((left, top, right, bottom), outline=(200, 200, 200), width=3)
+        draw.rectangle((left, top, left + 92, top + 56), fill=(0, 0, 0))
+        draw.text((left + 20, top + 16), slot, fill=(255, 255, 255))
+
+        crop_path = str(item.get("crop_path") or "").strip()
+        if not crop_path or not os.path.exists(crop_path):
+            continue
+        try:
+            with Image.open(crop_path) as crop:
+                crop_img = crop.convert("RGBA")
+                max_w = cell_w - 64
+                max_h = cell_h - 104
+                crop_img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+                paste_x = left + (cell_w - crop_img.width) // 2
+                paste_y = top + 72 + max(0, (max_h - crop_img.height) // 2)
+                background = Image.new("RGBA", crop_img.size, "white")
+                background.alpha_composite(crop_img)
+                sheet.paste(background.convert("RGB"), (paste_x, paste_y))
+        except Exception:
+            continue
+
+    slot_range = f"S1-S{len(selected)}" if selected else "S1-S0"
+    header = (
+        "Grouped Small Item Reference Sheet (COMPACT PRODUCT LOCKS - each labeled slot is a separate purchasable item; "
+        "the sheet is not one combined object). "
+        f"Use {slot_range} as individual purchasable items, preserving each product's identity and approximate scale. "
+        "Read slot metadata below to map each sheet image cell to its product card:\n"
+        + "\n".join(rows_text)
+    )
+    return header, sheet
 
 
 def _item_identifier_bits_for_prompt(item: dict | None) -> list[str]:
@@ -1565,13 +1752,15 @@ def generate_furnished_room(
             "2. **PLACEMENT:** Obey the item category and the user's placement instruction. Floor items belong on the floor, wall-attached items stay on the wall plane, and ceiling fixtures remain suspended from the ceiling plane.\n"
             "3. **AXIS ALIGNMENT:** If the room edges, window mullions, or major wall lines are straight, keep sofas, storage, rugs, and large tables parallel or perpendicular to those dominant room axes. Do not place them on a casual 20-60 degree diagonal unless explicit instructions require it.\n"
             "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
+            "4a. **PRODUCT PART LOCK:** keep each product's facing direction, module count, visible part count, support geometry, lampshade color, and silhouette from its reference.\n"
+            "4b. **NO PRODUCT RECOMPOSITION:** Do not rotate, simplify, fuse, split, or recompose product parts to improve styling. A less stylish exact product is better than a plausible substitute.\n"
             + (
-                f"4a. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
+                f"4c. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
                 if anchor_labels
                 else ""
             )
             + (
-                "4b. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
+                "4d. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
                 if anchor_labels
                 else ""
             )
@@ -1677,6 +1866,7 @@ def generate_furnished_room(
         try:
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 cutouts = []
+                grouped_sheet_items = []
                 items_for_cutout = list(furniture_specs_json.get("items") or [])
                 def _cutout_item_key(row: dict) -> str:
                     return str(row.get("target_key") or row.get("source_index") or row.get("label") or "").strip()
@@ -1712,13 +1902,16 @@ def generate_furnished_room(
                     is_primary_anchor = 1 if item_key and item_key in anchor_key_set else 0
                     return (is_primary_anchor, has_dims, vol, w, d, h, cat, -idx)
 
-                items_for_cutout.sort(key=_cutout_scale_priority, reverse=True)
-                first_pass_items = list(items_for_cutout)
-                first_pass_items = first_pass_items[:12]
-                for it in first_pass_items:
-                    cp = it.get("crop_path")
+                valid_cutout_items = []
+                for it in items_for_cutout:
+                    cp = it.get("crop_path") if isinstance(it, dict) else None
                     if cp and os.path.exists(cp):
-                        cutouts.append(it)
+                        valid_cutout_items.append(it)
+                first_pass_items, grouped_sheet_items = _split_cutout_reference_items_for_generation(
+                    valid_cutout_items,
+                    direct_sort_key=_cutout_scale_priority,
+                )
+                cutouts.extend(first_pass_items)
                 for it in cutouts:
                     cp = it.get("crop_path")
                     lbl = (it.get("label") or "").strip() or "Item"
@@ -1768,6 +1961,10 @@ def generate_furnished_room(
                         cutout_img,
                     ]
                     reference_content += reference_entry
+                if grouped_sheet_items:
+                    sheet_header, sheet_img = _build_grouped_small_item_sheet_reference(grouped_sheet_items)
+                    extra_imgs.append(sheet_img)
+                    reference_content += [sheet_header, sheet_img]
             if not reference_content and ref_path:
                 fallback_refs = ref_path if isinstance(ref_path, (list, tuple)) else [ref_path]
                 for index, raw_path in enumerate(fallback_refs, start=1):

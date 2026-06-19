@@ -169,7 +169,8 @@ class DetailMetadataTests(unittest.TestCase):
                     "category": "table_lamp",
                     "category_canonical": "table_lamp",
                     "box_2d": [422, 798, 558, 858],
-                    "box_source": "detail_current_image_analysis",
+                    "box_source": "product_reference_localization",
+                    "detail_localization_status": "product_reference_verified",
                     "source_box_2d": [410, 790, 565, 865],
                     "crop_path": "outputs/taccia-reference.png",
                     "reference_features": {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]},
@@ -182,6 +183,27 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
         self.assertEqual(styles[0]["target_crop_path"], "outputs/taccia-reference.png")
         self.assertEqual(styles[0]["target_reference_features"], {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]})
+
+    def test_construct_dynamic_styles_treats_external_cart_targets_as_product_backed(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Gubi F300 Lounge Chair",
+                    "target_key": "cart_37694_gubi-f300_001",
+                    "source_index": 1,
+                    "category": "lounge_chair",
+                    "category_canonical": "lounge_chair",
+                    "box_2d": [120, 80, 720, 540],
+                    "box_source": "product_reference_localization",
+                    "detail_localization_status": "product_reference_verified",
+                    "crop_path": "/tmp/f300.png",
+                }
+            ]
+        )
+
+        self.assertEqual(styles[0]["target_key"], "cart_37694_gubi-f300_001")
+        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
+        self.assertNotIn("simple_scene_detail", styles[0])
 
     def test_construct_dynamic_styles_preserves_target_category_metadata(self):
         styles = construct_dynamic_styles(
@@ -394,6 +416,8 @@ class DetailMetadataTests(unittest.TestCase):
                 "category_canonical": "sofa",
                 "crop_path": "/tmp/desede.png",
                 "box_2d": [120, 80, 700, 620],
+                "box_source": "product_reference_localization",
+                "detail_localization_status": "product_reference_verified",
                 "source_box_2d": [120, 80, 700, 620],
                 "identity_profile": {"family": "sofa"},
                 "volume_rank": 1,
@@ -416,6 +440,8 @@ class DetailMetadataTests(unittest.TestCase):
                 "category_canonical": "floor_lamp",
                 "crop_path": "/tmp/akari.png",
                 "box_2d": [80, 760, 540, 930],
+                "box_source": "product_reference_localization",
+                "detail_localization_status": "product_reference_verified",
                 "source_box_2d": [80, 760, 540, 930],
                 "identity_profile": {"family": "floor_lamp"},
                 "volume_rank": 3,

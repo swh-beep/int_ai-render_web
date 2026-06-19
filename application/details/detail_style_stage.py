@@ -54,6 +54,11 @@ def _has_localized_render_box(item) -> bool:
     if not box or _is_full_frame_box(box):
         return False
     box_source = str(item.get("box_source") or "").strip()
+    if _is_product_backed_detail_target(item):
+        return (
+            box_source == "product_reference_localization"
+            and str(item.get("detail_localization_status") or "").strip() == "product_reference_verified"
+        )
     return box_source not in {"item_image_full", "cached_detail_snapshot"}
 
 
@@ -150,7 +155,11 @@ def _is_source_backed_detail_target(item) -> bool:
     crop_path = str(item.get("crop_path") or "").strip()
     item_id = _normalized_label((item or {}).get("item_id"))
     target_key = _normalized_label((item or {}).get("target_key"))
-    has_product_reference = bool(item_id.startswith("product_") or target_key.startswith("cart_product"))
+    has_product_reference = bool(
+        item_id.startswith("product_")
+        or target_key.startswith("cart_product")
+        or target_key.startswith("cart_")
+    )
 
     if _has_localized_render_box(item) and has_product_reference:
         return True
@@ -166,6 +175,25 @@ def _is_source_backed_detail_target(item) -> bool:
         return True
 
     return False
+
+
+def _is_product_backed_detail_target(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    target_key = _normalized_label((item or {}).get("target_key"))
+    item_id = _normalized_label((item or {}).get("item_id"))
+    crop_path = str((item or {}).get("crop_path") or "").strip()
+    return bool(
+        crop_path
+        and (
+            target_key.startswith("cart_")
+            or target_key.startswith("cart-product")
+            or target_key.startswith("cart_product")
+            or target_key.startswith("internal_")
+            or item_id.startswith("product_")
+            or item_id.startswith("cart_")
+        )
+    )
 
 
 def _is_duplicate_detail_target(item, accepted_items) -> bool:
@@ -214,11 +242,11 @@ def construct_internal_angle_styles():
             "prompt": (
                 "CAMERA POSITION: Moderately elevated high-angle overview from just above standing eye level, "
                 "as if photographed by a person holding the camera slightly above head height inside the room.\n"
-                "VIEWPOINT CHANGE REQUIRED: Shift the camera laterally or backward from the source position so the output is not the same centered front-facing frame.\n"
-                "CAMERA TILT: Mild downward tilt only, enough to reveal more top surfaces of furniture, floor area, and room depth. Keep the horizon natural and the vertical lines stable.\n"
+                "VIEWPOINT SAFETY: Prefer a stable crop/reframe from the source composition. A mild camera-height change is allowed only if it does not alter any object direction, footprint, or room relationship.\n"
+                "CAMERA TILT: Mild downward tilt only, enough to reveal a little more top surface. Keep the horizon natural and the vertical lines stable.\n"
                 "FORBIDDEN CAMERA: Do NOT use bird's-eye, top-down, drone, ceiling-mounted, surveillance, or extreme overhead viewpoints.\n"
-                "COMPOSITION: Show the entire room layout exactly as shown in the original image, but from a natural elevated in-room overview near a doorway or corner.\n"
-                "FAILURE CONDITION: If the output looks like the original source frame with only tiny crop, zoom, or exposure changes, it is wrong.\n"
+                "COMPOSITION: Show the entire room layout exactly as shown in the original image. Do not chase novelty if it risks changing object placement or shape.\n"
+                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong even if the camera feels more dynamic.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait close-up or detail crop.\n"
             ),
             "ratio": "16:9",
@@ -228,11 +256,11 @@ def construct_internal_angle_styles():
             "name": "Side Composition (Focus Left)",
             "prompt": (
                 "CAMERA POSITION: Natural standing-height side-angle viewpoint from the LEFT side of the original room composition.\n"
-                "VIEWPOINT CHANGE REQUIRED: Move the camera laterally toward the left-side wall/window/furniture zone and rotate back into the room. The output must show real parallax and side planes.\n"
-                "COMPOSITION: The left half of the source room should become the dominant foreground/midground area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
-                "ALLOWED OCCLUSION: It is acceptable for right-side objects to be partially cropped or hidden by foreground objects because this is a side camera.\n"
+                "VIEWPOINT SAFETY: Prefer a source-image crop/reframe weighted toward the left side. Only a slight lateral camera shift is allowed, and only when all furniture footprints and facing directions remain unchanged.\n"
+                "COMPOSITION: The left half of the source room should become the dominant area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
+                "ALLOWED OCCLUSION: It is acceptable for right-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"
-                "FAILURE CONDITION: If it looks like a simple crop of the original frame instead of a new left-side in-room camera angle, it is wrong.\n"
+                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong. A safer crop-like result is better than a dynamic but unstable one.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait detail crop.\n"
             ),
             "ratio": "16:9",
@@ -243,11 +271,11 @@ def construct_internal_angle_styles():
             "name": "Side Composition (Focus Right)",
             "prompt": (
                 "CAMERA POSITION: Natural standing-height side-angle viewpoint from the RIGHT side of the original room composition.\n"
-                "VIEWPOINT CHANGE REQUIRED: Move the camera laterally toward the right-side wall/furniture zone and rotate back into the room. The output must show real parallax and side planes.\n"
-                "COMPOSITION: The right half of the source room should become the dominant foreground/midground area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
-                "ALLOWED OCCLUSION: It is acceptable for left-side objects to be partially cropped or hidden by foreground objects because this is a side camera.\n"
+                "VIEWPOINT SAFETY: Prefer a source-image crop/reframe weighted toward the right side. Only a slight lateral camera shift is allowed, and only when all furniture footprints and facing directions remain unchanged.\n"
+                "COMPOSITION: The right half of the source room should become the dominant area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
+                "ALLOWED OCCLUSION: It is acceptable for left-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"
-                "FAILURE CONDITION: If it looks like a simple crop of the original frame instead of a new right-side in-room camera angle, it is wrong.\n"
+                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong. A safer crop-like result is better than a dynamic but unstable one.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait detail crop.\n"
             ),
             "ratio": "16:9",
@@ -283,6 +311,8 @@ def construct_dynamic_styles(analyzed_items):
         if count >= 20:
             break
         if _is_excluded_detail_target(item):
+            continue
+        if _is_product_backed_detail_target(item) and not _has_localized_render_box(item):
             continue
         if _is_duplicate_detail_target(item, accepted_detail_targets):
             continue

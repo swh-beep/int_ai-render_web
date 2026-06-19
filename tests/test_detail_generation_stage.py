@@ -73,8 +73,12 @@ def test_generate_detail_view_initial_detail_prefers_editorial_model_generation_
         assert result["cutout_ref_count"] == 0
         assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "4:5"
-        assert "Create a NEW editorial close-up photographed inside the EXACT SAME finished room." in captured["prompt"]
-        assert "Do NOT turn this into a simple digital crop of the input." in captured["prompt"]
+        assert "Create a source-constrained editorial reframe of the exact same finished room." in captured["prompt"]
+        assert "Do not create a new camera angle that reveals unseen sides of furniture." in captured["prompt"]
+        assert "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object" in captured["prompt"]
+        assert "Create a NEW editorial close-up" not in captured["prompt"]
+        assert "Do NOT turn this into a simple digital crop" not in captured["prompt"]
+        assert "real parallax" not in captured["prompt"]
         assert "<TARGET ANCHOR>" in captured["prompt"]
         assert "ORIGINAL CACHED TARGET BOX" in captured["prompt"]
         assert "BOX SOURCE: detail_current_image_analysis" in captured["prompt"]
@@ -198,7 +202,8 @@ def test_generate_detail_view_uses_simple_scene_prompt_with_gemini_image_model(t
         assert "photorealistic editorial detail photograph focused on the Floor Lamp area" in captured["prompt"]
         assert "This is not a redesign task." in captured["prompt"]
         assert "Keep every furniture/decor item's shape, count, placement, scale, material, and color unchanged." in captured["prompt"]
-        assert "Shoot a close editorial detail from a natural in-room camera position." in captured["prompt"]
+        assert "Use a source-constrained crop/reframe from the main image camera." in captured["prompt"]
+        assert "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object" in captured["prompt"]
         assert "legacy prompt should not be used" not in captured["prompt"]
         assert "no text, no watermark" in captured["prompt"]
         assert captured["kwargs"]["log_tag"] == "Detail.Generate.Simple"
@@ -249,7 +254,8 @@ def test_generate_detail_view_uses_object_centered_prompt_for_small_decor(tmp_pa
     try:
         assert "photorealistic editorial detail photograph focused on the Framed Art area" in captured["prompt"]
         assert "This is not a redesign task." in captured["prompt"]
-        assert "Shoot a close editorial detail from a natural in-room camera position." in captured["prompt"]
+        assert "Use a source-constrained crop/reframe from the main image camera." in captured["prompt"]
+        assert "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object" in captured["prompt"]
         assert "no text, no watermark" in captured["prompt"]
         assert output_path.exists()
     finally:
@@ -453,12 +459,13 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
     output_path = Path(result["path"])
     try:
         assert captured["request_options"]["aspect_ratio"] == "16:9"
-        assert "<SCENE LOCK: SAME ROOM, NEW SIDE CAMERA>" in captured["prompt"]
-        assert "Do NOT copy the source frame" in captured["prompt"]
-        assert "SIDE CAMERA REQUIRED" in captured["prompt"]
+        assert "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED SIDE REFRAME>" in captured["prompt"]
+        assert "Do not create a new camera angle that reveals unseen sides of furniture." in captured["prompt"]
+        assert "SOURCE-CONSTRAINED REFRAME ONLY" in captured["prompt"]
         assert "crop out or minimize the opposite side of the room" in captured["prompt"]
-        assert "do NOT force every object from the source image to remain visible" in captured["prompt"]
+        assert "do NOT relocate objects to keep them visible" in captured["prompt"]
         assert "Never duplicate, mirror, or copy furniture because of the mask." in captured["prompt"]
+        assert "real parallax" not in captured["prompt"]
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
         assert any(

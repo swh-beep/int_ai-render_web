@@ -16,34 +16,43 @@ from render_route_services import (
 
 
 class DetailChainContractsTests(unittest.TestCase):
-    def test_select_external_detail_styles_interleaves_primary_and_small_items_at_six(self):
-        styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 13)]
+    def test_select_external_detail_styles_prefers_product_backed_targets_at_six(self):
+        styles = [
+            {"name": "Detail: Sofa", "target_key": "cart_product-1_sofa", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Coffee Table", "target_key": "cart_product-2_table", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Lounge Chair", "target_key": "cart_product-3_chair", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Floor Lamp", "target_key": "cart_product-4_lamp", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Wall Clock", "target_key": "cart_product-5_clock", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Side Table", "target_key": "cart_product-6_side-table", "detail_mode": "product_identity_lock"},
+            {"name": "Detail: Generic Vase", "target_key": "detail_vase", "simple_scene_detail": True},
+            {"name": "Detail: Generic Books", "target_key": "detail_books", "simple_scene_detail": True},
+        ]
 
         selected = select_external_detail_styles(styles)
 
         self.assertEqual(
             [style["name"] for style in selected],
             [
-                "Detail: item-1",
-                "Detail: item-12",
-                "Detail: item-2",
-                "Detail: item-11",
-                "Detail: item-3",
-                "Detail: item-10",
+                "Detail: Sofa",
+                "Detail: Coffee Table",
+                "Detail: Lounge Chair",
+                "Detail: Floor Lamp",
+                "Detail: Wall Clock",
+                "Detail: Side Table",
             ],
         )
 
-    def test_select_external_detail_styles_interleaves_even_when_under_limit(self):
+    def test_select_external_detail_styles_keeps_order_when_under_limit(self):
         three_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 4)]
         four_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 5)]
 
         self.assertEqual(
             [style["name"] for style in select_external_detail_styles(three_styles)],
-            ["Detail: item-1", "Detail: item-3", "Detail: item-2"],
+            ["Detail: item-1", "Detail: item-2", "Detail: item-3"],
         )
         self.assertEqual(
             [style["name"] for style in select_external_detail_styles(four_styles)],
-            ["Detail: item-1", "Detail: item-4", "Detail: item-2", "Detail: item-3"],
+            ["Detail: item-1", "Detail: item-2", "Detail: item-3", "Detail: item-4"],
         )
 
     def test_build_detail_payload_preserves_itemized_context(self):
@@ -382,7 +391,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(materialize_calls, [])
         self.assertEqual(analyze_calls, [])
 
-    def test_prepare_detail_generation_items_reanalyzes_current_image_and_preserves_cached_identity(self):
+    def test_prepare_detail_generation_items_preserves_cached_items_without_detection_only_targets(self):
         source_path = Path("outputs/test-detail-current-main.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.write_bytes(
@@ -426,18 +435,117 @@ class DetailChainContractsTests(unittest.TestCase):
                 normalize_label_for_match=lambda text: str(text or "").strip().lower(),
             )
 
-            self.assertEqual(len(prepared), 2)
+            self.assertEqual(len(prepared), 1)
             coffee_table = prepared[0]
             self.assertEqual(coffee_table["target_key"], "cached_table_001")
             self.assertEqual(coffee_table["crop_path"], "cached-table.png")
             self.assertEqual(coffee_table["description"], "Round fluted coffee table")
-            self.assertEqual(coffee_table["box_2d"], [420, 430, 640, 700])
-            self.assertEqual(coffee_table["source_box_2d"], [100, 120, 220, 320])
-            self.assertEqual(coffee_table["box_source"], "detail_current_image_analysis")
-            self.assertEqual(prepared[1]["label"], "Armchair")
-            self.assertEqual(prepared[1]["box_2d"], [310, 720, 640, 860])
+            self.assertEqual(coffee_table["box_2d"], [100, 120, 220, 320])
+            self.assertNotIn("detail_002_armchair", [row.get("target_key") for row in prepared])
         finally:
             source_path.unlink(missing_ok=True)
+
+    def test_prepare_detail_generation_items_uses_product_specific_localization_not_generic_detection_order(self):
+        source_path = Path("outputs/test-detail-product-localization.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        cached_items = [
+            {
+                "label": "Gubi F300 Lounge Chair",
+                "target_key": "cart_37694_gubi-f300_001",
+                "box_2d": [650, 650, 910, 870],
+                "box_source": "main_render",
+                "box_label_detected": "accent chair",
+                "box_match_score": 0.56,
+                "box_match_strategy": "score_threshold",
+                "crop_path": "f300.png",
+                "category": "lounge_chair",
+                "category_canonical": "lounge_chair",
+                "volume_rank": 1,
+            },
+            {
+                "label": "Cassina Soriana Armchair",
+                "target_key": "cart_37692_soriana_002",
+                "box_2d": [630, 110, 870, 290],
+                "box_source": "main_render",
+                "box_label_detected": "armchair",
+                "box_match_score": 0.50,
+                "box_match_strategy": "family_score_threshold",
+                "crop_path": "soriana.png",
+                "category": "lounge_chair",
+                "category_canonical": "lounge_chair",
+                "volume_rank": 2,
+            },
+        ]
+        fresh_detections = [
+            {"label": "armchair", "box_2d": [630, 110, 870, 290]},
+            {"label": "accent chair", "box_2d": [650, 650, 910, 870]},
+        ]
+        localized = {
+            "Gubi F300 Lounge Chair": (0.12, 0.14, 0.30, 0.42),
+            "Cassina Soriana Armchair": (0.64, 0.66, 0.86, 0.91),
+        }
+
+        try:
+            prepared = prepare_detail_generation_items(
+                furniture_data=cached_items,
+                moodboard_url=None,
+                local_path=str(source_path),
+                materialize_input=lambda url, prefix: url,
+                detect_furniture_boxes=lambda path: fresh_detections,
+                detect_item_bbox_norm=lambda staged_path, crop_path, label, item_context=None, timeout_sec=None: localized.get(label),
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual([row["target_key"] for row in prepared], ["cart_37694_gubi-f300_001", "cart_37692_soriana_002"])
+        self.assertEqual(prepared[0]["box_2d"], [140, 120, 420, 300])
+        self.assertEqual(prepared[1]["box_2d"], [660, 640, 910, 860])
+        self.assertEqual(prepared[0]["box_source"], "product_reference_localization")
+        self.assertEqual(prepared[1]["box_source"], "product_reference_localization")
+        self.assertEqual(prepared[0]["source_box_2d"], [650, 650, 910, 870])
+        self.assertEqual(prepared[1]["source_box_2d"], [630, 110, 870, 290])
+        self.assertNotIn("detail_001_armchair", [row.get("target_key") for row in prepared])
+
+    def test_construct_dynamic_styles_skips_product_backed_items_without_verified_localization(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Gubi F300 Lounge Chair",
+                    "target_key": "cart_37694_gubi-f300_001",
+                    "box_2d": [650, 650, 910, 870],
+                    "box_source": "main_render",
+                    "box_label_detected": "accent chair",
+                    "box_match_score": 0.56,
+                    "box_match_strategy": "score_threshold",
+                    "crop_path": "f300.png",
+                    "category": "lounge_chair",
+                    "category_canonical": "lounge_chair",
+                    "detail_localization_status": "unverified",
+                    "detail_skip_reason": "product_reference_localization_missing",
+                },
+                {
+                    "label": "Cassina Soriana Armchair",
+                    "target_key": "cart_37692_soriana_002",
+                    "box_2d": [660, 640, 910, 860],
+                    "box_source": "product_reference_localization",
+                    "crop_path": "soriana.png",
+                    "category": "lounge_chair",
+                    "category_canonical": "lounge_chair",
+                    "detail_localization_status": "product_reference_verified",
+                },
+            ]
+        )
+
+        self.assertEqual([style["target_key"] for style in styles], ["cart_37692_soriana_002"])
 
     def test_prepare_detail_generation_items_preserves_moodboard_analysis_when_no_cached_snapshot(self):
         source_path = Path("outputs/test-detail-main-image.png")
@@ -472,7 +580,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(detect_calls, [str(moodboard_path)])
         self.assertEqual(prepared[0]["label"], "Chair")
 
-    def test_run_generate_details_job_refreshes_current_image_targets_even_with_cached_snapshot(self):
+    def test_run_generate_details_job_uses_cached_item_targets_without_detection_only_targets(self):
         source_path = Path("outputs/test-detail-generate-current.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.write_bytes(
@@ -539,12 +647,11 @@ class DetailChainContractsTests(unittest.TestCase):
         finally:
             source_path.unlink(missing_ok=True)
 
-        self.assertEqual(captured["style_targets"], ["cached_table_001", "detail_002_armchair"])
-        self.assertEqual(result["furniture_data"][0]["box_2d"], [420, 430, 640, 700])
-        self.assertEqual(result["furniture_data"][0]["source_box_2d"], [100, 120, 220, 320])
+        self.assertEqual(captured["style_targets"], ["cached_table_001"])
+        self.assertEqual(result["furniture_data"][0]["box_2d"], [100, 120, 220, 320])
         self.assertEqual(result["furniture_data"][0]["target_key"], "cached_table_001")
         self.assertEqual(result["furniture_data"][0]["crop_path"], "cached-table.png")
-        self.assertEqual(result["furniture_data"][1]["label"], "Armchair")
+        self.assertEqual(len(result["furniture_data"]), 1)
 
     def test_run_regenerate_single_detail_job_uses_simple_generation_for_detail_styles(self):
         source_path = Path("outputs/test-regenerate-crop-mode.png")
@@ -1147,6 +1254,62 @@ def test_external_generate_details_job_uses_model_generation_for_detail_targets(
     assert [row["style_name"] for row in result["details"]] == ["Detail: Accent Chair"]
     assert recorded_styles[1].get("simple_scene_detail") is True
     assert recorded_crop_preferences == {1: False}
+
+
+def test_external_product_backed_details_prefer_verified_crop_extract(tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    recorded_crop_preferences = {}
+    recorded_styles = {}
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        recorded_styles[int(index)] = dict(style_config)
+        recorded_crop_preferences[int(index)] = kwargs.get("prefer_crop_extract")
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [
+                {
+                    "label": "Gubi F300 Lounge Chair",
+                    "target_key": "cart_37694_gubi-f300_001",
+                    "crop_path": str(image_path),
+                    "category": "lounge_chair",
+                    "category_canonical": "lounge_chair",
+                }
+            ],
+            "audience": "external",
+        },
+        normalize_audience=lambda audience: audience or "external",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: [],
+        detect_item_bbox_norm=lambda staged_path, crop_path, label, item_context=None, timeout_sec=None: (0.12, 0.14, 0.30, 0.42),
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: item,
+        attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: str(label or "").strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    assert [row["style_name"] for row in result["details"]] == ["Detail: Gubi F300 Lounge Chair"]
+    assert recorded_styles[1]["detail_mode"] == "product_identity_lock"
+    assert recorded_styles[1]["target_box_source"] == "product_reference_localization"
+    assert recorded_crop_preferences == {1: True}
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):

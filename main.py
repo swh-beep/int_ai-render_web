@@ -376,7 +376,7 @@ RANK_MODEL_NAME = _default_analysis_model_name(os.getenv("RANK_MODEL_NAME"))
 REMAP_MODEL_NAME = _default_analysis_model_name(os.getenv("REMAP_MODEL_NAME"))
 REMAP_DETECT_TIMEOUT_SEC = max(10, int(os.getenv("REMAP_DETECT_TIMEOUT_SEC", "60")))
 REMAP_DETECT_RETRY = max(0, int(os.getenv("REMAP_DETECT_RETRY", "1")))
-CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "12")))
+CART_MAX_ITEMS = max(1, int(os.getenv("CART_MAX_ITEMS", "20")))
 CART_MAX_ANALYSIS_WORKERS = max(1, int(os.getenv("CART_MAX_ANALYSIS_WORKERS", "10")))
 OPENAI_ANALYSIS_MODEL_SET = build_analysis_model_set(
     ANALYSIS_MODEL_NAME,
@@ -1352,14 +1352,22 @@ def detect_primary_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str]
         safe_json_from_model_text=_safe_json_from_model_text,
     )
 
-def detect_item_bbox_norm(staged_path: str, ref_item_crop_path: Optional[str], item_label: Optional[str]):
+def detect_item_bbox_norm(
+    staged_path: str,
+    ref_item_crop_path: Optional[str],
+    item_label: Optional[str],
+    item_context: Optional[dict] = None,
+    timeout_sec: Optional[float] = None,
+):
     return detect_item_bbox_norm_support(
         staged_path,
         ref_item_crop_path,
         item_label,
+        item_context=item_context,
         call_gemini_with_failover=call_gemini_with_failover,
         analysis_model_name=ANALYSIS_MODEL_NAME,
         safe_json_from_model_text=_safe_json_from_model_text,
+        timeout_sec=timeout_sec or 70.0,
     )
 
 def _score_scale(bbox_norm: tuple, wall_span_norm: tuple, target_ratio: float) -> float:
@@ -2228,6 +2236,7 @@ job_entrypoints_module.configure_job_entrypoints(
         ),
         log_section=log_section,
         detect_furniture_boxes=detect_furniture_boxes,
+        detect_item_bbox_norm=detect_item_bbox_norm,
         canonical_category=_canonical_category,
         build_item_target_key=_build_item_target_key,
         analyze_cropped_item=analyze_cropped_item,

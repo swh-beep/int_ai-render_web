@@ -37,6 +37,7 @@ class JobEntrypointServices:
     generate_frontal_room_from_photos: Callable[..., Any]
     log_section: Callable[[str], None]
     detect_furniture_boxes: Callable[..., Any]
+    detect_item_bbox_norm: Callable[..., Any]
     canonical_category: Callable[[Optional[str]], str]
     build_item_target_key: Callable[..., str]
     analyze_cropped_item: Callable[..., Any]
@@ -295,6 +296,7 @@ def job_generate_details(payload: dict) -> dict:
         resolve_image_url=services.resolve_image_url,
         log_section=services.log_section,
         detect_furniture_boxes=services.detect_furniture_boxes,
+        detect_item_bbox_norm=services.detect_item_bbox_norm,
         canonical_category=services.canonical_category,
         build_item_target_key=services.build_item_target_key,
         max_concurrency_analysis=services.max_concurrency_analysis,

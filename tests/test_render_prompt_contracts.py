@@ -753,6 +753,8 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         assert "<ITEM IDENTITY LOCKS (STRICT)>" not in prompt
         assert "Collector Lounge Chair: reference_image=authoritative_cutout; qty=1; category=lounge_chair" in prompt
         assert "same_family_substitute=invalid" in prompt
+        assert "keep each product's facing direction, module count, visible part count, support geometry, lampshade color, and silhouette from its reference" in prompt
+        assert "Do not rotate, simplify, fuse, split, or recompose product parts to improve styling" in prompt
         assert "avoid=generic club chair, boxy accent chair" not in prompt
         assert "preserve_rules=" not in prompt
         assert "PRODUCT EXACTNESS FIRST" in prompt
