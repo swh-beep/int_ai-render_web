@@ -159,6 +159,30 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["target_category_canonical"], "")
         self.assertNotIn("TARGET COORDINATES", styles[0]["prompt"])
 
+    def test_construct_dynamic_styles_uses_full_detail_contract_for_product_backed_targets(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Taccia Small Table Lamp",
+                    "target_key": "cart_product-38173_taccia-small_011",
+                    "item_id": "product_38173",
+                    "category": "table_lamp",
+                    "category_canonical": "table_lamp",
+                    "box_2d": [422, 798, 558, 858],
+                    "box_source": "detail_current_image_analysis",
+                    "source_box_2d": [410, 790, 565, 865],
+                    "crop_path": "outputs/taccia-reference.png",
+                    "reference_features": {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]},
+                }
+            ]
+        )
+
+        self.assertEqual(styles[0]["target_key"], "cart_product-38173_taccia-small_011")
+        self.assertNotIn("simple_scene_detail", styles[0])
+        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
+        self.assertEqual(styles[0]["target_crop_path"], "outputs/taccia-reference.png")
+        self.assertEqual(styles[0]["target_reference_features"], {"silhouette_cues": ["diagonal-cut glass bowl diffuser"]})
+
     def test_construct_dynamic_styles_preserves_target_category_metadata(self):
         styles = construct_dynamic_styles(
             [

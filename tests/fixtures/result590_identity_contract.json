@@ -1,0 +1,69 @@
+{
+  "items": [
+    {
+      "target_key": "sofa-1",
+      "label": "Main Sofa",
+      "category": "sofa",
+      "requested_dims_mm": {"width_mm": 2400, "depth_mm": 1000, "height_mm": 800},
+      "identity_profile": {"family": "sofa"},
+      "layout_envelope": {"placement_family": "floor_placed", "room_width_ratio": 0.6, "footprint_ratio": 0.15}
+    },
+    {
+      "target_key": "cart_product-39555_montana-free_001",
+      "label": "Montana Free 333000",
+      "category": "decor",
+      "category_path": "storage shelving > cabinet shelf",
+      "requested_dims_mm": {"width_mm": 2030, "depth_mm": 380, "height_mm": 1100},
+      "reference_features": {
+        "silhouette_cues": [
+          "Four-tier horizontal open shelving unit with three wide vertical bays",
+          "Rounded-corner open 3x3 grid shelf"
+        ],
+        "distinctive_parts": ["Slender vertical connection columns"]
+      },
+      "layout_envelope": {"room_width_ratio": 0.2256, "room_depth_ratio": 0.0633, "room_height_ratio": 0.3929, "footprint_ratio": 0.0143}
+    },
+    {
+      "target_key": "cart_product-39553_bowler_003",
+      "label": "HAY Bowler Table Red",
+      "category": "table",
+      "requested_dims_mm": {"width_mm": 360, "depth_mm": 360, "height_mm": 705},
+      "reference_features": {
+        "silhouette_cues": [
+          "Asymmetric silhouette with a single off-center vertical support stem",
+          "Looping inverted U-shaped handle"
+        ],
+        "distinctive_parts": ["Off-center single support column", "hemispherical stone base"]
+      },
+      "layout_envelope": {"placement_family": "floor_placed", "room_width_ratio": 0.04, "footprint_ratio": 0.0024}
+    },
+    {
+      "target_key": "cart_product-38173_taccia-small_011",
+      "label": "Flos Taccia Small Table Lamp",
+      "category": "table_lamp",
+      "requested_dims_mm": {"width_mm": 373, "depth_mm": 373, "height_mm": 485},
+      "reference_features": {
+        "silhouette_cues": ["Deep diagonal-cut glass bowl diffuser", "fluted cylindrical column base"],
+        "distinctive_parts": ["Angled open-top glass bowl", "Inner white reflector disc"]
+      },
+      "layout_envelope": {"placement_family": "surface_placed", "room_width_ratio": 0.05, "footprint_ratio": 0.002}
+    },
+    {
+      "target_key": "cart_product-41002_layer-lamp_012",
+      "label": "Jackson Chameleon Layer Table Lamp",
+      "category": "table_lamp",
+      "requested_dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+      "reference_features": {
+        "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+        "distinctive_parts": ["Layered shade", "compact upright stem"]
+      },
+      "layout_envelope": {"placement_family": "surface_placed", "room_width_ratio": 0.04, "footprint_ratio": 0.0018}
+    }
+  ],
+  "expected": {
+    "cart_product-39555_montana-free_001": {"family": "storage", "pass_role": "pass1_footprint"},
+    "cart_product-39553_bowler_003": {"pass_role": "pass2_floor_secondary", "requires_identity_validation": true},
+    "cart_product-38173_taccia-small_011": {"pass_role": "pass2_support_sensitive", "requires_identity_validation": true},
+    "cart_product-41002_layer-lamp_012": {"pass_role": "pass2_support_sensitive", "requires_identity_validation": true}
+  }
+}

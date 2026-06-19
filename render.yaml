@@ -123,11 +123,11 @@ envVarGroups:
       - key: MAIN_IMAGE_PROVIDER
         value: gemini
       - key: MAIN_IMAGE_MODEL_NAME
-        value: gemini-3.1-flash-image
+        value: gemini-3-pro-image
       - key: REPAIR_IMAGE_PROVIDER
         value: gemini
       - key: REPAIR_IMAGE_MODEL_NAME
-        value: gemini-3.1-flash-image
+        value: gemini-3-pro-image
       - key: REMAP_DETECT_RETRY
         value: "3"
       - key: REMAP_DETECT_TIMEOUT_SEC

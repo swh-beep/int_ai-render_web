@@ -219,9 +219,6 @@ def test_build_render_response_payload_keeps_replay_debug_metadata():
         selected_variant_review={
             "review_pass": True,
             "matched_source_count": 4,
-            "repair_applied": True,
-            "repair_attempt_count": 1,
-            "repair_target_keys": ["internal_item-1_sofa_001"],
             "scalecheck_diagnostics": {
                 "matched_items": {"internal_item-1_sofa_001": {"target_key": "internal_item-1_sofa_001"}},
                 "unmatched_items": [],
@@ -252,7 +249,5 @@ def test_build_render_response_payload_keeps_replay_debug_metadata():
     assert payload["selected_result_filename"] == "variant_a.png"
     assert payload["selected_result_reason"] == "review_pass_ranked"
     assert payload["selected_variant_review"]["matched_source_count"] == 4
-    assert payload["selected_variant_review"]["repair_applied"] is True
-    assert payload["selected_variant_review"]["repair_target_keys"] == ["internal_item-1_sofa_001"]
     assert payload["selected_item_review"][0]["status"] == "matched"
     assert payload["variant_diagnostics"][1]["scalecheck_failed_rules"] == ["rug_vs_anchor_footprint"]

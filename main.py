@@ -53,7 +53,6 @@ from application.media.image_edit_generation_stage import (
 )
 from application.render.empty_room_generation_stage import generate_empty_room as generate_empty_room_stage
 from application.render.furnished_generation_stage import generate_furnished_room as generate_furnished_room_stage
-from application.render.main_render_polish_stage import polish_main_render as polish_main_render_stage
 from application.render.dimension_support import (
     available_dim_axes as available_dim_axes_support,
     dims_has_positive_values as dims_has_positive_values_support,
@@ -295,8 +294,8 @@ def _calc_app_build_id() -> str:
 APP_BUILD_ID = _calc_app_build_id()
 GEMINI_MAX_CONCURRENCY_ANALYSIS = 30
 
-MODEL_NAME = 'gemini-3.1-flash-image'       # 절대 변경 금지
-DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3.1-flash-image"
+MODEL_NAME = 'gemini-3-pro-image'
+DEFAULT_GEMINI_MAIN_IMAGE_MODEL_NAME = "gemini-3-pro-image"
 
 
 def _default_direct_gemini_image_model_name() -> str:
@@ -1642,32 +1641,8 @@ def generate_furnished_room(
         allow_all_safety_settings=allow_all_safety_settings,
         call_generation_with_failover=CALL_MAIN_IMAGE_WITH_PROVIDER,
         generation_model_name=MAIN_IMAGE_MODEL_NAME,
-        call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
-        repair_model_name=REPAIR_IMAGE_MODEL_NAME,
-        call_lighting_review_with_failover=call_gemini_with_failover,
-        lighting_review_model_name=ANALYSIS_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
-    )
-
-
-def polish_main_image(
-    source_path,
-    unique_id,
-    timeout_sec: float = 90.0,
-    **_kwargs,
-):
-    return polish_main_render_stage(
-        source_path,
-        unique_id=unique_id,
-        allow_all_safety_settings=allow_all_safety_settings,
-        call_repair_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
-        repair_model_name=REPAIR_IMAGE_MODEL_NAME,
-        call_gemini_with_failover=call_gemini_with_failover,
-        model_name=GEMINI_IMAGE_MODEL_NAME,
-        match_aspect_to_target=match_aspect_to_target,
-        logger=logger,
-        timeout_sec=timeout_sec,
     )
 
 
@@ -1892,7 +1867,6 @@ def render_room(
                 generation=RenderWorkflowGenerationServices(
                     generate_empty_room=generate_empty_room,
                     generate_furnished_room=generate_furnished_room,
-                    polish_main_image=polish_main_image,
                 ),
                 postprocess=RenderWorkflowPostprocessServices(
                     rank_best_variant=_rank_best_variant_flash,

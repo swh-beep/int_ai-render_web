@@ -6,7 +6,6 @@ from application.render.geometry_contract_stage import build_geometry_contract
 from application.render.room_dimension_estimation_stage import estimate_room_dims_contract
 from application.render.render_room_workflow import (
     _build_simple_generation_specs,
-    _polish_selected_best_result,
     run_render_room_workflow,
 )
 from application.render.render_workflow_contracts import (
@@ -101,23 +100,6 @@ def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata()
     assert simple["two_pass_strategy"] == {"pass1_primary_keys": ["chair-1"]}
     assert simple["size_hierarchy_scale"] == ["Chair"]
     assert simple["primary"]["target_key"] == "chair-1"
-
-
-def test_polish_selected_best_result_keeps_selected_candidate_when_polish_fails():
-    warnings = []
-
-    paths, reason = _polish_selected_best_result(
-        ["outputs/v3.png"],
-        audience="external",
-        unique_id="job-polish-fail",
-        selected_result_reason="hard_qc_pass_ranked",
-        polish_main_image=lambda *args, **kwargs: None,
-        logger=SimpleNamespace(warning=lambda message: warnings.append(message)),
-    )
-
-    assert paths == ["outputs/v3.png"]
-    assert reason == "hard_qc_pass_ranked"
-    assert warnings
 
 
 def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypatch):
@@ -262,10 +244,6 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
 
     monkeypatch.setattr("application.render.render_room_workflow.run_render_postprocess_stage", fake_postprocess)
 
-    def fake_polish(path, **kwargs):
-        captured.setdefault("polish_calls", []).append({"path": path, **kwargs})
-        return path.replace(".png", "_polished.png")
-
     request = RenderWorkflowRequest(
         file=object(),
         room="room",
@@ -337,7 +315,6 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
         generation=RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: ("outputs/empty.png", None),
             generate_furnished_room=lambda *args, **kwargs: "outputs/simple-result.png",
-            polish_main_image=fake_polish,
         ),
         postprocess=RenderWorkflowPostprocessServices(
             rank_best_variant=lambda *args, **kwargs: None,
@@ -486,10 +463,6 @@ def test_run_render_room_workflow_treats_external_estimated_dimensions_as_strict
 
     monkeypatch.setattr("application.render.render_room_workflow.run_render_postprocess_stage", fake_postprocess)
 
-    def fake_polish(path, **kwargs):
-        captured["polish"] = {"path": path, **kwargs}
-        return path.replace(".png", "_polished.png")
-
     request = RenderWorkflowRequest(
         file=object(),
         room="room",
@@ -566,7 +539,6 @@ def test_run_render_room_workflow_treats_external_estimated_dimensions_as_strict
         generation=RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: ("outputs/empty.png", None),
             generate_furnished_room=lambda *args, **kwargs: "outputs/simple-result.png",
-            polish_main_image=fake_polish,
         ),
         postprocess=RenderWorkflowPostprocessServices(
             rank_best_variant=lambda *args, **kwargs: 0,
@@ -687,10 +659,6 @@ def test_run_render_room_workflow_uses_diagnostics_fallback_when_rerank_misses(m
 
     monkeypatch.setattr("application.render.render_room_workflow.run_render_postprocess_stage", fake_postprocess)
 
-    def fake_polish(path, **kwargs):
-        captured["polish"] = {"path": path, **kwargs}
-        return "outputs/simple-b_polished.png"
-
     request = RenderWorkflowRequest(
         file=object(),
         room="room",
@@ -744,7 +712,6 @@ def test_run_render_room_workflow_uses_diagnostics_fallback_when_rerank_misses(m
         generation=RenderWorkflowGenerationServices(
             generate_empty_room=lambda *args, **kwargs: ("outputs/empty.png", None),
             generate_furnished_room=lambda *args, **kwargs: "outputs/simple-result.png",
-            polish_main_image=fake_polish,
         ),
         postprocess=RenderWorkflowPostprocessServices(
             rank_best_variant=lambda *args, **kwargs: None,
@@ -808,12 +775,13 @@ def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but
 
     assert detect_calls == [str(source_path)]
     assert len(analyze_calls) == 0
-    assert result[0]["target_key"] == "detail_1_Chair"
+    assert result[0]["target_key"] == "chair-1"
+    assert result[0]["label"] == "Chair"
     assert result[0]["box_2d"] == [220, 260, 820, 900]
     assert result[0]["box_source"] == "detail_current_image_analysis"
-    assert "source_box_2d" not in result[0]
-    assert "crop_path" not in result[0]
-    assert "identity_profile" not in result[0]
-    assert "reference_features" not in result[0]
-    assert "placement_contract" not in result[0]
+    assert result[0]["source_box_2d"] == [100, 100, 700, 700]
+    assert result[0]["crop_path"] == "outputs/chair.png"
+    assert result[0]["identity_profile"] == {"silhouette": "rolled-arm"}
+    assert result[0]["reference_features"] == {"material_cues": ["boucle"]}
+    assert result[0]["placement_contract"] == {"zone": "left"}
     assert result[0]["volume_rank"] == 1

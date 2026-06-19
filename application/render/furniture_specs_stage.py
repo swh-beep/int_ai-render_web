@@ -1,10 +1,22 @@
 from typing import Callable
 
+from application.render.postprocess_support import resolve_item_canonical_category
 from application.render.two_pass_strategy_stage import (
     apply_two_pass_strategy,
     compute_strategy_priority,
     is_anchor_eligible,
     select_anchor_candidate,
+)
+
+
+_CATEGORY_METADATA_FIELDS = (
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
 )
 
 
@@ -80,7 +92,10 @@ def _extract_item_dims_for_ranking(
 
 def _category_priority_score(item: dict, *, canonical_category: Callable[[str | None], str]) -> int:
     try:
-        cat = (item or {}).get("category_canonical") or canonical_category((item or {}).get("category") or (item or {}).get("label"))
+        cat = resolve_item_canonical_category(
+            item or {},
+            default=(item or {}).get("category_canonical") or canonical_category((item or {}).get("category") or (item or {}).get("label")),
+        )
     except Exception:
         cat = ""
 
@@ -157,8 +172,10 @@ def attach_volume_ranks(
         item["volume_rank_basis"] = basis
         item["scale_rank_confidence"] = _scale_confidence_from_dims(dims)
 
-        if not item.get("category_canonical"):
-            item["category_canonical"] = canonical_category(item.get("category") or item.get("label"))
+        item["category_canonical"] = resolve_item_canonical_category(
+            item,
+            default=item.get("category_canonical") or canonical_category(item.get("category") or item.get("label")),
+        )
         item["category_score"] = _category_priority_score(item, canonical_category=canonical_category)
 
         if not item.get("dims_mm") and any([
@@ -296,7 +313,10 @@ def build_furniture_specs_json(
             vp = 0
 
         cat_score = 0
-        canonical = it.get("category_canonical") or canonical_category(it.get("category") or label)
+        canonical = resolve_item_canonical_category(
+            it,
+            default=it.get("category_canonical") or canonical_category(it.get("category") or label),
+        )
         cat_score_map = {
             "main_sofa": 100,
             "lounge_sofa": 98,
@@ -343,6 +363,11 @@ def build_furniture_specs_json(
                 "source_index": it.get("source_index"),
                 "category": it.get("category"),
                 "category_canonical": canonical,
+                **{
+                    field: it.get(field)
+                    for field in _CATEGORY_METADATA_FIELDS
+                    if isinstance(it, dict) and it.get(field) not in (None, "")
+                },
                 "is_rug": is_rug,
                 "category_score": cat_score,
                 "qty": int(it.get("qty") or 1),

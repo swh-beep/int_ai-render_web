@@ -72,16 +72,16 @@ def test_runtime_model_name_falls_back_to_provider_default_when_model_family_mis
             provider="gemini",
             configured_model_name="gpt-image-2",
             default_openai_model_name="gpt-image-2",
-            default_gemini_model_name="gemini-3.1-flash-image",
+            default_gemini_model_name="gemini-3-pro-image",
         )
-        == "gemini-3.1-flash-image"
+        == "gemini-3-pro-image"
     )
     assert (
         resolve_runtime_model_name(
             provider="openai",
             configured_model_name="gemini-3.1-flash-image",
             default_openai_model_name="gpt-image-2",
-            default_gemini_model_name="gemini-3.1-flash-image",
+            default_gemini_model_name="gemini-3-pro-image",
         )
         == "gpt-image-2"
     )
@@ -99,16 +99,16 @@ def test_default_runtime_models_keep_main_and_repair_on_gemini_when_openai_key_e
             provider=main_provider,
             configured_model_name=None,
             default_openai_model_name=defaults.openai_image_model_name,
-            default_gemini_model_name="gemini-3.1-flash-image",
+            default_gemini_model_name="gemini-3-pro-image",
         )
-        == "gemini-3.1-flash-image"
+        == "gemini-3-pro-image"
     )
     assert (
         resolve_runtime_model_name(
             provider=repair_provider,
             configured_model_name=None,
             default_openai_model_name=defaults.openai_image_model_name,
-            default_gemini_model_name="gemini-3.1-flash-image",
+            default_gemini_model_name="gemini-3-pro-image",
         )
-        == "gemini-3.1-flash-image"
+        == "gemini-3-pro-image"
     )

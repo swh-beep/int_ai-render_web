@@ -30,6 +30,6 @@ def test_experiment_runtime_metadata_respects_legacy_force_gemini_override():
     assert metadata["analysis_provider"] == "gemini"
     assert metadata["analysis_model_name"] == "gemini-3.5-flash"
     assert metadata["main_image_provider"] == "gemini"
-    assert metadata["main_image_model_name"] == "gemini-3.1-flash-image"
+    assert metadata["main_image_model_name"] == "gemini-3-pro-image"
     assert metadata["repair_image_provider"] == "gemini"
-    assert metadata["repair_image_model_name"] == "gemini-3.1-flash-image"
+    assert metadata["repair_image_model_name"] == "gemini-3-pro-image"

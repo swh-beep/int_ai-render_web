@@ -3,7 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
-from application.render.postprocess_support import canonical_category, category_match_family, refresh_item_boxes_from_main_render
+from application.render.postprocess_support import canonical_category, category_match_family, refresh_item_boxes_from_main_render, resolve_item_family
 from application.render.render_postprocess_stage import run_render_postprocess_stage
 
 
@@ -144,6 +144,68 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(remapped[0]["box_label_detected"], "Cabinet")
         self.assertGreater(remapped[0]["box_match_score"], 0.0)
 
+    def test_refresh_item_boxes_from_main_render_matches_shelf_lamp_as_lamp_not_storage(self):
+        analyzed_items = [
+            {
+                "label": "타치아 스몰",
+                "category": "table_lamp",
+                "category_canonical": "table_lamp",
+                "dims_mm": {"width_mm": 373, "depth_mm": 373, "height_mm": 485},
+                "box_2d": [0, 0, 1000, 1000],
+                "target_key": "cart_38173_타치아-스몰_011",
+            },
+        ]
+        detected = [
+            {"label": "Shelf Lamp", "box_2d": [592, 122, 674, 166]},
+            {"label": "Shelf Unit", "box_2d": [479, 71, 819, 269]},
+        ]
+        render_path = self.tmp_root / "shelf-lamp-render.png"
+        render_path.write_bytes(b"png")
+        remapped = refresh_item_boxes_from_main_render(
+            str(render_path),
+            analyzed_items,
+            detect_furniture_boxes=lambda *args, **kwargs: detected,
+            remap_model_name="model",
+            remap_detect_timeout_sec=30,
+            remap_detect_retry=0,
+        )
+        self.assertEqual(remapped[0]["box_2d"], [592, 122, 674, 166])
+        self.assertEqual(remapped[0]["box_source"], "main_render")
+        self.assertEqual(remapped[0]["box_label_detected"], "Shelf Lamp")
+
+    def test_refresh_item_boxes_from_main_render_rejects_generic_detection_for_identity_lamp(self):
+        analyzed_items = [
+            {
+                "label": "Layer Table Lamp",
+                "category": "table_lamp",
+                "category_canonical": "table_lamp",
+                "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                "box_2d": [0, 0, 1000, 1000],
+                "target_key": "cart_38172_layer-table-lamp_012",
+                "requires_identity_validation": True,
+                "identity_strictness": "critical",
+                "reference_features": {
+                    "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+                    "distinctive_parts": ["Layered shade", "compact upright stem"],
+                },
+            },
+        ]
+        detected = [
+            {"label": "table lamp", "box_2d": [490, 796, 576, 834]},
+        ]
+        render_path = self.tmp_root / "generic-table-lamp-detection.png"
+        render_path.write_bytes(b"png")
+        remapped = refresh_item_boxes_from_main_render(
+            str(render_path),
+            analyzed_items,
+            detect_furniture_boxes=lambda *args, **kwargs: detected,
+            remap_model_name="model",
+            remap_detect_timeout_sec=30,
+            remap_detect_retry=0,
+        )
+        self.assertEqual(remapped[0]["box_source"], "source_reference")
+        self.assertEqual(remapped[0]["box_2d"], [0, 0, 1000, 1000])
+
     def test_category_normalizers_support_requested_internal_taxonomy(self):
         self.assertEqual(canonical_category("거울 장식"), "mirror")
         self.assertEqual(canonical_category("메인소파"), "main_sofa")
@@ -165,8 +227,36 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(category_match_family("데스크테이블"), "desk")
         self.assertEqual(category_match_family("desk chair"), "chair")
         self.assertEqual(category_match_family("desk lamp"), "table_lamp")
+        self.assertEqual(canonical_category("Shelf Lamp"), "table_lamp")
+        self.assertEqual(category_match_family("Shelf Lamp"), "table_lamp")
         self.assertEqual(category_match_family("팬던트램프"), "ceiling_light")
         self.assertEqual(category_match_family("Arc Floor Lamp"), "floor_lamp")
+
+    def test_category_resolver_promotes_decor_shelving_identity_to_storage(self):
+        self.assertEqual(category_match_family("decor 몬타나 프리 333000 four-tier shelving grid"), "storage")
+        self.assertEqual(category_match_family("decor 수납·선반장 > 일반수납장"), "storage")
+
+    def test_resolve_item_family_prefers_decor_category_over_generic_ai_label_family(self):
+        item = {
+            "label": "AI design image",
+            "category": "decor",
+            "category_canonical": "decor",
+            "product_identity": {
+                "family": "ai design image",
+                "topology_cues": [
+                    "Left smoky amber glass bell jar",
+                    "Right textured black ceramic vessel",
+                ],
+            },
+            "reference_features": {
+                "distinctive_parts": [
+                    "Amber glass bell jar with spherical knob",
+                    "Textured black ceramic vessel",
+                ],
+            },
+        }
+
+        self.assertEqual(resolve_item_family(item), "decor")
 
     def test_run_render_postprocess_stage_external_keeps_best_only_and_attaches_volume(self):
         generated_path = self.tmp_root / "candidate-c.png"

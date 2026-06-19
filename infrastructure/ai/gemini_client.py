@@ -14,6 +14,7 @@ _IMAGE_2K_MODELS = {
     "gemini-3.1-flash-image",
     "gemini-3.1-flash-image-preview",
     "gemini-3-pro-image-preview",
+    "gemini-3-pro-image",
 }
 _HIGH_THINKING_LOG_TAGS = {
     "Analysis.CropItem",

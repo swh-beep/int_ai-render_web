@@ -28,7 +28,7 @@ def _logger():
     return SimpleNamespace(info=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
 
 
-def test_strict_b_lite_runtime_uses_single_repair_revalidate_scope(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_keeps_first_failed_render_without_localized_repair(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -128,8 +128,6 @@ def test_strict_b_lite_runtime_uses_single_repair_revalidate_scope(tmp_path, mon
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=lambda *args, **kwargs: _response(),
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
@@ -137,17 +135,16 @@ def test_strict_b_lite_runtime_uses_single_repair_revalidate_scope(tmp_path, mon
     assert result is not None
     assert result["scalecheck_fail_count"] == 1
     assert result["scalecheck_retry_count"] == 0
-    assert result["repair_applied"] is True
-    assert result["repair_attempt_count"] == 1
-    assert result["repair_target_keys"] == ["chair-1"]
-    assert validate_calls == [
-        (None, False),
-        (["chair-1"], False),
-        (None, False),
-    ]
+    assert "repair_applied" not in result
+    assert "repair_attempt_count" not in result
+    assert "repair_target_keys" not in result
+    assert result["scale_check_failed"] is True
+    assert result["scalecheck_failed_rules"] == ["reference_shape_drift"]
+    assert result["scalecheck_diagnostics"]["matched_items"]["chair-1"]["bbox_norm"] == [0.1, 0.2, 0.3, 0.5]
+    assert validate_calls == [(None, False)]
 
 
-def test_strict_b_lite_runtime_rejects_repair_when_full_scene_geometry_sweep_fails(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_does_not_run_full_scene_repair_sweep(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -263,20 +260,14 @@ def test_strict_b_lite_runtime_rejects_repair_when_full_scene_geometry_sweep_fai
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=lambda *args, **kwargs: _response(),
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
     assert result["scale_check_failed"] is True
-    assert result["scalecheck_failed_rules"] == ["primary_width_vs_room_width"]
-    assert validate_calls == [
-        (None, False),
-        (["chair-1"], False),
-        (None, False),
-    ]
+    assert result["scalecheck_failed_rules"] == ["reference_shape_drift"]
+    assert validate_calls == [(None, False)]
 
 
 def test_non_strict_runtime_keeps_legacy_retry_budget(tmp_path, monkeypatch):
@@ -321,8 +312,6 @@ def test_non_strict_runtime_keeps_legacy_retry_budget(tmp_path, monkeypatch):
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=lambda *args, **kwargs: next(responses),
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
@@ -333,7 +322,7 @@ def test_non_strict_runtime_keeps_legacy_retry_budget(tmp_path, monkeypatch):
     assert validate_calls["count"] == 3
 
 
-def test_strict_b_lite_runtime_keeps_original_render_when_repair_scores_worse(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_keeps_original_render_without_repair_scoring(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -344,8 +333,7 @@ def test_strict_b_lite_runtime_keeps_original_render_when_repair_scores_worse(tm
     monkeypatch.setattr(generation_stage.time, "time", lambda: 2200.0)
 
     generation_output = os.path.join("outputs", "result_2200_strict-reject.png")
-    repair_output = os.path.join("outputs", "repair_2200_strict-reject.png")
-    for path in (generation_output, repair_output):
+    for path in (generation_output,):
         if os.path.exists(path):
             os.remove(path)
 
@@ -414,8 +402,6 @@ def test_strict_b_lite_runtime_keeps_original_render_when_repair_scores_worse(tm
             },
         )
 
-    responses = iter([_response(), _response()])
-
     result = generate_furnished_room(
         str(room_path),
         "style",
@@ -458,21 +444,21 @@ def test_strict_b_lite_runtime_keeps_original_render_when_repair_scores_worse(tm
         log_brief=False,
         log_summary=False,
         allow_all_safety_settings=lambda: {},
-        call_generation_with_failover=lambda *args, **kwargs: next(responses),
+        call_generation_with_failover=lambda *args, **kwargs: _response(),
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
     assert result["path"] == generation_output
-    assert result["repair_applied"] is True
-    assert validate_calls == [None, ["chair-1"]]
+    assert "repair_applied" not in result
+    assert result["scale_check_failed"] is True
+    assert result["scalecheck_failed_rules"] == ["reference_shape_drift"]
+    assert validate_calls == [None]
 
 
-def test_strict_b_lite_first_pass_excludes_pass2_cutouts_and_repairs_them_later(tmp_path, monkeypatch):
+def test_strict_b_lite_first_pass_includes_legacy_pass2_cutouts_without_repair(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     sofa_crop = tmp_path / "sofa.png"
@@ -485,15 +471,10 @@ def test_strict_b_lite_first_pass_excludes_pass2_cutouts_and_repairs_them_later(
     monkeypatch.setattr(generation_stage.time, "time", lambda: 2300.0)
 
     generation_payloads: list[list] = []
-    repair_payloads: list[list] = []
     validate_calls: list[list[str] | None] = []
 
     def _generation(*args, **kwargs):
         generation_payloads.append(list(args[1]))
-        return _response()
-
-    def _repair(*args, **kwargs):
-        repair_payloads.append(list(args[1]))
         return _response()
 
     def _validate(*args, **kwargs):
@@ -603,27 +584,22 @@ def test_strict_b_lite_first_pass_excludes_pass2_cutouts_and_repairs_them_later(
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=_repair,
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
     assert generation_payloads
-    assert repair_payloads
     generation_reference_lines = [part for part in generation_payloads[0] if isinstance(part, str) and part.startswith("Furniture Cutout Reference")]
     reserve_reference_lines = [part for part in generation_payloads[0] if isinstance(part, str) and part.startswith("Pass2 Detail Reserve Reference")]
-    repair_target_lines = [part for part in repair_payloads[0] if isinstance(part, str) and part.startswith("Repair target.")]
     assert any("Sofa" in line for line in generation_reference_lines)
-    assert all("Side Table" not in line for line in generation_reference_lines)
-    assert any("Side Table" in line for line in reserve_reference_lines)
-    assert any("Do NOT insert these pass2 detail items yet" in part for part in generation_payloads[0] if isinstance(part, str))
-    assert any("Side Table" in line for line in repair_target_lines)
-    assert validate_calls == [None, ["side-2", "sofa-1"], None]
+    assert any("Side Table" in line for line in generation_reference_lines)
+    assert not reserve_reference_lines
+    assert not any("Do NOT insert these pass2 detail items yet" in part for part in generation_payloads[0] if isinstance(part, str))
+    assert validate_calls == [None]
 
 
-def test_strict_b_lite_repair_keeps_primary_critical_when_pass2_bucket_is_large(tmp_path, monkeypatch):
+def test_strict_b_lite_first_pass_keeps_primary_and_detail_refs_when_legacy_pass2_bucket_is_large(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
 
@@ -631,7 +607,7 @@ def test_strict_b_lite_repair_keeps_primary_critical_when_pass2_bucket_is_large(
 
     monkeypatch.setattr(generation_stage.time, "time", lambda: 2400.0)
 
-    repair_payloads: list[list] = []
+    generation_payloads: list[list] = []
     validate_calls: list[list[str] | None] = []
 
     items = []
@@ -697,9 +673,10 @@ def test_strict_b_lite_repair_keeps_primary_critical_when_pass2_bucket_is_large(
         },
     )
 
-    def _repair(*args, **kwargs):
-        repair_payloads.append(list(args[1]))
+    def _generation(*args, **kwargs):
+        generation_payloads.append(list(args[1]))
         return _response()
+
 
     def _validate(*args, **kwargs):
         validate_calls.append(kwargs.get("focus_item_keys"))
@@ -787,20 +764,19 @@ def test_strict_b_lite_repair_keeps_primary_critical_when_pass2_bucket_is_large(
         log_brief=False,
         log_summary=False,
         allow_all_safety_settings=lambda: {},
-        call_generation_with_failover=lambda *args, **kwargs: _response(),
+        call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=_repair,
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
-    repair_target_lines = [part for part in repair_payloads[0] if isinstance(part, str) and part.startswith("Repair target.")]
-    assert any("Primary Sofa" in line for line in repair_target_lines)
-    assert any("Support Table" in line for line in repair_target_lines)
-    assert any("Detail " in line for line in repair_target_lines)
-    assert sum(1 for line in repair_target_lines if "Detail " in line) <= 3
+    reference_lines = [part for part in generation_payloads[0] if isinstance(part, str) and part.startswith("Furniture Cutout Reference")]
+    assert any("Primary Sofa" in line for line in reference_lines)
+    assert any("Support Table" in line for line in reference_lines)
+    assert any("Detail " in line for line in reference_lines)
+    assert not any(part.startswith("Pass2 Detail Reserve Reference") for part in generation_payloads[0] if isinstance(part, str))
+    assert validate_calls == [None]
 
 
 def test_strict_b_lite_first_pass_cap_does_not_evict_pass1_support_refs(tmp_path, monkeypatch):
@@ -899,8 +875,6 @@ def test_strict_b_lite_first_pass_cap_does_not_evict_pass1_support_refs(tmp_path
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -914,7 +888,7 @@ def test_strict_b_lite_first_pass_cap_does_not_evict_pass1_support_refs(tmp_path
     assert len(reserve_reference_lines) <= 4
 
 
-def test_strict_b_lite_runtime_recomputes_timeouts_for_repair_after_generation(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_does_not_schedule_repair_timeout_after_generation(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -926,16 +900,11 @@ def test_strict_b_lite_runtime_recomputes_timeouts_for_repair_after_generation(t
     monkeypatch.setattr(generation_stage.time, "time", lambda: current_time["value"])
 
     generation_timeouts: list[float] = []
-    repair_timeouts: list[float] = []
     validate_calls: list[list[str] | None] = []
 
     def _generation(*args, **kwargs):
         generation_timeouts.append(float(args[2]["timeout"]))
         current_time["value"] = 4060.0
-        return _response()
-
-    def _repair(*args, **kwargs):
-        repair_timeouts.append(float(args[2]["timeout"]))
         return _response()
 
     def _validate(*args, **kwargs):
@@ -1016,19 +985,16 @@ def test_strict_b_lite_runtime_recomputes_timeouts_for_repair_after_generation(t
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=_repair,
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
     assert generation_timeouts == [90.0]
-    assert repair_timeouts == [30.0]
-    assert validate_calls == [None, ["chair-1"], None]
+    assert validate_calls == [None]
 
 
-def test_strict_b_lite_runtime_caps_stage2_generation_requests_and_disables_provider_retries(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_caps_stage2_generation_requests_without_repair_requests(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -1040,16 +1006,11 @@ def test_strict_b_lite_runtime_caps_stage2_generation_requests_and_disables_prov
     monkeypatch.setattr(generation_stage.time, "time", lambda: current_time["value"])
 
     generation_requests: list[dict[str, float | int]] = []
-    repair_requests: list[dict[str, float | int]] = []
     validate_calls: list[list[str] | None] = []
 
     def _generation(*args, **kwargs):
         generation_requests.append(dict(args[2]))
         current_time["value"] = 6200.0
-        return _response()
-
-    def _repair(*args, **kwargs):
-        repair_requests.append(dict(args[2]))
         return _response()
 
     def _validate(*args, **kwargs):
@@ -1130,8 +1091,6 @@ def test_strict_b_lite_runtime_caps_stage2_generation_requests_and_disables_prov
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=_repair,
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
@@ -1146,19 +1105,10 @@ def test_strict_b_lite_runtime_caps_stage2_generation_requests_and_disables_prov
             "max_attempts": 1,
         }
     ]
-    assert repair_requests == [
-        {
-            "timeout": 90.0,
-            "aspect_ratio": "16:9",
-            "thinking_level": "high",
-            "include_thoughts": False,
-            "max_attempts": 1,
-        }
-    ]
-    assert validate_calls == [None, ["chair-1"], None]
+    assert validate_calls == [None]
 
 
-def test_strict_b_lite_runtime_skips_full_scene_revalidate_when_budget_is_almost_gone(tmp_path, monkeypatch):
+def test_strict_b_lite_runtime_keeps_failure_when_budget_is_almost_gone_without_repair(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     crop_path = tmp_path / "chair.png"
@@ -1254,13 +1204,12 @@ def test_strict_b_lite_runtime_skips_full_scene_revalidate_when_budget_is_almost
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=_validate,
     )
 
     assert result is not None
-    assert result["repair_applied"] is True
-    assert result["scalecheck_diagnostics"]["full_scene_revalidate_skipped_due_to_budget"] is True
-    assert validate_calls == [None, ["chair-1"]]
+    assert "repair_applied" not in result
+    assert "full_scene_revalidate_skipped_due_to_budget" not in result.get("scalecheck_diagnostics", {})
+    assert result["scale_check_failed"] is True
+    assert validate_calls == [None]

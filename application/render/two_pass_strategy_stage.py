@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import normalize_label_for_match, resolve_item_family
 
 
 _PRIMARY_ANCHOR_FAMILIES = {
@@ -31,14 +31,7 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 
 def _resolve_family(item: dict) -> str:
-    identity = (item.get("product_identity") or item.get("identity_profile") or {}) if isinstance(item, dict) else {}
-    family = category_match_family(
-        identity.get("family")
-        or item.get("category_canonical")
-        or item.get("category")
-        or item.get("label")
-    )
-    return str(family or identity.get("family") or item.get("category_canonical") or item.get("category") or "").strip().lower()
+    return resolve_item_family(item)
 
 
 def _resolve_dims(item: dict) -> dict[str, int]:
@@ -67,14 +60,18 @@ def _structural_archetype(item: dict) -> str:
 
 
 def _placement_family(item: dict) -> str:
+    family = _resolve_family(item)
     placement_contract = (item.get("placement_contract") or {}) if isinstance(item, dict) else {}
     if placement_contract.get("placement_family"):
-        return str(placement_contract.get("placement_family") or "").strip().lower()
+        placement_family = str(placement_contract.get("placement_family") or "").strip().lower()
+        if not (family == "storage" and placement_family in {"surface_placed", "small_free_object"}):
+            return placement_family
     envelope = (item.get("layout_envelope") or {}) if isinstance(item, dict) else {}
     if envelope.get("placement_family"):
-        return str(envelope.get("placement_family") or "").strip().lower()
+        placement_family = str(envelope.get("placement_family") or "").strip().lower()
+        if not (family == "storage" and placement_family in {"surface_placed", "small_free_object"}):
+            return placement_family
 
-    family = _resolve_family(item)
     if family == "mirror":
         return "wall_attached"
     if family == "rug":
@@ -242,6 +239,81 @@ def _pass_role_for_item(item: dict, *, anchor_key: str | None) -> str:
     return "pass2_decor"
 
 
+def _flatten_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        fragments: list[str] = []
+        for nested in value.values():
+            fragments.extend(_flatten_text(nested))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments: list[str] = []
+        for nested in value:
+            fragments.extend(_flatten_text(nested))
+        return fragments
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _reference_feature_signal_count(item: dict) -> int:
+    features = item.get("reference_features") if isinstance(item, dict) else None
+    if not isinstance(features, dict):
+        return 0
+    count = 0
+    for key in ("silhouette_cues", "distinctive_parts", "preserve_rules", "material_cues", "color_cues"):
+        value = features.get(key)
+        if isinstance(value, (list, tuple, set)):
+            count += len([row for row in value if str(row or "").strip()])
+        elif str(value or "").strip():
+            count += 1
+    return count
+
+
+def _is_product_backed_item(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    target_key = normalize_label_for_match(item.get("target_key") or "")
+    item_id = normalize_label_for_match(item.get("item_id") or "")
+    crop_path = str(item.get("crop_path") or "").strip()
+    return bool(target_key.startswith("cart_product") or item_id.startswith("product_") or crop_path)
+
+
+def _identity_rich_reason(item: dict) -> str:
+    family = _resolve_family(item)
+    signal_count = _reference_feature_signal_count(item)
+    text = normalize_label_for_match(" ".join(_flatten_text(item.get("reference_features"))))
+    has_shape_language = any(
+        token in text
+        for token in (
+            "asymmetric",
+            "off center",
+            "off-center",
+            "fluted",
+            "bowl",
+            "diffuser",
+            "loop",
+            "stem",
+            "grid",
+            "shelf",
+            "shelving",
+            "silhouette",
+            "distinctive",
+        )
+    )
+    if signal_count >= 2:
+        return "reference_feature_contract"
+    if _is_product_backed_item(item) and family in {"table", "table_lamp", "floor_lamp", "storage"} and has_shape_language:
+        return "product_shape_contract"
+    return ""
+
+
+def _requires_identity_validation(item: dict, pass_role: str) -> bool:
+    if not str(pass_role or "").startswith("pass2_"):
+        return False
+    return bool(_identity_rich_reason(item))
+
+
 def _strategy_priority(pass_role: str) -> int:
     order = {
         "pass1_anchor": 100,
@@ -293,6 +365,7 @@ def build_two_pass_strategy(
         item = dict(row)
         target_key = str(item.get("target_key") or item.get("label") or "").strip()
         pass_role = _pass_role_for_item(item, anchor_key=anchor_key)
+        requires_identity_validation = _requires_identity_validation(item, pass_role)
         strategy = {
             "target_key": target_key,
             "family": _resolve_family(item),
@@ -302,10 +375,16 @@ def build_two_pass_strategy(
             "pass_role": pass_role,
             "strategy_priority": _strategy_priority(pass_role),
         }
+        if requires_identity_validation:
+            strategy["requires_identity_validation"] = True
+            strategy["identity_validation_reason"] = _identity_rich_reason(item)
         item["two_pass_strategy"] = strategy
         item["anchor_eligible"] = strategy["anchor_eligible"]
         item["pass_role"] = strategy["pass_role"]
         item["strategy_priority"] = strategy["strategy_priority"]
+        if requires_identity_validation:
+            item["requires_identity_validation"] = True
+            item["identity_validation_reason"] = strategy.get("identity_validation_reason")
         identity = dict(item.get("identity_profile") or {})
         if identity:
             identity["two_pass_strategy"] = strategy
@@ -336,6 +415,11 @@ def apply_two_pass_strategy(
             row.get("target_key")
             for row in summaries
             if str(row.get("pass_role") or "").startswith("pass2_") and row.get("target_key")
+        ],
+        "identity_validation_required_keys": [
+            row.get("target_key")
+            for row in summaries
+            if row.get("requires_identity_validation") and row.get("target_key")
         ],
     }
     return enriched, summary

@@ -102,16 +102,13 @@ def test_compact_variant_diagnostics_does_not_infer_review_pass_without_diagnost
     assert rows[0]["review_score"] == 0
 
 
-def test_can_skip_postprocess_remap_only_for_strict_nonrepair_global_matches():
+def test_can_skip_postprocess_remap_for_strict_global_matches():
     assert (
         _can_skip_postprocess_remap(
             strict_scale_requested=True,
             variant_diagnostics=[
                 {
                     "matched_source_count": 3,
-                    "repair_applied": False,
-                    "repair_attempt_count": 0,
-                    "repair_target_keys": [],
                 }
             ],
         )
@@ -123,13 +120,10 @@ def test_can_skip_postprocess_remap_only_for_strict_nonrepair_global_matches():
             variant_diagnostics=[
                 {
                     "matched_source_count": 3,
-                    "repair_applied": True,
-                    "repair_attempt_count": 1,
-                    "repair_target_keys": ["lamp-1"],
                 }
             ],
         )
-        is False
+        is True
     )
 
 
@@ -261,7 +255,6 @@ def test_select_final_generated_results_allows_repaired_delivery_best_effort_for
                 "placement_fail_count": 0,
                 "geometry_fail_count": 14,
                 "weighted_issue_score": 81.0,
-                "repair_applied": False,
             },
             {
                 "path": "candidate-a.png",
@@ -278,8 +271,6 @@ def test_select_final_generated_results_allows_repaired_delivery_best_effort_for
                 "placement_fail_count": 0,
                 "geometry_fail_count": 17,
                 "weighted_issue_score": 73.184,
-                "repair_applied": True,
-                "repair_attempt_count": 1,
             },
         ],
         strict_scale_requested=True,

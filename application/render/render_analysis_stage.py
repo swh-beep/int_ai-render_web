@@ -6,8 +6,19 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import category_match_family, resolve_item_canonical_category, resolve_item_family
 from application.render.scale_plan_support import build_scale_plan
+
+
+_CATEGORY_METADATA_FIELDS = (
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
+)
 
 
 @dataclass
@@ -107,6 +118,28 @@ def _merge_unique_str_lists(*values: list[str], limit: int = 6) -> list[str]:
             merged.append(text)
             if len(merged) >= limit:
                 return merged
+    return merged
+
+
+def _options_reference_features(options: Any) -> dict:
+    if not isinstance(options, dict):
+        return {}
+    features = options.get("reference_features")
+    return dict(features) if isinstance(features, dict) else {}
+
+
+def _merge_options_reference_features(reference_features: dict | None, options: Any) -> dict:
+    provided = _options_reference_features(options)
+    if not provided:
+        return reference_features if isinstance(reference_features, dict) else {}
+    merged = dict(reference_features or {})
+    for key in ("silhouette_cues", "material_cues", "distinctive_parts", "preserve_rules", "color_cues"):
+        merged[key] = _merge_unique_str_lists(provided.get(key) or [], merged.get(key) or [], limit=8)
+    if provided.get("reflective_surface") is not None:
+        merged["reflective_surface"] = provided.get("reflective_surface")
+    elif "reflective_surface" not in merged:
+        merged["reflective_surface"] = False
+    merged["options_reference_features_applied"] = True
     return merged
 
 
@@ -226,6 +259,7 @@ def _build_identity_profile(
     description: str,
     category: str | None,
     category_canonical: str,
+    category_metadata: dict | None = None,
     dims_mm: dict,
     crop_path: str | None,
     target_key: str,
@@ -233,7 +267,26 @@ def _build_identity_profile(
     room_dims_parsed: dict,
     reference_features: dict | None = None,
 ) -> dict:
-    family = category_match_family(category or label) or category_canonical or ""
+    category_metadata = dict(category_metadata or {})
+    family = resolve_item_family(
+        {
+            "label": label,
+            "category": category,
+            "category_canonical": category_canonical,
+            "reference_features": reference_features,
+            **category_metadata,
+        }
+    )
+    category_canonical = resolve_item_canonical_category(
+        {
+            "label": label,
+            "category": category,
+            "category_canonical": category_canonical,
+            "reference_features": reference_features,
+            **category_metadata,
+        },
+        default=category_canonical,
+    )
     text_blob = " ".join([str(label or ""), str(category or ""), str(description or "")]).strip()
     ref = reference_features if isinstance(reference_features, dict) else {}
     material_cues = _merge_unique_str_lists(
@@ -347,6 +400,11 @@ def _build_item_metas(
                         "item_id": item_id_val,
                         "source_index": source_index,
                         "target_key": target_key,
+                        **{
+                            field: meta.get(field)
+                            for field in _CATEGORY_METADATA_FIELDS
+                            if meta.get(field) not in (None, "")
+                        },
                     }
                 )
             except Exception:
@@ -560,6 +618,11 @@ def _analyze_items(
                 "category": meta.get("category"),
                 "category_canonical": meta.get("category_canonical"),
                 "item_id": meta.get("item_id"),
+                **{
+                    field: meta.get(field)
+                    for field in _CATEGORY_METADATA_FIELDS
+                    if meta.get(field) not in (None, "")
+                },
             }
             futures.append(
                 (
@@ -644,11 +707,28 @@ def _analyze_items(
         reference_features = res_item.get("reference_features")
         if not isinstance(reference_features, dict):
             reference_features = {}
+        reference_features = _merge_options_reference_features(reference_features, opts)
+        category_metadata = {
+            field: (meta.get(field) if meta.get(field) not in (None, "") else res_item.get(field))
+            for field in _CATEGORY_METADATA_FIELDS
+            if (meta.get(field) if meta.get(field) not in (None, "") else res_item.get(field)) not in (None, "")
+        }
+        category_canonical_val = resolve_item_canonical_category(
+            {
+                "label": label,
+                "category": category_val,
+                "category_canonical": category_canonical_val,
+                "reference_features": reference_features,
+                **category_metadata,
+            },
+            default=category_canonical_val,
+        )
         identity_profile = _build_identity_profile(
             label=label,
             description=full_desc,
             category=category_val,
             category_canonical=category_canonical_val,
+            category_metadata=category_metadata,
             dims_mm=req_dims or {},
             crop_path=res_item.get("crop_path"),
             target_key=target_key,
@@ -674,6 +754,7 @@ def _analyze_items(
                 "reference_features": reference_features,
                 "identity_profile": identity_profile,
                 "layout_envelope": identity_profile.get("layout_envelope"),
+                **category_metadata,
             }
         )
 

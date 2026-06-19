@@ -12,7 +12,7 @@ from application.render.render_scale_stage import run_render_scale_stage
 from application.render.render_variant_stage import run_render_variant_stage
 from application.render.qc_gate_stage import annotate_variant_reviews, select_rankable_paths, sort_variant_paths
 from application.render.scale_plan_support import build_scale_plan
-from application.render.postprocess_support import category_match_family
+from application.render.postprocess_support import resolve_item_family
 from application.render.two_pass_strategy_stage import apply_two_pass_strategy
 from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
@@ -115,15 +115,7 @@ def _resolve_style_prompt(style_map: dict | None, style_name: Any) -> Any:
 
 
 def _placement_family_for_item(item: dict) -> str:
-    identity = (item.get("identity_profile") or {}) if isinstance(item, dict) else {}
-    family = str(
-        identity.get("family")
-        or category_match_family(item.get("category_canonical") or item.get("category") or item.get("label"))
-        or item.get("category_canonical")
-        or item.get("category")
-        or item.get("label")
-        or ""
-    ).strip().lower()
+    family = resolve_item_family(item)
     if family == "mirror":
         return "wall_attached"
     if family == "rug":
@@ -256,12 +248,27 @@ def _sync_furniture_specs_contracts(
                 item["archetype_strategy"] = dict(enriched.get("archetype_strategy") or {})
             if enriched.get("two_pass_strategy"):
                 item["two_pass_strategy"] = dict(enriched.get("two_pass_strategy") or {})
+            for metadata_key in (
+                "category_path",
+                "category_source",
+                "main_category",
+                "sub_category",
+                "mainCategory",
+                "subCategory",
+                "product_type",
+            ):
+                if enriched.get(metadata_key) not in (None, ""):
+                    item[metadata_key] = enriched.get(metadata_key)
             if enriched.get("anchor_eligible") is not None:
                 item["anchor_eligible"] = bool(enriched.get("anchor_eligible"))
             if enriched.get("pass_role"):
                 item["pass_role"] = enriched.get("pass_role")
             if enriched.get("strategy_priority") is not None:
                 item["strategy_priority"] = int(enriched.get("strategy_priority") or 0)
+            if enriched.get("requires_identity_validation") is not None:
+                item["requires_identity_validation"] = bool(enriched.get("requires_identity_validation"))
+            if enriched.get("identity_validation_reason"):
+                item["identity_validation_reason"] = enriched.get("identity_validation_reason")
         synced_items.append(item)
     payload["items"] = synced_items
     def _sync_primary_payload(primary_payload: dict | None) -> dict | None:
@@ -284,11 +291,20 @@ def _sync_furniture_specs_contracts(
             "two_pass_strategy",
             "layout_envelope",
             "placement_contract",
+            "category_path",
+            "category_source",
+            "main_category",
+            "sub_category",
+            "mainCategory",
+            "subCategory",
+            "product_type",
             "identity_confidence",
             "identity_strictness",
             "anchor_eligible",
             "pass_role",
             "strategy_priority",
+            "requires_identity_validation",
+            "identity_validation_reason",
         ):
             if fallback.get(key) is not None:
                 merged[key] = fallback.get(key)
@@ -329,6 +345,13 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "name",
     "category",
     "category_canonical",
+    "category_path",
+    "category_source",
+    "main_category",
+    "sub_category",
+    "mainCategory",
+    "subCategory",
+    "product_type",
     "qty",
     "dims_mm",
     "requested_dims_mm",
@@ -347,9 +370,12 @@ _MAIN_PROMPT_ITEM_KEYS = (
     "placement_contract",
     "identity_confidence",
     "identity_strictness",
+    "pass_role",
+    "strategy_priority",
+    "requires_identity_validation",
+    "identity_validation_reason",
     "two_pass_strategy",
 )
-
 
 def _build_main_prompt_item_payload(src: dict | None) -> dict:
     if not isinstance(src, dict):
@@ -413,6 +439,19 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
     if not isinstance(furniture_specs_json, dict):
         return None
 
+    def _cue_list(value, limit: int = 4) -> str:
+        if not isinstance(value, list):
+            return ""
+        values: list[str] = []
+        for raw in value:
+            text = str(raw or "").strip()
+            if not text or text in values:
+                continue
+            values.append(text)
+            if len(values) >= limit:
+                break
+        return ", ".join(values)
+
     rows: list[str] = []
     for index, item in enumerate(furniture_specs_json.get("items") or [], start=1):
         if not isinstance(item, dict):
@@ -445,6 +484,36 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
             bits.append(f"category={family}")
         if dims_bits:
             bits.append(", ".join(dims_bits))
+        profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+        product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+        reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+        topology = (
+            _cue_list(product_identity.get("topology_cues"))
+            or _cue_list(profile.get("topology_cues") or profile.get("shape_cues"))
+            or _cue_list(reference_features.get("silhouette_cues"))
+        )
+        parts = (
+            _cue_list(profile.get("distinctive_parts"))
+            or _cue_list(reference_features.get("distinctive_parts"))
+            or _cue_list(product_identity.get("support_geometry"))
+        )
+        materials = _cue_list(profile.get("material_cues")) or _cue_list(reference_features.get("material_cues"))
+        preserve = (
+            _cue_list(product_identity.get("preserve_rules"))
+            or _cue_list(profile.get("preserve_rules"))
+            or _cue_list(reference_features.get("preserve_rules"))
+        )
+        if topology:
+            bits.append(f"topology={topology}")
+        if parts:
+            bits.append(f"parts={parts}")
+        if materials:
+            bits.append(f"materials={materials}")
+        if preserve:
+            bits.append(f"preserve={preserve}")
+        if item.get("requires_identity_validation") or ((item.get("two_pass_strategy") or {}).get("requires_identity_validation") if isinstance(item.get("two_pass_strategy"), dict) else False):
+            bits.append("identity=exact_reference_crop")
+            bits.append("generic_same_family_substitute=invalid")
         rows.append(f"{index}. {label}{qty_text}: " + " | ".join(bits))
     text = "\n".join(rows).strip()
     return text or None
@@ -538,10 +607,6 @@ def _compact_variant_diagnostics(variant_results: list) -> list[dict]:
                         "placement_fail_count": 0,
                         "geometry_fail_count": 0,
                         "weighted_issue_score": 0.0,
-                        "repair_applied": False,
-                        "repair_attempt_count": 0,
-                        "repair_target_keys": [],
-                        "repair_target_labels": [],
                     }
                 )
             continue
@@ -579,10 +644,6 @@ def _compact_variant_diagnostics(variant_results: list) -> list[dict]:
                 "placement_fail_count": int(row.get("placement_fail_count") or review_summary["placement_fail_count"]),
                 "geometry_fail_count": int(row.get("geometry_fail_count") or review_summary["geometry_fail_count"]),
                 "weighted_issue_score": float(row.get("weighted_issue_score") or review_summary["weighted_issue_score"]),
-                "repair_applied": bool(row.get("repair_applied", False)),
-                "repair_attempt_count": int(row.get("repair_attempt_count") or 0),
-                "repair_target_keys": list(row.get("repair_target_keys") or []),
-                "repair_target_labels": list(row.get("repair_target_labels") or []),
             }
         )
     return diagnostics
@@ -660,62 +721,6 @@ def _selected_result_reason_for_row(row: dict | None) -> str:
     return "best_effort_least_bad"
 
 
-def _polish_selected_best_result(
-    generated_results: list[str] | None,
-    *,
-    audience: str,
-    unique_id: str,
-    selected_result_reason: str | None,
-    polish_main_image: Callable[..., str | None] | None,
-    logger,
-) -> tuple[list[str], str | None]:
-    delivery_paths = [str(path) for path in (generated_results or []) if path]
-    if not delivery_paths or not callable(polish_main_image):
-        return delivery_paths, selected_result_reason
-
-    updated_paths = list(delivery_paths)
-    polished_any = False
-    for index, source_path in enumerate(delivery_paths):
-        polished_path = None
-        try:
-            try:
-                polished_path = polish_main_image(
-                    source_path,
-                    unique_id=unique_id,
-                    audience=audience,
-                    selected_result_reason=selected_result_reason,
-                    is_selected_best=(index == 0),
-                    variant_position=index + 1,
-                )
-            except TypeError:
-                polished_path = polish_main_image(source_path, unique_id=unique_id)
-        except Exception as exc:
-            try:
-                logger.warning(f"[MainPolish] skipped: {exc}")
-            except Exception:
-                pass
-            continue
-
-        polished_path = str(polished_path or "").strip()
-        if not polished_path:
-            continue
-        updated_paths[index] = polished_path
-        polished_any = True
-
-    if not polished_any:
-        try:
-            logger.warning(
-                "[MainPolish] no polished output; using unpolished candidate "
-                f"unique_id={unique_id} audience={audience} reason={selected_result_reason or 'unknown'}"
-            )
-        except Exception:
-            pass
-        return delivery_paths, selected_result_reason
-    if selected_result_reason:
-        return updated_paths, f"{selected_result_reason}_polished"
-    return updated_paths, "polished_best"
-
-
 def _is_validation_unavailable_best_effort_candidate(row: dict | None) -> bool:
     row = row if isinstance(row, dict) else {}
     if not row.get("path"):
@@ -773,8 +778,6 @@ def _is_strict_delivery_best_effort_candidate(row: dict | None) -> bool:
     unmatched_source_count = int(row.get("unmatched_source_count") or 0)
     if matched_source_count <= 0:
         return False
-    if bool(row.get("repair_applied")):
-        return True
     return unmatched_source_count <= 2 and matched_source_count >= max(4, unmatched_source_count + 1)
 
 
@@ -966,13 +969,6 @@ def _can_skip_postprocess_remap(
         return False
     rows = [row for row in (variant_diagnostics or []) if isinstance(row, dict)]
     if not rows:
-        return False
-    if any(
-        bool(row.get("repair_applied"))
-        or int(row.get("repair_attempt_count") or 0) > 0
-        or bool(row.get("repair_target_keys"))
-        for row in rows
-    ):
         return False
     return any(int(row.get("matched_source_count") or 0) > 0 for row in rows)
 

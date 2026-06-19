@@ -201,8 +201,6 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -224,11 +222,193 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "Preserve real material texture and tactile surface detail" in prompt
         assert "leather grain, fabric weave, wood grain, glass reflections, and metal highlights" in prompt
         assert "Avoid clay-like, waxy, plastic, CGI, overly smooth, or over-airbrushed furniture surfaces." in prompt
-        assert "Natural neutral white balance by default." in prompt
-        assert "apply warmth to emitted light and overall ambiance only; preserve all product material colors." in prompt
+        assert "Avoid excessive yellow/orange cast, but preserve realistic sunlight warmth and material color." in prompt
         assert "**NO warm/yellow cast.**" not in prompt
         assert "OPENING LOCK" in prompt
         assert "AXIS ALIGNMENT" in prompt
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_ignores_legacy_pass2_mode_and_uses_single_pass_prompt(tmp_path, monkeypatch):
+    room_path = tmp_path / "furnished-room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    ref_path = tmp_path / "art-ref.png"
+    ref_path.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 2500.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("content", content)
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the finished room quiet and refined."},
+        str(ref_path),
+        "prompt-pass2",
+        furniture_specs_json={
+            "render_pass_mode": "pass2_additive_edit",
+            "items": [
+                {
+                    "target_key": "art-1",
+                    "label": "Framed Artwork",
+                    "category": "artwork",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                    "requested_dims_mm": {"width_mm": 700, "depth_mm": 20, "height_mm": 900},
+                    "crop_path": str(ref_path),
+                    "identity_profile": {"family": "artwork", "absolute_size_class": "small"},
+                    "product_identity": {"family": "artwork"},
+                    "placement_contract": {"zone": "wall_art_band"},
+                }
+            ],
+            "primary_scale": {"target_key": "sofa-1", "label": "Existing Sofa"},
+        },
+        room_dimensions="4000x4000x2400",
+        primary_item={"target_key": "sofa-1", "label": "Existing Sofa"},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=2500.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        prompt = captured["prompt"]
+        assert captured["content"][1] == "Empty Room (Target Canvas - KEEP THIS):"
+        assert "Second-pass Additive Edit" not in prompt
+        assert "PASS 2 PRESERVATION LOCK" not in prompt
+        assert "ONLY NEW LISTED DETAIL ITEMS" not in prompt
+        assert "ONLY LISTED ITEMS" in prompt
+        assert "existing empty room image" not in prompt.split("<CRITICAL: ARCHITECTURAL FREEZE", 1)[0]
+        assert output_path.exists()
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_generate_furnished_room_uses_legacy_pass2_detail_cutouts_as_first_pass_references(tmp_path, monkeypatch):
+    room_path = tmp_path / "furnished-room.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    layer_ref = tmp_path / "layer-lamp-ref.png"
+    layer_ref.write_bytes(_make_png_bytes(80, 80))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 2550.0)
+
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured.setdefault("content", content)
+        captured.setdefault("prompt", content[0])
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Keep the finished room quiet and refined."},
+        str(layer_ref),
+        "prompt-pass2-active-cutout",
+        furniture_specs_json={
+            "render_pass_mode": "pass2_additive_edit",
+            "items": [
+                {
+                    "target_key": "cart_38172_layer-table-lamp_012",
+                    "label": "Layer Table Lamp",
+                    "category": "table_lamp",
+                    "qty": 1,
+                    "dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "requested_dims_mm": {"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+                    "crop_path": str(layer_ref),
+                    "identity_profile": {
+                        "family": "table_lamp",
+                        "topology_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "distinctive_parts": ["visible vertical rods"],
+                    },
+                    "product_identity": {
+                        "family": "table_lamp",
+                        "topology_cues": ["stacked layered shade profile", "parallel horizontal discs"],
+                        "support_geometry": ["visible vertical rods"],
+                    },
+                }
+            ],
+            "two_pass_strategy": {
+                "pass1_primary_keys": ["sofa-1"],
+                "pass1_support_keys": [],
+                "pass2_detail_keys": ["cart_38172_layer-table-lamp_012"],
+                "identity_validation_required_keys": ["cart_38172_layer-table-lamp_012"],
+            },
+            "primary_scale": {"target_key": "sofa-1", "label": "Existing Sofa"},
+        },
+        room_dimensions="4000x4000x2400",
+        primary_item={"target_key": "sofa-1", "label": "Existing Sofa"},
+        room_dims_parsed={"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        room_planes={"y_top": 0.1, "y_bottom": 0.9},
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=2550.0,
+        enable_scale_check=False,
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {"width_mm": 4000, "depth_mm": 4000, "height_mm": 2400},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        active_reference_lines = [
+            part for part in captured["content"] if isinstance(part, str) and part.startswith("Furniture Cutout Reference")
+        ]
+        reserve_reference_lines = [
+            part for part in captured["content"] if isinstance(part, str) and part.startswith("Pass2 Detail Reserve Reference")
+        ]
+        assert any("Layer Table Lamp" in line for line in active_reference_lines)
+        assert all("ACTIVE PASS2 ADDITIVE ITEM" not in line for line in active_reference_lines)
+        assert any("LISTED PRODUCT LOCK" in line for line in active_reference_lines)
+        assert any("ADD THIS EXACT PRODUCT" in line for line in active_reference_lines)
+        assert any("generic same-family substitutes are invalid" in line for line in active_reference_lines)
+        assert any("IdentityMustMatch=exact reference crop geometry" in line for line in active_reference_lines)
+        assert any("TopologyCues=stacked layered shade profile, parallel horizontal discs" in line for line in active_reference_lines)
+        assert any("DistinctiveParts=visible vertical rods" in line for line in active_reference_lines)
+        assert "Second-pass Additive Edit" not in captured["prompt"]
+        assert all("Layer Table Lamp" not in line for line in reserve_reference_lines)
+        assert not any("Do NOT insert these pass2 detail items yet" in part for part in captured["content"] if isinstance(part, str))
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -332,8 +512,6 @@ def test_generate_furnished_room_includes_small_item_guardrails_and_external_roo
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -461,8 +639,6 @@ def test_generate_furnished_room_includes_strict_estimated_scale_contract_contex
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {"chair-1": {}}, "unmatched_items": []}),
     )
@@ -565,8 +741,6 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -666,8 +840,6 @@ def test_generate_furnished_room_disambiguates_duplicate_product_labels(tmp_path
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -805,8 +977,6 @@ def test_generate_furnished_room_splits_primary_locks_from_secondary_items_and_o
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -828,14 +998,15 @@ def test_generate_furnished_room_splits_primary_locks_from_secondary_items_and_o
         headers = [part for part in content if isinstance(part, str) and "Furniture Cutout Reference" in part]
         assert "PRIMARY PRODUCT LOCK" in headers[0]
         assert "PRIMARY PRODUCT LOCK" in headers[1]
-        assert "SECONDARY SUPPORT ITEM" in headers[2]
+        assert "LISTED PRODUCT LOCK" in headers[2]
+        assert "generic same-family substitutes are invalid" in headers[2]
         assert output_path.exists()
     finally:
         if output_path.exists():
             output_path.unlink()
 
 
-def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_locks(tmp_path, monkeypatch):
+def test_generate_furnished_room_keeps_pass2_items_out_of_primary_locks_but_in_first_pass_references(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     sofa_ref = tmp_path / "sofa.png"
@@ -853,6 +1024,7 @@ def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_l
 
     def fake_generation(model_name, content, *args, **kwargs):
         captured.setdefault("prompt", content[0])
+        captured.setdefault("content", content)
         return _response()
 
     result = generate_furnished_room(
@@ -924,8 +1096,6 @@ def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_l
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -933,6 +1103,7 @@ def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_l
     output_path = Path(result["path"])
     try:
         prompt = captured["prompt"]
+        content = captured["content"]
         primary_section = prompt.split("<PRIMARY PRODUCT LOCKS>", 1)[1].split("<SECONDARY SUPPORTING ITEMS>", 1)[0]
         assert "Hero Sofa" in primary_section
         assert "Support Table" not in primary_section
@@ -941,6 +1112,12 @@ def test_generate_furnished_room_excludes_support_and_pass2_items_from_primary_l
         assert "Hero Sofa" in prompt
         assert "Support Table" not in prompt.split("PRIMARY LOCK ORDER:", 1)[1].split("\\n", 1)[0]
         assert "Pass2 Chair" not in prompt.split("PRIMARY LOCK ORDER:", 1)[1].split("\\n", 1)[0]
+        headers = [part for part in content if isinstance(part, str) and part.startswith("Furniture Cutout Reference")]
+        assert any("Support Table" in line for line in headers)
+        assert any("Pass2 Chair" in line for line in headers)
+        assert all("EXACT PRODUCT" in line for line in headers)
+        assert not any("Pass2 Detail Reserve Reference" in part for part in content if isinstance(part, str))
+        assert not any("Do NOT insert these pass2 detail items yet" in part for part in content if isinstance(part, str))
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -992,8 +1169,6 @@ def test_generate_furnished_room_falls_back_to_text_guidance_and_ref_images_when
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -1057,8 +1232,6 @@ def test_generate_furnished_room_falls_back_to_ref_images_when_json_items_are_un
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -1150,8 +1323,6 @@ def test_generate_furnished_room_keeps_reflection_and_opening_cues_in_compact_ca
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -1245,8 +1416,6 @@ def test_generate_furnished_room_keeps_tiny_surface_items_out_of_primary_locks(t
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -1258,93 +1427,6 @@ def test_generate_furnished_room_keeps_tiny_surface_items_out_of_primary_locks(t
         assert "Lounge Sofa" in primary_section
         assert "Mini Table Lamp" not in primary_section
         assert "Lounge Sofa, Mini Table Lamp" not in prompt
-        assert output_path.exists()
-    finally:
-        if output_path.exists():
-            output_path.unlink()
-
-
-def test_generate_furnished_room_bounds_user_lighting_requests_to_emission_not_fixture_or_shade(tmp_path, monkeypatch):
-    room_path = tmp_path / "room.png"
-    room_path.write_bytes(_make_png_bytes(160, 90))
-    lamp_ref = tmp_path / "lamp.png"
-    lamp_ref.write_bytes(_make_png_bytes(80, 80))
-
-    import application.render.furnished_generation_stage as generation_stage
-
-    monkeypatch.setattr(generation_stage.time, "time", lambda: 6400.0)
-
-    captured = {}
-
-    def fake_generation(model_name, content, *args, **kwargs):
-        captured["prompt"] = content[0]
-        return _response()
-
-    result = generate_furnished_room(
-        str(room_path),
-        {"prompt": "밤이었으면해. 아늑하고 따뜻한 조명이 비치는 분위기를 연출해줘."},
-        str(lamp_ref),
-        "prompt-contract-lighting-boundary",
-        furniture_specs_json={
-            "items": [
-                {
-                    "target_key": "lamp-1",
-                    "label": "Fabric Shade Table Lamp",
-                    "category": "table_lamp",
-                    "category_canonical": "table_lamp",
-                    "qty": 1,
-                    "dims_mm": {"width_mm": 320, "depth_mm": 320, "height_mm": 520},
-                    "requested_dims_mm": {"width_mm": 320, "depth_mm": 320, "height_mm": 520},
-                    "crop_path": str(lamp_ref),
-                    "identity_profile": {
-                        "family": "table_lamp",
-                        "material_cues": ["cream fabric shade", "black metal stem"],
-                        "distinctive_parts": ["opaque drum lampshade"],
-                    },
-                    "product_identity": {"family": "table_lamp"},
-                }
-            ],
-            "primary_scale": {"target_key": "lamp-1", "label": "Fabric Shade Table Lamp"},
-        },
-        room_dimensions="4200x3600x2500",
-        placement_instructions="조명을 켜달라. 밝고 화사하지만 따뜻한 느낌.",
-        primary_item={"target_key": "lamp-1", "label": "Fabric Shade Table Lamp"},
-        room_dims_parsed={"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        room_planes={"y_top": 0.1, "y_bottom": 0.9},
-        scale_plan={"strict_scale_requested": False},
-        geometry_contract=None,
-        start_time=6400.0,
-        enable_scale_check=False,
-        total_timeout_limit=60,
-        detect_windows_present=lambda path: False,
-        logger=_logger(),
-        parse_room_dimensions_mm=lambda text: {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        normalize_dims_dict=lambda dims: dims,
-        is_two_dim_ok_label=lambda label: False,
-        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
-        summary_ref=_summary_ref(),
-        log_brief=False,
-        log_summary=False,
-        allow_all_safety_settings=lambda: {},
-        call_generation_with_failover=fake_generation,
-        generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
-        match_aspect_to_target=lambda path, room: path,
-        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
-    )
-
-    output_path = Path(result["path"])
-    try:
-        prompt = captured["prompt"]
-        assert "<LIGHTING INTENT BOUNDARY>" in prompt
-        assert "lighting mood instruction alone is not permission to add fixture geometry" in prompt
-        assert "Do NOT add wall sconces" in prompt
-        assert "Lampshade and diffuser color/material are product identity" in prompt
-        assert "change emitted light only" in prompt
-        assert "exceptions: exposed bulbs, transparent glass, or visibly translucent glowing material" in prompt
-        assert "preserve_lampshade_material_color" in prompt
-        assert "light_color_changes_emission_only_not_shade" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():
@@ -1417,8 +1499,6 @@ def test_generate_furnished_room_keeps_topology_cues_in_compact_cards(tmp_path, 
         allow_all_safety_settings=lambda: {},
         call_generation_with_failover=fake_generation,
         generation_model_name="model",
-        call_repair_with_failover=lambda *args, **kwargs: _response(),
-        repair_model_name="repair-model",
         match_aspect_to_target=lambda path, room: path,
         validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
     )
@@ -1428,213 +1508,6 @@ def test_generate_furnished_room_keeps_topology_cues_in_compact_cards(tmp_path, 
         prompt = captured["prompt"]
         assert "Crest Rail Chair: reference_image=authoritative_cutout" in prompt
         assert "same_family_substitute=invalid" in prompt
-        assert output_path.exists()
-    finally:
-        if output_path.exists():
-            output_path.unlink()
-
-
-def test_generate_furnished_room_repairs_when_lighting_review_finds_new_fixture(tmp_path, monkeypatch):
-    room_path = tmp_path / "room.png"
-    room_path.write_bytes(_make_png_bytes(160, 90))
-    ref_path = tmp_path / "lamp.png"
-    ref_path.write_bytes(_make_png_bytes(80, 80))
-
-    import application.render.furnished_generation_stage as generation_stage
-
-    monkeypatch.setattr(generation_stage.time, "time", lambda: 6600.0)
-
-    generation_calls = []
-    repair_calls = []
-    review_calls = []
-    review_responses = iter(
-        [
-            SimpleNamespace(
-                text='{"has_new_unlisted_light_fixture": true, "confidence": 0.91, "reason": "new ceiling cove light"}'
-            ),
-            SimpleNamespace(text='{"has_new_unlisted_light_fixture": false, "confidence": 0.86, "reason": "listed lamp only"}'),
-        ]
-    )
-
-    def fake_generation(model_name, content, *args, **kwargs):
-        generation_calls.append(content)
-        return _response()
-
-    def fake_lighting_review(model_name, content, *args, **kwargs):
-        review_calls.append({"model_name": model_name, "content": content})
-        return next(review_responses)
-
-    def fake_repair(model_name, content, *args, **kwargs):
-        repair_calls.append(content)
-        return _response()
-
-    result = generate_furnished_room(
-        str(room_path),
-        {"prompt": "Keep product colors exact."},
-        str(ref_path),
-        "prompt-contract-lighting-review",
-        furniture_specs_json={
-            "items": [
-                {
-                    "target_key": "lamp-1",
-                    "label": "Fabric Shade Floor Lamp",
-                    "category": "floor_lamp",
-                    "category_canonical": "floor_lamp",
-                    "qty": 1,
-                    "dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
-                    "requested_dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
-                    "crop_path": str(ref_path),
-                    "identity_profile": {
-                        "family": "floor_lamp",
-                        "material_cues": ["black opaque fabric shade"],
-                        "distinctive_parts": ["conical opaque shade"],
-                    },
-                    "product_identity": {"family": "floor_lamp"},
-                }
-            ],
-            "primary_scale": {"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
-        },
-        room_dimensions="4200x3600x2500",
-        placement_instructions="어두운 밤이고, 조명만 켜줘",
-        primary_item={"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
-        room_dims_parsed={"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        room_planes={"y_top": 0.1, "y_bottom": 0.9},
-        scale_plan={"strict_scale_requested": False},
-        geometry_contract=None,
-        start_time=6600.0,
-        enable_scale_check=False,
-        max_generation_attempts=1,
-        total_timeout_limit=60,
-        detect_windows_present=lambda path: False,
-        logger=_logger(),
-        parse_room_dimensions_mm=lambda text: {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        normalize_dims_dict=lambda dims: dims,
-        is_two_dim_ok_label=lambda label: False,
-        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
-        summary_ref=_summary_ref(),
-        log_brief=False,
-        log_summary=False,
-        allow_all_safety_settings=lambda: {},
-        call_generation_with_failover=fake_generation,
-        generation_model_name="model",
-        call_repair_with_failover=fake_repair,
-        repair_model_name="repair-model",
-        call_lighting_review_with_failover=fake_lighting_review,
-        lighting_review_model_name="review-model",
-        match_aspect_to_target=lambda path, room: path,
-        validate_furnished_scale=lambda *args, **kwargs: (True, [], {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}}),
-    )
-
-    output_path = Path(result["path"])
-    try:
-        assert len(generation_calls) == 1
-        assert len(repair_calls) == 1
-        assert len(review_calls) == 2
-        assert review_calls[0]["model_name"] == "review-model"
-        assert "new wall, ceiling, pendant, sconce, LED strip" in review_calls[0]["content"][0]
-        assert "LIGHTING DRIFT REPAIR TASK" in repair_calls[0][0]
-        assert result["scalecheck_fail_count"] == 1
-        assert result["scalecheck_retry_count"] == 0
-        assert result["scale_check_failed"] is False
-        assert result["repair_applied"] is True
-        assert output_path.exists()
-    finally:
-        if output_path.exists():
-            output_path.unlink()
-
-
-def test_generate_furnished_room_prefers_lighting_repair_over_original_when_only_scale_check_remains(tmp_path, monkeypatch):
-    room_path = tmp_path / "room.png"
-    room_path.write_bytes(_make_png_bytes(160, 90))
-    ref_path = tmp_path / "lamp.png"
-    ref_path.write_bytes(_make_png_bytes(80, 80))
-
-    import application.render.furnished_generation_stage as generation_stage
-
-    monkeypatch.setattr(generation_stage.time, "time", lambda: 6600.0)
-
-    review_responses = iter(
-        [
-            SimpleNamespace(
-                text='{"has_new_unlisted_light_fixture": true, "confidence": 0.91, "reason": "new recessed lights"}'
-            ),
-            SimpleNamespace(
-                text='{"has_new_unlisted_light_fixture": false, "confidence": 0.88, "reason": "new lighting removed"}'
-            ),
-        ]
-    )
-    repair_calls = []
-
-    def fake_lighting_review(model_name, content, *args, **kwargs):
-        return next(review_responses)
-
-    def fake_repair(model_name, content, *args, **kwargs):
-        repair_calls.append(content)
-        return _response()
-
-    result = generate_furnished_room(
-        str(room_path),
-        {"prompt": "Keep product colors exact."},
-        str(ref_path),
-        "prompt-contract-lighting-repair-fallback",
-        furniture_specs_json={
-            "items": [
-                {
-                    "target_key": "lamp-1",
-                    "label": "Fabric Shade Floor Lamp",
-                    "category": "floor_lamp",
-                    "category_canonical": "floor_lamp",
-                    "qty": 1,
-                    "dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
-                    "requested_dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 1650},
-                    "crop_path": str(ref_path),
-                    "identity_profile": {"family": "floor_lamp"},
-                    "product_identity": {"family": "floor_lamp"},
-                }
-            ],
-            "primary_scale": {"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
-        },
-        room_dimensions="4200x3600x2500",
-        placement_instructions="어두운 밤이고, 조명만 켜줘",
-        primary_item={"target_key": "lamp-1", "label": "Fabric Shade Floor Lamp"},
-        room_dims_parsed={"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        room_planes={"y_top": 0.1, "y_bottom": 0.9},
-        scale_plan={"strict_scale_requested": True},
-        geometry_contract={},
-        start_time=6600.0,
-        enable_scale_check=True,
-        max_generation_attempts=1,
-        total_timeout_limit=60,
-        detect_windows_present=lambda path: False,
-        logger=_logger(),
-        parse_room_dimensions_mm=lambda text: {"width_mm": 4200, "depth_mm": 3600, "height_mm": 2500},
-        normalize_dims_dict=lambda dims: dims,
-        is_two_dim_ok_label=lambda label: False,
-        available_dim_axes=lambda dims: {"width_mm", "depth_mm", "height_mm"},
-        summary_ref=_summary_ref(),
-        log_brief=False,
-        log_summary=False,
-        allow_all_safety_settings=lambda: {},
-        call_generation_with_failover=lambda *args, **kwargs: _response(),
-        generation_model_name="model",
-        call_repair_with_failover=fake_repair,
-        repair_model_name="repair-model",
-        call_lighting_review_with_failover=fake_lighting_review,
-        lighting_review_model_name="review-model",
-        match_aspect_to_target=lambda path, room: path,
-        validate_furnished_scale=lambda *args, **kwargs: (
-            False,
-            ["strict_scale_contract_not_ready"],
-            {"failed_rules": ["strict_scale_contract_not_ready"], "matched_items": {}, "unmatched_items": [], "rule_details": {}},
-        ),
-    )
-
-    output_path = Path(result["path"])
-    try:
-        assert repair_calls
-        assert output_path.name.startswith("repair_lighting_")
-        assert result["scale_check_failed"] is True
-        assert result["scalecheck_failed_rules"] == ["strict_scale_contract_not_ready"]
         assert output_path.exists()
     finally:
         if output_path.exists():

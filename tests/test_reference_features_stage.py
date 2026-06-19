@@ -38,6 +38,18 @@ def test_should_extract_reference_features_marks_decor_for_identity_extraction()
     assert reason == "decor_reference_identity_object"
 
 
+def test_should_extract_reference_features_marks_general_items_for_identity_extraction():
+    should_extract, reason = should_extract_reference_features(
+        label="Floor Speaker",
+        category="speaker",
+        category_canonical="speaker",
+        dims_mm={"width_mm": 320, "depth_mm": 340, "height_mm": 980},
+    )
+
+    assert should_extract is True
+    assert reason == "general_reference_identity_object"
+
+
 def test_extract_reference_features_can_force_fallback_without_model_call(tmp_path):
     crop_path = tmp_path / "crop.png"
     _write_png(crop_path)
@@ -62,6 +74,93 @@ def test_extract_reference_features_can_force_fallback_without_model_call(tmp_pa
 
     assert call_count["count"] == 0
     assert result["reflective_surface"] is False
+
+
+def test_extract_reference_features_retries_same_prompt_until_specific_features(tmp_path):
+    crop_path = tmp_path / "crop.png"
+    _write_png(crop_path)
+    prompts = []
+    responses = iter(
+        [
+            {
+                "silhouette_cues": ["lamp"],
+                "material_cues": ["metal"],
+                "distinctive_parts": [],
+                "preserve_rules": [],
+                "reflective_surface": False,
+            },
+            {
+                "silhouette_cues": ["flat mushroom shade", "thin offset stem"],
+                "material_cues": ["brushed metal", "opal diffuser"],
+                "distinctive_parts": ["single disc shade", "small round base"],
+                "preserve_rules": ["preserve the off-center stem", "keep the low disc shade"],
+                "reflective_surface": False,
+            },
+        ]
+    )
+
+    def _call_model(_model, content, *_args, **_kwargs):
+        prompts.append(content[0])
+        return SimpleNamespace(text=json.dumps(next(responses)))
+
+    result = extract_reference_features(
+        crop_path=str(crop_path),
+        label="Table Lamp",
+        category="table_lamp",
+        description="Small table lamp.",
+        dims_mm={"width_mm": 260, "depth_mm": 260, "height_mm": 420},
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_json_from_model_text=lambda text: json.loads(text),
+        log_brief=True,
+        allow_model_call=True,
+        extraction_reason="light_fixture_identity_object",
+    )
+
+    assert len(prompts) == 2
+    assert prompts[0] == prompts[1]
+    assert result["distinctive_parts"] == ["single disc shade", "small round base"]
+    assert result["analysis_attempts"] == 2
+    assert result["analysis_retry_count"] == 1
+    assert result["analysis_quality"] == "model_sufficient"
+
+
+def test_extract_reference_features_falls_back_after_three_weak_attempts(tmp_path):
+    crop_path = tmp_path / "crop.png"
+    _write_png(crop_path)
+    call_count = {"count": 0}
+
+    def _call_model(*_args, **_kwargs):
+        call_count["count"] += 1
+        return SimpleNamespace(
+            text=json.dumps(
+                {
+                    "silhouette_cues": ["chair"],
+                    "material_cues": [],
+                    "distinctive_parts": [],
+                    "preserve_rules": [],
+                    "reflective_surface": False,
+                }
+            )
+        )
+
+    result = extract_reference_features(
+        crop_path=str(crop_path),
+        label="Dining Chair",
+        category="chair",
+        description="A chair.",
+        dims_mm={"width_mm": 460, "depth_mm": 520, "height_mm": 790},
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_json_from_model_text=lambda text: json.loads(text),
+        log_brief=True,
+        allow_model_call=True,
+        extraction_reason="topology_sensitive_seating",
+    )
+
+    assert call_count["count"] == 3
+    assert result["analysis_attempts"] == 3
+    assert result["analysis_quality"] == "fallback_after_weak_model"
 
 
 def test_analyze_cropped_item_uses_fallback_reference_features_for_noncritical_item(monkeypatch, tmp_path):
@@ -184,6 +283,60 @@ def test_analyze_cropped_item_can_model_extract_reference_features_without_text_
     assert result["reference_features"]["extraction_mode"] == "model"
     assert "rectangular shade" in result["description"]
     assert "block base" in result["description"]
+
+
+def test_analyze_cropped_item_merges_options_reference_features_when_model_fallback_is_weak(monkeypatch, tmp_path):
+    image_path = tmp_path / "layer-lamp.png"
+    _write_png(image_path)
+
+    def _fake_extract_reference_features(**kwargs):
+        return {
+            "silhouette_cues": ["slim"],
+            "material_cues": [],
+            "distinctive_parts": [],
+            "preserve_rules": ["surface scale"],
+            "analysis_quality": "fallback_after_weak_model",
+        }
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Layer Table Lamp",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "table_lamp",
+            "category_canonical": "table_lamp",
+            "target_key": "cart_layer_lamp_012",
+            "source_index": 12,
+            "options": {
+                "reference_features": {
+                    "silhouette_cues": ["Stacked layered shade profile", "slim cylindrical base"],
+                    "distinctive_parts": ["Layered shade", "compact upright stem"],
+                    "preserve_rules": ["preserve stacked horizontal shade rings"],
+                }
+            },
+        },
+        call_gemini_with_failover=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("OCR model should not happen")),
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        allow_reference_feature_model=True,
+        provided_dims_mm={"width_mm": 300, "depth_mm": 300, "height_mm": 500},
+    )
+
+    features = result["reference_features"]
+    assert "Stacked layered shade profile" in features["silhouette_cues"]
+    assert "Layered shade" in features["distinctive_parts"]
+    assert "surface scale" in features["preserve_rules"]
+    assert features["options_reference_features_applied"] is True
+    assert "Stacked layered shade profile" in result["description"]
+    assert "Layered shade" in result["description"]
 
 
 def test_analyze_cropped_item_uses_ocr_dims_to_enable_reference_features(monkeypatch, tmp_path):

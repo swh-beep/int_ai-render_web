@@ -41,12 +41,12 @@ def test_call_gemini_with_failover_consumes_max_attempts_without_forwarding_it_t
     assert "max_attempts" not in captured["config"]
 
 
-def test_call_gemini_with_failover_applies_2k_image_defaults_for_flash_image_models(monkeypatch):
+def test_call_gemini_with_failover_applies_2k_image_defaults_for_default_pro_image_model(monkeypatch):
     captured = {}
     _install_fake_genai_client(monkeypatch, captured)
 
     call_gemini_with_failover(
-        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
         ["prompt"],
         {"timeout": 12},
         {},
