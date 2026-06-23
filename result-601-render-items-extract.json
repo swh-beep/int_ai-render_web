@@ -1,0 +1,659 @@
+[
+  {
+    "label": "피쿠팔라 플로어 램프",
+    "item_id": "product_39522",
+    "category": "floor_lamp",
+    "dims_mm": {
+      "width_mm": 280,
+      "depth_mm": 280,
+      "height_mm": 1380,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.0622,
+      "room_depth_ratio": 0.0467,
+      "room_height_ratio": 0.5308,
+      "footprint_ratio": 0.0029,
+      "placement_family": "floor_placed"
+    },
+    "identity_profile": {
+      "family": "floor_lamp",
+      "floor_contact_expected": true,
+      "placement_family": "floor_placed",
+      "absolute_size_class": "medium",
+      "silhouette_summary": "Vertical totem profile composed of four stacked, rounded-cylinder segments, Goblet-shaped smooth shade on top, Flat, rectangular low-profile base",
+      "topology_cues": [
+        "Vertical totem profile composed of four stacked, rounded-cylinder segments",
+        "Goblet-shaped smooth shade on top",
+        "Flat, rectangular low-profile base",
+        "round",
+        "rectangular",
+        "low-profile"
+      ],
+      "support_geometry": [
+        "Four textured yellow ceramic body segments",
+        "Tulip-like cream-white shade",
+        "Rectangular green stone base plate"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-39522_피쿠팔라-플로어-램프_001",
+      "family": "floor_lamp",
+      "placement_family": "small_free_object",
+      "zone": "edge_floor_band",
+      "orientation_hint": null,
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.0577,
+        "height_ratio": 2.6038,
+        "footprint_ratio": 0.0057
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.0622,
+        "room_depth_ratio": 0.0467,
+        "room_height_ratio": 0.5308,
+        "footprint_ratio": 0.0029
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-39522_피쿠팔라-플로어-램프_001",
+      "family": "floor_lamp",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": true,
+      "anchor_family_score": 25,
+      "pass_role": "pass2_support_sensitive",
+      "strategy_priority": 60,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 7,
+    "pass_role": "pass2_support_sensitive",
+    "requires_identity_validation": true
+  },
+  {
+    "label": "빅 버드 - 레드",
+    "item_id": "product_39521",
+    "category": "rug",
+    "dims_mm": {
+      "width_mm": 3000,
+      "depth_mm": 4000,
+      "height_mm": 30,
+      "radius_mm": null
+    },
+    "box_2d": [
+      666,
+      127,
+      955,
+      903
+    ],
+    "box_source": "selected_variant_review",
+    "layout_envelope": {
+      "room_width_ratio": 0.6667,
+      "room_depth_ratio": 0.6667,
+      "room_height_ratio": 0.0115,
+      "footprint_ratio": 0.4444,
+      "placement_family": "rug"
+    },
+    "identity_profile": {
+      "family": "rug",
+      "floor_contact_expected": true,
+      "placement_family": "rug",
+      "absolute_size_class": "extra-large",
+      "silhouette_summary": "flat",
+      "topology_cues": [
+        "flat"
+      ],
+      "support_geometry": []
+    },
+    "placement_contract": {
+      "target_key": "cart_product-39521_빅-버드---레드_002",
+      "family": "rug",
+      "placement_family": "rug",
+      "zone": "under_anchor_band",
+      "orientation_hint": "Keep a single rug centered under the anchor seating group. Do not duplicate or offset it.",
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.6186,
+        "height_ratio": 0.0566,
+        "footprint_ratio": 0.8681
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.6667,
+        "room_depth_ratio": 0.6667,
+        "room_height_ratio": 0.0115,
+        "footprint_ratio": 0.4444
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-39521_빅-버드---레드_002",
+      "family": "rug",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": false,
+      "anchor_family_score": 0,
+      "pass_role": "pass1_footprint",
+      "strategy_priority": 85
+    },
+    "volume_rank": 3,
+    "pass_role": "pass1_footprint"
+  },
+  {
+    "label": "AI 디자인용 이미지입니다",
+    "item_id": "product_39080",
+    "category": "decor",
+    "dims_mm": {
+      "width_mm": 400,
+      "depth_mm": 400,
+      "height_mm": 950,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.0889,
+      "room_depth_ratio": 0.0667,
+      "room_height_ratio": 0.3654,
+      "footprint_ratio": 0.0059,
+      "placement_family": "surface_placed"
+    },
+    "identity_profile": {
+      "family": "decor",
+      "floor_contact_expected": false,
+      "placement_family": "surface_placed",
+      "absolute_size_class": "large",
+      "silhouette_summary": "Tall, slender multi-stem structure, Cylindrical pot with gently rounded base, Spherical radiating clusters of narrow, spike-like foliage at staggered heights",
+      "topology_cues": [
+        "Tall, slender multi-stem structure",
+        "Cylindrical pot with gently rounded base",
+        "Spherical radiating clusters of narrow, spike-like foliage at staggered heights",
+        "round",
+        "thin"
+      ],
+      "support_geometry": [
+        "Dracaena-style exploding needle-like leaf crowns",
+        "Slender, slightly curving vertical trunks",
+        "Minimalist textured stone cylindrical planter"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-39080_ai-디자인용-이미지입니다_003",
+      "family": "decor",
+      "placement_family": "surface_placed",
+      "zone": "surface_top_band",
+      "orientation_hint": null,
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.0825,
+        "height_ratio": 1.7925,
+        "footprint_ratio": 0.0116
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.0889,
+        "room_depth_ratio": 0.0667,
+        "room_height_ratio": 0.3654,
+        "footprint_ratio": 0.0059
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-39080_ai-디자인용-이미지입니다_003",
+      "family": "decor",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": false,
+      "anchor_family_score": 0,
+      "pass_role": "pass2_support_sensitive",
+      "strategy_priority": 60,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 4,
+    "pass_role": "pass2_support_sensitive",
+    "requires_identity_validation": true
+  },
+  {
+    "label": "AI 디자인용 이미지입니다",
+    "item_id": "product_39076",
+    "category": "decor",
+    "dims_mm": {
+      "width_mm": 250,
+      "depth_mm": 250,
+      "height_mm": 430,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.0556,
+      "room_depth_ratio": 0.0417,
+      "room_height_ratio": 0.1654,
+      "footprint_ratio": 0.0023,
+      "placement_family": "surface_placed"
+    },
+    "identity_profile": {
+      "family": "decor",
+      "floor_contact_expected": false,
+      "placement_family": "surface_placed",
+      "absolute_size_class": "small",
+      "silhouette_summary": "Sculptural black vase with a hollowed, arching tripod base and a tall neck, Sleek, conical medium-sized black vase, Small egg-shaped white vase with a flat bottom",
+      "topology_cues": [
+        "Sculptural black vase with a hollowed, arching tripod base and a tall neck",
+        "Sleek, conical medium-sized black vase",
+        "Small egg-shaped white vase with a flat bottom",
+        "Delicate, multi-branched vertical twig structure",
+        "arched"
+      ],
+      "support_geometry": [
+        "Arch-legged sculptural vase",
+        "Conical taper vase",
+        "Ellipsoid bud vase",
+        "Budding decorative branch",
+        "Stacked book display base"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+      "family": "decor",
+      "placement_family": "surface_placed",
+      "zone": "surface_top_band",
+      "orientation_hint": null,
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.0515,
+        "height_ratio": 0.8113,
+        "footprint_ratio": 0.0045
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.0556,
+        "room_depth_ratio": 0.0417,
+        "room_height_ratio": 0.1654,
+        "footprint_ratio": 0.0023
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+      "family": "decor",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": false,
+      "anchor_family_score": 0,
+      "pass_role": "pass2_support_sensitive",
+      "strategy_priority": 60,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 9,
+    "pass_role": "pass2_support_sensitive",
+    "requires_identity_validation": true
+  },
+  {
+    "label": "AI 디자인용 이미지입니다",
+    "item_id": "product_39067",
+    "category": "decor",
+    "dims_mm": {
+      "width_mm": 900,
+      "depth_mm": 50,
+      "height_mm": 1200,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.2,
+      "room_depth_ratio": 0.0083,
+      "room_height_ratio": 0.4615,
+      "footprint_ratio": 0.0017,
+      "placement_family": "surface_placed"
+    },
+    "identity_profile": {
+      "family": "decor",
+      "floor_contact_expected": false,
+      "placement_family": "surface_placed",
+      "absolute_size_class": "large",
+      "silhouette_summary": "Tall vertical rectangular panel profile, Continuous tight vertical ribbed surface texture, Bottom-center vertical rectangular cutout slot",
+      "topology_cues": [
+        "Tall vertical rectangular panel profile",
+        "Continuous tight vertical ribbed surface texture",
+        "Bottom-center vertical rectangular cutout slot",
+        "rectangular"
+      ],
+      "support_geometry": [
+        "Densely spaced vertical fluted ribs",
+        "Lower-center negative space cutout slot"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-39067_ai-디자인용-이미지입니다_005",
+      "family": "decor",
+      "placement_family": "surface_placed",
+      "zone": "surface_top_band",
+      "orientation_hint": null,
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.1856,
+        "height_ratio": 2.2642,
+        "footprint_ratio": 0.0033
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.2,
+        "room_depth_ratio": 0.0083,
+        "room_height_ratio": 0.4615,
+        "footprint_ratio": 0.0017
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-39067_ai-디자인용-이미지입니다_005",
+      "family": "decor",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": false,
+      "anchor_family_score": 0,
+      "pass_role": "pass2_support_sensitive",
+      "strategy_priority": 60,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 8,
+    "pass_role": "pass2_support_sensitive",
+    "requires_identity_validation": true
+  },
+  {
+    "label": "마리포사 서스펜션",
+    "item_id": "product_38668",
+    "category": "lamp",
+    "dims_mm": {
+      "width_mm": 550,
+      "depth_mm": 440,
+      "height_mm": 480,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.1222,
+      "room_depth_ratio": 0.0733,
+      "room_height_ratio": 0.1846,
+      "footprint_ratio": 0.009,
+      "placement_family": "floor_placed"
+    },
+    "identity_profile": {
+      "family": "light",
+      "floor_contact_expected": true,
+      "placement_family": "floor_placed",
+      "absolute_size_class": "small",
+      "silhouette_summary": "Overlapping, curved fan-like shades forming a C-shape shell, Asymmetrical wing-like segments wrapping around a central light source, Sculptural, multi-angled suspension profiles",
+      "topology_cues": [
+        "Overlapping, curved fan-like shades forming a C-shape shell",
+        "Asymmetrical wing-like segments wrapping around a central light source",
+        "Sculptural, multi-angled suspension profiles",
+        "round",
+        "curved"
+      ],
+      "support_geometry": [
+        "Radial pleated fan-shaped wings",
+        "Central spherical glass diffuser",
+        "Chrome suspension stem"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-38668_마리포사-서스펜션_006",
+      "family": "light",
+      "placement_family": "floor_placed",
+      "zone": "general_floor_band",
+      "orientation_hint": null,
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.1134,
+        "height_ratio": 0.9057,
+        "footprint_ratio": 0.0175
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.1222,
+        "room_depth_ratio": 0.0733,
+        "room_height_ratio": 0.1846,
+        "footprint_ratio": 0.009
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-38668_마리포사-서스펜션_006",
+      "family": "light",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": true,
+      "anchor_family_score": 25,
+      "pass_role": "pass2_support_sensitive",
+      "strategy_priority": 60,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 6,
+    "pass_role": "pass2_support_sensitive",
+    "requires_identity_validation": true
+  },
+  {
+    "label": "마 종 소파",
+    "item_id": "product_38543",
+    "category": "sofa",
+    "dims_mm": {
+      "width_mm": 4850,
+      "depth_mm": 2850,
+      "height_mm": 530,
+      "radius_mm": null
+    },
+    "box_2d": [
+      550,
+      209,
+      775,
+      772
+    ],
+    "box_source": "selected_variant_review",
+    "layout_envelope": {
+      "room_width_ratio": 1.0778,
+      "room_depth_ratio": 0.475,
+      "room_height_ratio": 0.2038,
+      "footprint_ratio": 0.5119,
+      "placement_family": "floor_placed"
+    },
+    "identity_profile": {
+      "family": "sofa",
+      "floor_contact_expected": true,
+      "placement_family": "floor_placed",
+      "absolute_size_class": "extra-large",
+      "silhouette_summary": "sofa",
+      "topology_cues": [],
+      "support_geometry": [
+        "support"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-38543_마-종-소파_007",
+      "family": "sofa",
+      "placement_family": "floor_placed",
+      "zone": "back_wall_anchor_band",
+      "orientation_hint": "Keep the back roughly parallel to the back wall and face the seating area toward the room center.",
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": null,
+        "height_ratio": null,
+        "footprint_ratio": null
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 1.0778,
+        "room_depth_ratio": 0.475,
+        "room_height_ratio": 0.2038,
+        "footprint_ratio": 0.5119
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-38543_마-종-소파_007",
+      "family": "sofa",
+      "anchor_eligible": true,
+      "fallback_anchor_candidate": true,
+      "anchor_family_score": 100,
+      "pass_role": "pass1_anchor",
+      "strategy_priority": 100
+    },
+    "volume_rank": 1,
+    "pass_role": "pass1_anchor"
+  },
+  {
+    "label": "리오 테이블",
+    "item_id": "product_37582",
+    "category": "sofa_table",
+    "dims_mm": {
+      "width_mm": 1400,
+      "depth_mm": 1400,
+      "height_mm": 330,
+      "radius_mm": null
+    },
+    "box_2d": [
+      644,
+      408,
+      819,
+      622
+    ],
+    "box_source": "selected_variant_review",
+    "layout_envelope": {
+      "room_width_ratio": 0.3111,
+      "room_depth_ratio": 0.2333,
+      "room_height_ratio": 0.1269,
+      "footprint_ratio": 0.0726,
+      "placement_family": "floor_placed"
+    },
+    "identity_profile": {
+      "family": "table",
+      "floor_contact_expected": true,
+      "placement_family": "floor_placed",
+      "absolute_size_class": "medium",
+      "silhouette_summary": "table",
+      "topology_cues": [],
+      "support_geometry": [
+        "support"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-37582_리오-테이블_008",
+      "family": "table",
+      "placement_family": "floor_placed",
+      "zone": "center_floor_anchor",
+      "orientation_hint": "Keep the tabletop aligned to the seating anchor geometry unless explicit placement instructions say otherwise.",
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.2887,
+        "height_ratio": 0.6226,
+        "footprint_ratio": 0.1418
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.3111,
+        "room_depth_ratio": 0.2333,
+        "room_height_ratio": 0.1269,
+        "footprint_ratio": 0.0726
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-37582_리오-테이블_008",
+      "family": "table",
+      "anchor_eligible": true,
+      "fallback_anchor_candidate": true,
+      "anchor_family_score": 82,
+      "pass_role": "pass1_footprint",
+      "strategy_priority": 85
+    },
+    "volume_rank": 2,
+    "pass_role": "pass1_footprint"
+  },
+  {
+    "label": "지그 재그",
+    "item_id": "product_37426",
+    "category": "chair",
+    "dims_mm": {
+      "width_mm": 370,
+      "depth_mm": 460,
+      "height_mm": 740,
+      "radius_mm": null
+    },
+    "box_2d": [
+      0,
+      0,
+      1000,
+      1000
+    ],
+    "layout_envelope": {
+      "room_width_ratio": 0.0822,
+      "room_depth_ratio": 0.0767,
+      "room_height_ratio": 0.2846,
+      "footprint_ratio": 0.0063,
+      "placement_family": "floor_placed"
+    },
+    "identity_profile": {
+      "family": "chair",
+      "floor_contact_expected": true,
+      "placement_family": "floor_placed",
+      "absolute_size_class": "medium",
+      "silhouette_summary": "Cantilevered Z-profile with no vertical legs, Four flat rectangular plates intersecting at sharp angles, Upright flat backrest perpendicular to the horizontal seat",
+      "topology_cues": [
+        "Cantilevered Z-profile with no vertical legs",
+        "Four flat rectangular plates intersecting at sharp angles",
+        "Upright flat backrest perpendicular to the horizontal seat",
+        "rectangular",
+        "triangular"
+      ],
+      "support_geometry": [
+        "cantilever",
+        "support",
+        "Diagonal support panel",
+        "Triangular corner reinforcement wedges",
+        "Flat rectangular base plate"
+      ]
+    },
+    "placement_contract": {
+      "target_key": "cart_product-37426_지그-재그_009",
+      "family": "chair",
+      "placement_family": "floor_placed",
+      "zone": "adjacent_seating_band",
+      "orientation_hint": "Keep this seat oriented toward the primary seating group instead of rotating it diagonally.",
+      "anchor_relationship": {
+        "anchor_to": "cart_product-38543_마-종-소파_007",
+        "width_ratio": 0.0763,
+        "height_ratio": 1.3962,
+        "footprint_ratio": 0.0123
+      },
+      "room_ratio_targets": {
+        "room_width_ratio": 0.0822,
+        "room_depth_ratio": 0.0767,
+        "room_height_ratio": 0.2846,
+        "footprint_ratio": 0.0063
+      }
+    },
+    "two_pass_strategy": {
+      "target_key": "cart_product-37426_지그-재그_009",
+      "family": "chair",
+      "anchor_eligible": false,
+      "fallback_anchor_candidate": true,
+      "anchor_family_score": 60,
+      "pass_role": "pass2_floor_secondary",
+      "strategy_priority": 45,
+      "requires_identity_validation": true,
+      "identity_validation_reason": "reference_feature_contract"
+    },
+    "volume_rank": 5,
+    "pass_role": "pass2_floor_secondary",
+    "requires_identity_validation": true
+  }
+]

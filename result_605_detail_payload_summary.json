@@ -1,0 +1,386 @@
+{
+  "detail_keys": [
+    "details",
+    "furniture_data",
+    "furniture_boxes",
+    "used_cutout_references",
+    "volume_ranking",
+    "message"
+  ],
+  "furniture_data_count": 23,
+  "furniture_data": [
+    {
+      "label": "커스텀 러그",
+      "target_key": "cart_product-39525_커스텀-러그_001",
+      "box_2d": [
+        708,
+        191,
+        1000,
+        856
+      ],
+      "source_box_2d": [
+        702,
+        190,
+        1000,
+        853
+      ],
+      "box_source": "detail_current_image_analysis",
+      "crop_path": "outputs/crop_19986ace_01__.png",
+      "category": "rug",
+      "category_canonical": "rug",
+      "volume_rank": 8
+    },
+    {
+      "label": "온 더 락 소파",
+      "target_key": "cart_product-37245_온-더-락-소파_012",
+      "box_2d": [
+        570,
+        195,
+        794,
+        608
+      ],
+      "source_box_2d": [
+        569,
+        194,
+        794,
+        610
+      ],
+      "box_source": "detail_current_image_analysis",
+      "crop_path": "outputs/crop_19986ace_12__.png",
+      "category": "sofa",
+      "category_canonical": "main_sofa",
+      "volume_rank": 1
+    },
+    {
+      "label": "TV Console",
+      "target_key": "detail_tv-console_003",
+      "box_2d": [
+        540,
+        105,
+        676,
+        329
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "electronics",
+      "volume_rank": 14
+    },
+    {
+      "label": "DS-262/11 체어",
+      "target_key": "cart_product-37641_ds-262-11-체어_010",
+      "box_2d": [
+        510,
+        715,
+        810,
+        846
+      ],
+      "source_box_2d": [
+        509,
+        715,
+        810,
+        848
+      ],
+      "box_source": "detail_current_image_analysis",
+      "crop_path": "outputs/crop_19986ace_10_DS-262_11_.png",
+      "category": "lounge_chair",
+      "category_canonical": "lounge_chair",
+      "volume_rank": 2
+    },
+    {
+      "label": "Coffee Table",
+      "target_key": "detail_coffee-table_005",
+      "box_2d": [
+        668,
+        431,
+        796,
+        622
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "sofa_table",
+      "volume_rank": 15
+    },
+    {
+      "label": "Floor Lamp",
+      "target_key": "detail_floor-lamp_006",
+      "box_2d": [
+        279,
+        578,
+        701,
+        711
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "floor_lamp",
+      "volume_rank": 13
+    },
+    {
+      "label": "Framed Print",
+      "target_key": "detail_framed-print_007",
+      "box_2d": [
+        380,
+        120,
+        555,
+        195
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "decor",
+      "volume_rank": 16
+    },
+    {
+      "label": "TV",
+      "target_key": "detail_tv_008",
+      "box_2d": [
+        438,
+        207,
+        547,
+        309
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "electronics",
+      "volume_rank": 17
+    },
+    {
+      "label": "Side Table",
+      "target_key": "detail_side-table_009",
+      "box_2d": [
+        603,
+        612,
+        716,
+        668
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "side_table",
+      "volume_rank": 18
+    },
+    {
+      "label": "Floor Speaker",
+      "target_key": "detail_floor-speaker_010",
+      "box_2d": [
+        472,
+        57,
+        678,
+        80
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "electronics",
+      "volume_rank": 20
+    },
+    {
+      "label": "Floor Speaker",
+      "target_key": "detail_floor-speaker_011",
+      "box_2d": [
+        479,
+        348,
+        584,
+        362
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "electronics",
+      "volume_rank": 21
+    },
+    {
+      "label": "Vase with Branches",
+      "target_key": "detail_vase-with-branches_012",
+      "box_2d": [
+        491,
+        630,
+        606,
+        672
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "decor",
+      "volume_rank": 19
+    },
+    {
+      "label": "Sculpture",
+      "target_key": "detail_sculpture_013",
+      "box_2d": [
+        540,
+        621,
+        606,
+        640
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "",
+      "volume_rank": 22
+    },
+    {
+      "label": "Sculpture",
+      "target_key": "detail_sculpture_014",
+      "box_2d": [
+        564,
+        639,
+        607,
+        660
+      ],
+      "box_source": "detail_current_image_analysis",
+      "category_canonical": "",
+      "volume_rank": 23
+    },
+    {
+      "label": "베어브릭 오디오 포터블 블루투스 스피커 400% 블랙",
+      "target_key": "cart_product-39181_베어브릭-오디오-포터블-블루투스-스피커-40_002",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_02__400_.png",
+      "category": "decor",
+      "category_canonical": "decor",
+      "volume_rank": 12
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39091_ai-디자인용-이미지입니다_003",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_03_AI_.png",
+      "category": "decor",
+      "category_canonical": "decor",
+      "volume_rank": 9
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_04_AI_.png",
+      "category": "decor",
+      "category_canonical": "decor",
+      "volume_rank": 10
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39064_ai-디자인용-이미지입니다_005",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_05_AI_.png",
+      "category": "decor",
+      "category_canonical": "decor",
+      "volume_rank": 11
+    },
+    {
+      "label": "베오랩 18",
+      "target_key": "cart_product-38860_베오랩-18_006",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_06__18.png",
+      "category": "decor",
+      "category_canonical": "decor",
+      "volume_rank": 7
+    },
+    {
+      "label": "플래트너 사이드 테이블",
+      "target_key": "cart_product-38819_플래트너-사이드-테이블_007",
+      "box_2d": [
+        0,
+        0,
+        1000,
+        1000
+      ],
+      "box_source": "cached_detail_snapshot",
+      "crop_path": "outputs/crop_19986ace_07__.png",
+      "category": "table",
+      "category_canonical": "table",
+      "volume_rank": 6
+    }
+  ],
+  "used_cutout_references_count": 12,
+  "used_cutout_references": [
+    {
+      "label": "커스텀 러그",
+      "target_key": "cart_product-39525_커스텀-러그_001",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_01__.png",
+      "box_source": "detail_current_image_analysis"
+    },
+    {
+      "label": "온 더 락 소파",
+      "target_key": "cart_product-37245_온-더-락-소파_012",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_12__.png",
+      "box_source": "detail_current_image_analysis"
+    },
+    {
+      "label": "DS-262/11 체어",
+      "target_key": "cart_product-37641_ds-262-11-체어_010",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_10_DS-262_11_.png",
+      "box_source": "detail_current_image_analysis"
+    },
+    {
+      "label": "베어브릭 오디오 포터블 블루투스 스피커 400% 블랙",
+      "target_key": "cart_product-39181_베어브릭-오디오-포터블-블루투스-스피커-40_002",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_02__400_.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39091_ai-디자인용-이미지입니다_003",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_03_AI_.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_04_AI_.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "AI 디자인용 이미지입니다",
+      "target_key": "cart_product-39064_ai-디자인용-이미지입니다_005",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_05_AI_.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "베오랩 18",
+      "target_key": "cart_product-38860_베오랩-18_006",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_06__18.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "플래트너 사이드 테이블",
+      "target_key": "cart_product-38819_플래트너-사이드-테이블_007",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_07__.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "Tolomeo Mega Floor Lamp",
+      "target_key": "cart_product-38073_tolomeo-mega-floor-lamp_008",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_08_Tolomeo_Mega_Floor_Lamp.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "엔폴드 사이드보드",
+      "target_key": "cart_product-37864_엔폴드-사이드보드_009",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_09__.png",
+      "box_source": "cached_detail_snapshot"
+    },
+    {
+      "label": "아코르도 커피 테이블_블랙",
+      "target_key": "cart_product-37562_아코르도-커피-테이블-블랙_011",
+      "crop_url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/user-photos/crop_19986ace_11____.png",
+      "box_source": "cached_detail_snapshot"
+    }
+  ],
+  "selected_item_review_count": 0,
+  "selected_item_review": []
+}

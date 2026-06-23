@@ -1,0 +1,2111 @@
+[
+  {
+    "id": "1417a262-60be-4536-9a3f-e8fd7bfdbd97",
+    "status": "finished",
+    "created_at": null,
+    "render_url": null,
+    "detail_count": 6,
+    "detail_targets": [
+      {
+        "name": "Detail: 픽셀 모듈 소파",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_1_Detail픽셀모듈소파.png",
+        "target_key": "cart_product-39523_픽셀-모듈-소파_001",
+        "target_label": "픽셀 모듈 소파",
+        "box": [
+          560,
+          349,
+          742,
+          718
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: 에픽 커피 테이블",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_2_Detail에픽커피테이블.png",
+        "target_key": "cart_product-38810_에픽-커피-테이블_006",
+        "target_label": "에픽 커피 테이블",
+        "box": [
+          690,
+          428,
+          862,
+          626
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: 부코브스키 라운지 체어",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_3_Detail부코브스키라운지체어.png",
+        "target_key": "cart_product-37650_부코브스키-라운지-체어_008",
+        "target_label": "부코브스키 라운지 체어",
+        "box": [
+          613,
+          108,
+          916,
+          278
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: 쿠션 스툴 (서클 베이스)",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_4_Detail쿠션스툴서클베이스.png",
+        "target_key": "cart_product-39482_쿠션-스툴-서클-베이스_002",
+        "target_label": "쿠션 스툴 (서클 베이스)",
+        "box": [
+          670,
+          760,
+          860,
+          860
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: 블랙 그래나이트 사이드 테이블",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_5_Detail블랙그래나이트사이드테이블.png",
+        "target_key": "cart_product-38297_블랙-그래나이트-사이드-테이블_007",
+        "target_label": "블랙 그래나이트 사이드 테이블",
+        "box": [
+          655,
+          235,
+          804,
+          314
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: 베오랩 18",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782191205_8ce311_6_Detail베오랩18.png",
+        "target_key": "cart_product-38860_베오랩-18_005",
+        "target_label": "베오랩 18",
+        "box": [
+          474,
+          722,
+          725,
+          751
+        ],
+        "box_source": "product_reference_localization",
+        "cutout_ref_count": 0
+      }
+    ],
+    "furniture_sample": [
+      {
+        "label": "픽셀 모듈 소파",
+        "target_key": "cart_product-39523_픽셀-모듈-소파_001",
+        "category": "sofa",
+        "category_canonical": "main_sofa",
+        "box": [
+          560,
+          349,
+          742,
+          718
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_01__.png",
+        "volume_rank": 1,
+        "item_id": "product_39523"
+      },
+      {
+        "label": "쿠션 스툴 (서클 베이스)",
+        "target_key": "cart_product-39482_쿠션-스툴-서클-베이스_002",
+        "category": "chair",
+        "category_canonical": "dining_chair",
+        "box": [
+          670,
+          760,
+          860,
+          860
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_02__.png",
+        "volume_rank": 4,
+        "item_id": "product_39482"
+      },
+      {
+        "label": "펀 1STM 플로어 스탠드",
+        "target_key": "cart_product-39031_펀-1stm-플로어-스탠드_003",
+        "category": "floor_lamp",
+        "category_canonical": "floor_lamp",
+        "box": [
+          360,
+          850,
+          900,
+          960
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_03__1STM_.png",
+        "volume_rank": 8,
+        "item_id": "product_39031"
+      },
+      {
+        "label": "미러 월피스",
+        "target_key": "cart_product-38862_미러-월피스_004",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          418,
+          556,
+          509,
+          631
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_04__.png",
+        "volume_rank": 7,
+        "item_id": "product_38862"
+      },
+      {
+        "label": "베오랩 18",
+        "target_key": "cart_product-38860_베오랩-18_005",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          474,
+          722,
+          725,
+          751
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_05__18.png",
+        "volume_rank": 6,
+        "item_id": "product_38860"
+      },
+      {
+        "label": "에픽 커피 테이블",
+        "target_key": "cart_product-38810_에픽-커피-테이블_006",
+        "category": "sofa_table",
+        "category_canonical": "sofa_table",
+        "box": [
+          690,
+          428,
+          862,
+          626
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_06__.png",
+        "volume_rank": 2,
+        "item_id": "product_38810"
+      },
+      {
+        "label": "블랙 그래나이트 사이드 테이블",
+        "target_key": "cart_product-38297_블랙-그래나이트-사이드-테이블_007",
+        "category": "table",
+        "category_canonical": "table",
+        "box": [
+          655,
+          235,
+          804,
+          314
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_07__.png",
+        "volume_rank": 5,
+        "item_id": "product_38297"
+      },
+      {
+        "label": "부코브스키 라운지 체어",
+        "target_key": "cart_product-37650_부코브스키-라운지-체어_008",
+        "category": "lounge_chair",
+        "category_canonical": "lounge_chair",
+        "box": [
+          613,
+          108,
+          916,
+          278
+        ],
+        "source_box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "product_reference_localization",
+        "crop_path": "outputs/crop_04b11819_08__.png",
+        "volume_rank": 3,
+        "item_id": "product_37650"
+      }
+    ],
+    "used_cutout_count": 8,
+    "product_keys": [
+      {
+        "label": "픽셀 모듈 소파",
+        "target_key": "cart_product-39523_픽셀-모듈-소파_001",
+        "box": [
+          560,
+          349,
+          742,
+          718
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 1,
+        "category": "main_sofa"
+      },
+      {
+        "label": "쿠션 스툴 (서클 베이스)",
+        "target_key": "cart_product-39482_쿠션-스툴-서클-베이스_002",
+        "box": [
+          670,
+          760,
+          860,
+          860
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 4,
+        "category": "dining_chair"
+      },
+      {
+        "label": "펀 1STM 플로어 스탠드",
+        "target_key": "cart_product-39031_펀-1stm-플로어-스탠드_003",
+        "box": [
+          360,
+          850,
+          900,
+          960
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 8,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "미러 월피스",
+        "target_key": "cart_product-38862_미러-월피스_004",
+        "box": [
+          418,
+          556,
+          509,
+          631
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 7,
+        "category": "decor"
+      },
+      {
+        "label": "베오랩 18",
+        "target_key": "cart_product-38860_베오랩-18_005",
+        "box": [
+          474,
+          722,
+          725,
+          751
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 6,
+        "category": "decor"
+      },
+      {
+        "label": "에픽 커피 테이블",
+        "target_key": "cart_product-38810_에픽-커피-테이블_006",
+        "box": [
+          690,
+          428,
+          862,
+          626
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 2,
+        "category": "sofa_table"
+      },
+      {
+        "label": "블랙 그래나이트 사이드 테이블",
+        "target_key": "cart_product-38297_블랙-그래나이트-사이드-테이블_007",
+        "box": [
+          655,
+          235,
+          804,
+          314
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 5,
+        "category": "table"
+      },
+      {
+        "label": "부코브스키 라운지 체어",
+        "target_key": "cart_product-37650_부코브스키-라운지-체어_008",
+        "box": [
+          613,
+          108,
+          916,
+          278
+        ],
+        "box_source": "product_reference_localization",
+        "volume_rank": 3,
+        "category": "lounge_chair"
+      }
+    ]
+  },
+  {
+    "id": "10240397-0797-4721-b405-4f82dc75dddc",
+    "status": "finished",
+    "created_at": null,
+    "render_url": null,
+    "detail_count": 6,
+    "detail_targets": [
+      {
+        "name": "Detail: Coffee Table",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193331_3c3cf3_1_DetailCoffeeTable.png",
+        "target_key": "detail_coffee-table_004",
+        "target_label": "Coffee Table",
+        "box": [
+          667,
+          396,
+          814,
+          582
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Side Table",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193333_3c3cf3_2_DetailSideTable.png",
+        "target_key": "detail_side-table_006",
+        "target_label": "Side Table",
+        "box": [
+          701,
+          796,
+          937,
+          910
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Mirror",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193334_3c3cf3_3_DetailMirror.png",
+        "target_key": "detail_mirror_007",
+        "target_label": "Mirror",
+        "box": [
+          291,
+          66,
+          532,
+          157
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Wall Sculpture",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193333_3c3cf3_4_DetailWallSculpture.png",
+        "target_key": "detail_wall-sculpture_009",
+        "target_label": "Wall Sculpture",
+        "box": [
+          273,
+          785,
+          529,
+          839
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Floor Lamp",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193337_3c3cf3_5_DetailFloorLamp.png",
+        "target_key": "detail_floor-lamp_008",
+        "target_label": "Floor Lamp",
+        "box": [
+          372,
+          603,
+          558,
+          669
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Vase",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782193338_3c3cf3_6_DetailVase.png",
+        "target_key": "detail_vase_013",
+        "target_label": "Vase",
+        "box": [
+          635,
+          497,
+          703,
+          523
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      }
+    ],
+    "furniture_sample": [
+      {
+        "label": "툰드라",
+        "target_key": "cart_product-38318_툰드라_008",
+        "category": "rug",
+        "category_canonical": "rug",
+        "box": [
+          693,
+          86,
+          951,
+          912
+        ],
+        "source_box": [
+          689,
+          87,
+          951,
+          911
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_27410029_08__.png",
+        "volume_rank": 9
+      },
+      {
+        "label": "카멜레온다 소파",
+        "target_key": "cart_product-37247_카멜레온다-소파_011",
+        "category": "sofa",
+        "category_canonical": "main_sofa",
+        "box": [
+          554,
+          297,
+          784,
+          792
+        ],
+        "source_box": [
+          554,
+          298,
+          781,
+          788
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_27410029_11__.png",
+        "volume_rank": 1
+      },
+      {
+        "label": "시드 암체어",
+        "target_key": "cart_product-37645_시드-암체어_010",
+        "category": "lounge_chair",
+        "category_canonical": "lounge_chair",
+        "box": [
+          625,
+          146,
+          898,
+          287
+        ],
+        "source_box": [
+          624,
+          146,
+          895,
+          287
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_27410029_10__.png",
+        "volume_rank": 3
+      },
+      {
+        "label": "Coffee Table",
+        "target_key": "detail_coffee-table_004",
+        "category_canonical": "sofa_table",
+        "box": [
+          667,
+          396,
+          814,
+          582
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 12
+      },
+      {
+        "label": "Side Table",
+        "target_key": "detail_side-table_005",
+        "category_canonical": "side_table",
+        "box": [
+          680,
+          725,
+          878,
+          831
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 15
+      },
+      {
+        "label": "Side Table",
+        "target_key": "detail_side-table_006",
+        "category_canonical": "side_table",
+        "box": [
+          701,
+          796,
+          937,
+          910
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 13
+      },
+      {
+        "label": "Mirror",
+        "target_key": "detail_mirror_007",
+        "category_canonical": "mirror",
+        "box": [
+          291,
+          66,
+          532,
+          157
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 14
+      },
+      {
+        "label": "Floor Lamp",
+        "target_key": "detail_floor-lamp_008",
+        "category_canonical": "floor_lamp",
+        "box": [
+          372,
+          603,
+          558,
+          669
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 17
+      },
+      {
+        "label": "Wall Sculpture",
+        "target_key": "detail_wall-sculpture_009",
+        "category_canonical": "",
+        "box": [
+          273,
+          785,
+          529,
+          839
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 16
+      },
+      {
+        "label": "Mirror",
+        "target_key": "detail_mirror_010",
+        "category_canonical": "mirror",
+        "box": [
+          322,
+          164,
+          514,
+          224
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 18
+      },
+      {
+        "label": "Mirror",
+        "target_key": "detail_mirror_011",
+        "category_canonical": "mirror",
+        "box": [
+          343,
+          228,
+          502,
+          270
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 19
+      },
+      {
+        "label": "Floor Lamp",
+        "target_key": "detail_floor-lamp_012",
+        "category_canonical": "floor_lamp",
+        "box": [
+          350,
+          298,
+          626,
+          315
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 20
+      },
+      {
+        "label": "Vase",
+        "target_key": "detail_vase_013",
+        "category_canonical": "decor",
+        "box": [
+          635,
+          497,
+          703,
+          523
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 21
+      },
+      {
+        "label": "Table Decor",
+        "target_key": "detail_table-decor_014",
+        "category_canonical": "decor",
+        "box": [
+          655,
+          477,
+          696,
+          501
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 22
+      },
+      {
+        "label": "Table Decor",
+        "target_key": "detail_table-decor_015",
+        "category_canonical": "decor",
+        "box": [
+          661,
+          452,
+          696,
+          479
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 23
+      },
+      {
+        "label": "콘스탄틴 스툴",
+        "target_key": "cart_product-39526_콘스탄틴-스툴_001",
+        "category": "chair",
+        "category_canonical": "dining_chair",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_27410029_01__.png",
+        "volume_rank": 6,
+        "item_id": "product_39526"
+      },
+      {
+        "label": "아놀드 스몰 테이블",
+        "target_key": "cart_product-39524_아놀드-스몰-테이블_002",
+        "category": "sofa_table",
+        "category_canonical": "sofa_table",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_27410029_02__.png",
+        "volume_rank": 2,
+        "item_id": "product_39524"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39073_ai-디자인용-이미지입니다_003",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_27410029_03_AI_.png",
+        "volume_rank": 11,
+        "item_id": "product_39073"
+      },
+      {
+        "label": "메모아르 코트 랙 - 브론즈",
+        "target_key": "cart_product-38870_메모아르-코트-랙---브론즈_004",
+        "category": "decor",
+        "category_canonical": "storage_cabinet_shelf",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_27410029_04__-_.png",
+        "volume_rank": 10,
+        "item_id": "product_38870"
+      },
+      {
+        "label": "타플라 오 미러",
+        "target_key": "cart_product-38857_타플라-오-미러_005",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_27410029_05__.png",
+        "volume_rank": 7,
+        "item_id": "product_38857"
+      }
+    ],
+    "used_cutout_count": 11,
+    "product_keys": [
+      {
+        "label": "툰드라",
+        "target_key": "cart_product-38318_툰드라_008",
+        "box": [
+          693,
+          86,
+          951,
+          912
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 9,
+        "category": "rug"
+      },
+      {
+        "label": "카멜레온다 소파",
+        "target_key": "cart_product-37247_카멜레온다-소파_011",
+        "box": [
+          554,
+          297,
+          784,
+          792
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 1,
+        "category": "main_sofa"
+      },
+      {
+        "label": "시드 암체어",
+        "target_key": "cart_product-37645_시드-암체어_010",
+        "box": [
+          625,
+          146,
+          898,
+          287
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 3,
+        "category": "lounge_chair"
+      },
+      {
+        "label": "콘스탄틴 스툴",
+        "target_key": "cart_product-39526_콘스탄틴-스툴_001",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 6,
+        "category": "dining_chair"
+      },
+      {
+        "label": "아놀드 스몰 테이블",
+        "target_key": "cart_product-39524_아놀드-스몰-테이블_002",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 2,
+        "category": "sofa_table"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39073_ai-디자인용-이미지입니다_003",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 11,
+        "category": "decor"
+      },
+      {
+        "label": "메모아르 코트 랙 - 브론즈",
+        "target_key": "cart_product-38870_메모아르-코트-랙---브론즈_004",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 10,
+        "category": "storage_cabinet_shelf"
+      },
+      {
+        "label": "타플라 오 미러",
+        "target_key": "cart_product-38857_타플라-오-미러_005",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 7,
+        "category": "decor"
+      },
+      {
+        "label": "베리에이션 플로어 램프",
+        "target_key": "cart_product-38728_베리에이션-플로어-램프_006",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 8,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "84V 시리즈",
+        "target_key": "cart_product-38715_84v-시리즈_007",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 5,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "티 테이블",
+        "target_key": "cart_product-37714_티-테이블_009",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 4,
+        "category": "table"
+      }
+    ]
+  },
+  {
+    "id": "408e0d16-22f9-4886-9e21-9eef79886d57",
+    "status": "finished",
+    "created_at": null,
+    "render_url": null,
+    "detail_count": 3,
+    "detail_targets": [
+      {
+        "name": "Detail: kitchen island",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782194882_9b0f3a_1_Detailkitchenisland.png",
+        "target_key": "detail_kitchen-island_001",
+        "target_label": "kitchen island",
+        "box": [
+          531,
+          615,
+          656,
+          759
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: refrigerator",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782194880_9b0f3a_2_Detailrefrigerator.png",
+        "target_key": "detail_refrigerator_002",
+        "target_label": "refrigerator",
+        "box": [
+          413,
+          803,
+          630,
+          852
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: potted plant",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782194880_9b0f3a_3_Detailpottedplant.png",
+        "target_key": "detail_potted-plant_005",
+        "target_label": "potted plant",
+        "box": [
+          456,
+          682,
+          538,
+          703
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      }
+    ],
+    "furniture_sample": [
+      {
+        "label": "kitchen island",
+        "target_key": "detail_kitchen-island_001",
+        "category_canonical": "",
+        "box": [
+          531,
+          615,
+          656,
+          759
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 3
+      },
+      {
+        "label": "refrigerator",
+        "target_key": "detail_refrigerator_002",
+        "category_canonical": "",
+        "box": [
+          413,
+          803,
+          630,
+          852
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 4
+      },
+      {
+        "label": "트위기 플로어 램프(블랙)",
+        "target_key": "cart_product-21308_트위기-플로어-램프-블랙_002",
+        "category": "floor_lamp",
+        "category_canonical": "floor_lamp",
+        "box": [
+          288,
+          39,
+          908,
+          344
+        ],
+        "source_box": [
+          291,
+          38,
+          908,
+          340
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_fc6c608f_02__.png",
+        "volume_rank": 1
+      },
+      {
+        "label": "그라운드 사이드 테이블",
+        "target_key": "cart_product-26404_그라운드-사이드-테이블_001",
+        "category": "table",
+        "category_canonical": "table",
+        "box": [
+          647,
+          451,
+          868,
+          552
+        ],
+        "source_box": [
+          647,
+          449,
+          866,
+          552
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_fc6c608f_01__.png",
+        "volume_rank": 2
+      },
+      {
+        "label": "potted plant",
+        "target_key": "detail_potted-plant_005",
+        "category_canonical": "plant",
+        "box": [
+          456,
+          682,
+          538,
+          703
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 5
+      }
+    ],
+    "used_cutout_count": 2,
+    "product_keys": [
+      {
+        "label": "트위기 플로어 램프(블랙)",
+        "target_key": "cart_product-21308_트위기-플로어-램프-블랙_002",
+        "box": [
+          288,
+          39,
+          908,
+          344
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 1,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "그라운드 사이드 테이블",
+        "target_key": "cart_product-26404_그라운드-사이드-테이블_001",
+        "box": [
+          647,
+          451,
+          868,
+          552
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 2,
+        "category": "table"
+      }
+    ]
+  },
+  {
+    "id": "95ff817e-f592-4e00-9289-877886ac0f49",
+    "status": "finished",
+    "created_at": null,
+    "render_url": null,
+    "detail_count": 5,
+    "detail_targets": [
+      {
+        "name": "Detail: floor sculpture",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782197859_763f4e_1_Detailfloorsculpture.png",
+        "target_key": "detail_floor-sculpture_005",
+        "target_label": "floor sculpture",
+        "box": [
+          285,
+          118,
+          905,
+          185
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: pendant light",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782197855_763f4e_2_Detailpendantlight.png",
+        "target_key": "detail_pendant-light_006",
+        "target_label": "pendant light",
+        "box": [
+          28,
+          424,
+          290,
+          575
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: side table",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782197856_763f4e_3_Detailsidetable.png",
+        "target_key": "detail_side-table_007",
+        "target_label": "side table",
+        "box": [
+          574,
+          650,
+          695,
+          717
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: potted plant",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782197854_763f4e_4_Detailpottedplant.png",
+        "target_key": "detail_potted-plant_010",
+        "target_label": "potted plant",
+        "box": [
+          524,
+          299,
+          608,
+          355
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: wall sconce",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782197856_763f4e_5_Detailwallsconce.png",
+        "target_key": "detail_wall-sconce_009",
+        "target_label": "wall sconce",
+        "box": [
+          276,
+          694,
+          360,
+          715
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      }
+    ],
+    "furniture_sample": [
+      {
+        "label": "젠 러그",
+        "target_key": "cart_product-38323_젠-러그_007",
+        "category": "rug",
+        "category_canonical": "rug",
+        "box": [
+          704,
+          275,
+          915,
+          686
+        ],
+        "source_box": [
+          698,
+          274,
+          915,
+          689
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_a82e224f_07__.png",
+        "volume_rank": 7
+      },
+      {
+        "label": "율렙 소파",
+        "target_key": "cart_product-15354_율렙-소파_010",
+        "category": "sofa",
+        "category_canonical": "main_sofa",
+        "box": [
+          524,
+          354,
+          715,
+          646
+        ],
+        "source_box": [
+          526,
+          355,
+          715,
+          646
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_a82e224f_10__.png",
+        "volume_rank": 1
+      },
+      {
+        "label": "소리아나 암체어",
+        "target_key": "cart_product-39529_소리아나-암체어_001",
+        "category": "lounge_chair",
+        "category_canonical": "lounge_chair",
+        "box": [
+          617,
+          610,
+          892,
+          829
+        ],
+        "source_box": [
+          615,
+          611,
+          891,
+          826
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_a82e224f_01__.png",
+        "volume_rank": 3
+      },
+      {
+        "label": "그래쥬에이트 북쉘프 & 멀티미디어 CG2020",
+        "target_key": "cart_product-38698_그래쥬에이트-북쉘프-멀티미디어-cg2020_005",
+        "category": "decor",
+        "category_canonical": "storage_cabinet_shelf",
+        "box": [
+          291,
+          729,
+          659,
+          831
+        ],
+        "source_box": [
+          288,
+          729,
+          663,
+          831
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_a82e224f_05__CG2020.png",
+        "volume_rank": 2
+      },
+      {
+        "label": "floor sculpture",
+        "target_key": "detail_floor-sculpture_005",
+        "category_canonical": "",
+        "box": [
+          285,
+          118,
+          905,
+          185
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 11
+      },
+      {
+        "label": "pendant light",
+        "target_key": "detail_pendant-light_006",
+        "category_canonical": "pendant_lamp",
+        "box": [
+          28,
+          424,
+          290,
+          575
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 12
+      },
+      {
+        "label": "side table",
+        "target_key": "detail_side-table_007",
+        "category_canonical": "side_table",
+        "box": [
+          574,
+          650,
+          695,
+          717
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 13
+      },
+      {
+        "label": "side table",
+        "target_key": "detail_side-table_008",
+        "category_canonical": "side_table",
+        "box": [
+          587,
+          293,
+          716,
+          353
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 14
+      },
+      {
+        "label": "wall sconce",
+        "target_key": "detail_wall-sconce_009",
+        "category_canonical": "",
+        "box": [
+          276,
+          694,
+          360,
+          715
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 16
+      },
+      {
+        "label": "potted plant",
+        "target_key": "detail_potted-plant_010",
+        "category_canonical": "plant",
+        "box": [
+          524,
+          299,
+          608,
+          355
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 15
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39073_ai-디자인용-이미지입니다_002",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_02_AI_.png",
+        "volume_rank": 9,
+        "item_id": "product_39073"
+      },
+      {
+        "label": "루나 더블유",
+        "target_key": "cart_product-38856_루나-더블유_003",
+        "category": "lamp",
+        "category_canonical": "light",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_03__.png",
+        "volume_rank": 10,
+        "item_id": "product_38856"
+      },
+      {
+        "label": "하우메아 S",
+        "target_key": "cart_product-38816_하우메아-s_004",
+        "category": "table",
+        "category_canonical": "table",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_04__S.png",
+        "volume_rank": 5,
+        "item_id": "product_38816"
+      },
+      {
+        "label": "말라골라",
+        "target_key": "cart_product-38661_말라골라_006",
+        "category": "lamp",
+        "category_canonical": "light",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_06__.png",
+        "volume_rank": 8,
+        "item_id": "product_38661"
+      },
+      {
+        "label": "컬럼 플로어 램프",
+        "target_key": "cart_product-38100_컬럼-플로어-램프_008",
+        "category": "floor_lamp",
+        "category_canonical": "floor_lamp",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_08__.png",
+        "volume_rank": 4,
+        "item_id": "product_38100"
+      },
+      {
+        "label": "하우메아",
+        "target_key": "cart_product-37710_하우메아_009",
+        "category": "table",
+        "category_canonical": "table",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_a82e224f_09__.png",
+        "volume_rank": 6,
+        "item_id": "product_37710"
+      }
+    ],
+    "used_cutout_count": 10,
+    "product_keys": [
+      {
+        "label": "젠 러그",
+        "target_key": "cart_product-38323_젠-러그_007",
+        "box": [
+          704,
+          275,
+          915,
+          686
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 7,
+        "category": "rug"
+      },
+      {
+        "label": "율렙 소파",
+        "target_key": "cart_product-15354_율렙-소파_010",
+        "box": [
+          524,
+          354,
+          715,
+          646
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 1,
+        "category": "main_sofa"
+      },
+      {
+        "label": "소리아나 암체어",
+        "target_key": "cart_product-39529_소리아나-암체어_001",
+        "box": [
+          617,
+          610,
+          892,
+          829
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 3,
+        "category": "lounge_chair"
+      },
+      {
+        "label": "그래쥬에이트 북쉘프 & 멀티미디어 CG2020",
+        "target_key": "cart_product-38698_그래쥬에이트-북쉘프-멀티미디어-cg2020_005",
+        "box": [
+          291,
+          729,
+          659,
+          831
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 2,
+        "category": "storage_cabinet_shelf"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39073_ai-디자인용-이미지입니다_002",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 9,
+        "category": "decor"
+      },
+      {
+        "label": "루나 더블유",
+        "target_key": "cart_product-38856_루나-더블유_003",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 10,
+        "category": "light"
+      },
+      {
+        "label": "하우메아 S",
+        "target_key": "cart_product-38816_하우메아-s_004",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 5,
+        "category": "table"
+      },
+      {
+        "label": "말라골라",
+        "target_key": "cart_product-38661_말라골라_006",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 8,
+        "category": "light"
+      },
+      {
+        "label": "컬럼 플로어 램프",
+        "target_key": "cart_product-38100_컬럼-플로어-램프_008",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 4,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "하우메아",
+        "target_key": "cart_product-37710_하우메아_009",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 6,
+        "category": "table"
+      }
+    ]
+  },
+  {
+    "id": "ff4ed2fb-1a45-45b1-9bd1-bff16b257e17",
+    "status": "finished",
+    "created_at": null,
+    "render_url": null,
+    "detail_count": 6,
+    "detail_targets": [
+      {
+        "name": "Detail: Floor Lamp",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198446_f16589_1_DetailFloorLamp.png",
+        "target_key": "detail_floor-lamp_006",
+        "target_label": "Floor Lamp",
+        "box": [
+          279,
+          578,
+          701,
+          711
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: TV Console",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198453_f16589_2_DetailTVConsole.png",
+        "target_key": "detail_tv-console_003",
+        "target_label": "TV Console",
+        "box": [
+          540,
+          105,
+          676,
+          329
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Coffee Table",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198450_f16589_3_DetailCoffeeTable.png",
+        "target_key": "detail_coffee-table_005",
+        "target_label": "Coffee Table",
+        "box": [
+          668,
+          431,
+          796,
+          622
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Framed Print",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198454_f16589_4_DetailFramedPrint.png",
+        "target_key": "detail_framed-print_007",
+        "target_label": "Framed Print",
+        "box": [
+          380,
+          120,
+          555,
+          195
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: TV",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198448_f16589_5_DetailTV.png",
+        "target_key": "detail_tv_008",
+        "target_label": "TV",
+        "box": [
+          438,
+          207,
+          547,
+          309
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      },
+      {
+        "name": "Detail: Side Table",
+        "url": "https://intea-ai-render.s3.ap-northeast-2.amazonaws.com/external/detailrendered/rendered/detail_1782198446_f16589_6_DetailSideTable.png",
+        "target_key": "detail_side-table_009",
+        "target_label": "Side Table",
+        "box": [
+          603,
+          612,
+          716,
+          668
+        ],
+        "box_source": "detail_current_image_analysis",
+        "cutout_ref_count": 0
+      }
+    ],
+    "furniture_sample": [
+      {
+        "label": "커스텀 러그",
+        "target_key": "cart_product-39525_커스텀-러그_001",
+        "category": "rug",
+        "category_canonical": "rug",
+        "box": [
+          708,
+          191,
+          1000,
+          856
+        ],
+        "source_box": [
+          702,
+          190,
+          1000,
+          853
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_19986ace_01__.png",
+        "volume_rank": 8
+      },
+      {
+        "label": "온 더 락 소파",
+        "target_key": "cart_product-37245_온-더-락-소파_012",
+        "category": "sofa",
+        "category_canonical": "main_sofa",
+        "box": [
+          570,
+          195,
+          794,
+          608
+        ],
+        "source_box": [
+          569,
+          194,
+          794,
+          610
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_19986ace_12__.png",
+        "volume_rank": 1
+      },
+      {
+        "label": "TV Console",
+        "target_key": "detail_tv-console_003",
+        "category_canonical": "electronics",
+        "box": [
+          540,
+          105,
+          676,
+          329
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 14
+      },
+      {
+        "label": "DS-262/11 체어",
+        "target_key": "cart_product-37641_ds-262-11-체어_010",
+        "category": "lounge_chair",
+        "category_canonical": "lounge_chair",
+        "box": [
+          510,
+          715,
+          810,
+          846
+        ],
+        "source_box": [
+          509,
+          715,
+          810,
+          848
+        ],
+        "box_source": "detail_current_image_analysis",
+        "crop_path": "outputs/crop_19986ace_10_DS-262_11_.png",
+        "volume_rank": 2
+      },
+      {
+        "label": "Coffee Table",
+        "target_key": "detail_coffee-table_005",
+        "category_canonical": "sofa_table",
+        "box": [
+          668,
+          431,
+          796,
+          622
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 15
+      },
+      {
+        "label": "Floor Lamp",
+        "target_key": "detail_floor-lamp_006",
+        "category_canonical": "floor_lamp",
+        "box": [
+          279,
+          578,
+          701,
+          711
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 13
+      },
+      {
+        "label": "Framed Print",
+        "target_key": "detail_framed-print_007",
+        "category_canonical": "decor",
+        "box": [
+          380,
+          120,
+          555,
+          195
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 16
+      },
+      {
+        "label": "TV",
+        "target_key": "detail_tv_008",
+        "category_canonical": "electronics",
+        "box": [
+          438,
+          207,
+          547,
+          309
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 17
+      },
+      {
+        "label": "Side Table",
+        "target_key": "detail_side-table_009",
+        "category_canonical": "side_table",
+        "box": [
+          603,
+          612,
+          716,
+          668
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 18
+      },
+      {
+        "label": "Floor Speaker",
+        "target_key": "detail_floor-speaker_010",
+        "category_canonical": "electronics",
+        "box": [
+          472,
+          57,
+          678,
+          80
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 20
+      },
+      {
+        "label": "Floor Speaker",
+        "target_key": "detail_floor-speaker_011",
+        "category_canonical": "electronics",
+        "box": [
+          479,
+          348,
+          584,
+          362
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 21
+      },
+      {
+        "label": "Vase with Branches",
+        "target_key": "detail_vase-with-branches_012",
+        "category_canonical": "decor",
+        "box": [
+          491,
+          630,
+          606,
+          672
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 19
+      },
+      {
+        "label": "Sculpture",
+        "target_key": "detail_sculpture_013",
+        "category_canonical": "",
+        "box": [
+          540,
+          621,
+          606,
+          640
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 22
+      },
+      {
+        "label": "Sculpture",
+        "target_key": "detail_sculpture_014",
+        "category_canonical": "",
+        "box": [
+          564,
+          639,
+          607,
+          660
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 23
+      },
+      {
+        "label": "베어브릭 오디오 포터블 블루투스 스피커 400% 블랙",
+        "target_key": "cart_product-39181_베어브릭-오디오-포터블-블루투스-스피커-40_002",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_02__400_.png",
+        "volume_rank": 12,
+        "item_id": "product_39181"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39091_ai-디자인용-이미지입니다_003",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_03_AI_.png",
+        "volume_rank": 9,
+        "item_id": "product_39091"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_04_AI_.png",
+        "volume_rank": 10,
+        "item_id": "product_39076"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39064_ai-디자인용-이미지입니다_005",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_05_AI_.png",
+        "volume_rank": 11,
+        "item_id": "product_39064"
+      },
+      {
+        "label": "베오랩 18",
+        "target_key": "cart_product-38860_베오랩-18_006",
+        "category": "decor",
+        "category_canonical": "decor",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_06__18.png",
+        "volume_rank": 7,
+        "item_id": "product_38860"
+      },
+      {
+        "label": "플래트너 사이드 테이블",
+        "target_key": "cart_product-38819_플래트너-사이드-테이블_007",
+        "category": "table",
+        "category_canonical": "table",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "crop_path": "outputs/crop_19986ace_07__.png",
+        "volume_rank": 6,
+        "item_id": "product_38819"
+      }
+    ],
+    "used_cutout_count": 12,
+    "product_keys": [
+      {
+        "label": "커스텀 러그",
+        "target_key": "cart_product-39525_커스텀-러그_001",
+        "box": [
+          708,
+          191,
+          1000,
+          856
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 8,
+        "category": "rug"
+      },
+      {
+        "label": "온 더 락 소파",
+        "target_key": "cart_product-37245_온-더-락-소파_012",
+        "box": [
+          570,
+          195,
+          794,
+          608
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 1,
+        "category": "main_sofa"
+      },
+      {
+        "label": "DS-262/11 체어",
+        "target_key": "cart_product-37641_ds-262-11-체어_010",
+        "box": [
+          510,
+          715,
+          810,
+          846
+        ],
+        "box_source": "detail_current_image_analysis",
+        "volume_rank": 2,
+        "category": "lounge_chair"
+      },
+      {
+        "label": "베어브릭 오디오 포터블 블루투스 스피커 400% 블랙",
+        "target_key": "cart_product-39181_베어브릭-오디오-포터블-블루투스-스피커-40_002",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 12,
+        "category": "decor"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39091_ai-디자인용-이미지입니다_003",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 9,
+        "category": "decor"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39076_ai-디자인용-이미지입니다_004",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 10,
+        "category": "decor"
+      },
+      {
+        "label": "AI 디자인용 이미지입니다",
+        "target_key": "cart_product-39064_ai-디자인용-이미지입니다_005",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 11,
+        "category": "decor"
+      },
+      {
+        "label": "베오랩 18",
+        "target_key": "cart_product-38860_베오랩-18_006",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 7,
+        "category": "decor"
+      },
+      {
+        "label": "플래트너 사이드 테이블",
+        "target_key": "cart_product-38819_플래트너-사이드-테이블_007",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 6,
+        "category": "table"
+      },
+      {
+        "label": "Tolomeo Mega Floor Lamp",
+        "target_key": "cart_product-38073_tolomeo-mega-floor-lamp_008",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 5,
+        "category": "floor_lamp"
+      },
+      {
+        "label": "엔폴드 사이드보드",
+        "target_key": "cart_product-37864_엔폴드-사이드보드_009",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 4,
+        "category": "decor"
+      },
+      {
+        "label": "아코르도 커피 테이블_블랙",
+        "target_key": "cart_product-37562_아코르도-커피-테이블-블랙_011",
+        "box": [
+          0,
+          0,
+          1000,
+          1000
+        ],
+        "box_source": "cached_detail_snapshot",
+        "volume_rank": 3,
+        "category": "sofa_table"
+      }
+    ]
+  }
+]

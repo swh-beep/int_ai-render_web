@@ -1,0 +1,31 @@
+--- a/src/components/ai-consultant/AIConsultantWidget.tsx
++++ b/src/components/ai-consultant/AIConsultantWidget.tsx
+@@ -2895,19 +2895,20 @@
+
+ const extractRenderBatchImageUrls = (data: unknown): RenderBatchImageResult[] =>
+   getBatchResultRows(data)
+-    .map((row, index) => {
++    .reduce<RenderBatchImageResult[]>((results, row, index) => {
+       const record = getObjectRecord(row)
+
+       if (!record) {
+-        return null
+-      }
+-
+-      return {
++        return results
++      }
++
++      results.push({
+         variantIndex: readZeroBasedVariantIndex(record, index),
+         imageUrl: extractRenderImageUrl(record.render ?? record),
+-      }
+-    })
+-    .filter((row): row is RenderBatchImageResult => Boolean(row))
++      })
++
++      return results
++    }, [])
+     .sort((left, right) => left.variantIndex - right.variantIndex)
+
+ const pollRenderBatchJobImages = async (

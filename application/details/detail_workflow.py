@@ -368,6 +368,11 @@ def run_generate_details_job(
         unique_id = uuid.uuid4().hex[:6]
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
 
+        use_product_reference_localization = (
+            aud == "external"
+            and bool(furniture_data)
+            and detect_item_bbox_norm is not None
+        )
         analyzed_items = prepare_detail_generation_items(
             furniture_data=furniture_data,
             moodboard_url=moodboard_url,
@@ -381,7 +386,7 @@ def run_generate_details_job(
             analyze_cropped_item=analyze_cropped_item,
             attach_volume_ranks=attach_volume_ranks,
             normalize_label_for_match=normalize_label_for_match,
-            simple_generation_mode=True,
+            simple_generation_mode=not use_product_reference_localization,
         )
         if budgeted_mode:
             remaining_budget = _remaining_deadline_sec()

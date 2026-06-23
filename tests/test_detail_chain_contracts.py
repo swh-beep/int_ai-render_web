@@ -712,6 +712,159 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["furniture_data"][0]["crop_path"], "cached-table.png")
         self.assertEqual(len(result["furniture_data"]), 1)
 
+    def test_external_generate_details_job_localizes_cart_products_without_fresh_detection_loss(self):
+        source_path = Path("outputs/test-detail-cart-localize-products.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        detect_calls = []
+        localized = {
+            "Ma Jong Sofa": (0.18, 0.51, 0.76, 0.76),
+            "Big Bird Rug": (0.20, 0.62, 0.82, 0.89),
+            "Rio Table": (0.41, 0.62, 0.59, 0.77),
+            "Floor Lamp": (0.34, 0.37, 0.36, 0.55),
+            "Pendant Lamp": (0.47, 0.08, 0.55, 0.32),
+            "Zig Zag Chair": (0.70, 0.58, 0.82, 0.89),
+            "Plant Decor": (0.46, 0.55, 0.51, 0.69),
+        }
+        furniture_data = [
+            {
+                "label": "Floor Lamp",
+                "target_key": "cart_product-39522_floor-lamp_001",
+                "item_id": "product_39522",
+                "category": "floor_lamp",
+                "category_canonical": "floor_lamp",
+                "box_2d": [0, 0, 1000, 1000],
+                "crop_path": "floor-lamp.png",
+                "volume_rank": 7,
+            },
+            {
+                "label": "Big Bird Rug",
+                "target_key": "cart_product-39521_rug_002",
+                "item_id": "product_39521",
+                "category": "rug",
+                "category_canonical": "rug",
+                "box_2d": [625, 203, 893, 824],
+                "box_source": "selected_variant_review",
+                "crop_path": "rug.png",
+                "volume_rank": 3,
+            },
+            {
+                "label": "Plant Decor",
+                "target_key": "cart_product-39080_plant_003",
+                "item_id": "product_39080",
+                "category": "decor",
+                "category_canonical": "decor",
+                "box_2d": [0, 0, 1000, 1000],
+                "crop_path": "plant.png",
+                "volume_rank": 4,
+            },
+            {
+                "label": "Pendant Lamp",
+                "target_key": "cart_product-38668_pendant_006",
+                "item_id": "product_38668",
+                "category": "lamp",
+                "category_canonical": "light",
+                "box_2d": [0, 0, 1000, 1000],
+                "crop_path": "pendant.png",
+                "volume_rank": 6,
+            },
+            {
+                "label": "Ma Jong Sofa",
+                "target_key": "cart_product-38543_sofa_007",
+                "item_id": "product_38543",
+                "category": "sofa",
+                "category_canonical": "main_sofa",
+                "box_2d": [515, 184, 768, 763],
+                "box_source": "selected_variant_review",
+                "crop_path": "sofa.png",
+                "volume_rank": 1,
+            },
+            {
+                "label": "Rio Table",
+                "target_key": "cart_product-37582_table_008",
+                "item_id": "product_37582",
+                "category": "sofa_table",
+                "category_canonical": "sofa_table",
+                "box_2d": [621, 410, 775, 592],
+                "box_source": "selected_variant_review",
+                "crop_path": "table.png",
+                "volume_rank": 2,
+            },
+            {
+                "label": "Zig Zag Chair",
+                "target_key": "cart_product-37426_chair_009",
+                "item_id": "product_37426",
+                "category": "chair",
+                "category_canonical": "dining_chair",
+                "box_2d": [0, 0, 1000, 1000],
+                "crop_path": "chair.png",
+                "volume_rank": 5,
+            },
+        ]
+
+        try:
+            result = run_generate_details_job(
+                {
+                    "image_url": str(source_path),
+                    "furniture_data": furniture_data,
+                    "audience": "external",
+                    "require_details": True,
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                persist_job_result=lambda payload, audience=None: None,
+                materialize_input=lambda url, prefix: str(source_path) if prefix == "detail_src" else url,
+                resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                log_section=lambda message: None,
+                detect_furniture_boxes=lambda path: detect_calls.append(path) or [
+                    {"label": "Ma Jong Sofa", "box_2d": [519, 187, 764, 764]},
+                    {"label": "Big Bird Rug", "box_2d": [629, 204, 893, 822]},
+                    {"label": "Rio Table", "box_2d": [617, 409, 772, 592]},
+                ],
+                detect_item_bbox_norm=lambda staged_path, crop_path, label, item_context=None, timeout_sec=None: localized.get(label),
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: sorted(
+                    [{**item, "volume_rank": item.get("volume_rank") or index + 1} for index, item in enumerate(items)],
+                    key=lambda item: int(item.get("volume_rank") or 10**9),
+                ),
+                construct_dynamic_styles=construct_dynamic_styles,
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: {
+                    "path": original_image_path,
+                    "style_name": style_config.get("name"),
+                },
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                volume_ranking_snapshot=lambda items: [{"target_key": item.get("target_key")} for item in items if isinstance(item, dict)],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+
+        self.assertEqual(detect_calls, [])
+        self.assertEqual(len(result["details"]), 6)
+        self.assertEqual(
+            {detail["target_key"] for detail in result["details"]},
+            {
+                "cart_product-38543_sofa_007",
+                "cart_product-37582_table_008",
+                "cart_product-39080_plant_003",
+                "cart_product-37426_chair_009",
+                "cart_product-38668_pendant_006",
+                "cart_product-39522_floor-lamp_001",
+            },
+        )
+        self.assertNotIn("cart_product-39521_rug_002", {detail["target_key"] for detail in result["details"]})
+        self.assertTrue(
+            all(
+                row.get("box_source") == "product_reference_localization"
+                for row in result["furniture_data"]
+                if str(row.get("target_key") or "") != "cart_product-39521_rug_002"
+            )
+        )
+
     def test_run_regenerate_single_detail_job_uses_simple_generation_for_detail_styles(self):
         source_path = Path("outputs/test-regenerate-crop-mode.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)

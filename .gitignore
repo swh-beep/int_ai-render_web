@@ -5,5 +5,8 @@ outputs/
 .DS_Store
 .serena/
 .tmp_codex_app/
+.tmp_pytest*/
+.tmp_eslintcache*
+.playwright-mcp/
 .local_job_state/
 .video_state/
