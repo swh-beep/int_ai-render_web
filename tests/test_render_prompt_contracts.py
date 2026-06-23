@@ -226,6 +226,10 @@ def test_generate_furnished_room_includes_style_direction_and_inventory_for_comp
         assert "**NO warm/yellow cast.**" not in prompt
         assert "OPENING LOCK" in prompt
         assert "AXIS ALIGNMENT" in prompt
+        assert "SAME EMPTY ROOM STRUCTURE LOCK" in prompt
+        assert "locked camera plate" in prompt
+        assert "Do not rotate the camera, pan sideways, orbit, truck, dolly" in prompt
+        assert "door/window/wall/corner layout must be pixel-position consistent" in prompt
         assert output_path.exists()
     finally:
         if output_path.exists():
