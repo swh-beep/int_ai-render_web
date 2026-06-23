@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import resolve_item_family
+from application.render.postprocess_support import decor_prefers_surface_placement, resolve_item_family
 from application.render.render_contracts import PlacementPlan
 
 
-_SURFACE_FAMILIES = {"table_lamp", "decor"}
+_SURFACE_FAMILIES = {"table_lamp"}
 _SMALL_FREE_FAMILIES = {"floor_lamp", "table_lamp", "stool"}
 _ADJACENT_SEATING_FAMILIES = {"chair", "lounge_chair"}
 _SECONDARY_ADJACENT_SEATING_FAMILIES = {"lounge_seating", "armchair", "loveseat"}
@@ -59,7 +59,7 @@ def _placement_family(item: dict) -> str:
         return "ceiling_attached"
     if family == "rug":
         return "rug"
-    if family in _SURFACE_FAMILIES:
+    if family in _SURFACE_FAMILIES or (family == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     if family in _SMALL_FREE_FAMILIES:
         return "small_free_object"

@@ -264,7 +264,7 @@ def test_build_placement_plan_promotes_decor_shelving_reference_to_floor_storage
     assert enriched[0]["placement_contract"]["family"] == "storage"
 
 
-def test_build_placement_plan_keeps_generic_named_decor_on_surface_band():
+def test_build_placement_plan_keeps_tabletop_decor_on_surface_band():
     analyzed_items = [
         {
             "target_key": "decor-39075",
@@ -272,13 +272,14 @@ def test_build_placement_plan_keeps_generic_named_decor_on_surface_band():
             "category": "decor",
             "category_canonical": "decor",
             "product_identity": {
-                "family": "ai design image",
+                "family": "decor",
                 "topology_cues": [
                     "Left cylindrical smoky amber glass bell jar",
                     "Right textured black ceramic vessel",
                 ],
-                "dims_mm": {},
+                "dims_mm": {"width_mm": 250, "depth_mm": 250, "height_mm": 430},
             },
+            "requested_dims_mm": {"width_mm": 250, "depth_mm": 250, "height_mm": 430},
             "reference_features": {
                 "distinctive_parts": [
                     "Amber glass bell jar with spherical knob",
@@ -315,6 +316,60 @@ def test_build_placement_plan_keeps_generic_named_decor_on_surface_band():
     assert zone["placement_family"] == "surface_placed"
     assert zone["zone"] == "surface_top_band"
     assert enriched[0]["placement_contract"]["family"] == "decor"
+
+
+def test_build_placement_plan_does_not_force_large_decor_to_surface_band():
+    analyzed_items = [
+        {
+            "target_key": "decor-39080",
+            "label": "AI design image",
+            "category": "decor",
+            "category_canonical": "decor",
+            "product_identity": {
+                "family": "decor",
+                "topology_cues": [
+                    "Tall potted dracaena-style plant",
+                    "slender multi-stem plant rising from a cylindrical floor planter",
+                ],
+                "dims_mm": {"width_mm": 450, "depth_mm": 450, "height_mm": 1450},
+            },
+            "requested_dims_mm": {"width_mm": 450, "depth_mm": 450, "height_mm": 1450},
+            "reference_features": {
+                "silhouette_cues": [
+                    "Tall floor-standing potted plant",
+                    "Long stems and leaf crowns above a planter",
+                ],
+            },
+        }
+    ]
+    scene_contract = SceneContract(
+        room_dims_contract=RoomDimsContract(
+            source="explicit",
+            confidence="high",
+            dims_mm_center={"width_mm": 6000, "depth_mm": 5000, "height_mm": 2800},
+            dims_mm_range={},
+            estimation_basis=["user_dimensions"],
+            strict_scale_mode="strict_geometry_mode",
+            room_dims_valid=True,
+        ),
+        room="livingroom",
+        audience="external",
+        anchor_item_key="sofa-1",
+        geometry_targets={},
+    )
+
+    placement_plan, enriched = build_placement_plan(
+        analyzed_items=analyzed_items,
+        primary_item=None,
+        scene_contract=scene_contract,
+        placement_instructions="",
+    )
+
+    zone = placement_plan.placement_zones["decor-39080"]
+    assert zone["family"] == "decor"
+    assert zone["placement_family"] == "floor_placed"
+    assert zone["zone"] == "general_floor_band"
+    assert enriched[0]["placement_contract"]["placement_family"] == "floor_placed"
 
 
 def test_build_placement_plan_routes_ceiling_and_wall_fixtures_with_orientation_hints():

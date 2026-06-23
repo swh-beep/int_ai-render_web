@@ -42,6 +42,64 @@ class DetailChainContractsTests(unittest.TestCase):
             ],
         )
 
+    def test_select_external_detail_styles_delays_overlapping_crop_targets(self):
+        styles = [
+            {
+                "name": "Detail: Sofa",
+                "target_key": "cart_product-38543_sofa_007",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [548, 203, 778, 776],
+                "target_category": "main_sofa",
+            },
+            {
+                "name": "Detail: Rio Table",
+                "target_key": "cart_product-37582_table_008",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [648, 408, 817, 619],
+                "target_category": "sofa_table",
+            },
+            {
+                "name": "Detail: Tabletop Decor",
+                "target_key": "cart_product-39080_decor_003",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [556, 462, 692, 510],
+                "target_category": "decor",
+            },
+            {
+                "name": "Detail: Zig Chair",
+                "target_key": "cart_product-37426_chair_009",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [581, 698, 893, 822],
+                "target_category": "dining_chair",
+            },
+            {
+                "name": "Detail: Floor Lamp",
+                "target_key": "cart_product-39522_floor-lamp_001",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [370, 338, 545, 362],
+                "target_category": "floor_lamp",
+            },
+            {
+                "name": "Detail: Pendant",
+                "target_key": "cart_product-38668_pendant_006",
+                "detail_mode": "product_identity_lock",
+                "target_box_2d": [76, 468, 320, 551],
+                "target_category": "light",
+            },
+        ]
+
+        selected = select_external_detail_styles(styles)
+
+        self.assertEqual(len(selected), 6)
+        self.assertEqual(
+            [style["name"] for style in selected[:3]],
+            ["Detail: Sofa", "Detail: Zig Chair", "Detail: Floor Lamp"],
+        )
+        self.assertEqual(
+            [style["name"] for style in selected[3:]],
+            ["Detail: Pendant", "Detail: Rio Table", "Detail: Tabletop Decor"],
+        )
+
     def test_select_external_detail_styles_keeps_order_when_under_limit(self):
         three_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 4)]
         four_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 5)]
@@ -648,7 +706,8 @@ class DetailChainContractsTests(unittest.TestCase):
             source_path.unlink(missing_ok=True)
 
         self.assertEqual(captured["style_targets"], ["cached_table_001"])
-        self.assertEqual(result["furniture_data"][0]["box_2d"], [100, 120, 220, 320])
+        self.assertEqual(result["furniture_data"][0]["box_2d"], [420, 430, 640, 700])
+        self.assertEqual(result["furniture_data"][0]["source_box_2d"], [100, 120, 220, 320])
         self.assertEqual(result["furniture_data"][0]["target_key"], "cached_table_001")
         self.assertEqual(result["furniture_data"][0]["crop_path"], "cached-table.png")
         self.assertEqual(len(result["furniture_data"]), 1)
@@ -1310,6 +1369,74 @@ def test_external_product_backed_details_prefer_verified_crop_extract(tmp_path):
     assert recorded_styles[1]["detail_mode"] == "product_identity_lock"
     assert recorded_styles[1]["target_box_source"] == "product_reference_localization"
     assert recorded_crop_preferences == {1: True}
+
+
+def test_external_cart_product_details_prefer_current_render_crop_extract(tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    recorded_crop_preferences = {}
+    recorded_styles = {}
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        recorded_styles[int(index)] = dict(style_config)
+        recorded_crop_preferences[int(index)] = kwargs.get("prefer_crop_extract")
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [
+                {
+                    "label": "HAY Bowler Table",
+                    "target_key": "cart_product-39553_bowler_003",
+                    "crop_path": str(image_path),
+                    "category": "side_table",
+                    "category_canonical": "side_table",
+                    "box_2d": [603, 612, 716, 668],
+                }
+            ],
+            "audience": "external",
+        },
+        normalize_audience=lambda audience: audience or "external",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: [
+            {
+                "label": "HAY Bowler Table",
+                "box_2d": [603, 612, 716, 668],
+                "box_source": "detail_current_image_analysis",
+            },
+            {
+                "label": "Side Table",
+                "box_2d": [603, 612, 716, 668],
+                "box_source": "detail_current_image_analysis",
+            },
+        ],
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}_{str(label or '').strip().lower().replace(' ', '-')}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: item,
+        attach_volume_ranks=lambda items: [{**item, "volume_rank": index + 1} for index, item in enumerate(items)],
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: str(label or "").strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    assert [row["style_name"] for row in result["details"]][:1] == ["Detail: HAY Bowler Table"]
+    assert recorded_styles[1]["target_key"] == "cart_product-39553_bowler_003"
+    assert recorded_styles[1]["detail_mode"] == "product_identity_lock"
+    assert recorded_styles[1]["target_box_source"] == "detail_current_image_analysis"
+    assert recorded_crop_preferences[1] is True
 
 
 def test_run_generate_details_job_budgeted_mode_returns_empty_shape_when_budget_is_too_low(monkeypatch, tmp_path):

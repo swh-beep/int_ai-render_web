@@ -93,7 +93,7 @@ def _size_scale_note(*, family: str, size_class: str) -> str:
             "extra-large": "an oversized rug anchor that should dominate the floor footprint",
         }
         return notes.get(size_class, "a rug sized to its real-world floor footprint")
-    if normalized_family in {"table_lamp", "decor"}:
+    if normalized_family == "table_lamp":
         notes = {
             "tiny": "a tiny surface accessory, never anchor-sized furniture",
             "small": "a compact surface object, not a side table or stool",
@@ -101,6 +101,14 @@ def _size_scale_note(*, family: str, size_class: str) -> str:
             "large": "a substantial decorative object that still reads smaller than anchor furniture",
         }
         return notes.get(size_class, "a compact surface-scale object")
+    if normalized_family == "decor":
+        notes = {
+            "tiny": "a tiny decorative object, never anchor-sized furniture",
+            "small": "a compact decorative object, placed on a surface only when its reference or dimensions indicate tabletop scale",
+            "medium": "a mid-scale decorative object, placed according to its reference instead of automatically on a tabletop",
+            "large": "a large decorative object that may be floor-standing or wall/floor placed according to its reference",
+        }
+        return notes.get(size_class, "a decorative object placed according to its reference scale")
     notes = {
         "tiny": "a very small accessory-scale piece",
         "small": "a compact accent piece",

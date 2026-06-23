@@ -87,6 +87,132 @@ _CATEGORY_FAMILY_MAP = {
 
 _KNOWN_FAMILY_VALUES = set(_CATEGORY_FAMILY_MAP.values())
 
+_SURFACE_DECOR_SIGNALS = (
+    "tabletop",
+    "table top",
+    "surface",
+    "shelf decor",
+    "table decor",
+    "vase",
+    "jar",
+    "bell jar",
+    "bowl",
+    "tray",
+    "candle",
+    "book",
+    "ceramic vessel",
+    "glass vessel",
+    "small object",
+    "small accessory",
+    "objet",
+)
+
+_FLOOR_DECOR_SIGNALS = (
+    "floor-standing",
+    "floor standing",
+    "floor planter",
+    "floor vase",
+    "large planter",
+    "potted plant",
+    "tall plant",
+    "plant",
+    "tree",
+    "dracaena",
+    "bamboo",
+    "panel",
+    "screen",
+    "room divider",
+    "standing sculpture",
+    "floor sculpture",
+    "statue",
+)
+
+
+def _coerce_positive_int_for_placement(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _flatten_placement_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        fragments: list[str] = []
+        for nested in value.values():
+            fragments.extend(_flatten_placement_text(nested))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments: list[str] = []
+        for nested in value:
+            fragments.extend(_flatten_placement_text(nested))
+        return fragments
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _decor_dims_for_placement(item: dict | None) -> dict[str, int]:
+    item = item if isinstance(item, dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    dims = (
+        item.get("requested_dims_mm")
+        or item.get("dims_mm")
+        or item.get("layout_dims_mm")
+        or product_identity.get("dims_mm")
+        or {}
+    )
+    dims = dims if isinstance(dims, dict) else {}
+    return {
+        "width_mm": _coerce_positive_int_for_placement(dims.get("width_mm")) or 0,
+        "depth_mm": _coerce_positive_int_for_placement(dims.get("depth_mm")) or 0,
+        "height_mm": _coerce_positive_int_for_placement(dims.get("height_mm")) or 0,
+        "radius_mm": _coerce_positive_int_for_placement(dims.get("radius_mm")) or 0,
+    }
+
+
+def decor_prefers_surface_placement(item: dict | None) -> bool:
+    """Return True only for decor that is clearly tabletop/shelf scale."""
+    if not isinstance(item, dict):
+        return False
+
+    dims = _decor_dims_for_placement(item)
+    width_mm = dims["width_mm"]
+    depth_mm = dims["depth_mm"]
+    height_mm = dims["height_mm"]
+    radius_mm = dims["radius_mm"]
+    max_dim = max(width_mm, depth_mm, height_mm, radius_mm)
+    footprint_max = max(width_mm, depth_mm, radius_mm * 2)
+
+    text_sources = [
+        item.get("label"),
+        item.get("category"),
+        item.get("category_canonical"),
+        item.get("category_path"),
+        item.get("type"),
+        item.get("reference_features"),
+        item.get("identity_profile"),
+        item.get("product_identity"),
+        item.get("archetype_strategy"),
+    ]
+    text = " ".join(fragment.lower() for source in text_sources for fragment in _flatten_placement_text(source))
+    has_surface_signal = any(signal in text for signal in _SURFACE_DECOR_SIGNALS)
+    has_floor_signal = any(signal in text for signal in _FLOOR_DECOR_SIGNALS)
+
+    if max_dim > 0:
+        if height_mm >= 700 or max_dim >= 900:
+            return False
+        if height_mm <= 550 and footprint_max <= 550:
+            return True
+        if has_surface_signal and height_mm <= 650 and footprint_max <= 700:
+            return True
+        return False
+
+    if has_floor_signal and not has_surface_signal:
+        return False
+    return has_surface_signal
+
 _SENSITIVE_REMAP_FAMILIES = {
     "mirror",
     "storage",

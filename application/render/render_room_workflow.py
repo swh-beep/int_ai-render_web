@@ -12,7 +12,7 @@ from application.render.render_scale_stage import run_render_scale_stage
 from application.render.render_variant_stage import run_render_variant_stage
 from application.render.qc_gate_stage import annotate_variant_reviews, select_rankable_paths, sort_variant_paths
 from application.render.scale_plan_support import build_scale_plan
-from application.render.postprocess_support import resolve_item_family
+from application.render.postprocess_support import decor_prefers_surface_placement, resolve_item_family
 from application.render.two_pass_strategy_stage import apply_two_pass_strategy
 from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
@@ -120,7 +120,7 @@ def _placement_family_for_item(item: dict) -> str:
         return "wall_attached"
     if family == "rug":
         return "rug"
-    if family in {"table_lamp", "decor"}:
+    if family == "table_lamp" or (family == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     return "floor_placed"
 

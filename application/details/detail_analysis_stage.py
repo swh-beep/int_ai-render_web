@@ -227,6 +227,32 @@ def _localize_product_backed_items(
     return prepared
 
 
+def _prepare_localized_cached_items(
+    *,
+    furniture_data: list | None,
+    local_path: str,
+    materialize_input: Callable[[str | None, str], str | None],
+    detect_item_bbox_norm: Callable[..., object] | None,
+    attach_volume_ranks: Callable[[list], list],
+) -> list:
+    cached_items = [dict(item) for item in furniture_data or [] if isinstance(item, dict)]
+    try:
+        cached_items = attach_volume_ranks(cached_items)
+    except Exception:
+        pass
+    localized_items = _localize_product_backed_items(
+        cached_items=cached_items,
+        local_path=local_path,
+        materialize_input=materialize_input,
+        detect_item_bbox_norm=detect_item_bbox_norm,
+    )
+    try:
+        localized_items = attach_volume_ranks(localized_items)
+    except Exception:
+        pass
+    return localized_items
+
+
 def _merge_cached_identity_into_fresh_items(
     *,
     cached_items: list,
@@ -372,12 +398,10 @@ def _merge_cached_identity_into_fresh_items(
         row["box_source"] = row.get("box_source") or "detail_current_image_analysis"
         cached_index = fresh_to_cached.get(fresh_index)
         if cached_index is None:
-            merged.append(row)
             continue
 
         cached_item = cached_items[cached_index]
         if not isinstance(cached_item, dict):
-            merged.append(row)
             continue
 
         row["label"] = str(cached_item.get("label") or row.get("label") or "").strip() or row.get("label")
@@ -524,22 +548,13 @@ def prepare_detail_generation_items(
     simple_generation_mode: bool = False,
 ) -> list:
     if furniture_data and not simple_generation_mode:
-        cached_items = [dict(item) for item in furniture_data if isinstance(item, dict)]
-        try:
-            cached_items = attach_volume_ranks(cached_items)
-        except Exception:
-            pass
-        localized_items = _localize_product_backed_items(
-            cached_items=cached_items,
+        return _prepare_localized_cached_items(
+            furniture_data=furniture_data,
             local_path=local_path,
             materialize_input=materialize_input,
             detect_item_bbox_norm=detect_item_bbox_norm,
+            attach_volume_ranks=attach_volume_ranks,
         )
-        try:
-            localized_items = attach_volume_ranks(localized_items)
-        except Exception:
-            pass
-        return localized_items
 
     fresh_items = load_analyzed_items(
         furniture_data=None,
@@ -556,6 +571,14 @@ def prepare_detail_generation_items(
     )
 
     if not _structured_items_available(fresh_items):
+        if furniture_data:
+            return _prepare_localized_cached_items(
+                furniture_data=furniture_data,
+                local_path=local_path,
+                materialize_input=materialize_input,
+                detect_item_bbox_norm=detect_item_bbox_norm,
+                attach_volume_ranks=attach_volume_ranks,
+            )
         return load_analyzed_items(
             furniture_data=furniture_data,
             moodboard_url=moodboard_url,

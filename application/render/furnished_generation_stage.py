@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from PIL import Image, ImageDraw, ImageFont
 from application.render.placement_support import build_placement_prompt_block
+from application.render.postprocess_support import decor_prefers_surface_placement
 from shared.image_canvas import (
     get_image_size,
     image_matches_ratio,
@@ -207,7 +208,7 @@ def _category_prompt_guardrails(category: str) -> list[str]:
         rules.extend(["exact_back_seat_leg_geometry", "no_generic_chair_substitution"])
     if any(token in text for token in ("decor", "art", "frame")):
         rules.extend(["copy_artwork_image_content", "no_generic_wall_art_substitution"])
-    if any(token in text for token in ("table_lamp", "decor", "vase", "object", "accessory")):
+    if any(token in text for token in ("table_lamp", "vase", "object", "accessory")):
         rules.append("surface_or_compact_object_scale")
     return rules
 
@@ -224,6 +225,50 @@ def _prompt_cue_list(values, *, limit: int = 3) -> str:
         if len(cues) >= limit:
             break
     return ", ".join(cues)
+
+
+def _is_generic_product_label(label: str | None) -> bool:
+    text = str(label or "").strip().lower()
+    if not text:
+        return False
+    compact = re.sub(r"[\s_\-]+", "", text)
+    if "ai" in compact and (("design" in compact and "image" in compact) or ("디자인" in compact and "이미지" in compact)):
+        return True
+    if text.startswith("ai ") and "?" in text:
+        return True
+    if "판매 제외 상품" in text and ("ai" in compact or "디자인" in compact or "이미지" in compact):
+        return True
+    return False
+
+
+def _visual_alias_for_prompt(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+    alias = (
+        _prompt_cue_list(reference_features.get("distinctive_parts"), limit=1)
+        or _prompt_cue_list(product_identity.get("topology_cues"), limit=1)
+        or _prompt_cue_list(reference_features.get("silhouette_cues"), limit=1)
+        or _prompt_cue_list(profile.get("distinctive_parts"), limit=1)
+        or _prompt_cue_list(profile.get("topology_cues") or profile.get("shape_cues"), limit=1)
+        or _prompt_cue_list(product_identity.get("material_cues"), limit=1)
+        or _prompt_cue_list(reference_features.get("material_cues"), limit=1)
+    )
+    return alias[:120].strip()
+
+
+def _item_display_label_for_prompt(item: dict | None) -> str:
+    if not isinstance(item, dict):
+        return "Unknown Item"
+    raw_label = str(item.get("label") or item.get("category") or "Unknown Item").strip() or "Unknown Item"
+    alias = _visual_alias_for_prompt(item)
+    if alias and _is_generic_product_label(raw_label):
+        item_id = str(item.get("item_id") or item.get("source_index") or item.get("target_key") or "").strip()
+        suffix = f" [{item_id}]" if item_id else ""
+        return f"{alias}{suffix}"
+    return raw_label
 
 
 def _format_contract_dims(dims: dict | None) -> str:
@@ -452,7 +497,8 @@ def _split_cutout_reference_items_for_generation(
 
 
 def _format_grouped_sheet_item_row(slot: str, item: dict) -> str:
-    label = str(item.get("label") or item.get("category") or slot).strip() or slot
+    label = _item_display_label_for_prompt(item)
+    raw_label = str(item.get("label") or "").strip()
     item_key = _item_target_key_for_prompt(item)
     item_id = str(item.get("item_id") or "").strip()
     source_index = str(item.get("source_index") or "").strip()
@@ -466,9 +512,11 @@ def _format_grouped_sheet_item_row(slot: str, item: dict) -> str:
         f"D={depth if depth is not None else 'null'}mm "
         f"H={height if height is not None else 'null'}mm"
     )
+    raw_label_text = f" | RawLabel={raw_label}" if raw_label and raw_label != label else ""
     return (
         f"{slot} = {item_key or label} | Label={label} | SourceIndex={source_index or 'null'} "
         f"| ItemID={item_id or 'null'} | Category={category} | {dims_text}"
+        f"{raw_label_text}"
         f"{_build_reference_identity_suffix(item)}"
     )
 
@@ -680,7 +728,8 @@ def _select_primary_anchor_keys(furniture_specs_json: dict | None, *, limit: int
 def _build_item_exactness_card_row(item: dict | None) -> str:
     if not isinstance(item, dict):
         return ""
-    label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
+    raw_label = str(item.get("label") or item.get("category") or "Unknown Item").strip()
+    label = _item_display_label_for_prompt(item)
     if not label:
         return ""
     try:
@@ -693,6 +742,11 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
     bits = ["reference_image=authoritative_cutout", f"qty={qty}"]
     if category:
         bits.append(f"category={category}")
+    if raw_label and raw_label != label:
+        bits.append(f"raw_label={raw_label}")
+    visual_alias = _visual_alias_for_prompt(item)
+    if visual_alias:
+        bits.append(f"visual_alias={visual_alias}")
     bits.extend(_item_identifier_bits_for_prompt(item))
     if dims_text:
         bits.append(dims_text)
@@ -792,7 +846,7 @@ def _build_reference_identity_suffix(item: dict | None) -> str:
         fields.append(f"MaterialCues={materials}")
     if preserve:
         fields.append(f"PreserveRules={preserve}")
-    fields.append("InvalidIf=generic same-family substitute or missing listed topology/distinctive parts")
+    fields.append("InvalidIf=generic same-family substitute, missing listed topology/distinctive parts, or cross-product feature borrowing")
     return " | " + " | ".join(fields)
 
 
@@ -822,6 +876,7 @@ def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, pr
         "The attached cutout image is the authoritative product-shape source. Text tags are only scale, placement, and exception guardrails.\n",
         "Do not restyle, simplify, or generalize an item into a same-family substitute. If text and image conflict, follow the image.\n",
         "If multiple rows share the same label, they are still separate products when source_index, item_id, or target_key differ. Render each distinct product once per its qty; never merge them or reuse one reference image for another row.\n",
+        "Do not borrow color, material, silhouette, topology, lampshade, stacked-body, leg/support, or distinctive-part cues across product rows. Each row may use only its own attached reference image and its own item card.\n",
     ]
     if primary_rows:
         lines.extend(
@@ -1312,7 +1367,7 @@ def generate_furnished_room(
             if furniture_specs_json and isinstance(furniture_specs_json, dict):
                 rows = []
                 for it in (furniture_specs_json.get("items") or []):
-                    lbl = (it.get("label") or "").strip()
+                    lbl = _item_display_label_for_prompt(it)
                     qty = it.get("qty") or 1
                     dm = it.get("dims_mm") or {}
                     w = dm.get("width_mm")
@@ -1358,7 +1413,7 @@ def generate_furnished_room(
                     continue
                 item_key = str(item.get("target_key") or item.get("source_index") or item.get("label") or "").strip()
                 if item_key and item_key not in item_labels_by_key:
-                    item_labels_by_key[item_key] = str(item.get("label") or item.get("category") or item_key)
+                    item_labels_by_key[item_key] = _item_display_label_for_prompt(item)
         anchor_labels = [item_labels_by_key.get(item_key, item_key) for item_key in primary_anchor_keys if item_key in item_labels_by_key]
         scale_plan_context = _build_scale_plan_context(scale_plan, item_labels_by_key)
         geometry_contract_context = _build_geometry_contract_context(geometry_contract, item_labels_by_key)
@@ -1409,7 +1464,8 @@ def generate_furnished_room(
                     total_requested_qty = 0
 
                     for it in (furniture_specs_json.get("items") or []):
-                        label = (it.get("label") or "").strip() or "Unknown Item"
+                        raw_label = (it.get("label") or "").strip() or "Unknown Item"
+                        label = _item_display_label_for_prompt(it)
                         qty = it.get("qty") or 1
                         try:
                             qty = max(1, int(qty))
@@ -1421,6 +1477,11 @@ def generate_furnished_room(
                         inventory_bits = [f"qty={qty}"]
                         if category:
                             inventory_bits.append(f"category={category}")
+                        if raw_label and raw_label != label:
+                            inventory_bits.append(f"raw_label={raw_label}")
+                        visual_alias = _visual_alias_for_prompt(it)
+                        if visual_alias:
+                            inventory_bits.append(f"visual_alias={visual_alias}")
                         inventory_bits.extend(_item_identifier_bits_for_prompt(it))
                         inventory_rows.append(f"- {label}: " + "; ".join(inventory_bits))
                         dm = it.get("dims_mm") or {}
@@ -1459,8 +1520,10 @@ def generate_furnished_room(
                             except Exception:
                                 room_depth_ratio = None
                         category_text = str(category or "").lower()
+                        surface_decor = bool("decor" in category_text and decor_prefers_surface_placement(it))
                         compact_object = bool(
-                            any(token in category_text for token in ("table_lamp", "decor", "stool", "vase", "accessory"))
+                            any(token in category_text for token in ("table_lamp", "stool", "vase", "accessory"))
+                            or surface_decor
                             or ("rug" in category_text and room_width_ratio is not None and room_width_ratio <= 0.35)
                             or (room_width_ratio is not None and room_width_ratio <= 0.18)
                             or (room_depth_ratio is not None and room_depth_ratio <= 0.18)
@@ -1470,8 +1533,10 @@ def generate_furnished_room(
                             compact_note = "keep visually compact"
                             if "rug" in category_text:
                                 compact_note = "keep this rug compact relative to the room, not wall-to-wall"
-                            elif any(token in category_text for token in ("table_lamp", "decor", "vase", "accessory")):
+                            elif any(token in category_text for token in ("table_lamp", "vase", "accessory")):
                                 compact_note = "keep this as a surface-scale object, never side-table sized"
+                            elif surface_decor:
+                                compact_note = "keep this as a reference-scale compact object only when its dimensions/reference indicate tabletop scale, never side-table sized"
                             small_scale_rows.append(f"- {label}: " + "; ".join(compact_bits) + f"; {compact_note}.")
 
                 if incomplete_items:
@@ -1763,13 +1828,14 @@ def generate_furnished_room(
             "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
             "4a. **PRODUCT PART LOCK:** keep each product's facing direction, module count, visible part count, support geometry, lampshade color, and silhouette from its reference.\n"
             "4b. **NO PRODUCT RECOMPOSITION:** Do not rotate, simplify, fuse, split, or recompose product parts to improve styling. A less stylish exact product is better than a plausible substitute.\n"
+            "4c. **LIGHTING SCALE LOCK:** Do not miniaturize lighting products into tabletop decor, tabletop sculpture, or duplicated small props; floor lamps stay floor-standing, table lamps stay on valid support surfaces, and pendant/ceiling lights stay attached to the ceiling plane.\n"
             + (
-                f"4c. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
+                f"4d. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
                 if anchor_labels
                 else ""
             )
             + (
-                "4d. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
+                "4e. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
                 if anchor_labels
                 else ""
             )
@@ -1923,7 +1989,8 @@ def generate_furnished_room(
                 cutouts.extend(first_pass_items)
                 for it in cutouts:
                     cp = it.get("crop_path")
-                    lbl = (it.get("label") or "").strip() or "Item"
+                    raw_lbl = (it.get("label") or "").strip() or "Item"
+                    lbl = _item_display_label_for_prompt(it)
                     item_key = str(it.get("target_key") or it.get("source_index") or it.get("label") or "").strip()
                     category = _item_category_for_prompt(it)
                     qty = int(it.get("qty") or 1)
@@ -1953,14 +2020,20 @@ def generate_furnished_room(
                     extra_imgs.append(cutout_img)
                     reference_header = (
                         "Furniture Cutout Reference (LISTED PRODUCT LOCK - ADD THIS EXACT PRODUCT IN THE MAIN RENDER; "
-                        "generic same-family substitutes are invalid; topology, distinctive parts, and material cues must match the reference). "
+                        "generic same-family substitutes are invalid; topology, distinctive parts, and material cues must match the reference; "
+                        "cross-product feature borrowing is invalid). "
                     )
                     if item_key and item_key in anchor_key_set:
-                        reference_header = "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN). "
+                        reference_header = (
+                            "Furniture Cutout Reference (PRIMARY PRODUCT LOCK - PRIMARY EXACTNESS ANCHOR - MUST MATCH THIS EXACT PRODUCT DESIGN; "
+                            "cross-product feature borrowing is invalid). "
+                        )
+                    raw_label_text = f"| RawLabel={raw_lbl} " if raw_lbl and raw_lbl != lbl else ""
                     reference_entry = [
                         (
                             reference_header
                             + f"Label={lbl} | TargetKey={item_key or 'null'} "
+                            + raw_label_text
                             + f"| SourceIndex={source_index or 'null'} | ItemID={item_id or 'null'} "
                             + f"| Category={category} | Qty={qty} | W={w if w is not None else 'null'}mm "
                             f"D={d if d is not None else 'null'}mm H={h if h is not None else 'null'}mm "

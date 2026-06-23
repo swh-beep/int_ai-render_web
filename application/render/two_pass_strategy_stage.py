@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import normalize_label_for_match, resolve_item_family
+from application.render.postprocess_support import decor_prefers_surface_placement, normalize_label_for_match, resolve_item_family
 
 
 _PRIMARY_ANCHOR_FAMILIES = {
@@ -19,7 +19,7 @@ _SECONDARY_ANCHOR_FAMILIES = {
     "stool": 45,
 }
 _EXCLUDED_ANCHOR_FAMILIES = {"rug", "mirror", "decor", "floor_lamp", "table_lamp"}
-_SURFACE_PLACED_FAMILIES = {"table_lamp", "decor"}
+_SURFACE_PLACED_FAMILIES = {"table_lamp"}
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -76,7 +76,7 @@ def _placement_family(item: dict) -> str:
         return "wall_attached"
     if family == "rug":
         return "rug"
-    if family in _SURFACE_PLACED_FAMILIES:
+    if family in _SURFACE_PLACED_FAMILIES or (family == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     if family in {"floor_lamp", "table_lamp", "stool"}:
         return "small_free_object"

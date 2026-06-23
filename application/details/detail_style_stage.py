@@ -47,18 +47,23 @@ def _is_full_frame_box(box) -> bool:
     return ymin <= 1 and xmin <= 1 and ymax >= 999 and xmax >= 999
 
 
+_PRODUCT_BACKED_CURRENT_RENDER_BOX_SOURCES = {
+    "detail_current_image_analysis",
+    "selected_variant_review",
+}
+
+
 def _has_localized_render_box(item) -> bool:
     if not isinstance(item, dict):
         return False
     box = _normalize_box(item.get("box_2d"))
     if not box or _is_full_frame_box(box):
         return False
-    box_source = str(item.get("box_source") or "").strip()
+    box_source = str(item.get("box_source") or "").strip().lower()
     if _is_product_backed_detail_target(item):
-        return (
-            box_source == "product_reference_localization"
-            and str(item.get("detail_localization_status") or "").strip() == "product_reference_verified"
-        )
+        if box_source == "product_reference_localization":
+            return str(item.get("detail_localization_status") or "").strip() == "product_reference_verified"
+        return box_source in _PRODUCT_BACKED_CURRENT_RENDER_BOX_SOURCES
     return box_source not in {"item_image_full", "cached_detail_snapshot"}
 
 

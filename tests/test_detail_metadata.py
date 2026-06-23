@@ -205,6 +205,38 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
         self.assertNotIn("simple_scene_detail", styles[0])
 
+    def test_construct_dynamic_styles_keeps_cart_products_localized_by_current_render(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "HAY Bowler Table",
+                    "target_key": "cart_product-39553_bowler_003",
+                    "source_index": 3,
+                    "category": "side_table",
+                    "category_canonical": "side_table",
+                    "box_2d": [603, 612, 716, 668],
+                    "box_source": "detail_current_image_analysis",
+                    "source_box_2d": [603, 612, 716, 668],
+                    "crop_path": "/tmp/bowler.png",
+                    "volume_rank": 1,
+                },
+                {
+                    "label": "Side Table",
+                    "target_key": "detail_side-table_009",
+                    "source_index": 99,
+                    "category": "side_table",
+                    "category_canonical": "side_table",
+                    "box_2d": [603, 612, 716, 668],
+                    "box_source": "detail_current_image_analysis",
+                    "volume_rank": 2,
+                },
+            ]
+        )
+
+        self.assertEqual(styles[0]["target_key"], "cart_product-39553_bowler_003")
+        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
+        self.assertNotIn("simple_scene_detail", styles[0])
+
     def test_construct_dynamic_styles_preserves_target_category_metadata(self):
         styles = construct_dynamic_styles(
             [

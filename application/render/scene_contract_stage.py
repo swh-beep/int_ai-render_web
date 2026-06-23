@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import resolve_item_family
+from application.render.postprocess_support import decor_prefers_surface_placement, resolve_item_family
 from application.render.render_contracts import PlacementPlan, RoomDimsContract, SceneContract
 
 
@@ -88,14 +88,14 @@ def _collect_pairwise_ratio_contracts(items: list[dict], primary_item: dict | No
     return rows_out
 
 
-def _placement_family_for_family(family: str) -> str:
+def _placement_family_for_family(family: str, item: dict | None = None) -> str:
     if family in {"mirror", "wall_light"}:
         return "wall_attached"
     if family == "ceiling_light":
         return "ceiling_attached"
     if family == "rug":
         return "rug"
-    if family in {"table_lamp", "decor"}:
+    if family == "table_lamp" or (family == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     return "floor_placed"
 
@@ -121,7 +121,7 @@ def _collect_geometry_targets(items: list[dict], room_dims_contract: RoomDimsCon
             "target_key": key,
             "label": row.get("label"),
             "family": family,
-            "placement_family": _placement_family_for_family(family),
+            "placement_family": _placement_family_for_family(family, row),
             "room_width_ratio": round(width_mm / room_width, 4) if room_width > 0 and width_mm > 0 else None,
             "room_depth_ratio": round(depth_mm / room_depth, 4) if room_depth > 0 and depth_mm > 0 else None,
             "room_height_ratio": round(height_mm / room_height, 4) if room_height > 0 and height_mm > 0 else None,

@@ -762,6 +762,7 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         assert "avoid=generic club chair, boxy accent chair" not in prompt
         assert "preserve_rules=" not in prompt
         assert "PRODUCT EXACTNESS FIRST" in prompt
+        assert "Do not miniaturize lighting products into tabletop decor" in prompt
         assert long_item_prose not in prompt
         assert "PRIMARY EXACTNESS ANCHOR" in content[3]
         assert output_path.exists()
@@ -807,7 +808,15 @@ def test_generate_furnished_room_disambiguates_duplicate_product_labels(tmp_path
                     "requested_dims_mm": {"width_mm": 900, "depth_mm": 50, "height_mm": 1200},
                     "crop_path": str(red_art_ref),
                     "identity_profile": {"family": "decor"},
-                    "product_identity": {"family": "decor"},
+                    "product_identity": {
+                        "family": "decor",
+                        "topology_cues": ["tall red ribbed vertical art panel"],
+                        "material_cues": ["red ribbed painted panel"],
+                    },
+                    "reference_features": {
+                        "distinctive_parts": ["bright red ribbed vertical panel face"],
+                        "silhouette_cues": ["tall narrow standing red panel"],
+                    },
                 },
                 {
                     "target_key": "cart_product-39065_gray-art_005",
@@ -820,7 +829,15 @@ def test_generate_furnished_room_disambiguates_duplicate_product_labels(tmp_path
                     "requested_dims_mm": {"width_mm": 400, "depth_mm": 50, "height_mm": 600},
                     "crop_path": str(gray_art_ref),
                     "identity_profile": {"family": "decor"},
-                    "product_identity": {"family": "decor"},
+                    "product_identity": {
+                        "family": "decor",
+                        "topology_cues": ["soft gray sculptural panel"],
+                        "material_cues": ["matte gray fabric texture"],
+                    },
+                    "reference_features": {
+                        "distinctive_parts": ["soft gray sculptural panel face"],
+                        "silhouette_cues": ["smaller gray rectangular art panel"],
+                    },
                 },
             ],
             "primary_scale": {"target_key": "cart_product-39067_red-art_004", "label": "AI 디자인용 이미지입니다"},
@@ -858,9 +875,15 @@ def test_generate_furnished_room_disambiguates_duplicate_product_labels(tmp_path
         assert "item_id=product_39065" in prompt
         assert "source_index=4" in prompt
         assert "source_index=5" in prompt
+        assert "bright red ribbed vertical panel face" in prompt
+        assert "soft gray sculptural panel face" in prompt
+        assert "Do not borrow color, material, silhouette, topology, lampshade, stacked-body, leg/support, or distinctive-part cues across product rows" in prompt
         headers = [part for part in content if isinstance(part, str) and "Furniture Cutout Reference" in part]
         assert any("ItemID=product_39067" in header and "SourceIndex=4" in header for header in headers)
         assert any("ItemID=product_39065" in header and "SourceIndex=5" in header for header in headers)
+        assert any("bright red ribbed vertical panel face" in header for header in headers)
+        assert any("soft gray sculptural panel face" in header for header in headers)
+        assert all("cross-product feature borrowing is invalid" in header for header in headers)
     finally:
         if output_path.exists():
             output_path.unlink()

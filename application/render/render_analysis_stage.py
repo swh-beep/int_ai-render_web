@@ -6,7 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from application.render.postprocess_support import category_match_family, resolve_item_canonical_category, resolve_item_family
+from application.render.postprocess_support import (
+    category_match_family,
+    decor_prefers_surface_placement,
+    resolve_item_canonical_category,
+    resolve_item_family,
+)
 from application.render.scale_plan_support import build_scale_plan
 
 
@@ -143,7 +148,7 @@ def _merge_options_reference_features(reference_features: dict | None, options: 
     return merged
 
 
-def _expected_placement_family(family: str) -> str:
+def _expected_placement_family(family: str, item: dict | None = None) -> str:
     normalized = str(family or "").strip().lower()
     if normalized in {"mirror", "wall_light"}:
         return "wall_attached"
@@ -151,12 +156,12 @@ def _expected_placement_family(family: str) -> str:
         return "ceiling_attached"
     if normalized == "rug":
         return "rug"
-    if normalized in {"table_lamp", "decor"}:
+    if normalized == "table_lamp" or (normalized == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     return "floor_placed"
 
 
-def _build_layout_envelope(*, dims_mm: dict, room_dims_parsed: dict, family: str) -> dict | None:
+def _build_layout_envelope(*, dims_mm: dict, room_dims_parsed: dict, family: str, item: dict | None = None) -> dict | None:
     if not isinstance(dims_mm, dict):
         return None
     try:
@@ -185,7 +190,7 @@ def _build_layout_envelope(*, dims_mm: dict, room_dims_parsed: dict, family: str
         "footprint_ratio": round((width_mm * depth_mm) / max(1, room_width_mm * room_depth_mm), 4)
         if room_width_mm > 0 and room_depth_mm > 0
         else None,
-        "placement_family": _expected_placement_family(family),
+        "placement_family": _expected_placement_family(family, item or {"category": family, "category_canonical": family, "requested_dims_mm": dims_mm}),
     }
 
 
@@ -314,7 +319,17 @@ def _build_identity_profile(
     reflective_surface = bool(reflective_flag) or family == "mirror" or any(
         token in material_cues for token in ("mirror", "reflective", "glass", "chrome")
     )
-    expected_placement_family = _expected_placement_family(family)
+    expected_placement_family = _expected_placement_family(
+        family,
+        {
+            "label": label,
+            "category": category,
+            "category_canonical": category_canonical,
+            "category_path": category_metadata.get("category_path"),
+            "requested_dims_mm": dims_mm,
+            "reference_features": reference_features or {},
+        },
+    )
     wall_attached = expected_placement_family == "wall_attached"
     ceiling_attached = expected_placement_family == "ceiling_attached"
     floor_contact = expected_placement_family in {"floor_placed", "rug"}
@@ -324,6 +339,14 @@ def _build_identity_profile(
         dims_mm=dims_mm or {},
         room_dims_parsed=room_dims_parsed or {},
         family=family,
+        item={
+            "label": label,
+            "category": category,
+            "category_canonical": category_canonical,
+            "category_path": category_metadata.get("category_path"),
+            "requested_dims_mm": dims_mm,
+            "reference_features": reference_features or {},
+        },
     )
 
     return {
@@ -536,12 +559,20 @@ def _requested_size_hint(req_dims: dict, category: str | None) -> str:
         if max_dim <= 2000:
             return "a mid-scale rug"
         return "a large rug anchor"
-    if family in {"table_lamp", "decor"}:
+    if family == "table_lamp":
         if max_dim <= 250:
             return "a tiny surface object"
         if max_dim <= 450:
             return "a compact tabletop object"
         return "a substantial but still secondary tabletop object"
+    if family == "decor":
+        if max_dim <= 250:
+            return "a tiny decorative object"
+        if max_dim <= 450:
+            return "a compact decorative object"
+        if max_dim <= 800:
+            return "a mid-scale decorative object"
+        return "a large decorative object placed according to its reference, not automatically on a tabletop"
     if max_dim <= 250:
         return "a tiny accessory-scale piece"
     if max_dim <= 700:

@@ -21,6 +21,7 @@ from application.render.postprocess_support import (
     _SENSITIVE_REMAP_FAMILIES,
     canonical_category,
     category_match_family,
+    decor_prefers_surface_placement,
     remap_match_score,
 )
 from infrastructure.ai.analysis_provider_dispatch import GEMINI_ANALYSIS_DEFAULT
@@ -1081,7 +1082,7 @@ def _placement_family(item: dict) -> str:
         return "wall_attached"
     if category == "rug":
         return "rug"
-    if category in {"table_lamp", "decor"}:
+    if category == "table_lamp" or (category == "decor" and decor_prefers_surface_placement(item)):
         return "surface_placed"
     if identity_profile.get("floor_contact_expected") or not category:
         return "floor_placed"

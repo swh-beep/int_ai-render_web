@@ -16,10 +16,22 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
         return max(minimum, int(default))
 
 
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    try:
+        return max(minimum, float(os.getenv(name, str(default)) or default))
+    except Exception:
+        return max(minimum, float(default))
+
+
 DETAIL_GENERATION_TIMEOUT_CAP_SEC = _env_int("DETAIL_GENERATION_TIMEOUT_SEC", 180, minimum=10)
 DETAIL_GENERATION_BUDGETED_MAX_WORKERS = _env_int("DETAIL_GENERATION_BUDGETED_MAX_WORKERS", 10)
 DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
 EXTERNAL_DETAIL_STYLE_LIMIT = 6
+DETAIL_SPATIAL_DIVERSITY_IOU_THRESHOLD = _env_float("DETAIL_SPATIAL_DIVERSITY_IOU_THRESHOLD", 0.42)
+DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH", 1376)
+DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT", 768)
+DETAIL_CROP_MIN_SOURCE_WIDTH_PX = _env_int("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", 400)
+DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = _env_int("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", 500)
 
 
 def _is_product_backed_external_style(style: dict) -> bool:
@@ -35,6 +47,185 @@ def _is_product_backed_external_style(style: dict) -> bool:
     )
 
 
+def _coerce_box_2d(value) -> list[float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        ymin, xmin, ymax, xmax = [float(row) for row in value]
+    except Exception:
+        return None
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    box = [
+        max(0.0, min(1000.0, ymin)),
+        max(0.0, min(1000.0, xmin)),
+        max(0.0, min(1000.0, ymax)),
+        max(0.0, min(1000.0, xmax)),
+    ]
+    if box[2] - box[0] >= 980.0 and box[3] - box[1] >= 980.0:
+        return None
+    return box
+
+
+def _clamp_bounds(bounds: tuple[float, float, float, float], image_size: tuple[int, int]) -> tuple[float, float, float, float]:
+    width, height = image_size
+    left, top, right, bottom = bounds
+    left = max(0.0, min(float(width - 1), left))
+    top = max(0.0, min(float(height - 1), top))
+    right = max(left + 1.0, min(float(width), right))
+    bottom = max(top + 1.0, min(float(height), bottom))
+    return left, top, right, bottom
+
+
+def _style_family(style: dict) -> str:
+    raw = (
+        style.get("target_category_canonical")
+        or style.get("target_category")
+        or style.get("category_canonical")
+        or style.get("category")
+        or style.get("target_label")
+        or style.get("name")
+        or ""
+    )
+    return str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _expand_style_bounds(
+    bounds: tuple[float, float, float, float],
+    image_size: tuple[int, int],
+    *,
+    family: str,
+) -> tuple[float, float, float, float]:
+    left, top, right, bottom = bounds
+    width = max(1.0, float(right - left))
+    height = max(1.0, float(bottom - top))
+    pad_left = width * 0.35
+    pad_right = width * 0.35
+    pad_top = height * 0.30
+    pad_bottom = height * 0.35
+
+    if any(token in family for token in ("ceiling_light", "wall_light", "pendant", "chandelier", "sconce")):
+        pad_left = width * 0.55
+        pad_right = width * 0.55
+        pad_top = max(height * 0.55, image_size[1] * 0.08)
+        pad_bottom = height * 1.60
+    elif "rug" in family:
+        pad_left = width * 0.18
+        pad_right = width * 0.18
+        pad_top = height * 0.80
+        pad_bottom = height * 0.25
+    elif any(token in family for token in ("sofa", "chair", "seating", "loveseat")):
+        pad_left = width * 0.35
+        pad_right = width * 0.35
+        pad_top = height * 0.40
+        pad_bottom = height * 0.45
+    elif any(token in family for token in ("table", "desk", "storage")):
+        pad_left = width * 0.32
+        pad_right = width * 0.32
+        pad_top = height * 0.35
+        pad_bottom = height * 0.38
+
+    return _clamp_bounds((left - pad_left, top - pad_top, right + pad_right, bottom + pad_bottom), image_size)
+
+
+def _fit_bounds_to_detail_ratio(
+    bounds: tuple[float, float, float, float],
+    image_size: tuple[int, int],
+) -> tuple[float, float, float, float]:
+    left, top, right, bottom = bounds
+    img_w, img_h = image_size
+    desired_ratio = 4.0 / 5.0
+    crop_w = max(float(right - left), float(DETAIL_CROP_MIN_SOURCE_WIDTH_PX))
+    crop_h = max(float(bottom - top), float(DETAIL_CROP_MIN_SOURCE_HEIGHT_PX))
+    center_x = (float(left) + float(right)) / 2.0
+    center_y = (float(top) + float(bottom)) / 2.0
+
+    if crop_w / crop_h > desired_ratio:
+        crop_h = crop_w / desired_ratio
+    else:
+        crop_w = crop_h * desired_ratio
+
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
+    if crop_h > float(img_h):
+        crop_h = float(img_h)
+        crop_w = crop_h * desired_ratio
+    if crop_w > float(img_w):
+        crop_w = float(img_w)
+        crop_h = crop_w / desired_ratio
+
+    return _clamp_bounds(
+        (
+            center_x - crop_w / 2.0,
+            center_y - crop_h / 2.0,
+            center_x + crop_w / 2.0,
+            center_y + crop_h / 2.0,
+        ),
+        image_size,
+    )
+
+
+def _predicted_detail_crop_bounds(style: dict) -> tuple[float, float, float, float] | None:
+    if not isinstance(style, dict):
+        return None
+    box_2d = _coerce_box_2d(style.get("target_box_2d") or style.get("box_2d"))
+    if box_2d is None:
+        return None
+
+    width = DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH
+    height = DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT
+    ymin, xmin, ymax, xmax = box_2d
+    raw_bounds = (
+        xmin / 1000.0 * width,
+        ymin / 1000.0 * height,
+        xmax / 1000.0 * width,
+        ymax / 1000.0 * height,
+    )
+    expanded = _expand_style_bounds(raw_bounds, (width, height), family=_style_family(style))
+    return _fit_bounds_to_detail_ratio(expanded, (width, height))
+
+
+def _bounds_iou(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> float:
+    l1, t1, r1, b1 = left
+    l2, t2, r2, b2 = right
+    inter_w = max(0.0, min(r1, r2) - max(l1, l2))
+    inter_h = max(0.0, min(b1, b2) - max(t1, t2))
+    inter = inter_w * inter_h
+    if inter <= 0.0:
+        return 0.0
+    area_left = max(0.0, r1 - l1) * max(0.0, b1 - t1)
+    area_right = max(0.0, r2 - l2) * max(0.0, b2 - t2)
+    denom = area_left + area_right - inter
+    return inter / denom if denom > 0.0 else 0.0
+
+
+def _prioritize_spatially_diverse_styles(styles: list[dict]) -> list[dict]:
+    selected: list[dict] = []
+    selected_bounds: list[tuple[float, float, float, float]] = []
+    delayed: list[dict] = []
+
+    for style in styles:
+        bounds = _predicted_detail_crop_bounds(style)
+        if bounds is None:
+            selected.append(style)
+            continue
+        overlaps_existing = any(
+            _bounds_iou(bounds, existing) >= DETAIL_SPATIAL_DIVERSITY_IOU_THRESHOLD
+            for existing in selected_bounds
+        )
+        if overlaps_existing:
+            delayed.append(style)
+            continue
+        selected.append(style)
+        selected_bounds.append(bounds)
+
+    return [*selected, *delayed]
+
+
 def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTERNAL_DETAIL_STYLE_LIMIT) -> list[dict]:
     styles = list(dynamic_styles or [])
     max_count = max(0, int(limit or 0))
@@ -43,6 +234,7 @@ def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTER
 
     product_backed = [style for style in styles if _is_product_backed_external_style(style)]
     fallback = [style for style in styles if not _is_product_backed_external_style(style)]
+    product_backed = _prioritize_spatially_diverse_styles(product_backed)
     return [*product_backed, *fallback][:max_count]
 
 
