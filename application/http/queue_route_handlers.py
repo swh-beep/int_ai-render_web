@@ -46,6 +46,7 @@ class QueueRouteDependencies:
     build_empty_room_job_payload: Callable[[Any], dict]
     build_external_preset_job: Callable[[Any, dict], tuple[dict, dict]]
     build_external_cart_job: Callable[..., tuple[dict, list[dict], list[dict]]]
+    build_external_cart_batch_job: Callable[..., tuple[dict, list[dict]]]
     build_external_render_video_job: Callable[[Any], dict]
     build_regenerate_detail_job_payload: Callable[[Any], dict]
     build_detail_generation_job_payload: Callable[[Any], dict]
@@ -53,6 +54,7 @@ class QueueRouteDependencies:
     job_render: Callable[..., dict]
     job_render_with_details: Callable[..., dict]
     job_render_with_extra: Callable[..., dict]
+    job_render_cart_simple_batch: Callable[..., dict]
     job_generate_render_video: Callable[..., dict]
     job_image_edit: Callable[..., dict]
     job_frontal_view: Callable[..., dict]
@@ -668,6 +670,44 @@ def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: 
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
+
+
+def handle_api_external_render_cart_simple_batch(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
+    deps.require_role(
+        request,
+        {"external"},
+        deps.api_auth_disabled,
+        deps.internal_api_keys,
+        deps.external_api_keys,
+    )
+    if not _queue_backend_available(deps):
+        return _redis_not_configured_response()
+    if not req.image_url:
+        raise HTTPException(status_code=400, detail="image_url is required")
+    if not req.variants:
+        raise HTTPException(status_code=400, detail="variants are required")
+
+    try:
+        job_payload, variants = deps.build_external_cart_batch_job(
+            req,
+            cart_max_items=deps.cart_max_items,
+            apply_cart_limits=deps.apply_cart_limits,
+            build_cart_summary=deps.build_cart_summary,
+            materialize_input=deps.materialize_input,
+            normalize_item_image=deps.normalize_item_image,
+            resolve_image_url=deps.resolve_image_url,
+            build_s3_prefix=deps.build_s3_prefix,
+            build_item_target_key=deps.build_item_target_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+    job, err = deps.enqueue_job(deps.job_render_cart_simple_batch, job_payload, queue_name=deps.rq_queue_render)
+    if err:
+        return JSONResponse(content={"error": err}, status_code=500)
+    return JSONResponse(content={"job_id": job.id, "status": "queued", "variants": variants})
 
 
 def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:

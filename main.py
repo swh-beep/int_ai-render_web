@@ -26,6 +26,7 @@ from application.http.queue_route_handlers import (
     QueueRouteDependencies,
     handle_api_external_render_cart,
     handle_api_external_render_cart_simple,
+    handle_api_external_render_cart_simple_batch,
     handle_api_external_render_preset,
     handle_api_external_render_video,
     handle_api_internal_render,
@@ -186,6 +187,7 @@ from rq.job import Job
 from api_models import (
     CartItem,
     CartRenderRequest,
+    CartSimpleBatchRequest,
     CompileClip,
     CompileRequest,
     DetailRequest,
@@ -205,6 +207,7 @@ from application.http.internal_render_form_parser import parse_internal_render_i
 from render_route_services import (
     build_detail_generation_job_payload,
     build_empty_room_job_payload,
+    build_external_cart_batch_job,
     build_external_cart_job,
     build_external_preset_job,
     build_external_render_video_job,
@@ -979,6 +982,9 @@ def job_render_with_details(payload: dict) -> dict:
 
 def job_render_with_extra(payload: dict) -> dict:
     return job_entrypoints_module.job_render_with_extra(payload)
+
+def job_render_cart_simple_batch(payload: dict) -> dict:
+    return job_entrypoints_module.job_render_cart_simple_batch(payload)
 
 def job_generate_render_video(payload: dict) -> dict:
     return job_entrypoints_module.job_generate_render_video(payload)
@@ -1811,6 +1817,8 @@ def render_room(
     audience: str = Form(""),
     moodboard_items: Optional[List[Dict[str, Any]]] = None,
     simple_generation_mode: bool = False,
+    precomputed_empty_room_path: str | None = None,
+    precomputed_empty_room_raw_path: str | None = None,
 ):
     try:
         payload = run_render_room_workflow(
@@ -1825,6 +1833,8 @@ def render_room(
                 audience=audience,
                 moodboard_items=moodboard_items,
                 simple_generation_mode=bool(simple_generation_mode),
+                precomputed_empty_room_path=precomputed_empty_room_path,
+                precomputed_empty_room_raw_path=precomputed_empty_room_raw_path,
             ),
             RenderWorkflowDependencies(
                 runtime=RenderWorkflowRuntime(
@@ -1928,6 +1938,7 @@ def _queue_route_deps() -> QueueRouteDependencies:
         build_empty_room_job_payload=build_empty_room_job_payload,
         build_external_preset_job=build_external_preset_job,
         build_external_cart_job=build_external_cart_job,
+        build_external_cart_batch_job=build_external_cart_batch_job,
         build_external_render_video_job=build_external_render_video_job,
         build_regenerate_detail_job_payload=build_regenerate_detail_job_payload,
         build_detail_generation_job_payload=build_detail_generation_job_payload,
@@ -1935,6 +1946,7 @@ def _queue_route_deps() -> QueueRouteDependencies:
         job_render=job_render,
         job_render_with_details=job_render_with_details,
         job_render_with_extra=job_render_with_extra,
+        job_render_cart_simple_batch=job_render_cart_simple_batch,
         job_generate_render_video=job_generate_render_video,
         job_image_edit=job_image_edit,
         job_frontal_view=job_frontal_view,
@@ -2063,6 +2075,11 @@ def api_external_render_cart(req: CartRenderRequest, request: Request):
 @async_wrap
 def api_external_render_cart_simple(req: CartRenderRequest, request: Request):
     return handle_api_external_render_cart_simple(req, request, deps=_queue_route_deps())
+
+@app.post("/api/external/render/cart-simple-batch")
+@async_wrap
+def api_external_render_cart_simple_batch(req: CartSimpleBatchRequest, request: Request):
+    return handle_api_external_render_cart_simple_batch(req, request, deps=_queue_route_deps())
 
 @app.post("/api/external/render/video")
 @async_wrap
@@ -2202,6 +2219,7 @@ job_entrypoints_module.configure_job_entrypoints(
         save_job_result=_save_job_result_s3,
         materialize_input=_materialize_input,
         normalize_item_image=lambda local_path, unique_id, index: _normalize_item_image(local_path, unique_id, index, max_size=1024),
+        standardize_image=standardize_image,
         build_s3_prefix=_build_s3_prefix,
         resolve_image_url=resolve_image_url,
         render_room=render_room,

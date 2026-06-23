@@ -45,6 +45,8 @@ class RenderWorkflowRequest:
     audience: str = ""
     moodboard_items: list[dict[str, Any]] | None = None
     simple_generation_mode: bool = False
+    precomputed_empty_room_path: str | None = None
+    precomputed_empty_room_raw_path: str | None = None
 
 
 @dataclass

@@ -61,6 +61,27 @@ class CartRenderRequest(BaseModel):
     simple_generation_mode: Optional[bool] = None
 
 
+class CartSimpleBatchVariant(BaseModel):
+    items: List[CartItem]
+    room: Optional[str] = None
+    style: Optional[str] = None
+    variant: Optional[str] = None
+    dimensions: Optional[str] = ""
+    placement: Optional[str] = ""
+    simple_generation_mode: Optional[bool] = None
+
+
+class CartSimpleBatchRequest(BaseModel):
+    image_url: str
+    variants: List[CartSimpleBatchVariant]
+    room: Optional[str] = None
+    style: Optional[str] = None
+    variant: Optional[str] = None
+    dimensions: Optional[str] = ""
+    placement: Optional[str] = ""
+    simple_generation_mode: Optional[bool] = None
+
+
 class ExternalRenderVideoRequest(BaseModel):
     render_job_id: str
     clip_count: int = 7

@@ -11,6 +11,7 @@ from fastapi import UploadFile
 from application.render.direct_item_image_prep import prepare_direct_item_image
 from api_models import (
     CartRenderRequest,
+    CartSimpleBatchRequest,
     DetailRequest,
     ExternalRenderVideoRequest,
     FinalizeRequest,
@@ -456,6 +457,86 @@ def build_external_cart_job(
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }
     return job_payload, kept, dropped
+
+
+def _batch_variant_value(batch_req: CartSimpleBatchRequest, variant: object, field_name: str, default: str = ""):
+    variant_value = getattr(variant, field_name, None)
+    if variant_value not in (None, ""):
+        return variant_value
+    batch_value = getattr(batch_req, field_name, None)
+    if batch_value not in (None, ""):
+        return batch_value
+    return default
+
+
+def build_external_cart_batch_job(
+    req: CartSimpleBatchRequest,
+    *,
+    cart_max_items: int,
+    apply_cart_limits: Callable[[list[dict], int], tuple[list[dict], list[dict]]],
+    build_cart_summary: Callable[[list[dict]], str],
+    materialize_input: Callable[[str, str], str | None],
+    normalize_item_image: Callable[[str, str, int], str | None],
+    resolve_image_url: Callable[[str, str | None], str | None],
+    build_s3_prefix: Callable[[str, str], str],
+    build_item_target_key: Callable[..., str],
+) -> tuple[dict, list[dict]]:
+    if not req.variants:
+        raise ValueError("variants are required")
+
+    job_variants: list[dict] = []
+    response_variants: list[dict] = []
+    for index, variant in enumerate(req.variants, start=1):
+        if not getattr(variant, "items", None):
+            raise ValueError(f"Variant {index} items are required")
+        variant_req = CartRenderRequest(
+            image_url=req.image_url,
+            items=variant.items,
+            room=_batch_variant_value(req, variant, "room", ""),
+            style=_batch_variant_value(req, variant, "style", None),
+            variant=_batch_variant_value(req, variant, "variant", str(index)),
+            dimensions=_batch_variant_value(req, variant, "dimensions", ""),
+            placement=_batch_variant_value(req, variant, "placement", ""),
+            simple_generation_mode=(
+                variant.simple_generation_mode
+                if variant.simple_generation_mode is not None
+                else req.simple_generation_mode
+            ),
+        )
+        job_payload, kept, dropped = build_external_cart_job(
+            variant_req,
+            cart_max_items=cart_max_items,
+            apply_cart_limits=apply_cart_limits,
+            build_cart_summary=build_cart_summary,
+            materialize_input=materialize_input,
+            normalize_item_image=normalize_item_image,
+            resolve_image_url=resolve_image_url,
+            build_s3_prefix=build_s3_prefix,
+            build_item_target_key=build_item_target_key,
+        )
+        job_variants.append(
+            {
+                "variant_index": index,
+                "render": job_payload["render"],
+                "extra": job_payload.get("extra") or {},
+            }
+        )
+        response_variants.append(
+            {
+                "variant_index": index,
+                "cart_kept": kept,
+                "cart_dropped": dropped,
+            }
+        )
+
+    return (
+        {
+            "audience": "external",
+            "image_url": req.image_url,
+            "variants": job_variants,
+        },
+        response_variants,
+    )
 
 
 def build_external_render_video_job(req: ExternalRenderVideoRequest) -> dict:

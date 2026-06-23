@@ -25,6 +25,8 @@ class RenderInputs:
     dimensions: str
     placement: str
     audience: str
+    precomputed_empty_room_path: str | None = None
+    precomputed_empty_room_raw_path: str | None = None
 
 
 @dataclass
@@ -56,6 +58,8 @@ def prepare_render_inputs(
         dimensions=payload.get("dimensions", ""),
         placement=payload.get("placement", ""),
         audience=normalize_audience(payload.get("audience")),
+        precomputed_empty_room_path=payload.get("precomputed_empty_room_path"),
+        precomputed_empty_room_raw_path=payload.get("precomputed_empty_room_raw_path"),
     )
 
 

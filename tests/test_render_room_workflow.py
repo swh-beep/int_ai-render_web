@@ -71,6 +71,9 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         moodboard_items=None,
         analyze_cropped_item=None,
         refresh_item_boxes_from_main_render=None,
+        precomputed_empty_room_path=None,
+        precomputed_empty_room_raw_path=None,
+        generate_empty_room=None,
     ):
         generated_calls = []
         self.generated_call_kwargs = []
@@ -85,7 +88,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             return path
 
         generation = RenderWorkflowGenerationServices(
-            generate_empty_room=lambda *args, **kwargs: (self._touch("empty.png"), self._touch("empty-raw.png")),
+            generate_empty_room=generate_empty_room
+            or (lambda *args, **kwargs: (self._touch("empty.png"), self._touch("empty-raw.png"))),
             generate_furnished_room=generate_furnished_room,
         )
 
@@ -149,6 +153,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 variant="1",
                 audience=audience,
                 moodboard_items=moodboard_items or [{"label": "Chair", "path": "https://example.com/chair.png"}],
+                precomputed_empty_room_path=precomputed_empty_room_path,
+                precomputed_empty_room_raw_path=precomputed_empty_room_raw_path,
             ),
             deps,
         )
@@ -177,6 +183,28 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["result_url"], "url://internal/mainrendered/rendered/int12345_v2.png")
+
+    def test_precomputed_empty_room_skips_empty_generation_and_reuses_shared_canvas(self):
+        precomputed_empty = self._touch("shared-empty.png")
+        precomputed_raw = self._touch("shared-empty-raw.png")
+        empty_calls = []
+
+        def generate_empty_room(*args, **kwargs):
+            empty_calls.append((args, kwargs))
+            return self._touch("unexpected-empty.png"), self._touch("unexpected-empty-raw.png")
+
+        payload, generated_calls, _polished_calls = self._run_workflow_case(
+            audience="external",
+            unique_id="shared01",
+            precomputed_empty_room_path=precomputed_empty,
+            precomputed_empty_room_raw_path=precomputed_raw,
+            generate_empty_room=generate_empty_room,
+        )
+
+        self.assertEqual(empty_calls, [])
+        self.assertEqual(len(generated_calls), 3)
+        self.assertEqual(payload["empty_room_url"], "url://external/mainrendered/empty/shared-empty.png")
+        self.assertTrue(payload["result_url"].endswith("/shared01_v2.png"))
 
     def test_external_render_includes_detail_items_in_first_generation_without_pass2(self):
         def analyze_cropped_item(_path, item, *_args, **_kwargs):

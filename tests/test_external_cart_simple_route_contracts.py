@@ -14,6 +14,19 @@ def _external_deps():
     def job_render_with_extra(payload):
         return {"render": {"result_url": "https://cdn.example/main.png"}, **(payload.get("extra") or {})}
 
+    def job_render_cart_simple_batch(payload):
+        return {
+            "empty_room_url": "https://cdn.example/empty-room.png",
+            "results": [
+                {
+                    "variant_index": 1,
+                    "render": {"result_url": "https://cdn.example/main-1.png"},
+                    "cart_kept": [{"id": "chair-1", "category": "chair"}],
+                    "cart_dropped": [],
+                }
+            ],
+        }
+
     def require_role(request, roles, api_auth_disabled, internal_api_keys, external_api_keys):
         return None
 
@@ -30,6 +43,7 @@ def _external_deps():
         require_role=require_role,
         enqueue_job=enqueue_job,
         job_render_with_extra=job_render_with_extra,
+        job_render_cart_simple_batch=job_render_cart_simple_batch,
         build_external_cart_job=lambda req, **kwargs: (
             {
                 "render": {"audience": "external", "file_path": req.image_url},
@@ -40,6 +54,20 @@ def _external_deps():
             },
             [{"id": "chair-1", "category": "chair"}],
             [{"id": "lamp-1", "drop_reason": "max_items_exceeded"}],
+        ),
+        build_external_cart_batch_job=lambda req, **kwargs: (
+            {
+                "audience": "external",
+                "image_url": req.image_url,
+                "variants": [
+                    {
+                        "variant_index": 1,
+                        "render": {"audience": "external", "file_path": req.image_url},
+                        "extra": {"cart_kept": [{"id": "chair-1", "category": "chair"}], "cart_dropped": []},
+                    }
+                ],
+            },
+            [{"variant_index": 1, "cart_kept": [{"id": "chair-1", "category": "chair"}], "cart_dropped": []}],
         ),
         cart_max_items=8,
         apply_cart_limits=lambda items, limit: (items, []),
@@ -136,6 +164,60 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertIs(enqueued[-1][0], deps.job_render_with_extra)
         self.assertEqual(enqueued[-1][2], "render")
 
+    def test_route_surface_includes_external_cart_simple_batch_endpoint(self):
+        paths = {route.path for route in main.app.routes}
+        self.assertIn("/api/external/render/cart-simple-batch", paths)
+
+    def test_external_cart_simple_batch_route_queues_batch_wrapper(self):
+        deps = _external_deps()
+        enqueued = []
+
+        def enqueue_job(job_func, payload, queue_name=None, **kwargs):
+            enqueued.append((job_func, payload, queue_name))
+            return SimpleNamespace(id="job-batch"), None
+
+        deps.enqueue_job = enqueue_job
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/cart-simple-batch",
+                json={
+                    "image_url": "https://example.com/room.png",
+                    "variants": [
+                        {
+                            "items": [
+                                {
+                                    "id": "chair-1",
+                                    "category": "chair",
+                                    "image_url": "https://example.com/chair.png",
+                                    "qty": 1,
+                                }
+                            ]
+                        }
+                    ],
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "job_id": "job-batch",
+                "status": "queued",
+                "variants": [
+                    {
+                        "variant_index": 1,
+                        "cart_kept": [{"id": "chair-1", "category": "chair"}],
+                        "cart_dropped": [],
+                    }
+                ],
+            },
+        )
+        self.assertIs(enqueued[-1][0], deps.job_render_cart_simple_batch)
+        self.assertEqual(enqueued[-1][2], "render")
+
     def test_job_render_with_extra_returns_render_and_cart_metadata_without_details(self):
         persisted = []
 
@@ -168,6 +250,84 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertNotIn("original_url", result["render"])
         self.assertEqual(result["cart_kept"], [{"id": "chair-1", "category": "chair"}])
         self.assertNotIn("details", result)
+        self.assertEqual(persisted[-1][1], "external")
+
+    def test_job_render_cart_simple_batch_generates_empty_once_and_reuses_it(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = os.path.join(tmpdir, "room.png")
+            std_path = os.path.join(tmpdir, "room-std.png")
+            empty_path = os.path.join(tmpdir, "empty.png")
+            empty_raw_path = os.path.join(tmpdir, "empty-raw.png")
+            for path in (source_path, std_path, empty_path, empty_raw_path):
+                with open(path, "wb") as handle:
+                    handle.write(b"img")
+
+            empty_calls = []
+            render_calls = []
+            persisted = []
+
+            def fake_generate_empty_room(path, unique_id, start_time, **kwargs):
+                empty_calls.append((path, unique_id, kwargs))
+                return empty_path, empty_raw_path
+
+            def fake_job_render(payload, persist_result=True):
+                render_calls.append(dict(payload))
+                variant_index = payload["batch_variant_index"]
+                return {
+                    "original_url": f"https://cdn.example/original-{variant_index}.png",
+                    "empty_room_url": "https://cdn.example/external/mainrendered/empty/empty.png",
+                    "result_url": f"https://cdn.example/main-{variant_index}.png",
+                    "result_urls": [f"https://cdn.example/main-{variant_index}.png"],
+                }
+
+            with (
+                patch.object(
+                    job_entrypoints,
+                    "_services",
+                    return_value=SimpleNamespace(
+                        normalize_audience=lambda audience: audience or "external",
+                        materialize_input=lambda source_ref, prefix: source_path,
+                        standardize_image=lambda path: std_path,
+                        generate_empty_room=fake_generate_empty_room,
+                        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{prefix}/{os.path.basename(path)}",
+                        build_s3_prefix=lambda audience, category, subfolder=None: "/".join(
+                            [part for part in [audience, category, subfolder] if part]
+                        ),
+                    ),
+                ),
+                patch.object(job_entrypoints, "job_render", side_effect=fake_job_render),
+                patch.object(
+                    job_entrypoints,
+                    "_persist_job_result",
+                    side_effect=lambda payload, audience=None: persisted.append((payload, audience)),
+                ),
+            ):
+                result = job_entrypoints.job_render_cart_simple_batch(
+                    {
+                        "audience": "external",
+                        "image_url": "https://example.com/room.png",
+                        "variants": [
+                            {
+                                "variant_index": 1,
+                                "render": {"audience": "external", "file_path": "https://example.com/room.png"},
+                                "extra": {"cart_kept": [{"id": "chair-1"}], "cart_dropped": []},
+                            },
+                            {
+                                "variant_index": 2,
+                                "render": {"audience": "external", "file_path": "https://example.com/room.png"},
+                                "extra": {"cart_kept": [{"id": "sofa-1"}], "cart_dropped": []},
+                            },
+                        ],
+                    }
+                )
+
+        self.assertEqual(len(empty_calls), 1)
+        self.assertEqual(len(render_calls), 2)
+        self.assertEqual({call["precomputed_empty_room_path"] for call in render_calls}, {empty_path})
+        self.assertEqual({call["precomputed_empty_room_raw_path"] for call in render_calls}, {empty_raw_path})
+        self.assertEqual(result["empty_room_url"], "https://cdn.example/external/mainrendered/empty/empty.png")
+        self.assertEqual([row["variant_index"] for row in result["results"]], [1, 2])
+        self.assertNotIn("original_url", result["results"][0]["render"])
         self.assertEqual(persisted[-1][1], "external")
 
     def test_job_render_preprocesses_deferred_cart_items_before_run_render_job(self):

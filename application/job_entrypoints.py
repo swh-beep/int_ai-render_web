@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ class JobEntrypointServices:
     save_job_result: Callable[[str, dict, Optional[str]], Optional[str]]
     materialize_input: Callable[[str, str], str | None]
     normalize_item_image: Callable[[str, str, int], str | None]
+    standardize_image: Callable[..., str]
     build_s3_prefix: Callable[..., str]
     resolve_image_url: Callable[..., str | None]
     render_room: Callable[..., Any]
@@ -206,6 +208,103 @@ def job_render_with_extra(payload: dict) -> dict:
     else:
         result = {"render": render_result, **extra}
 
+    _persist_job_result(result, audience=audience)
+    return result
+
+
+def _generate_shared_cart_empty_room(payload: dict, services: JobEntrypointServices, audience: str) -> dict:
+    variants = [row for row in (payload.get("variants") or []) if isinstance(row, dict)]
+    first_render = dict((variants[0].get("render") if variants else {}) or {})
+    image_url = payload.get("image_url") or first_render.get("file_path")
+    local_path = services.materialize_input(image_url, "cart_simple_batch_empty_src")
+    if not local_path or not os.path.exists(local_path):
+        return {"error": "Input file not found"}
+
+    try:
+        std_path = services.standardize_image(local_path) or local_path
+    except Exception:
+        std_path = local_path
+
+    unique_id = uuid.uuid4().hex[:8]
+    start_time = time.time()
+    empty_result = services.generate_empty_room(
+        std_path,
+        unique_id,
+        start_time,
+        stage_name="Cart Simple Batch: Shared Empty Gen",
+        return_raw=True,
+    )
+    if isinstance(empty_result, tuple):
+        empty_path, empty_raw_path = empty_result
+    else:
+        empty_path = empty_result
+        empty_raw_path = empty_result
+
+    if not empty_path or not os.path.exists(empty_path):
+        return {"error": "Shared empty room generation failed"}
+
+    empty_url = services.resolve_image_url(
+        empty_path,
+        services.build_s3_prefix(audience, "mainrendered", "empty"),
+    )
+    return {
+        "empty_room_path": empty_path,
+        "empty_room_raw_path": empty_raw_path or empty_path,
+        "empty_room_url": empty_url or empty_path,
+    }
+
+
+def job_render_cart_simple_batch(payload: dict) -> dict:
+    services = _services()
+    variants = [row for row in (payload.get("variants") or []) if isinstance(row, dict)]
+    audience = services.normalize_audience(payload.get("audience") or "external")
+    if not variants:
+        result = {"error": "variants are required"}
+        _persist_job_result(result, audience=audience)
+        return result
+
+    shared_empty = _generate_shared_cart_empty_room(payload, services, audience)
+    if shared_empty.get("error"):
+        result = {"error": shared_empty.get("error"), "results": []}
+        _persist_job_result(result, audience=audience)
+        return result
+
+    results: list[dict] = []
+    variant_count = len(variants)
+    for fallback_index, variant in enumerate(variants, start=1):
+        variant_index = int(variant.get("variant_index") or fallback_index)
+        render_payload = dict(variant.get("render") or {})
+        extra = dict(variant.get("extra") or {})
+        render_payload["audience"] = audience
+        render_payload.setdefault("file_path", payload.get("image_url"))
+        render_payload["precomputed_empty_room_path"] = shared_empty["empty_room_path"]
+        render_payload["precomputed_empty_room_raw_path"] = shared_empty["empty_room_raw_path"]
+        render_payload["batch_variant_index"] = variant_index
+        render_payload["batch_variant_count"] = variant_count
+
+        render_result = job_render(render_payload, persist_result=False)
+        if isinstance(render_result, dict) and render_result.get("error"):
+            row = {
+                "variant_index": variant_index,
+                "error": render_result.get("error"),
+                "render": render_result,
+                **extra,
+            }
+        else:
+            normalized_render = dict(render_result or {})
+            normalized_render.pop("original_url", None)
+            normalized_render["empty_room_url"] = shared_empty["empty_room_url"]
+            row = {
+                "variant_index": variant_index,
+                "render": normalized_render,
+                **extra,
+            }
+        results.append(row)
+
+    result = {
+        "empty_room_url": shared_empty["empty_room_url"],
+        "results": results,
+    }
     _persist_job_result(result, audience=audience)
     return result
 

@@ -523,7 +523,7 @@ def prepare_detail_generation_items(
     detect_item_bbox_norm: Callable[..., object] | None = None,
     simple_generation_mode: bool = False,
 ) -> list:
-    if furniture_data:
+    if furniture_data and not simple_generation_mode:
         cached_items = [dict(item) for item in furniture_data if isinstance(item, dict)]
         try:
             cached_items = attach_volume_ranks(cached_items)

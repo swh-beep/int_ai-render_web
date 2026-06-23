@@ -70,6 +70,8 @@ def run_render_job(
             audience=prepared.audience,
             moodboard_items=resources.local_items,
             simple_generation_mode=bool(payload.get("simple_generation_mode")),
+            precomputed_empty_room_path=prepared.precomputed_empty_room_path,
+            precomputed_empty_room_raw_path=prepared.precomputed_empty_room_raw_path,
         )
         result = json_from_response(response)
         if persist_result:

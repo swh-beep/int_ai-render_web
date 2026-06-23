@@ -1012,14 +1012,19 @@ def run_render_room_workflow(
         timestamp = input_result.timestamp
         std_path = input_result.std_path
 
-        empty_stage_result = run_render_empty_stage(
-            std_path=std_path,
-            unique_id=unique_id,
-            start_time=start_time,
-            generate_empty_room=deps.generation.generate_empty_room,
-        )
-        step1_img = empty_stage_result.step1_img
-        step1_raw = empty_stage_result.step1_raw
+        precomputed_empty_room_path = str(request.precomputed_empty_room_path or "").strip()
+        if precomputed_empty_room_path:
+            step1_img = precomputed_empty_room_path
+            step1_raw = str(request.precomputed_empty_room_raw_path or "").strip() or step1_img
+        else:
+            empty_stage_result = run_render_empty_stage(
+                std_path=std_path,
+                unique_id=unique_id,
+                start_time=start_time,
+                generate_empty_room=deps.generation.generate_empty_room,
+            )
+            step1_img = empty_stage_result.step1_img
+            step1_raw = empty_stage_result.step1_raw
 
         scale_stage_result = run_render_scale_stage(
             audience=aud,
