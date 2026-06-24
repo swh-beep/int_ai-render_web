@@ -162,6 +162,12 @@ def _is_external_render_job_result(result: Any) -> bool:
     return any(key in result for key in ("resolved", "cart_kept", "cart_dropped"))
 
 
+def _is_external_cart_render_job_result(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    return "cart_kept" in result or "cart_dropped" in result
+
+
 def _has_external_video_source_images(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
@@ -741,6 +747,8 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
 
     if not _is_external_render_job_result(source_result):
         raise HTTPException(status_code=403, detail="render_job_id must belong to an external render job")
+    if _is_external_cart_render_job_result(source_result):
+        raise HTTPException(status_code=400, detail="cart render jobs do not generate video")
     if isinstance(source_result, dict) and (source_result.get("error") or not _has_external_video_source_images(source_result)):
         raise HTTPException(status_code=400, detail="render_job_id does not have usable image results")
 

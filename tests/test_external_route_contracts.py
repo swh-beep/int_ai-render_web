@@ -270,6 +270,21 @@ class ExternalRouteContractsTests(unittest.TestCase):
             },
         )
 
+    def test_external_render_video_route_rejects_cart_source_job(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(_external_cart_finished_result_payload())
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/video",
+                json={"render_job_id": "job-cart", "clip_count": 4},
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"detail": "cart render jobs do not generate video"})
+
     def test_external_render_video_route_rejects_internal_source_job(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: _FakeFinishedJob({"render": {"result_url": "https://cdn.example/internal.png"}})
