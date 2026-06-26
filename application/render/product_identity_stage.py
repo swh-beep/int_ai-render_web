@@ -176,6 +176,7 @@ def build_product_identity_bundle(analyzed_items: list[dict] | None) -> tuple[li
         )
         support_geometry = _merge_unique(
             _extract_from_text(text_blob, _SUPPORT_GEOMETRY_HINTS),
+            list(ref.get("support_geometry") or []),
             list(ref.get("distinctive_parts") or []),
             [cue for cue in (profile.get("distinctive_parts") or []) if any(h in str(cue).lower() for h in _SUPPORT_GEOMETRY_HINTS)],
         )
@@ -195,6 +196,8 @@ def build_product_identity_bundle(analyzed_items: list[dict] | None) -> tuple[li
         preserve_rules = _merge_unique(
             ["exact_reference_image"] if item.get("crop_path") else [],
             list(ref.get("preserve_rules") or []),
+            list(ref.get("negative_identity_constraints") or []),
+            list(ref.get("surface_finish") or []),
             list(profile.get("preserve_rules") or []),
             support_geometry,
             opening_or_gap_features,

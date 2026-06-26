@@ -1819,6 +1819,8 @@ def render_room(
     simple_generation_mode: bool = False,
     precomputed_empty_room_path: str | None = None,
     precomputed_empty_room_raw_path: str | None = None,
+    artifact_job_id: str | None = None,
+    artifact_created_at: str | float | None = None,
 ):
     try:
         payload = run_render_room_workflow(
@@ -1835,6 +1837,8 @@ def render_room(
                 simple_generation_mode=bool(simple_generation_mode),
                 precomputed_empty_room_path=precomputed_empty_room_path,
                 precomputed_empty_room_raw_path=precomputed_empty_room_raw_path,
+                artifact_job_id=artifact_job_id,
+                artifact_created_at=artifact_created_at,
             ),
             RenderWorkflowDependencies(
                 runtime=RenderWorkflowRuntime(

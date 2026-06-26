@@ -204,6 +204,38 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["target_key"], "cart_37694_gubi-f300_001")
         self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
         self.assertNotIn("simple_scene_detail", styles[0])
+        self.assertEqual(styles[0]["name"], "Detail: lounge chair")
+        self.assertEqual(styles[0]["target_label"], "lounge chair")
+        self.assertEqual(styles[0]["target_product_label"], "Gubi F300 Lounge Chair")
+
+    def test_construct_dynamic_styles_uses_category_label_for_noisy_product_names(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "AI 디자인용 이미지입니다",
+                    "target_key": "cart_product-39073_ai-design_010",
+                    "item_id": "product_39073",
+                    "category": "decor",
+                    "category_canonical": "decor",
+                    "category_path": "식물 > 기타식물",
+                    "mainCategory": "식물",
+                    "subCategory": "기타식물",
+                    "box_2d": [120, 80, 720, 540],
+                    "box_source": "product_reference_localization",
+                    "detail_localization_status": "product_reference_verified",
+                    "crop_path": "/tmp/ai-design-product.png",
+                }
+            ]
+        )
+
+        self.assertEqual(styles[0]["name"], "Detail: 기타식물")
+        self.assertEqual(styles[0]["target_label"], "기타식물")
+        self.assertEqual(styles[0]["target_product_label"], "AI 디자인용 이미지입니다")
+        self.assertEqual(styles[0]["target_key"], "cart_product-39073_ai-design_010")
+        self.assertEqual(styles[0]["target_category"], "decor")
+        self.assertEqual(styles[0]["target_category_canonical"], "decor")
+        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
+        self.assertNotIn("simple_scene_detail", styles[0])
 
     def test_construct_dynamic_styles_keeps_cart_products_localized_by_current_render(self):
         styles = construct_dynamic_styles(
@@ -301,7 +333,7 @@ class DetailMetadataTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual([style["target_label"] for style in styles], ["Accent Chair"])
+        self.assertEqual([style["target_label"] for style in styles], ["chair"])
 
     def test_construct_internal_angle_styles_returns_internal_overview_and_side_slots(self):
         styles = construct_internal_angle_styles()
@@ -349,12 +381,12 @@ class DetailMetadataTests(unittest.TestCase):
 
         styles = construct_dynamic_styles(analyzed_items)
         detail_styles = [style for style in styles if str(style.get("name") or "").startswith("Detail:")]
-        sofa_styles = [style for style in detail_styles if style.get("target_label") == "Sofa"]
+        sofa_styles = [style for style in detail_styles if style.get("target_label") == "sofa"]
 
         self.assertEqual(len(sofa_styles), 1)
         self.assertEqual(len(detail_styles), 2)
-        self.assertEqual(detail_styles[0]["target_label"], "Sofa")
-        self.assertEqual(detail_styles[1]["target_label"], "Floor Lamp")
+        self.assertEqual(detail_styles[0]["target_label"], "sofa")
+        self.assertEqual(detail_styles[1]["target_label"], "light")
 
     def test_construct_dynamic_styles_deduplicates_detection_fragments_with_same_label(self):
         analyzed_items = [
@@ -493,7 +525,7 @@ class DetailMetadataTests(unittest.TestCase):
         styles = construct_dynamic_styles(analyzed_items)
         detail_targets = [style.get("target_label") for style in styles if str(style.get("name") or "").startswith("Detail:")]
 
-        self.assertEqual(detail_targets, ["De Sede DS-787", "Sofa", "Akari Floor Lamp", "Console Table"])
+        self.assertEqual(detail_targets, ["sofa", "sofa", "floor lamp", "console table"])
 
     def test_construct_dynamic_styles_does_not_prioritize_uncroppable_cached_snapshots(self):
         analyzed_items = [
@@ -525,4 +557,4 @@ class DetailMetadataTests(unittest.TestCase):
         styles = construct_dynamic_styles(analyzed_items)
         detail_targets = [style.get("target_label") for style in styles if str(style.get("name") or "").startswith("Detail:")]
 
-        self.assertEqual(detail_targets, ["Sofa"])
+        self.assertEqual(detail_targets, ["sofa"])

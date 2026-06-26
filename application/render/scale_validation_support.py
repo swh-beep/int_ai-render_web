@@ -50,6 +50,10 @@ _COMMON_RULE_SEVERITY = {
 _FAMILY_SEVERITY_MULTIPLIERS = {
     "mirror": 1.20,
     "rug": 1.10,
+    "electronics": 1.15,
+    "decor": 1.05,
+    "plant": 1.05,
+    "stool": 1.05,
     "floor_lamp": 1.05,
     "table_lamp": 1.05,
     "ceiling_light": 1.10,
@@ -71,10 +75,23 @@ _EXTRA_INSTANCE_TRACKED_FAMILIES = {
     "table",
     "storage",
     "rug",
+    "electronics",
+    "decor",
+    "plant",
+    "stool",
     "floor_lamp",
     "table_lamp",
     "ceiling_light",
     "wall_light",
+}
+
+_WEAK_REFERENCE_ANALYSIS_QUALITIES = {
+    "fallback",
+    "fallback_after_weak_model",
+    "fallback_after_invalid_model",
+    "model_insufficient",
+    "model_weak",
+    "weak_model",
 }
 
 
@@ -415,11 +432,54 @@ def _identity_richness_score(item: dict) -> float:
     return round(score, 3)
 
 
+def _reference_feature_signal_count(item: dict) -> int:
+    reference_features = item.get("reference_features") if isinstance(item, dict) and isinstance(item.get("reference_features"), dict) else {}
+    identity_profile = item.get("identity_profile") if isinstance(item, dict) and isinstance(item.get("identity_profile"), dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item, dict) and isinstance(item.get("product_identity"), dict) else {}
+    signal_keys = (
+        "silhouette_cues",
+        "material_cues",
+        "color_cues",
+        "surface_finish",
+        "distinctive_parts",
+        "support_geometry",
+        "preserve_rules",
+        "negative_identity_constraints",
+    )
+    count = 0
+    for source in (reference_features, identity_profile, product_identity):
+        for key in signal_keys:
+            value = source.get(key)
+            if isinstance(value, list):
+                count += len([row for row in value if str(row or "").strip()])
+            elif str(value or "").strip():
+                count += 1
+    for key in ("silhouette_summary", "product_identity_summary"):
+        if str(identity_profile.get(key) or product_identity.get(key) or "").strip():
+            count += 1
+    return count
+
+
+def _has_weak_reference_identity(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    crop_path = item.get("crop_path")
+    if not crop_path or not os.path.exists(str(crop_path)):
+        return False
+    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+    analysis_quality = str(reference_features.get("analysis_quality") or "").strip().lower()
+    extraction_mode = str(reference_features.get("extraction_mode") or "").strip().lower()
+    if analysis_quality in _WEAK_REFERENCE_ANALYSIS_QUALITIES or extraction_mode == "fallback":
+        return True
+    has_analysis_signal = "analysis_quality" in reference_features or "extraction_mode" in reference_features
+    return bool(has_analysis_signal and _reference_feature_signal_count(item) <= 2)
+
+
 def _should_review_reference_fidelity(item: dict) -> bool:
     crop_path = item.get("crop_path")
     if not crop_path or not os.path.exists(crop_path):
         return False
-    return _identity_richness_score(item) >= 1.0
+    return _identity_richness_score(item) >= 1.0 or _has_weak_reference_identity(item)
 
 
 def _item_importance_score(item: dict, *, is_primary: bool = False) -> float:
@@ -486,7 +546,8 @@ def _rule_kind_for_id(rule_id: str) -> str:
 def _issue_severity(rule_id: str, family: str | None = None) -> float:
     kind = _rule_kind_for_id(rule_id)
     severity = _COMMON_RULE_SEVERITY.get(kind, 0.8)
-    return round(severity, 3)
+    family_multiplier = _FAMILY_SEVERITY_MULTIPLIERS.get(str(family or "").strip().lower(), 1.0)
+    return round(severity * family_multiplier, 3)
 
 
 def _build_issue_record(
@@ -1212,7 +1273,14 @@ def validate_scale_from_detection_map(
                 continue
             xmin, ymin, xmax, ymax = bbox_norm
             area_norm = max(0.0, float(xmax) - float(xmin)) * max(0.0, float(ymax) - float(ymin))
-            min_area_norm = 0.025 if family in {"rug", "sofa", "lounge_sofa", "lounge_seating", "storage"} else 0.01
+            if family in {"electronics", "decor", "plant", "stool"}:
+                min_area_norm = 0.0025
+            elif family in {"floor_lamp", "table_lamp", "ceiling_light", "wall_light"}:
+                min_area_norm = 0.004
+            elif family in {"rug", "sofa", "lounge_sofa", "lounge_seating", "storage"}:
+                min_area_norm = 0.025
+            else:
+                min_area_norm = 0.01
             if area_norm < min_area_norm:
                 continue
             extra_detected_items.append(
@@ -1941,6 +2009,8 @@ def validate_furnished_scale(
             identity_richness = _identity_richness_score(item)
             archetype = _structural_archetype(item)
             pass_role = _pass_role(item)
+            if _has_weak_reference_identity(item):
+                return True
             if str(((item.get("archetype_strategy") or {}).get("strictness") or "")).strip().lower() == "critical":
                 return True
             if archetype in {
@@ -2297,8 +2367,12 @@ def validate_furnished_scale(
                 continue
             if not _should_run_reference_review(item, fallback_index):
                 continue
+            primary_priority = 1 if _matches_primary_identity(item, fallback_index) else 0
+            weak_reference_priority = 1 if _has_weak_reference_identity(item) else 0
             reference_review_candidates.append(
                 (
+                    primary_priority,
+                    weak_reference_priority,
                     _item_importance_score(item, is_primary=_matches_primary_identity(item, fallback_index)),
                     fallback_index,
                     item_key,
@@ -2306,11 +2380,11 @@ def validate_furnished_scale(
                     bbox,
                 )
             )
-        reference_review_candidates.sort(key=lambda row: (-row[0], row[1]))
+        reference_review_candidates.sort(key=lambda row: (-row[0], -row[1], -row[2], row[3]))
         reference_review_performed_keys: list[str] = []
         reference_review_skipped_item_keys: list[str] = []
-        for candidate_index, (_, fallback_index, item_key, item, bbox) in enumerate(reference_review_candidates):
-            if candidate_index >= 5:
+        for candidate_index, (_, _, _, fallback_index, item_key, item, bbox) in enumerate(reference_review_candidates):
+            if candidate_index >= 7:
                 reference_review_skipped_item_keys.append(item_key)
                 continue
             fidelity_timeout_sec = _bounded_timeout(25.0, minimum_sec=4.0)
@@ -2318,7 +2392,7 @@ def validate_furnished_scale(
                 reference_review_skipped_item_keys.extend(
                     [
                         candidate_item_key
-                        for _, _, candidate_item_key, _, _ in reference_review_candidates[candidate_index:]
+                        for _, _, _, _, candidate_item_key, _, _ in reference_review_candidates[candidate_index:]
                     ]
                 )
                 break

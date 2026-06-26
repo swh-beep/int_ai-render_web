@@ -1,5 +1,7 @@
+import os
 from typing import Any, Callable
 
+from application.render.artifact_paths import artifact_subprefix, build_job_artifact_root
 from application.render.reference_preparation import prepare_render_references
 from application.render.render_analysis_stage import run_render_analysis_stage
 from application.render.render_audience_stage import run_render_audience_stage
@@ -18,6 +20,16 @@ from application.render.render_workflow_contracts import (
     RenderWorkflowDependencies,
     RenderWorkflowRequest,
 )
+
+
+_IDENTITY_RULE_KINDS = {
+    "reference_shape_drift",
+    "reference_material_drift",
+    "reference_integration_drift",
+    "reference_review_unresolved",
+    "reflection_violation",
+}
+_IDENTITY_FAILED_RULE_IDS = {"mirror_reflection_drift"}
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -342,7 +354,6 @@ def _copy_prompt_payload_value(value: Any) -> Any:
 
 _MAIN_PROMPT_ITEM_KEYS = (
     "label",
-    "name",
     "category",
     "category_canonical",
     "category_path",
@@ -440,6 +451,8 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
         return None
 
     def _cue_list(value, limit: int = 4) -> str:
+        if limit == 4 and str(os.getenv("AI_RENDER_ULTRA_DETAILED_ITEM_ANALYSIS", "")).strip().lower() in {"1", "true", "yes", "on"}:
+            limit = 6
         if not isinstance(value, list):
             return ""
         values: list[str] = []
@@ -456,7 +469,7 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
     for index, item in enumerate(furniture_specs_json.get("items") or [], start=1):
         if not isinstance(item, dict):
             continue
-        label = str(item.get("label") or item.get("name") or f"Item {index}").strip()
+        label = str(item.get("label") or item.get("category") or item.get("category_canonical") or item.get("name") or f"Item {index}").strip()
         if not label:
             label = f"Item {index}"
         try:
@@ -494,15 +507,23 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
         )
         parts = (
             _cue_list(profile.get("distinctive_parts"))
-            or _cue_list(reference_features.get("distinctive_parts"))
+            or _cue_list(
+                list(reference_features.get("distinctive_parts") or [])
+                + list(reference_features.get("support_geometry") or [])
+            )
             or _cue_list(product_identity.get("support_geometry"))
         )
-        materials = _cue_list(profile.get("material_cues")) or _cue_list(reference_features.get("material_cues"))
+        materials = _cue_list(profile.get("material_cues")) or _cue_list(
+            list(reference_features.get("material_cues") or [])
+            + list(reference_features.get("color_cues") or [])
+            + list(reference_features.get("surface_finish") or [])
+        )
         preserve = (
             _cue_list(product_identity.get("preserve_rules"))
             or _cue_list(profile.get("preserve_rules"))
             or _cue_list(reference_features.get("preserve_rules"))
         )
+        forbid_identity_changes = _cue_list(reference_features.get("negative_identity_constraints"))
         if topology:
             bits.append(f"topology={topology}")
         if parts:
@@ -511,6 +532,8 @@ def _build_compact_generation_specs_text(furniture_specs_json: dict | None) -> s
             bits.append(f"materials={materials}")
         if preserve:
             bits.append(f"preserve={preserve}")
+        if forbid_identity_changes:
+            bits.append(f"forbid_identity_changes={forbid_identity_changes}")
         if item.get("requires_identity_validation") or ((item.get("two_pass_strategy") or {}).get("requires_identity_validation") if isinstance(item.get("two_pass_strategy"), dict) else False):
             bits.append("identity=exact_reference_crop")
             bits.append("generic_same_family_substitute=invalid")
@@ -531,18 +554,48 @@ def _weighted_issue_score(issue_records: list[dict] | None) -> float:
     return round(total, 4)
 
 
+def _is_identity_rule(rule: str) -> bool:
+    rule = str(rule or "").strip()
+    return bool(rule) and (rule.startswith("reference_") or rule in _IDENTITY_FAILED_RULE_IDS)
+
+
+def _identity_rules_from_review(
+    failed_rules: list[str] | None,
+    issue_records: list[dict] | None,
+) -> list[str]:
+    rules: list[str] = []
+    for row in issue_records or []:
+        if not isinstance(row, dict):
+            continue
+        rule = str(row.get("rule_kind") or row.get("rule_id") or "").strip()
+        if rule in _IDENTITY_RULE_KINDS or _is_identity_rule(rule):
+            rules.append(rule)
+    if not rules:
+        rules.extend([str(rule or "").strip() for rule in (failed_rules or []) if _is_identity_rule(str(rule or ""))])
+    return list(dict.fromkeys([rule for rule in rules if rule]))
+
+
+def _identity_fail_count(row: dict | None) -> int:
+    row = row if isinstance(row, dict) else {}
+    if row.get("identity_fail_count") is not None:
+        return int(row.get("identity_fail_count") or 0)
+    return int(row.get("fidelity_fail_count") or 0)
+
+
+def _identity_issue_count(row: dict | None) -> int:
+    row = row if isinstance(row, dict) else {}
+    return _identity_fail_count(row) + int(row.get("unmatched_source_count") or 0)
+
+
 def _review_summary_from_scalecheck_diagnostics(diagnostics: dict | None, *, scale_check_failed: bool, failed_rules: list[str], issues: list[str]) -> dict:
     raw = diagnostics or {}
     matched_items = raw.get("matched_items") or {}
     unmatched_items = list(raw.get("unmatched_items") or [])
     all_failed_rules = list(raw.get("failed_rules") or failed_rules or [])
     issue_records = list(raw.get("issue_records") or [])
+    identity_failed_rules = _identity_rules_from_review(all_failed_rules, issue_records)
     if issue_records:
-        fidelity_fail_count = sum(
-            1
-            for row in issue_records
-            if str((row or {}).get("rule_kind") or "") in {"reference_shape_drift", "reference_material_drift", "reflection_violation"}
-        )
+        fidelity_fail_count = len(identity_failed_rules)
         placement_fail_count = sum(1 for row in issue_records if str((row or {}).get("rule_kind") or "") == "placement_violation")
         geometry_fail_count = sum(
             1
@@ -550,7 +603,7 @@ def _review_summary_from_scalecheck_diagnostics(diagnostics: dict | None, *, sca
             if str((row or {}).get("rule_kind") or "") in {"scale_fit_violation", "validation_exception", "low_confidence_match"}
         )
     else:
-        fidelity_fail_count = sum(1 for rule in all_failed_rules if str(rule).startswith("reference_"))
+        fidelity_fail_count = len(identity_failed_rules)
         placement_fail_count = sum(
             1
             for rule in all_failed_rules
@@ -561,7 +614,7 @@ def _review_summary_from_scalecheck_diagnostics(diagnostics: dict | None, *, sca
     if weighted_issue_score <= 0 and (all_failed_rules or unmatched_items or issues or scale_check_failed):
         weighted_issue_score = round(
             (len(unmatched_items) * 3.0)
-            + (fidelity_fail_count * 2.5)
+            + (fidelity_fail_count * 6.0)
             + (placement_fail_count * 2.0)
             + (geometry_fail_count * 1.5)
             + (len(list(issues or [])) * 0.35)
@@ -570,6 +623,15 @@ def _review_summary_from_scalecheck_diagnostics(diagnostics: dict | None, *, sca
         )
     review_pass = bool(matched_items) and not scale_check_failed and not unmatched_items and not all_failed_rules
     review_score = (len(matched_items) * 4) - int(round(weighted_issue_score * 10))
+    identity_issue_count = fidelity_fail_count + len(unmatched_items)
+    identity_qc_summary = {
+        "pass": bool(matched_items) and identity_issue_count == 0,
+        "matched_source_count": len(matched_items),
+        "unmatched_source_count": len(unmatched_items),
+        "identity_fail_count": fidelity_fail_count,
+        "identity_issue_count": identity_issue_count,
+        "identity_failed_rules": identity_failed_rules,
+    }
     return {
         "review_pass": review_pass,
         "review_score": int(review_score),
@@ -577,6 +639,10 @@ def _review_summary_from_scalecheck_diagnostics(diagnostics: dict | None, *, sca
         "matched_source_count": len(matched_items),
         "unmatched_source_count": len(unmatched_items),
         "unmatched_source_items": unmatched_items,
+        "identity_fail_count": fidelity_fail_count,
+        "identity_issue_count": identity_issue_count,
+        "identity_failed_rules": identity_failed_rules,
+        "identity_qc_summary": identity_qc_summary,
         "fidelity_fail_count": fidelity_fail_count,
         "placement_fail_count": placement_fail_count,
         "geometry_fail_count": geometry_fail_count,
@@ -603,6 +669,17 @@ def _compact_variant_diagnostics(variant_results: list) -> list[dict]:
                         "matched_source_count": 0,
                         "unmatched_source_count": 0,
                         "unmatched_source_items": [],
+                        "identity_fail_count": 0,
+                        "identity_issue_count": 0,
+                        "identity_failed_rules": [],
+                        "identity_qc_summary": {
+                            "pass": False,
+                            "matched_source_count": 0,
+                            "unmatched_source_count": 0,
+                            "identity_fail_count": 0,
+                            "identity_issue_count": 0,
+                            "identity_failed_rules": [],
+                        },
                         "fidelity_fail_count": 0,
                         "placement_fail_count": 0,
                         "geometry_fail_count": 0,
@@ -625,6 +702,31 @@ def _compact_variant_diagnostics(variant_results: list) -> list[dict]:
             failed_rules=list(row.get("scalecheck_failed_rules") or []),
             issues=list(row.get("scalecheck_issues") or []),
         )
+        matched_source_count = int(row.get("matched_source_count") or review_summary["matched_source_count"])
+        unmatched_source_count = int(row.get("unmatched_source_count") or review_summary["unmatched_source_count"])
+        if row.get("identity_fail_count") is not None:
+            identity_fail_count = int(row.get("identity_fail_count") or 0)
+        elif row.get("fidelity_fail_count") is not None:
+            identity_fail_count = int(row.get("fidelity_fail_count") or 0)
+        else:
+            identity_fail_count = int(review_summary["identity_fail_count"])
+        identity_issue_count = int(
+            row.get("identity_issue_count")
+            if row.get("identity_issue_count") is not None
+            else identity_fail_count + unmatched_source_count
+        )
+        identity_failed_rules = list(row.get("identity_failed_rules") or review_summary["identity_failed_rules"])
+        identity_qc_summary = dict(row.get("identity_qc_summary") or review_summary["identity_qc_summary"])
+        identity_qc_summary.update(
+            {
+                "pass": bool(identity_qc_summary.get("pass")) and identity_issue_count == 0,
+                "matched_source_count": matched_source_count,
+                "unmatched_source_count": unmatched_source_count,
+                "identity_fail_count": identity_fail_count,
+                "identity_issue_count": identity_issue_count,
+                "identity_failed_rules": identity_failed_rules,
+            }
+        )
         diagnostics.append(
             {
                 "variant_index": index,
@@ -637,10 +739,14 @@ def _compact_variant_diagnostics(variant_results: list) -> list[dict]:
                 "scalecheck_diagnostics": raw_diagnostics,
                 "review_pass": bool(row.get("review_pass", review_summary["review_pass"] if raw_diagnostics else inferred_review_pass)),
                 "review_score": int(row.get("review_score") or (review_summary["review_score"] if raw_diagnostics else 0)),
-                "matched_source_count": int(row.get("matched_source_count") or review_summary["matched_source_count"]),
-                "unmatched_source_count": int(row.get("unmatched_source_count") or review_summary["unmatched_source_count"]),
+                "matched_source_count": matched_source_count,
+                "unmatched_source_count": unmatched_source_count,
                 "unmatched_source_items": list(row.get("unmatched_source_items") or review_summary["unmatched_source_items"]),
-                "fidelity_fail_count": int(row.get("fidelity_fail_count") or review_summary["fidelity_fail_count"]),
+                "identity_fail_count": identity_fail_count,
+                "identity_issue_count": identity_issue_count,
+                "identity_failed_rules": identity_failed_rules,
+                "identity_qc_summary": identity_qc_summary,
+                "fidelity_fail_count": identity_fail_count,
                 "placement_fail_count": int(row.get("placement_fail_count") or review_summary["placement_fail_count"]),
                 "geometry_fail_count": int(row.get("geometry_fail_count") or review_summary["geometry_fail_count"]),
                 "weighted_issue_score": float(row.get("weighted_issue_score") or review_summary["weighted_issue_score"]),
@@ -653,12 +759,27 @@ def _variant_quality_sort_key(path: str, diagnostics_by_path: dict[str, dict]) -
     row = diagnostics_by_path.get(path) or {}
     review_score = int(row.get("review_score") or 0)
     weighted_issue_score = float(row.get("weighted_issue_score") or 0.0)
+    identity_fail_count = _identity_fail_count(row)
+    identity_issue_count = _identity_issue_count(row)
+    matched_source_count = int(row.get("matched_source_count") or 0)
+    identity_qc = row.get("identity_qc_summary") if isinstance(row.get("identity_qc_summary"), dict) else {}
+    identity_qc_failed = 0 if bool(identity_qc.get("pass")) and identity_issue_count == 0 else 1
+    identity_failed_rules = [
+        str(rule or "").strip()
+        for rule in list(row.get("identity_failed_rules") or [])
+        if str(rule or "").strip()
+    ]
+    reference_failure_count = sum(1 for rule in identity_failed_rules if rule.startswith("reference_"))
     return (
         0 if row.get("review_pass") else 1,
+        identity_qc_failed,
+        identity_issue_count,
+        reference_failure_count,
+        identity_fail_count,
+        int(row.get("unmatched_source_count") or 0),
+        -matched_source_count,
         weighted_issue_score,
         1 if row.get("scale_check_failed") else 0,
-        int(row.get("unmatched_source_count") or 0),
-        int(row.get("fidelity_fail_count") or 0),
         int(row.get("placement_fail_count") or 0),
         int(row.get("geometry_fail_count") or 0),
         int(row.get("scalecheck_fail_count") or 0),
@@ -701,6 +822,21 @@ def _select_rankable_results(generated_results: list[str], diagnostics_by_path: 
     return fallback[: max(1, min(2, len(fallback)))]
 
 
+def _merge_candidate_results_for_artifacts(
+    preferred_results: list[str] | None,
+    all_results: list[str] | None,
+) -> list[str]:
+    merged = []
+    seen = set()
+    for path in list(all_results or []) + list(preferred_results or []):
+        path_str = str(path or "").strip()
+        if not path_str or path_str in seen:
+            continue
+        seen.add(path_str)
+        merged.append(path_str)
+    return merged
+
+
 def _selected_result_reason_for_row(row: dict | None) -> str:
     row = row if isinstance(row, dict) else {}
     if row.get("hard_qc_pass"):
@@ -739,7 +875,7 @@ def _is_validation_unavailable_best_effort_candidate(row: dict | None) -> bool:
         return False
     if int(row.get("matched_source_count") or 0) > 0:
         return False
-    if int(row.get("fidelity_fail_count") or 0) > 0:
+    if _identity_fail_count(row) > 0:
         return False
     if int(row.get("placement_fail_count") or 0) > 0:
         return False
@@ -770,7 +906,7 @@ def _is_strict_delivery_best_effort_candidate(row: dict | None) -> bool:
         }
     ):
         return False
-    if int(row.get("fidelity_fail_count") or 0) > 0:
+    if _identity_fail_count(row) > 0:
         return False
     if int(row.get("placement_fail_count") or 0) > 0:
         return False
@@ -1001,6 +1137,19 @@ def run_render_room_workflow(
         prefix_main_user = audience_result.prefix_main_user
         prefix_main_empty = audience_result.prefix_main_empty
         prefix_main_rendered = audience_result.prefix_main_rendered
+        prefix_main_candidates = prefix_main_rendered
+        artifact_root_prefix = build_job_artifact_root(
+            deps.storage.build_s3_prefix,
+            aud,
+            request.artifact_job_id,
+            request.artifact_created_at,
+            category="mainrendered",
+        )
+        if artifact_root_prefix:
+            prefix_main_user = artifact_subprefix(artifact_root_prefix, "input")
+            prefix_main_empty = artifact_subprefix(artifact_root_prefix, "empty")
+            prefix_main_rendered = artifact_subprefix(artifact_root_prefix, "selected")
+            prefix_main_candidates = artifact_subprefix(artifact_root_prefix, "candidates")
         prefix_customize = audience_result.prefix_customize
 
         input_result = run_render_input_stage(
@@ -1289,6 +1438,7 @@ def run_render_room_workflow(
             path = row.get("path")
             if path:
                 generated_results.append(path)
+        all_candidate_results = list(generated_results)
 
         strict_delivery_scale_requested = bool(aud == "external" and stage2_strict_scale_requested)
         rankable_results, allow_failed_rerank = _resolve_postprocess_ranking_inputs(
@@ -1316,14 +1466,14 @@ def run_render_room_workflow(
             ),
             absolute_deadline_ts=absolute_deadline_ts,
         )
-        candidate_results = list(postprocess_result.generated_results or [])
+        selection_candidate_results = list(postprocess_result.generated_results or [])
         if not bool(getattr(postprocess_result, "rerank_applied", False)):
-            candidate_results = _fallback_rank_candidates(
-                candidate_results,
+            selection_candidate_results = _fallback_rank_candidates(
+                selection_candidate_results,
                 variant_diagnostics,
                 audience=aud,
             )
-        generated_results = list(candidate_results)
+        generated_results = list(selection_candidate_results)
         full_analyzed_data = postprocess_result.full_analyzed_data
         volume_ranking = postprocess_result.volume_ranking
         (
@@ -1333,7 +1483,7 @@ def run_render_room_workflow(
             selected_variant_review,
             strict_final_result_blocked,
         ) = _select_final_generated_results(
-            candidate_results,
+            selection_candidate_results,
             variant_diagnostics,
             strict_scale_requested=strict_delivery_scale_requested,
         )
@@ -1352,7 +1502,7 @@ def run_render_room_workflow(
                 deps.runtime.logger.exception(f"[VolumeRank] selected-review reuse failed: {exc}")
 
         log_render_summary(summary, log_summary=deps.runtime.log_summary, logger=deps.runtime.logger)
-        return build_render_response_payload(
+        payload = build_render_response_payload(
             std_path=std_path,
             step1_img=step1_img,
             scale_guide_path=None,
@@ -1361,7 +1511,10 @@ def run_render_room_workflow(
             selected_result_reason=selected_result_reason,
             selected_variant_review=selected_variant_review,
             variant_diagnostics=variant_diagnostics,
-            candidate_results=candidate_results,
+            candidate_results=_merge_candidate_results_for_artifacts(
+                selection_candidate_results,
+                all_candidate_results,
+            ),
             final_result_blocked=strict_final_result_blocked,
             scale_plan=scale_plan_dict,
             room_dims_contract=room_dims_contract_dict,
@@ -1375,7 +1528,24 @@ def run_render_room_workflow(
             prefix_main_user=prefix_main_user,
             prefix_main_empty=prefix_main_empty,
             prefix_main_rendered=prefix_main_rendered,
+            prefix_main_candidates=prefix_main_candidates,
+            artifact_root_prefix=artifact_root_prefix or None,
             resolve_image_url=deps.storage.resolve_image_url,
         )
+        if artifact_root_prefix:
+            try:
+                deps.runtime.logger.info(
+                    "[Artifacts] root=%s selected=%s candidates=%s reason=%s identity_issues=%s",
+                    artifact_root_prefix,
+                    payload.get("result_url"),
+                    len((payload.get("artifact_manifest") or {}).get("candidate_result_urls") or []),
+                    selected_result_reason,
+                    ((payload.get("artifact_manifest") or {}).get("identity_qc_summary") or {}).get(
+                        "identity_failed_candidate_count"
+                    ),
+                )
+            except Exception:
+                pass
+        return payload
     finally:
         deps.runtime.reset_summary_token(summary_token)

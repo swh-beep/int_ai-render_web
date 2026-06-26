@@ -162,7 +162,8 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
         self.assertEqual(items[0]["payload_index"], 1)
         self.assertEqual(items[0]["target_key"], "internal_item-2_001")
 
-        self.assertEqual(items[1]["label"], "Boucle Sofa")
+        self.assertEqual(items[1]["label"], "sofa")
+        self.assertEqual(items[1]["product_name"], "Boucle Sofa")
         self.assertEqual(items[1]["path"], "outputs/item_1.png")
         self.assertEqual(items[1]["dims_mm"], {"width_mm": 2200, "depth_mm": 950, "height_mm": 760})
         self.assertEqual(items[1]["qty"], 2)
@@ -206,13 +207,13 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
         resolve_image_url.assert_not_called()
         build_s3_prefix.assert_not_called()
 
-    def test_build_internal_itemized_async_render_job_payload_uses_category_label_when_name_missing(self):
+    def test_build_internal_itemized_async_render_job_payload_uses_category_label_over_name(self):
         payload = build_internal_itemized_async_render_job_payload(
             raw_path="outputs/raw_room.png",
             item_specs=[
                 {
                     "client_id": "item-9",
-                    "name": None,
+                    "name": "AI 디자인용 이미지입니다",
                     "category": "table",
                     "qty": 1,
                     "dims_mm": {"width_mm": 800, "depth_mm": 800, "height_mm": 750},
@@ -231,6 +232,7 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["moodboard_items"][0]["label"], "table")
+        self.assertEqual(payload["moodboard_items"][0]["product_name"], "AI 디자인용 이미지입니다")
 
     def test_build_internal_itemized_async_render_job_payload_rejects_invalid_upload_index(self):
         calls = []

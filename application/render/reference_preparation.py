@@ -50,7 +50,7 @@ def prepare_render_references(
     if moodboard_items:
         for item in moodboard_items:
             try:
-                label = str(item.get("label") or item.get("name") or item.get("category") or "Item")
+                label = str(item.get("label") or item.get("category") or item.get("category_canonical") or item.get("name") or "Item")
                 src = item.get("path") or item.get("url")
                 local_path = materialize_input(src, "mb") if src else None
                 if local_path and os.path.exists(local_path):

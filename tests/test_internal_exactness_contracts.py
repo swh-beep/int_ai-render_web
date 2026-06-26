@@ -34,6 +34,70 @@ def test_build_render_response_payload_exposes_room_and_scene_contracts_for_inte
     assert payload["placement_plan"]["anchor_item_key"] == "sofa-1"
 
 
+def test_build_render_response_payload_writes_identity_qc_summary_to_artifact_manifest():
+    payload = build_render_response_payload(
+        std_path="outputs/original.png",
+        step1_img="outputs/empty.png",
+        scale_guide_path=None,
+        generated_results=["outputs/result.png"],
+        candidate_results=["outputs/result.png", "outputs/alt.png"],
+        selected_result_index=0,
+        selected_result_reason="strict_delivery_best_effort",
+        selected_variant_review={
+            "variant_index": 0,
+            "path": "outputs/result.png",
+            "identity_fail_count": 0,
+            "identity_issue_count": 0,
+            "matched_source_count": 4,
+            "unmatched_source_count": 0,
+            "identity_qc_summary": {"pass": True},
+        },
+        variant_diagnostics=[
+            {
+                "variant_index": 0,
+                "path": "outputs/result.png",
+                "identity_fail_count": 0,
+                "identity_issue_count": 0,
+                "matched_source_count": 4,
+                "unmatched_source_count": 0,
+                "identity_qc_summary": {"pass": True},
+            },
+            {
+                "variant_index": 1,
+                "path": "outputs/alt.png",
+                "identity_fail_count": 1,
+                "identity_issue_count": 1,
+                "identity_failed_rules": ["reference_shape_drift"],
+                "matched_source_count": 4,
+                "unmatched_source_count": 0,
+                "identity_qc_summary": {"pass": False},
+            },
+        ],
+        final_result_blocked=False,
+        scale_plan={"strict_scale_requested": True},
+        room_dims_contract={"source": "explicit", "confidence": "high"},
+        geometry_contract={"strict_scale_ready": True},
+        scene_contract={},
+        placement_plan={},
+        include_replay_debug=False,
+        moodboard_url=None,
+        furniture_data=[],
+        volume_ranking=[],
+        prefix_main_user="external/mainrendered/2026/06/25/job-1/input/",
+        prefix_main_empty="external/mainrendered/2026/06/25/job-1/empty/",
+        prefix_main_rendered="external/mainrendered/2026/06/25/job-1/selected/",
+        prefix_main_candidates="external/mainrendered/2026/06/25/job-1/candidates/",
+        artifact_root_prefix="external/mainrendered/2026/06/25/job-1/",
+        resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{s3_prefix_override}{path}",
+    )
+
+    summary = payload["artifact_manifest"]["identity_qc_summary"]
+    assert summary["selected"]["pass"] is True
+    assert summary["candidate_count"] == 2
+    assert summary["identity_failed_candidate_count"] == 1
+    assert summary["candidates"][1]["identity_failed_rules"] == ["reference_shape_drift"]
+
+
 def test_hydrate_item_dims_promotes_requested_dims_and_identity_dims():
     hydrated = _hydrate_item_dims(
         {

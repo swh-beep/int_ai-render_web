@@ -84,6 +84,34 @@ def job_result_key_candidates(
     return [c for c in candidates if not (c in seen or seen.add(c))]
 
 
+def _artifact_roots_from_result(result: dict) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    candidates = [result]
+    if isinstance(result.get("render"), dict):
+        candidates.append(result["render"])
+    for row in result.get("results") or []:
+        if not isinstance(row, dict):
+            continue
+        candidates.append(row)
+        if isinstance(row.get("render"), dict):
+            candidates.append(row["render"])
+
+    roots = []
+    seen = set()
+    for candidate in candidates:
+        manifest = candidate.get("artifact_manifest") if isinstance(candidate, dict) else None
+        root = str((manifest or {}).get("root_prefix") or "").strip() if isinstance(manifest, dict) else ""
+        if not root:
+            continue
+        normalized = normalize_s3_prefix(root)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        roots.append(normalized)
+    return roots
+
+
 def save_job_result_s3(
     job_id: str,
     result: dict,
@@ -108,6 +136,16 @@ def save_job_result_s3(
             Body=body,
             ContentType="application/json",
         )
+        for artifact_root in _artifact_roots_from_result(result):
+            artifact_key = f"{artifact_root}job.json"
+            if artifact_key == key:
+                continue
+            get_s3_client().put_object(
+                Bucket=s3_bucket,
+                Key=artifact_key,
+                Body=body,
+                ContentType="application/json",
+            )
         return s3_public_url(s3_bucket, aws_region, key)
     except Exception:
         return None

@@ -21,6 +21,13 @@ _CONFIDENCE_AWARE_GEOMETRY_RULES = {
 }
 
 
+def _identity_fail_count(item: dict | None) -> int:
+    item = item if isinstance(item, dict) else {}
+    if item.get("identity_fail_count") is not None:
+        return int(item.get("identity_fail_count") or 0)
+    return int(item.get("fidelity_fail_count") or 0)
+
+
 def _is_confidence_aware_geometry_rule(rule: str) -> bool:
     return (
         rule in _CONFIDENCE_AWARE_GEOMETRY_RULES
@@ -127,13 +134,17 @@ def annotate_variant_reviews(
         matched = int(item.get("matched_source_count") or 0)
         unmatched = int(item.get("unmatched_source_count") or 0)
         weighted = float(item.get("weighted_issue_score") or 0.0)
+        identity_fail_count = _identity_fail_count(item)
+        identity_issue_count = int(item.get("identity_issue_count") or (identity_fail_count + unmatched))
         hard_qc_pass = bool(item.get("review_pass")) and not hard_rules and unmatched == 0 and not bool(item.get("scale_check_failed"))
         soft_qc_pass = matched > 0 and not hard_rules and unmatched == 0 and not (strict_internal and bool(item.get("scale_check_failed")))
+        identity_qc_pass = matched > 0 and identity_issue_count == 0
         qc_issue_score = round(
             weighted
+            + (identity_fail_count * 6.0)
             + (len(hard_rules) * 5.0)
             + (len(soft_rules) * 1.5)
-            + (unmatched * 2.5),
+            + (unmatched * 3.0),
             4,
         )
         if strict_internal and hard_rules:
@@ -142,6 +153,8 @@ def annotate_variant_reviews(
             qc_reason = "hard_qc_pass"
         elif soft_qc_pass:
             qc_reason = "soft_qc_pass"
+        elif identity_issue_count > 0:
+            qc_reason = "identity_qc_fail"
         else:
             qc_reason = "weighted_fallback"
         estimated_geometry = str(geometry_source or "").strip().lower() == "estimated"
@@ -154,6 +167,9 @@ def annotate_variant_reviews(
         )
         item["hard_qc_pass"] = hard_qc_pass
         item["soft_qc_pass"] = soft_qc_pass
+        item["identity_qc_pass"] = identity_qc_pass
+        item["identity_fail_count"] = identity_fail_count
+        item["identity_issue_count"] = identity_issue_count
         item["hard_failed_rules"] = hard_rules
         item["soft_failed_rules"] = soft_rules
         item["qc_issue_score"] = qc_issue_score
@@ -168,6 +184,9 @@ def sort_variant_paths(variant_diagnostics: list[dict] | None) -> list[str]:
         key=lambda row: (
             0 if row.get("hard_qc_pass") else 1,
             0 if row.get("soft_qc_pass") else 1,
+            int(row.get("identity_issue_count") or 0),
+            int(row.get("identity_fail_count") or row.get("fidelity_fail_count") or 0),
+            int(row.get("unmatched_source_count") or 0),
             float(row.get("qc_issue_score") or 0.0),
             int(row.get("variant_index") or 0),
         )

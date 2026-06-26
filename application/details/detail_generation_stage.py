@@ -441,8 +441,7 @@ def _build_simple_scene_detail_prompt(target_label: str) -> str:
         "- The target must remain the same object in the same physical location, with nearby objects preserved as context.\n\n"
         "<CAMERA>\n"
         "Use a source-constrained crop/reframe from the main image camera. You may tighten framing, crop, slightly zoom, and add subtle depth of field "
-        "to make the target read clearly, but do not create a new camera angle that reveals unseen sides of furniture. "
-        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n\n"
+        "to make the target read clearly, but do not create a new camera angle that reveals unseen sides of furniture.\n\n"
         "<STYLE>\n"
         "High-end interior magazine photography: natural depth of field, clean composition, realistic texture, balanced shadows, no text, no watermark."
     )
@@ -554,7 +553,6 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
         "The camera may crop or hide objects, but it must never move any object into a new place. "
         "If an object is not visible in the safer reframe, leave it out of frame instead of relocating it. "
         "All objects must stay anchored to their original wall/floor/window relationships, facing direction, footprint, and nearby-object distances. "
-        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead. "
     )
 
     if is_overview:
@@ -695,7 +693,6 @@ def generate_detail_view(
                 "Do not create a new camera angle that reveals unseen sides of furniture.\n"
                 "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT relocate objects to keep them visible.\n"
                 "If a side-focus composition mask is provided, use it only to choose framing weight. Never duplicate, mirror, or copy furniture because of the mask.\n"
-                "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n"
             )
             camera_lock_line = (
                 "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth to make the side area read clearly. "
@@ -708,7 +705,6 @@ def generate_detail_view(
                 "Use the main render as the visual source of truth. This is a crop/reframe/detail-polish task, not a restaging task.\n"
                 "Keep the architecture, furniture placement, object scale, object identities, materials, lighting direction, and nearby-object relationships unchanged.\n"
                 "Do not create a new camera angle that reveals unseen sides of furniture.\n"
-                "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose a safer crop-like editorial reframe instead.\n"
             )
             camera_lock_line = "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth. Keep object placement, facing direction, footprint, and room geometry fixed.\n\n"
 

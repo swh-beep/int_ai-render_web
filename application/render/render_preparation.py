@@ -27,6 +27,8 @@ class RenderInputs:
     audience: str
     precomputed_empty_room_path: str | None = None
     precomputed_empty_room_raw_path: str | None = None
+    artifact_job_id: str | None = None
+    artifact_created_at: str | float | None = None
 
 
 @dataclass
@@ -60,6 +62,8 @@ def prepare_render_inputs(
         audience=normalize_audience(payload.get("audience")),
         precomputed_empty_room_path=payload.get("precomputed_empty_room_path"),
         precomputed_empty_room_raw_path=payload.get("precomputed_empty_room_raw_path"),
+        artifact_job_id=payload.get("artifact_job_id"),
+        artifact_created_at=payload.get("artifact_created_at"),
     )
 
 
@@ -75,7 +79,7 @@ def collect_local_moodboard_items(
     for item in moodboard_items:
         try:
             path_or_url = item.get("path") or item.get("url")
-            label = item.get("label") or item.get("name") or item.get("category") or "Item"
+            label = item.get("label") or item.get("category") or item.get("category_canonical") or item.get("name") or "Item"
             local_path = materialize_input(path_or_url, "mood")
             if local_path and os.path.exists(local_path):
                 try:

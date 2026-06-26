@@ -1359,6 +1359,44 @@ def test_validate_scale_from_detection_map_flags_extra_instance_for_duplicate_ru
     assert diagnostics["rule_details"]["extra_detected_items"][0]["family"] == "rug"
 
 
+def test_validate_scale_from_detection_map_flags_extra_instance_for_duplicate_speaker():
+    from application.render.scale_validation_support import validate_scale_from_detection_map
+
+    items = [
+        {
+            "label": "Sofa",
+            "category": "sofa",
+            "target_key": "anchor_sofa",
+            "source_index": 0,
+            "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 850},
+        },
+        {
+            "label": "Speaker",
+            "category": "electronics",
+            "target_key": "speaker_01",
+            "source_index": 1,
+            "dims_mm": {"width_mm": 130, "depth_mm": 70, "height_mm": 280},
+        },
+    ]
+
+    ok, issues, diagnostics = validate_scale_from_detection_map(
+        items,
+        {"width_mm": 5000, "depth_mm": 5000, "height_mm": 2600},
+        room_planes={"y_top": 0.10, "y_bottom": 0.86},
+        detected_rows=[
+            {"label": "Sofa", "target_key": "anchor_sofa", "source_index": 0, "bbox_norm": [0.18, 0.54, 0.58, 0.84]},
+            {"label": "Speaker", "target_key": "speaker_01", "source_index": 1, "bbox_norm": [0.62, 0.66, 0.68, 0.76]},
+            {"label": "Speaker", "category": "speaker", "bbox_norm": [0.72, 0.66, 0.77, 0.75]},
+        ],
+        primary_target_key="anchor_sofa",
+    )
+
+    assert ok is False
+    assert "extra_instance_detected:electronics" in issues
+    assert "extra_instance_detected" in diagnostics["failed_rules"]
+    assert diagnostics["rule_details"]["extra_detected_items"][0]["family"] == "electronics"
+
+
 def test_validate_scale_from_detection_map_fails_closed_on_internal_exception(monkeypatch):
     from application.render import scale_validation_support as support
 

@@ -47,6 +47,8 @@ class RenderWorkflowRequest:
     simple_generation_mode: bool = False
     precomputed_empty_room_path: str | None = None
     precomputed_empty_room_raw_path: str | None = None
+    artifact_job_id: str | None = None
+    artifact_created_at: str | float | None = None
 
 
 @dataclass

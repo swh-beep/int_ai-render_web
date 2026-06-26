@@ -1518,8 +1518,9 @@ def test_external_product_backed_details_prefer_verified_crop_extract(tmp_path):
         volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
     )
 
-    assert [row["style_name"] for row in result["details"]] == ["Detail: Gubi F300 Lounge Chair"]
+    assert [row["style_name"] for row in result["details"]] == ["Detail: lounge chair"]
     assert recorded_styles[1]["detail_mode"] == "product_identity_lock"
+    assert recorded_styles[1]["target_product_label"] == "Gubi F300 Lounge Chair"
     assert recorded_styles[1]["target_box_source"] == "product_reference_localization"
     assert recorded_crop_preferences == {1: True}
 
@@ -1585,9 +1586,10 @@ def test_external_cart_product_details_prefer_current_render_crop_extract(tmp_pa
         volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
     )
 
-    assert [row["style_name"] for row in result["details"]][:1] == ["Detail: HAY Bowler Table"]
+    assert [row["style_name"] for row in result["details"]][:1] == ["Detail: side table"]
     assert recorded_styles[1]["target_key"] == "cart_product-39553_bowler_003"
     assert recorded_styles[1]["detail_mode"] == "product_identity_lock"
+    assert recorded_styles[1]["target_product_label"] == "HAY Bowler Table"
     assert recorded_styles[1]["target_box_source"] == "detail_current_image_analysis"
     assert recorded_crop_preferences[1] is True
 

@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from application.details.detail_analysis_stage import prepare_detail_generation_items
 from application.details.detail_result_stage import build_detail_generation_output
 from application.details.detail_style_stage import with_internal_angle_styles
+from application.render.artifact_paths import artifact_subprefix
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -277,6 +278,7 @@ def run_generate_details_job(
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
         require_details = bool(payload.get("require_details"))
+        artifact_root_prefix = str(payload.get("artifact_root_prefix") or "").strip()
         raw_absolute_deadline_ts = payload.get("absolute_deadline_ts")
         raw_minimum_budget_sec = payload.get("minimum_detail_budget_sec")
         try:
@@ -300,6 +302,9 @@ def run_generate_details_job(
         )
         prefix_detail_user = build_s3_prefix(aud, "detailrendered", "user-photos")
         prefix_detail_rendered = build_s3_prefix(aud, "detailrendered", "rendered")
+        if artifact_root_prefix:
+            prefix_detail_user = artifact_subprefix(artifact_root_prefix, "detail-inputs")
+            prefix_detail_rendered = artifact_subprefix(artifact_root_prefix, "detail-results")
 
         def _remaining_deadline_sec() -> float | None:
             if absolute_deadline_ts is None:

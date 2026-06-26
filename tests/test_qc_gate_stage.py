@@ -71,6 +71,43 @@ def test_qc_gate_allows_soft_candidates_only_for_non_strict():
     assert select_rankable_paths(annotated, strict_internal=False) == ["v0.png"]
 
 
+def test_qc_gate_fallback_sort_prefers_identity_clean_candidate_over_lower_scale_score():
+    annotated = annotate_variant_reviews(
+        [
+            {
+                "variant_index": 0,
+                "path": "identity-drift.png",
+                "review_pass": False,
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": ["reference_shape_drift"],
+                "identity_fail_count": 1,
+                "identity_issue_count": 1,
+                "weighted_issue_score": 1.0,
+                "matched_source_count": 4,
+                "unmatched_source_count": 0,
+            },
+            {
+                "variant_index": 1,
+                "path": "scale-drift.png",
+                "review_pass": False,
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": ["scale_plan_room_width_ratio"],
+                "identity_fail_count": 0,
+                "identity_issue_count": 0,
+                "weighted_issue_score": 20.0,
+                "matched_source_count": 4,
+                "unmatched_source_count": 0,
+            },
+        ],
+        strict_internal=False,
+    )
+
+    by_path = {row["path"]: row for row in annotated}
+    assert by_path["identity-drift.png"]["qc_reason"] == "identity_qc_fail"
+    assert sort_variant_paths(annotated)[0] == "scale-drift.png"
+    assert select_rankable_paths(annotated, strict_internal=False)[0] == "scale-drift.png"
+
+
 def test_qc_gate_strict_mode_does_not_fallback_to_failed_candidates():
     annotated = annotate_variant_reviews(
         [

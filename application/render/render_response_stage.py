@@ -32,6 +32,45 @@ def _build_selected_item_review(furniture_data: list[dict], selected_variant_rev
     return rows
 
 
+def _identity_review_from_variant(row: dict | None) -> dict | None:
+    if not isinstance(row, dict):
+        return None
+    identity_summary = row.get("identity_qc_summary") if isinstance(row.get("identity_qc_summary"), dict) else {}
+    identity_fail_count = int(row.get("identity_fail_count") if row.get("identity_fail_count") is not None else row.get("fidelity_fail_count") or 0)
+    unmatched_source_count = int(row.get("unmatched_source_count") or 0)
+    identity_issue_count = int(row.get("identity_issue_count") or (identity_fail_count + unmatched_source_count))
+    identity_failed_rules = list(row.get("identity_failed_rules") or identity_summary.get("identity_failed_rules") or [])
+    return {
+        "variant_index": row.get("variant_index"),
+        "path": row.get("path"),
+        "pass": bool(identity_summary.get("pass")) and identity_issue_count == 0,
+        "matched_source_count": int(row.get("matched_source_count") or 0),
+        "unmatched_source_count": unmatched_source_count,
+        "identity_fail_count": identity_fail_count,
+        "identity_issue_count": identity_issue_count,
+        "identity_failed_rules": identity_failed_rules,
+        "qc_reason": row.get("qc_reason"),
+    }
+
+
+def _build_identity_qc_summary(
+    selected_variant_review: dict | None,
+    variant_diagnostics: list[dict] | None,
+) -> dict:
+    candidate_reviews = [
+        review
+        for review in (_identity_review_from_variant(row) for row in (variant_diagnostics or []))
+        if isinstance(review, dict)
+    ]
+    failed_count = sum(1 for row in candidate_reviews if int(row.get("identity_issue_count") or 0) > 0)
+    return {
+        "selected": _identity_review_from_variant(selected_variant_review),
+        "candidates": candidate_reviews,
+        "candidate_count": len(candidate_reviews),
+        "identity_failed_candidate_count": failed_count,
+    }
+
+
 def log_render_summary(
     summary: dict,
     *,
@@ -78,6 +117,8 @@ def build_render_response_payload(
     prefix_main_user: str,
     prefix_main_empty: str,
     prefix_main_rendered: str,
+    prefix_main_candidates: str | None = None,
+    artifact_root_prefix: str | None = None,
     resolve_image_url: Callable[[str | None, str | None], str | None],
 ) -> dict:
     final_before_url = resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)
@@ -90,7 +131,8 @@ def build_render_response_payload(
         pass
 
     candidate_paths = list(candidate_results or generated_results or [])
-    candidate_result_urls = [resolve_image_url(path, s3_prefix_override=prefix_main_rendered) for path in candidate_paths if path]
+    candidate_prefix = prefix_main_candidates or prefix_main_rendered
+    candidate_result_urls = [resolve_image_url(path, s3_prefix_override=candidate_prefix) for path in candidate_paths if path]
     delivery_paths = list(candidate_paths if final_result_blocked else (generated_results or []))
     result_urls = [
         resolve_image_url(path, s3_prefix_override=prefix_main_rendered)
@@ -123,6 +165,20 @@ def build_render_response_payload(
         "volume_ranking": volume_ranking,
         "message": "QC blocked final selection" if final_result_blocked else "Complete",
     }
+    identity_qc_summary = _build_identity_qc_summary(selected_variant_review, variant_diagnostics)
+    if artifact_root_prefix:
+        payload["artifact_manifest"] = {
+            "root_prefix": artifact_root_prefix,
+            "original_url": payload["original_url"],
+            "empty_room_url": final_before_url,
+            "candidate_result_urls": candidate_result_urls,
+            "selected_result_urls": result_urls,
+            "selected_result_index": selected_result_index,
+            "selected_result_filename": selected_result_filename,
+            "selected_result_reason": selected_result_reason,
+            "final_result_blocked": bool(final_result_blocked),
+            "identity_qc_summary": identity_qc_summary,
+        }
     if include_replay_debug:
         payload["final_result_blocked"] = bool(final_result_blocked)
         payload["candidate_result_urls"] = candidate_result_urls

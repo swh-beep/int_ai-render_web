@@ -72,6 +72,8 @@ def run_render_job(
             simple_generation_mode=bool(payload.get("simple_generation_mode")),
             precomputed_empty_room_path=prepared.precomputed_empty_room_path,
             precomputed_empty_room_raw_path=prepared.precomputed_empty_room_raw_path,
+            artifact_job_id=prepared.artifact_job_id,
+            artifact_created_at=prepared.artifact_created_at,
         )
         result = json_from_response(response)
         if persist_result:

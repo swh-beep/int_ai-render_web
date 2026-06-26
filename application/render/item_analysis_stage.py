@@ -20,6 +20,24 @@ _GENERIC_DESC_PREFIXES = (
 )
 _MATERIAL_HINT_RE = re.compile(r"\b(wood|walnut|oak|marble|stone|glass|metal|chrome|steel|fabric|linen|boucle|leather|rattan|mirror|reflective)\b", re.IGNORECASE)
 _SHAPE_HINT_RE = re.compile(r"\b(round|circular|oval|square|rectangular|arched|curved|modular|low-profile|pedestal|spindle|flaring|blocky|slim|thin|tufted|rolled|boxy)\b", re.IGNORECASE)
+_ULTRA_DETAILED_FEATURE_KEYS = (
+    "silhouette_cues",
+    "material_cues",
+    "color_cues",
+    "distinctive_parts",
+    "support_geometry",
+    "surface_finish",
+    "preserve_rules",
+    "negative_identity_constraints",
+)
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ultra_detailed_item_analysis_enabled() -> bool:
+    return _env_truthy("AI_RENDER_ULTRA_DETAILED_ITEM_ANALYSIS")
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -180,6 +198,14 @@ def _stabilize_description(
     distinctive_parts = [str(x).strip() for x in (ref.get("distinctive_parts") or []) if str(x).strip()]
     preserve_rules = [str(x).strip() for x in (ref.get("preserve_rules") or []) if str(x).strip()]
 
+    if _ultra_detailed_item_analysis_enabled() and _description_word_count(base_text) >= 80:
+        stabilized = base_text
+        if dim_sentence and not re.search(r"\d{2,4}\s*mm", stabilized):
+            if stabilized and not stabilized.endswith((".", "!", "?")):
+                stabilized += "."
+            stabilized = f"{stabilized} {dim_sentence}".strip()
+        return stabilized
+
     if not _looks_generic_description(base_text, label):
         stabilized = base_text
         cue_bits: list[str] = []
@@ -270,6 +296,87 @@ def _merge_options_reference_features(reference_features: dict | None, item_data
     elif "reflective_surface" not in merged:
         merged["reflective_surface"] = False
     merged["options_reference_features_applied"] = True
+    return merged
+
+
+def _analysis_catalog_context(item_data: dict | None, *, label: str, dims_mm: dict | None) -> str:
+    item_data = item_data if isinstance(item_data, dict) else {}
+    dims = _normalize_dims_for_description(dims_mm)
+    lines = [
+        f"Label: {label or 'Item'}",
+        f"Category: {item_data.get('category') or 'unknown'}",
+        f"Canonical category: {item_data.get('category_canonical') or 'unknown'}",
+    ]
+    for key, title in (
+        ("main_category", "Main category"),
+        ("sub_category", "Sub category"),
+        ("category_path", "Category path"),
+        ("product_type", "Product type"),
+        ("target_key", "Target key"),
+        ("item_id", "Item id"),
+    ):
+        value = item_data.get(key)
+        if value not in (None, "", []):
+            lines.append(f"{title}: {value}")
+    if any(value for value in dims.values()):
+        lines.append(
+            "Authoritative dimensions(mm): "
+            f"W={dims.get('width_mm')}, D={dims.get('depth_mm')}, "
+            f"H={dims.get('height_mm')}, R={dims.get('radius_mm')}"
+        )
+    return "\n".join(lines)
+
+
+def _coerce_ultra_feature_list(value: Any, *, limit: int = 18) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for raw in value:
+        text = str(raw or "").strip()
+        if not text or text in result:
+            continue
+        result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _reference_features_from_crop_analysis(data: dict | None) -> dict:
+    if not isinstance(data, dict):
+        return {}
+    features: dict[str, Any] = {}
+    for key in _ULTRA_DETAILED_FEATURE_KEYS:
+        values = _coerce_ultra_feature_list(data.get(key))
+        if values:
+            features[key] = values
+    do_not_change = _coerce_ultra_feature_list(data.get("do_not_change"))
+    if do_not_change:
+        features["negative_identity_constraints"] = _merge_reference_feature_lists(
+            features.get("negative_identity_constraints"),
+            do_not_change,
+            limit=18,
+        )
+    description = str(data.get("description") or "").strip()
+    if description:
+        features["ultra_description_word_count"] = _description_word_count(description)
+    if features:
+        features["ultra_crop_analysis_applied"] = True
+    return features
+
+
+def _merge_ultra_reference_features(reference_features: dict | None, crop_features: dict | None) -> dict:
+    merged = dict(reference_features or {})
+    crop_features = crop_features if isinstance(crop_features, dict) else {}
+    if not crop_features:
+        return merged
+    for key in _ULTRA_DETAILED_FEATURE_KEYS:
+        merged[key] = _merge_reference_feature_lists(crop_features.get(key), merged.get(key), limit=18)
+    for key in ("ultra_description_word_count", "ultra_crop_analysis_applied"):
+        if key in crop_features:
+            merged[key] = crop_features[key]
+    merged["ultra_detailed_analysis"] = True
     return merged
 
 
@@ -520,7 +627,8 @@ def analyze_cropped_item(
             crop_path = None
 
         resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
-        if not enable_text_read:
+        ultra_detailed_analysis = _ultra_detailed_item_analysis_enabled()
+        if not enable_text_read and not ultra_detailed_analysis:
             extract_ref_features, extraction_reason = should_extract_reference_features(
                 label=label,
                 category=item_data.get("category"),
@@ -576,7 +684,46 @@ def analyze_cropped_item(
                 "item_id": item_data.get("item_id"),
             }
 
-        if enable_text_read:
+        if ultra_detailed_analysis:
+            catalog_context = _analysis_catalog_context(item_data, label=label, dims_mm=resolved_dims_mm)
+            text_instruction = (
+                "Also read any visible dimension/model text if it exists, but never guess text that is not visible."
+                if enable_text_read
+                else "Do not perform OCR-style guessing; use only visible product geometry plus the authoritative catalog fields."
+            )
+            prompt = (
+                "ULTRA-DETAILED PRODUCT IDENTITY ANALYSIS TASK.\n"
+                "Analyze ONLY the provided product cutout/reference image. Ignore the room/background and do not describe styling.\n"
+                "The downstream renderer must be able to recreate this same item even if it cannot see the image. "
+                "Write enough concrete visual detail that a human could sketch or model the object from your text alone.\n"
+                f"Object label: {label}\n"
+                f"{catalog_context}\n"
+                f"{text_instruction}\n"
+                "Describe every visible identity-bearing part one by one: overall silhouette, exact proportions, footprint, "
+                "front/back/side orientation, top surface, back, arms, cushions, panels, shelves, openings, gaps, seams, "
+                "legs, feet, base, support struts, lamp shade, stem, socket, tabletop edge, frame thickness, handle details, "
+                "decorative accents, bevels, rounded corners, transparency, reflection, color zones, material transitions, "
+                "surface finish, texture, and any asymmetry.\n"
+                "Do not be concise. The description must be 220-320 words and must avoid generic phrases. "
+                "Call out what must NOT change: category, proportions, support geometry, material/color/finish, distinctive parts, "
+                "and any scale implied by the authoritative dimensions.\n"
+                "If a detail is not visible, say it is not visible instead of inventing it. Do not invent brand/model names.\n"
+                "Return STRICT JSON only:\n"
+                "{\n"
+                "  \"description\": \"220-320 word object-only reconstruction brief...\",\n"
+                "  \"dimensions_mm\": {\"width\": int/null, \"depth\": int/null, \"height\": int/null, \"radius\": int/null},\n"
+                "  \"raw_text_found\": \"visible text only or empty string\",\n"
+                "  \"silhouette_cues\": [\"very specific cue\", \"...\"],\n"
+                "  \"material_cues\": [\"specific material cue\", \"...\"],\n"
+                "  \"color_cues\": [\"specific color cue\", \"...\"],\n"
+                "  \"distinctive_parts\": [\"specific recognizable part\", \"...\"],\n"
+                "  \"support_geometry\": [\"leg/base/support detail\", \"...\"],\n"
+                "  \"surface_finish\": [\"finish/texture/reflection detail\", \"...\"],\n"
+                "  \"preserve_rules\": [\"must preserve...\", \"...\"],\n"
+                "  \"negative_identity_constraints\": [\"must not change...\", \"...\"]\n"
+                "}\n"
+            )
+        elif enable_text_read:
             prompt = (
                 f"Analyze this image cutout of a '{label}'.\n"
                 "IMPORTANT: Look specifically at the TEXT written below or near the object.\n"
@@ -627,7 +774,7 @@ def analyze_cropped_item(
                 "}\n"
             )
 
-        crop_timeout_sec = 150
+        crop_timeout_sec = 240 if ultra_detailed_analysis else 150
         crop_max_attempts = None
         if absolute_deadline_ts is not None:
             try:
@@ -637,7 +784,8 @@ def analyze_cropped_item(
             if remaining_deadline_sec <= 10.0:
                 response = None
             else:
-                crop_timeout_sec = int(max(10.0, min(45.0, remaining_deadline_sec)))
+                deadline_cap_sec = 120.0 if ultra_detailed_analysis else 45.0
+                crop_timeout_sec = int(max(10.0, min(deadline_cap_sec, remaining_deadline_sec)))
                 crop_max_attempts = 1
                 response = call_gemini_with_failover(
                     analysis_model_name,
@@ -656,12 +804,15 @@ def analyze_cropped_item(
             )
 
         desc = f"{label} with its original material and silhouette preserved."
+        crop_reference_features: dict = {}
 
         if response and response.text:
             data = safe_extract_json(response.text)
             if data:
                 desc = data.get("description", desc)
-                if enable_text_read:
+                if ultra_detailed_analysis:
+                    crop_reference_features = _reference_features_from_crop_analysis(data)
+                if enable_text_read or ultra_detailed_analysis:
                     raw_dims = data.get("dimensions_mm", {})
                     width_mm = raw_dims.get("width")
                     depth_mm = raw_dims.get("depth")
@@ -711,7 +862,7 @@ def analyze_cropped_item(
             category=item_data.get("category") or item_data.get("category_canonical"),
             description=desc,
             dims_mm=resolved_dims_mm,
-            reference_features=None,
+            reference_features=crop_reference_features if crop_reference_features else None,
         )
 
         if cropped_img:
@@ -747,7 +898,11 @@ def analyze_cropped_item(
         if isinstance(reference_features, dict):
             reference_features["extraction_mode"] = "model" if extract_ref_features else "fallback"
             reference_features["extraction_reason"] = extraction_reason
+        if ultra_detailed_analysis:
+            reference_features = _merge_ultra_reference_features(reference_features, crop_reference_features)
         reference_features = _merge_options_reference_features(reference_features, item_data)
+        if ultra_detailed_analysis and isinstance(reference_features, dict):
+            reference_features["ultra_detailed_analysis"] = True
         final_desc = _stabilize_description(
             label=label,
             category=item_data.get("category") or item_data.get("category_canonical"),

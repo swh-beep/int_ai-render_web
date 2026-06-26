@@ -74,9 +74,12 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         precomputed_empty_room_path=None,
         precomputed_empty_room_raw_path=None,
         generate_empty_room=None,
+        artifact_job_id=None,
+        artifact_created_at=None,
     ):
         generated_calls = []
         self.generated_call_kwargs = []
+        self.resolved_uploads = []
         polished_calls = []
         item_ref_path = self._touch("item.png")
 
@@ -92,6 +95,11 @@ class RenderRoomWorkflowTests(unittest.TestCase):
             or (lambda *args, **kwargs: (self._touch("empty.png"), self._touch("empty-raw.png"))),
             generate_furnished_room=generate_furnished_room,
         )
+
+        def resolve_image_url(path, s3_prefix_override=None):
+            url = f"url://{s3_prefix_override or ''}{Path(path).name}"
+            self.resolved_uploads.append((path, s3_prefix_override, url))
+            return url
 
         deps = RenderWorkflowDependencies(
             runtime=RenderWorkflowRuntime(
@@ -117,7 +125,7 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 + "/",
                 standardize_image=lambda raw_path: raw_path,
                 materialize_input=lambda src, prefix: item_ref_path if prefix == "mb" else src,
-                resolve_image_url=lambda path, s3_prefix_override=None: f"url://{s3_prefix_override or ''}{Path(path).name}",
+                resolve_image_url=resolve_image_url,
                 find_s3_moodboard_key=lambda *_args, **_kwargs: None,
                 s3_public_url=lambda key: f"url://{key}",
             ),
@@ -155,6 +163,8 @@ class RenderRoomWorkflowTests(unittest.TestCase):
                 moodboard_items=moodboard_items or [{"label": "Chair", "path": "https://example.com/chair.png"}],
                 precomputed_empty_room_path=precomputed_empty_room_path,
                 precomputed_empty_room_raw_path=precomputed_empty_room_raw_path,
+                artifact_job_id=artifact_job_id,
+                artifact_created_at=artifact_created_at,
             ),
             deps,
         )
@@ -167,6 +177,34 @@ class RenderRoomWorkflowTests(unittest.TestCase):
         self.assertFalse(any("_p2" in Path(path).name for path in generated_calls))
         self.assertEqual(payload["result_urls"], ["url://external/mainrendered/rendered/abc12345_v2.png"])
         self.assertEqual(payload["result_url"], "url://external/mainrendered/rendered/abc12345_v2.png")
+
+    def test_external_artifact_job_uploads_all_candidates_but_delivers_selected_only(self):
+        payload, generated_calls, _polished_calls = self._run_workflow_case(
+            audience="external",
+            unique_id="artifact01",
+            artifact_job_id="job-123",
+            artifact_created_at="2026-06-25T04:37:46Z",
+        )
+
+        root = "external/mainrendered/2026/06/25/job-123/"
+        self.assertEqual(len(generated_calls), 3)
+        self.assertEqual(payload["result_urls"], [f"url://{root}selected/artifact01_v2.png"])
+        self.assertEqual(payload["result_url"], f"url://{root}selected/artifact01_v2.png")
+        manifest = payload["artifact_manifest"]
+        self.assertEqual(manifest["root_prefix"], root)
+        self.assertEqual(
+            manifest["candidate_result_urls"],
+            [
+                f"url://{root}candidates/artifact01_v1.png",
+                f"url://{root}candidates/artifact01_v2.png",
+                f"url://{root}candidates/artifact01_v3.png",
+            ],
+        )
+        self.assertEqual(manifest["selected_result_urls"], [f"url://{root}selected/artifact01_v2.png"])
+        candidate_uploads = [
+            row for row in self.resolved_uploads if row[1] == f"{root}candidates/"
+        ]
+        self.assertEqual(len(candidate_uploads), 3)
 
     def test_internal_render_keeps_ranked_candidates_without_polish(self):
         payload, generated_calls, polished_calls = self._run_workflow_case(audience="internal", unique_id="int12345")

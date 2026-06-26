@@ -5,6 +5,7 @@ from application.render.render_room_workflow import (
     _resolve_postprocess_ranking_inputs,
     _select_final_generated_results,
     _should_launch_budgeted_fallback_variant,
+    _variant_quality_sort_key,
 )
 
 
@@ -100,6 +101,135 @@ def test_compact_variant_diagnostics_does_not_infer_review_pass_without_diagnost
 
     assert rows[0]["review_pass"] is False
     assert rows[0]["review_score"] == 0
+
+
+def test_compact_variant_diagnostics_exposes_identity_qc_from_reference_review():
+    rows = _compact_variant_diagnostics(
+        [
+            {
+                "path": "candidate-identity-drift.png",
+                "scale_check_failed": True,
+                "scalecheck_failed_rules": ["reference_integration_drift"],
+                "scalecheck_issues": ["reference_integration_drift:chair-1"],
+                "scalecheck_diagnostics": {
+                    "failed_rules": ["reference_integration_drift"],
+                    "matched_items": {"chair-1": {"bbox_norm": [0.1, 0.2, 0.4, 0.7]}},
+                    "unmatched_items": [],
+                    "issue_records": [
+                        {"rule_kind": "reference_integration_drift", "weighted_score": 1.0},
+                        {"rule_kind": "scale_fit_violation", "weighted_score": 0.5},
+                    ],
+                },
+            }
+        ]
+    )
+
+    assert rows[0]["identity_fail_count"] == 1
+    assert rows[0]["identity_issue_count"] == 1
+    assert rows[0]["fidelity_fail_count"] == 1
+    assert rows[0]["identity_failed_rules"] == ["reference_integration_drift"]
+    assert rows[0]["identity_qc_summary"]["pass"] is False
+
+
+def test_variant_quality_sort_key_prioritizes_identity_clean_over_lower_scale_score():
+    diagnostics_by_path = {
+        "identity-drift.png": {
+            "path": "identity-drift.png",
+            "variant_index": 0,
+            "review_pass": False,
+            "identity_fail_count": 1,
+            "identity_issue_count": 1,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 1.0,
+            "geometry_fail_count": 0,
+        },
+        "scale-drift.png": {
+            "path": "scale-drift.png",
+            "variant_index": 1,
+            "review_pass": False,
+            "identity_fail_count": 0,
+            "identity_issue_count": 0,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 20.0,
+            "geometry_fail_count": 8,
+        },
+    }
+
+    ordered = sorted(diagnostics_by_path, key=lambda path: _variant_quality_sort_key(path, diagnostics_by_path))
+
+    assert ordered == ["scale-drift.png", "identity-drift.png"]
+
+
+def test_variant_quality_sort_key_prefers_more_matched_items_before_scale_weight():
+    diagnostics_by_path = {
+        "many-items-scale-drift.png": {
+            "path": "many-items-scale-drift.png",
+            "variant_index": 0,
+            "review_pass": False,
+            "identity_fail_count": 0,
+            "identity_issue_count": 0,
+            "matched_source_count": 9,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 40.0,
+            "geometry_fail_count": 10,
+            "scale_check_failed": True,
+            "identity_qc_summary": {"pass": True},
+        },
+        "few-items-scale-cleaner.png": {
+            "path": "few-items-scale-cleaner.png",
+            "variant_index": 1,
+            "review_pass": False,
+            "identity_fail_count": 0,
+            "identity_issue_count": 0,
+            "matched_source_count": 4,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 5.0,
+            "geometry_fail_count": 1,
+            "scale_check_failed": True,
+            "identity_qc_summary": {"pass": True},
+        },
+    }
+
+    ordered = sorted(diagnostics_by_path, key=lambda path: _variant_quality_sort_key(path, diagnostics_by_path))
+
+    assert ordered == ["many-items-scale-drift.png", "few-items-scale-cleaner.png"]
+
+
+def test_variant_quality_sort_key_demotes_reference_fidelity_failure_even_with_lower_scale_weight():
+    diagnostics_by_path = {
+        "reference-drift.png": {
+            "path": "reference-drift.png",
+            "variant_index": 0,
+            "review_pass": False,
+            "identity_fail_count": 1,
+            "identity_issue_count": 1,
+            "identity_failed_rules": ["reference_shape_drift"],
+            "matched_source_count": 9,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 3.0,
+            "geometry_fail_count": 1,
+            "scale_check_failed": True,
+            "identity_qc_summary": {"pass": False},
+        },
+        "scale-drift-only.png": {
+            "path": "scale-drift-only.png",
+            "variant_index": 1,
+            "review_pass": False,
+            "identity_fail_count": 0,
+            "identity_issue_count": 0,
+            "identity_failed_rules": [],
+            "matched_source_count": 7,
+            "unmatched_source_count": 0,
+            "weighted_issue_score": 30.0,
+            "geometry_fail_count": 10,
+            "scale_check_failed": True,
+            "identity_qc_summary": {"pass": True},
+        },
+    }
+
+    ordered = sorted(diagnostics_by_path, key=lambda path: _variant_quality_sort_key(path, diagnostics_by_path))
+
+    assert ordered == ["scale-drift-only.png", "reference-drift.png"]
 
 
 def test_can_skip_postprocess_remap_for_strict_global_matches():

@@ -13,7 +13,7 @@ from application.render.direct_item_image_prep import prepare_direct_item_image
 from application.http.queue_route_handlers import handle_get_job_status, handle_render_room_async
 from render_route_services import build_external_cart_job, build_external_preset_job, build_external_render_video_job
 from request_helpers import require_role
-from storage_helpers import is_allowed_download_url, resolve_image_url
+from storage_helpers import is_allowed_download_url, resolve_image_url, save_job_result_s3
 
 
 class _FakeRequest:
@@ -239,6 +239,8 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(dropped, [])
         self.assertEqual(kept[0]["category_path"], "수납·선반장 > 일반수납장")
         item_ref = job_payload["render"]["moodboard_items"][0]
+        self.assertEqual(item_ref["label"], "일반수납장")
+        self.assertEqual(item_ref["product_name"], "Montana Free 333000")
         self.assertEqual(item_ref["category"], "decor")
         self.assertEqual(item_ref["category_path"], "수납·선반장 > 일반수납장")
         self.assertEqual(item_ref["mainCategory"], "수납·선반장")
@@ -402,4 +404,87 @@ class RouteHelperTests(unittest.TestCase):
                 s3_bucket="trusted-bucket",
                 allowed_hosts={"downloads.example.com"},
             )
+        )
+
+    def test_save_job_result_s3_also_writes_artifact_job_json_when_manifest_has_root(self):
+        put_calls = []
+
+        class _Client:
+            def put_object(self, **kwargs):
+                put_calls.append(kwargs)
+
+        result = {
+            "render": {
+                "artifact_manifest": {
+                    "root_prefix": "external/mainrendered/2026/06/25/job-123/"
+                }
+            }
+        }
+
+        url = save_job_result_s3(
+            "job-123",
+            result,
+            "external",
+            "bucket",
+            "ap-northeast-2",
+            "",
+            "",
+            lambda audience, category, subfolder=None: "/".join(
+                [part for part in [audience, category, subfolder] if part]
+            )
+            + "/",
+            lambda: _Client(),
+        )
+
+        self.assertEqual(url, "https://bucket.s3.ap-northeast-2.amazonaws.com/external/job-results/job-123.json")
+        self.assertEqual(
+            [call["Key"] for call in put_calls],
+            [
+                "external/job-results/job-123.json",
+                "external/mainrendered/2026/06/25/job-123/job.json",
+            ],
+        )
+
+    def test_save_job_result_s3_finds_artifact_root_inside_batch_results(self):
+        put_calls = []
+
+        class _Client:
+            def put_object(self, **kwargs):
+                put_calls.append(kwargs)
+
+        result = {
+            "empty_room_url": "https://cdn.example/empty.png",
+            "results": [
+                {
+                    "variant_index": 1,
+                    "render": {
+                        "artifact_manifest": {
+                            "root_prefix": "external/mainrendered/2026/06/25/batch-job/"
+                        }
+                    },
+                }
+            ],
+        }
+
+        save_job_result_s3(
+            "batch-job",
+            result,
+            "external",
+            "bucket",
+            "ap-northeast-2",
+            "",
+            "",
+            lambda audience, category, subfolder=None: "/".join(
+                [part for part in [audience, category, subfolder] if part]
+            )
+            + "/",
+            lambda: _Client(),
+        )
+
+        self.assertEqual(
+            [call["Key"] for call in put_calls],
+            [
+                "external/job-results/batch-job.json",
+                "external/mainrendered/2026/06/25/batch-job/job.json",
+            ],
         )

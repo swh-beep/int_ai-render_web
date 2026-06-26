@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from application.render.furnished_generation_stage import generate_furnished_room
+from application.render.furnished_generation_stage import (
+    _build_item_exactness_card_row,
+    _build_reference_identity_suffix,
+    generate_furnished_room,
+)
 from application.render.postprocess_support import rank_best_variant_flash
 from application.render.render_room_workflow import _resolve_style_prompt
 
@@ -28,6 +32,39 @@ def _logger():
 
 def _summary_ref():
     return SimpleNamespace(get=lambda: {"dims_warn": 0, "primary_bbox_miss": 0})
+
+
+def test_item_exactness_card_marks_weak_analysis_item_as_image_contract(tmp_path):
+    reference = tmp_path / "speaker.png"
+    reference.write_bytes(_make_png_bytes(80, 80))
+    item = {
+        "target_key": "speaker_01",
+        "source_index": 1,
+        "label": "Speaker",
+        "category": "decor",
+        "qty": 1,
+        "crop_path": str(reference),
+        "dims_mm": {"width_mm": 130, "depth_mm": 70, "height_mm": 280},
+        "identity_profile": {"family": "electronics"},
+        "reference_features": {
+            "analysis_quality": "fallback_after_weak_model",
+            "extraction_mode": "model",
+            "silhouette_cues": [],
+            "material_cues": [],
+            "distinctive_parts": [],
+        },
+    }
+
+    row = _build_item_exactness_card_row(item)
+    suffix = _build_reference_identity_suffix(item)
+
+    assert "weak_text_analysis=image_is_contract" in row
+    assert "if_text_cues_are_sparse_match_reference_crop_outline_parts_and_count" in row
+    assert "exactly_one_instance_required" in row
+    assert "duplicate_instances_invalid" in row
+    assert "same_family_substitute=invalid" in row
+    assert "WeakTextAnalysis=ignore sparse text if needed" in suffix
+    assert "duplicate qty=1 instance" in suffix
 
 
 def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):

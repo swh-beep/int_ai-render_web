@@ -71,6 +71,67 @@ def _normalized_label(value) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def _string_field(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("name", "categoryName", "category_name", "title", "value"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _category_path_leaf(value) -> str:
+    text = _string_field(value)
+    if not text:
+        return ""
+    parts = [text]
+    for separator in (">", "/", "|"):
+        if separator in text:
+            parts = [part.strip() for part in text.split(separator)]
+            break
+    for part in reversed(parts):
+        if part:
+            return part
+    return text
+
+
+def _readable_category_label(value) -> str:
+    text = _string_field(value)
+    if not text:
+        return ""
+    return " ".join(text.replace("_", " ").replace("-", " ").split())
+
+
+def _category_detail_label(item) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in ("subCategory", "sub_category"):
+        text = _readable_category_label(item.get(key))
+        if text:
+            return text
+    text = _readable_category_label(_category_path_leaf(item.get("category_path")))
+    if text:
+        return text
+    for key in ("mainCategory", "main_category", "category"):
+        text = _readable_category_label(item.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _detail_label(item) -> tuple[str, str | None]:
+    original_label = str((item or {}).get("label") or "").strip()
+    category_label = _category_detail_label(item)
+    if category_label:
+        preserved_label = original_label if original_label and _normalized_label(original_label) != _normalized_label(category_label) else None
+        return category_label, preserved_label
+    if original_label:
+        return original_label, None
+    return _readable_category_label(item.get("category_canonical")) or _detail_identity_family(item), None
+
+
 _GENERIC_DECOR_DETAIL_KEYS = {
     "accessory",
     "accessories",
@@ -322,7 +383,7 @@ def construct_dynamic_styles(analyzed_items):
         if _is_duplicate_detail_target(item, accepted_detail_targets):
             continue
 
-        label = item["label"]
+        label, original_label = _detail_label(item)
 
         source_backed = _is_source_backed_detail_target(item)
         style = {
@@ -345,6 +406,8 @@ def construct_dynamic_styles(analyzed_items):
             ),
             "ratio": "4:5",
         }
+        if original_label:
+            style["target_product_label"] = original_label
         if source_backed:
             style["detail_mode"] = "product_identity_lock"
             style["prompt"] += (

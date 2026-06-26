@@ -330,6 +330,70 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertNotIn("original_url", result["results"][0]["render"])
         self.assertEqual(persisted[-1][1], "external")
 
+    def test_job_render_cart_simple_batch_passes_artifact_context_to_variants(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = os.path.join(tmpdir, "room.png")
+            std_path = os.path.join(tmpdir, "room-std.png")
+            empty_path = os.path.join(tmpdir, "empty.png")
+            empty_raw_path = os.path.join(tmpdir, "empty-raw.png")
+            for path in (source_path, std_path, empty_path, empty_raw_path):
+                with open(path, "wb") as handle:
+                    handle.write(b"img")
+
+            render_calls = []
+
+            def fake_job_render(payload, persist_result=True):
+                render_calls.append(dict(payload))
+                return {
+                    "original_url": "https://cdn.example/original.png",
+                    "empty_room_url": "https://cdn.example/old-empty.png",
+                    "result_url": "https://cdn.example/main.png",
+                    "result_urls": ["https://cdn.example/main.png"],
+                    "artifact_manifest": {
+                        "root_prefix": "external/mainrendered/2026/06/25/batch-job/",
+                    },
+                }
+
+            with (
+                patch.object(
+                    job_entrypoints,
+                    "_services",
+                    return_value=SimpleNamespace(
+                        normalize_audience=lambda audience: audience or "external",
+                        materialize_input=lambda source_ref, prefix: source_path,
+                        standardize_image=lambda path: std_path,
+                        generate_empty_room=lambda *args, **kwargs: (empty_path, empty_raw_path),
+                        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{prefix}/{os.path.basename(path)}",
+                        build_s3_prefix=lambda audience, category, subfolder=None: "/".join(
+                            [part for part in [audience, category, subfolder] if part]
+                        ),
+                    ),
+                ),
+                patch.object(job_entrypoints, "job_render", side_effect=fake_job_render),
+                patch.object(job_entrypoints, "_persist_job_result"),
+            ):
+                result = job_entrypoints.job_render_cart_simple_batch(
+                    {
+                        "audience": "external",
+                        "image_url": "https://example.com/room.png",
+                        "artifact_job_id": "batch-job",
+                        "artifact_created_at": "2026-06-25T04:37:46Z",
+                        "variants": [
+                            {"variant_index": 1, "render": {"file_path": "https://example.com/room.png"}},
+                            {"variant_index": 2, "render": {"file_path": "https://example.com/room.png"}},
+                        ],
+                    }
+                )
+
+        self.assertEqual(len(render_calls), 2)
+        self.assertEqual({call["artifact_job_id"] for call in render_calls}, {"batch-job"})
+        self.assertEqual({call["artifact_created_at"] for call in render_calls}, {"2026-06-25T04:37:46Z"})
+        self.assertIn("external/mainrendered/2026/06/25/batch-job/empty", result["empty_room_url"])
+        self.assertEqual(
+            {row["render"]["artifact_manifest"]["root_prefix"] for row in result["results"]},
+            {"external/mainrendered/2026/06/25/batch-job/"},
+        )
+
     def test_job_render_preprocesses_deferred_cart_items_before_run_render_job(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             local_src = os.path.join(tmpdir, "cart_item_0.png")

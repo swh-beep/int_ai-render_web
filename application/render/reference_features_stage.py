@@ -84,6 +84,14 @@ _GENERIC_FEATURE_TOKENS = {
 }
 
 
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ultra_detailed_item_analysis_enabled() -> bool:
+    return _env_truthy("AI_RENDER_ULTRA_DETAILED_ITEM_ANALYSIS")
+
+
 def _extract_keyword_cues(text: str, keywords: tuple[str, ...], limit: int = 4) -> list[str]:
     normalized = str(text or "").lower()
     cues: list[str] = []
@@ -95,7 +103,11 @@ def _extract_keyword_cues(text: str, keywords: tuple[str, ...], limit: int = 4) 
     return cues
 
 
-def _coerce_str_list(value: Any, *, limit: int = 6) -> list[str]:
+def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
+    if limit is None:
+        limit = 16 if _ultra_detailed_item_analysis_enabled() else 6
+    if isinstance(value, str):
+        value = [value]
     if not isinstance(value, list):
         return []
     result: list[str] = []
@@ -204,6 +216,8 @@ def _should_use_reference_feature_model(*, extraction_reason: str, absolute_dead
     remaining = _remaining_deadline_sec(absolute_deadline_ts)
     if remaining is None:
         return True
+    if _ultra_detailed_item_analysis_enabled():
+        return remaining >= 25.0
 
     if reason in _HIGH_PRIORITY_REFERENCE_REASONS:
         return remaining >= 35.0
@@ -294,6 +308,34 @@ def _build_reference_feature_prompt(
     dims_mm: dict | None,
 ) -> str:
     dims = dims_mm or {}
+    if _ultra_detailed_item_analysis_enabled():
+        return (
+            "EXHAUSTIVE REFERENCE PRODUCT IDENTITY ANALYSIS TASK.\n"
+            "Analyze ONLY the provided product crop/reference image. Do not describe the room, background, camera, or styling.\n"
+            "The later image renderer must be able to recreate the same product even without seeing the reference image, "
+            "so every cue must be concrete, specific, and identity-preserving.\n"
+            f"Label: {label or 'Item'}\n"
+            f"Category: {category or 'unknown'}\n"
+            f"Existing description: {description or ''}\n"
+            f"Dims(mm): W={dims.get('width_mm')}, D={dims.get('depth_mm')}, H={dims.get('height_mm')}, R={dims.get('radius_mm')}\n"
+            "Return STRICT JSON ONLY with keys: "
+            "\"silhouette_cues\", \"material_cues\", \"color_cues\", \"distinctive_parts\", "
+            "\"support_geometry\", \"surface_finish\", \"preserve_rules\", "
+            "\"negative_identity_constraints\", \"reflective_surface\".\n"
+            "For silhouette_cues, give many specific visible shape/proportion/topology cues: overall massing, outline, "
+            "back/arm/top/edge shape, panel layout, shade shape, tabletop outline, openings, gaps, thickness, rounded corners, "
+            "asymmetry, footprint, and scale relationship.\n"
+            "For material_cues and color_cues, separate visible materials from colors: fabric grain, leather sheen, wood tone, "
+            "stone veining, glass tint, metal finish, matte/gloss/satin quality, transparent or reflective surfaces, and exact color zones.\n"
+            "For distinctive_parts, list product-specific parts that make this exact item recognizable, not generic category words.\n"
+            "For support_geometry, describe every visible leg, foot, base, pedestal, sled, strut, stem, bracket, wall mount, or floor contact point.\n"
+            "For surface_finish, describe texture, seams, stitching, bevels, edge treatment, reflection, shadow behavior, and translucency.\n"
+            "For preserve_rules, write short imperative rules for what must remain visually unchanged.\n"
+            "For negative_identity_constraints, state what the renderer must NOT turn it into: wrong category, wrong leg count/base, "
+            "wrong proportions, wrong material/color, wrong transparency, wrong scale, or missing distinctive parts.\n"
+            "Do not invent brand/model names. Do not output vague words like furniture, object, chair, table, lamp, or decor as the only cue. "
+            "Prefer 8-16 items in each list when visible evidence supports it."
+        )
     return (
         "REFERENCE PRODUCT IDENTITY ANALYSIS TASK.\n"
         "Analyze ONLY the provided product crop/reference image. Do not describe the room, camera, background, or styling.\n"
@@ -350,13 +392,20 @@ def _reference_features_sufficient(features: dict, *, label: str, category: str 
 
 
 def _normalize_reference_feature_payload(parsed: dict, fallback: dict) -> dict:
-    return {
+    result = {
         "silhouette_cues": _coerce_str_list(parsed.get("silhouette_cues")) or fallback["silhouette_cues"],
         "material_cues": _coerce_str_list(parsed.get("material_cues")) or fallback["material_cues"],
+        "color_cues": _coerce_str_list(parsed.get("color_cues")),
         "distinctive_parts": _coerce_str_list(parsed.get("distinctive_parts")),
+        "support_geometry": _coerce_str_list(parsed.get("support_geometry")),
+        "surface_finish": _coerce_str_list(parsed.get("surface_finish")),
         "preserve_rules": _coerce_str_list(parsed.get("preserve_rules")),
+        "negative_identity_constraints": _coerce_str_list(parsed.get("negative_identity_constraints")),
         "reflective_surface": _coerce_bool(parsed.get("reflective_surface"), fallback["reflective_surface"]),
     }
+    if _ultra_detailed_item_analysis_enabled():
+        result["ultra_reference_feature_analysis"] = True
+    return result
 
 
 def extract_reference_features(
@@ -387,7 +436,8 @@ def extract_reference_features(
 
     crop_img = None
     try:
-        bounded_timeout = _bounded_timeout(25.0, absolute_deadline_ts=absolute_deadline_ts)
+        requested_timeout = 75.0 if _ultra_detailed_item_analysis_enabled() else 25.0
+        bounded_timeout = _bounded_timeout(requested_timeout, absolute_deadline_ts=absolute_deadline_ts)
         if bounded_timeout is None:
             return fallback
         prompt = _build_reference_feature_prompt(

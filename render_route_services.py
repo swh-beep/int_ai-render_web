@@ -38,6 +38,59 @@ def _category_metadata(payload: dict) -> dict:
     return {field: payload.get(field) for field in _CATEGORY_METADATA_FIELDS if payload.get(field) not in (None, "")}
 
 
+def _text_field(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("name", "categoryName", "category_name", "title", "value"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _category_path_leaf(value) -> str:
+    text = _text_field(value)
+    if not text:
+        return ""
+    parts = [text]
+    for separator in (">", "/", "|"):
+        if separator in text:
+            parts = [part.strip() for part in text.split(separator)]
+            break
+    for part in reversed(parts):
+        if part:
+            return part
+    return text
+
+
+def _readable_category_label(value) -> str:
+    text = _text_field(value)
+    if not text:
+        return ""
+    return " ".join(text.replace("_", " ").replace("-", " ").split())
+
+
+def _category_label(payload: dict) -> str:
+    payload = payload if isinstance(payload, dict) else {}
+    for key in ("subCategory", "sub_category"):
+        label = _readable_category_label(payload.get(key))
+        if label:
+            return label
+    label = _readable_category_label(_category_path_leaf(payload.get("category_path")))
+    if label:
+        return label
+    for key in ("mainCategory", "main_category", "category_canonical", "category"):
+        label = _readable_category_label(payload.get(key))
+        if label:
+            return label
+    return ""
+
+
+def _product_name(payload: dict) -> str:
+    return _text_field((payload if isinstance(payload, dict) else {}).get("name"))
+
+
 def _safe_upload_name(upload: UploadFile | None, fallback: str) -> str:
     if upload is None:
         return fallback
@@ -212,13 +265,11 @@ def build_internal_itemized_async_render_job_payload(
         if upload_index < 0 or upload_index >= len(item_paths):
             raise ValueError(f"Item {payload_index} has invalid upload_index")
 
-        name = spec.get("name")
-        if isinstance(name, str) and name.strip():
-            label = name.strip()
-        else:
-            category = spec.get("category")
-            if isinstance(category, str) and category.strip():
-                label = category.strip()
+        label = _category_label(spec)
+        if not label:
+            name = _product_name(spec)
+            if name:
+                label = name
             else:
                 raise ValueError(f"Item {payload_index} has invalid label")
 
@@ -234,6 +285,7 @@ def build_internal_itemized_async_render_job_payload(
                 "qty": qty,
                 "dims_mm": spec.get("dims_mm"),
                 "category": spec.get("category"),
+                "product_name": _product_name(spec) or None,
                 "client_id": spec.get("client_id"),
             }
         )
@@ -260,6 +312,7 @@ def build_internal_itemized_async_render_job_payload(
                 "dims_mm": spec["dims_mm"],
                 "qty": spec["qty"],
                 "category": spec["category"],
+                "product_name": spec.get("product_name"),
                 "item_id": spec["client_id"],
                 "payload_index": spec["payload_index"],
                 "target_key": build_item_target_key(
@@ -400,7 +453,8 @@ def build_external_cart_job(
         img_url = it.get("image_url") or it.get("image")
         if not img_url:
             continue
-        label = it.get("name") or it.get("category") or it.get("id") or "Item"
+        label = _category_label(it) or str(it.get("id") or "").strip() or _product_name(it) or "Item"
+        product_name = _product_name(it)
         try:
             qty_val = int(it.get("qty") or 1)
         except Exception:
@@ -415,6 +469,7 @@ def build_external_cart_job(
                 "options": it.get("options"),
                 "qty": qty_val,
                 "category": it.get("category"),
+                "product_name": product_name or None,
                 "item_id": it.get("id"),
                 "payload_index": idx + 1,
                 "worker_preprocess": "external_cart_item_v1",

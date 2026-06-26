@@ -15,6 +15,7 @@ from application.details.detail_workflow import run_generate_details_job
 from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
 from application.media.frontal_view_workflow import run_frontal_view_job
 from application.media.image_edit_workflow import run_image_edit_job
+from application.render.artifact_paths import artifact_subprefix, build_job_artifact_root
 from application.render.empty_room_workflow import run_generate_empty_room_job
 from application.render.finalize_workflow import run_finalize_job
 from application.render.render_workflow import run_render_job, run_render_with_details_job
@@ -124,6 +125,34 @@ def _cleanup_temp_cart_source(local_src: str | None) -> None:
         pass
 
 
+def _current_artifact_context(payload: dict | None = None) -> tuple[str | None, float | str | None]:
+    payload = payload or {}
+    job_id = payload.get("artifact_job_id")
+    created_at = payload.get("artifact_created_at")
+    try:
+        job = get_current_job()
+    except Exception:
+        job = None
+    if not job_id and job:
+        job_id = job.id
+    if not created_at:
+        created_at = time.time()
+    return (str(job_id) if job_id else None), created_at
+
+
+def _artifact_prefix_for_cart_items(payload: dict, services: JobEntrypointServices) -> str:
+    artifact_root = build_job_artifact_root(
+        services.build_s3_prefix,
+        services.normalize_audience(payload.get("audience")),
+        payload.get("artifact_job_id"),
+        payload.get("artifact_created_at"),
+        category="mainrendered",
+    )
+    if artifact_root:
+        return artifact_subprefix(artifact_root, "input-items")
+    return services.build_s3_prefix("external", "customize")
+
+
 def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointServices) -> dict:
     render_payload = dict(payload)
     raw_items = list(render_payload.get("moodboard_items") or [])
@@ -153,7 +182,7 @@ def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointS
             _cleanup_temp_cart_source(local_src)
             continue
 
-        ref_url = services.resolve_image_url(norm_path, services.build_s3_prefix("external", "customize"))
+        ref_url = services.resolve_image_url(norm_path, _artifact_prefix_for_cart_items(render_payload, services))
         if isinstance(ref_url, str) and ref_url.startswith("http"):
             try:
                 if os.path.exists(norm_path):
@@ -176,6 +205,12 @@ def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointS
 
 def job_render(payload: dict, persist_result: bool = True) -> dict:
     services = _services()
+    payload = dict(payload or {})
+    artifact_job_id, artifact_created_at = _current_artifact_context(payload)
+    if artifact_job_id:
+        payload.setdefault("artifact_job_id", artifact_job_id)
+    if artifact_created_at:
+        payload.setdefault("artifact_created_at", artifact_created_at)
     prepared_payload = _prepare_worker_cart_moodboard_items(payload, services)
     if isinstance(prepared_payload, dict) and prepared_payload.get("error"):
         return prepared_payload
@@ -243,10 +278,15 @@ def _generate_shared_cart_empty_room(payload: dict, services: JobEntrypointServi
     if not empty_path or not os.path.exists(empty_path):
         return {"error": "Shared empty room generation failed"}
 
-    empty_url = services.resolve_image_url(
-        empty_path,
-        services.build_s3_prefix(audience, "mainrendered", "empty"),
+    artifact_root = build_job_artifact_root(
+        services.build_s3_prefix,
+        audience,
+        payload.get("artifact_job_id"),
+        payload.get("artifact_created_at"),
+        category="mainrendered",
     )
+    empty_prefix = artifact_subprefix(artifact_root, "empty") if artifact_root else services.build_s3_prefix(audience, "mainrendered", "empty")
+    empty_url = services.resolve_image_url(empty_path, empty_prefix)
     return {
         "empty_room_path": empty_path,
         "empty_room_raw_path": empty_raw_path or empty_path,
@@ -256,6 +296,12 @@ def _generate_shared_cart_empty_room(payload: dict, services: JobEntrypointServi
 
 def job_render_cart_simple_batch(payload: dict) -> dict:
     services = _services()
+    payload = dict(payload or {})
+    artifact_job_id, artifact_created_at = _current_artifact_context(payload)
+    if artifact_job_id:
+        payload.setdefault("artifact_job_id", artifact_job_id)
+    if artifact_created_at:
+        payload.setdefault("artifact_created_at", artifact_created_at)
     variants = [row for row in (payload.get("variants") or []) if isinstance(row, dict)]
     audience = services.normalize_audience(payload.get("audience") or "external")
     if not variants:
@@ -281,6 +327,10 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         render_payload["precomputed_empty_room_raw_path"] = shared_empty["empty_room_raw_path"]
         render_payload["batch_variant_index"] = variant_index
         render_payload["batch_variant_count"] = variant_count
+        if payload.get("artifact_job_id"):
+            render_payload.setdefault("artifact_job_id", payload.get("artifact_job_id"))
+        if payload.get("artifact_created_at"):
+            render_payload.setdefault("artifact_created_at", payload.get("artifact_created_at"))
 
         render_result = job_render(render_payload, persist_result=False)
         if isinstance(render_result, dict) and render_result.get("error"):

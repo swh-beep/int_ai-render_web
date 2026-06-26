@@ -213,7 +213,13 @@ def _category_prompt_guardrails(category: str) -> list[str]:
     return rules
 
 
+def _ultra_detailed_item_analysis_enabled() -> bool:
+    return str(os.getenv("AI_RENDER_ULTRA_DETAILED_ITEM_ANALYSIS", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _prompt_cue_list(values, *, limit: int = 3) -> str:
+    if limit == 3 and _ultra_detailed_item_analysis_enabled():
+        limit = 6
     if not isinstance(values, list):
         return ""
     cues = []
@@ -779,20 +785,29 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         support = _prompt_cue_list(product_identity.get("support_geometry"))
     if not support and isinstance(profile, dict):
         support = _prompt_cue_list(profile.get("support_geometry"))
+    if not support and isinstance(reference_features, dict):
+        support = _prompt_cue_list(reference_features.get("support_geometry"))
     if support:
         bits.append(f"support={support}")
     materials = ""
     if isinstance(profile, dict):
         materials = _prompt_cue_list(profile.get("material_cues"))
     if not materials and isinstance(reference_features, dict):
-        materials = _prompt_cue_list(reference_features.get("material_cues"))
+        materials = _prompt_cue_list(
+            list(reference_features.get("material_cues") or [])
+            + list(reference_features.get("color_cues") or [])
+            + list(reference_features.get("surface_finish") or [])
+        )
     if materials:
         bits.append(f"materials={materials}")
     parts = ""
     if isinstance(profile, dict):
         parts = _prompt_cue_list(profile.get("distinctive_parts"))
     if not parts and isinstance(reference_features, dict):
-        parts = _prompt_cue_list(reference_features.get("distinctive_parts"))
+        parts = _prompt_cue_list(
+            list(reference_features.get("distinctive_parts") or [])
+            + list(reference_features.get("support_geometry") or [])
+        )
     if parts:
         bits.append(f"parts={parts}")
     preserve = ""
@@ -804,6 +819,13 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         preserve = _prompt_cue_list(reference_features.get("preserve_rules"))
     if preserve:
         bits.append(f"preserve={preserve}")
+    if isinstance(reference_features, dict):
+        forbid_identity_changes = _prompt_cue_list(reference_features.get("negative_identity_constraints"))
+        if forbid_identity_changes:
+            bits.append(f"forbid_identity_changes={forbid_identity_changes}")
+        if _is_weak_reference_analysis_item(item):
+            bits.append("weak_text_analysis=image_is_contract")
+            bits.append("if_text_cues_are_sparse_match_reference_crop_outline_parts_and_count")
     if isinstance(archetype, dict):
         strategy = str(archetype.get("render_strategy") or "").strip()
         if strategy:
@@ -811,8 +833,61 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
         forbid = _prompt_cue_list(archetype.get("forbidden_substitutions"))
         if forbid:
             bits.append(f"forbid={forbid}")
+    if qty == 1:
+        bits.append("exactly_one_instance_required")
+        bits.append("duplicate_instances_invalid")
     bits.append("same_family_substitute=invalid")
     return f"- {label}: " + "; ".join(bits)
+
+
+_WEAK_REFERENCE_ANALYSIS_QUALITIES = {
+    "fallback",
+    "fallback_after_weak_model",
+    "fallback_after_invalid_model",
+    "model_insufficient",
+    "model_weak",
+    "weak_model",
+}
+
+
+def _reference_signal_count_for_prompt(item: dict | None) -> int:
+    if not isinstance(item, dict):
+        return 0
+    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+    identity_profile = item.get("identity_profile") if isinstance(item.get("identity_profile"), dict) else {}
+    product_identity = item.get("product_identity") if isinstance(item.get("product_identity"), dict) else {}
+    signal_keys = (
+        "silhouette_cues",
+        "material_cues",
+        "color_cues",
+        "surface_finish",
+        "distinctive_parts",
+        "support_geometry",
+        "preserve_rules",
+        "negative_identity_constraints",
+        "topology_cues",
+    )
+    count = 0
+    for source in (reference_features, identity_profile, product_identity):
+        for key in signal_keys:
+            value = source.get(key)
+            if isinstance(value, list):
+                count += len([row for row in value if str(row or "").strip()])
+            elif str(value or "").strip():
+                count += 1
+    return count
+
+
+def _is_weak_reference_analysis_item(item: dict | None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    reference_features = item.get("reference_features") if isinstance(item.get("reference_features"), dict) else {}
+    analysis_quality = str(reference_features.get("analysis_quality") or "").strip().lower()
+    extraction_mode = str(reference_features.get("extraction_mode") or "").strip().lower()
+    if analysis_quality in _WEAK_REFERENCE_ANALYSIS_QUALITIES or extraction_mode == "fallback":
+        return True
+    has_analysis_signal = "analysis_quality" in reference_features or "extraction_mode" in reference_features
+    return bool(item.get("crop_path") and has_analysis_signal and _reference_signal_count_for_prompt(item) <= 2)
 
 
 def _build_reference_identity_suffix(item: dict | None) -> str:
@@ -828,16 +903,24 @@ def _build_reference_identity_suffix(item: dict | None) -> str:
     )
     parts = (
         _prompt_cue_list(profile.get("distinctive_parts"))
-        or _prompt_cue_list(reference_features.get("distinctive_parts"))
+        or _prompt_cue_list(
+            list(reference_features.get("distinctive_parts") or [])
+            + list(reference_features.get("support_geometry") or [])
+        )
         or _prompt_cue_list(product_identity.get("support_geometry"))
     )
-    materials = _prompt_cue_list(profile.get("material_cues")) or _prompt_cue_list(reference_features.get("material_cues"))
+    materials = _prompt_cue_list(profile.get("material_cues")) or _prompt_cue_list(
+        list(reference_features.get("material_cues") or [])
+        + list(reference_features.get("color_cues") or [])
+        + list(reference_features.get("surface_finish") or [])
+    )
     preserve = (
         _prompt_cue_list(product_identity.get("preserve_rules"))
         or _prompt_cue_list(profile.get("preserve_rules"))
         or _prompt_cue_list(reference_features.get("preserve_rules"))
     )
-    fields = ["IdentityMustMatch=exact reference crop geometry"]
+    forbid_identity_changes = _prompt_cue_list(reference_features.get("negative_identity_constraints"))
+    fields = ["IdentityMustMatch=exact reference crop geometry, outline, visible part count, and instance count"]
     if topology:
         fields.append(f"TopologyCues={topology}")
     if parts:
@@ -846,7 +929,13 @@ def _build_reference_identity_suffix(item: dict | None) -> str:
         fields.append(f"MaterialCues={materials}")
     if preserve:
         fields.append(f"PreserveRules={preserve}")
-    fields.append("InvalidIf=generic same-family substitute, missing listed topology/distinctive parts, or cross-product feature borrowing")
+    if forbid_identity_changes:
+        fields.append(f"ForbiddenIdentityChanges={forbid_identity_changes}")
+    if _is_weak_reference_analysis_item(item):
+        fields.append("WeakTextAnalysis=ignore sparse text if needed; the attached reference crop defines the required product shape")
+    fields.append(
+        "InvalidIf=generic same-family substitute, missing listed topology/distinctive parts, duplicate qty=1 instance, or cross-product feature borrowing"
+    )
     return " | " + " | ".join(fields)
 
 
@@ -875,6 +964,7 @@ def _build_item_exactness_cards_context(furniture_specs_json: dict | None, *, pr
         "\n<ITEM EXACTNESS CARDS>\n",
         "The attached cutout image is the authoritative product-shape source. Text tags are only scale, placement, and exception guardrails.\n",
         "Do not restyle, simplify, or generalize an item into a same-family substitute. If text and image conflict, follow the image.\n",
+        "If an item has sparse or weak text analysis, the image is still mandatory: preserve the reference crop outline, visible parts, proportions, material impression, and exact instance count.\n",
         "If multiple rows share the same label, they are still separate products when source_index, item_id, or target_key differ. Render each distinct product once per its qty; never merge them or reuse one reference image for another row.\n",
         "Do not borrow color, material, silhouette, topology, lampshade, stacked-body, leg/support, or distinctive-part cues across product rows. Each row may use only its own attached reference image and its own item card.\n",
     ]

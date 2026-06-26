@@ -513,8 +513,6 @@ def _storage_signal_text(item: dict) -> str:
         "category",
         "category_canonical",
         "label",
-        "name",
-        "product_name",
     ):
         fragments.extend(_flatten_identity_fragments(item.get(field)))
     fragments.extend(_flatten_identity_fragments(product_identity))
@@ -687,7 +685,7 @@ def _specific_detection_overlap(item: dict, det_label: str) -> bool:
     if not det_tokens:
         return False
     fragments: list[str] = []
-    for field in ("label", "name", "product_name", "target_key", "item_id"):
+    for field in ("label", "category", "category_canonical", "target_key", "item_id"):
         fragments.extend(_flatten_identity_fragments(item.get(field)))
     fragments.extend(_flatten_identity_fragments(item.get("reference_features")))
     fragments.extend(_flatten_identity_fragments(item.get("identity_profile")))
