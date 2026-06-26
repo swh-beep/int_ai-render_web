@@ -95,13 +95,15 @@ def build_empty_room_prompt() -> str:
         "7. **DO NOT ALTER LIGHTING/SHADOWS:** Keep existing lighting direction and intensity consistent with the input.\n"
         "8. **DO NOT REMOVE TRUE STRUCTURE:** Strictly preserve structural elements including columns, pillars, beams, doors, windows, and architectural fireplaces. Do NOT add new openings.\n"
         "9. **VIEW PROTECTION:** If the input shows an exterior view through any opening, preserve the same view content while keeping window and door verticals plumb.\n\n"
-        "10. **REMOVE ALL NON-STRUCTURAL OBJECTS:** Remove furniture, rugs, lamps, curtains, decorations, books, appliances, desks, chairs, sofas, tables, beds, mirrors, wall art, and all storage/display units.\n"
+        "10. **REMOVE ALL NON-STRUCTURAL OBJECTS:** Remove furniture, rugs, portable lamps, curtains, decorations, books, appliances, desks, chairs, sofas, tables, beds, mirrors, wall art, and all storage/display units.\n"
         "11. **BOOKCASE/SHELVING RULE:** Remove every bookshelf, bookcase, shelving unit, cabinet, console, wardrobe, media unit, and wall-mounted storage even if it appears attached to the wall. If unsure whether it is built-in furniture or architecture, remove it.\n\n"
+        "12. **KOREAN FLUSH-MOUNT CEILING LIGHT RULE:** Remove only bulky Korean apartment-style flush-mount fluorescent fixtures and large rectangular/square LED panel ceiling lights with diffuser covers. Even if this fixture is centered, screwed into the ceiling, or appears semi-built-in, it is NOT architecture. Patch that ceiling surface cleanly.\n"
+        "13. **ARCHITECTURAL LIGHTING PRESERVATION:** Do NOT remove track/rail lighting, recessed downlights, cove or indirect lighting, curtain boxes, lighting slots, ceiling coves, trims, tray-ceiling planes, soffits, beams, or other true ceiling geometry.\n\n"
         "<CRITICAL: COMPLETE ERADICATION (PRIORITY #1)>\n"
-        "1. REMOVE EVERYTHING ELSE: Identify and remove ALL movable or non-structural furniture, storage, rugs, curtains, lighting fixtures, wall decor, books, electronics, and small objects.\n"
+        "1. REMOVE EVERYTHING ELSE: Identify and remove ALL movable or non-structural furniture, storage, rugs, curtains, portable lamps, bulky flush-mount ceiling fluorescent/LED panel fixtures, wall decor, books, electronics, and small objects.\n"
         "2. CLEAN SURFACES: The floor and walls must be perfectly empty. Remove all shadows, reflections, and traces.\n"
         "3. BARE SHELL: Restore the room to its initial construction state.\n\n"
-        "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural elements intact and all true vertical architectural lines upright. No bookshelves, cabinets, furniture, decor, rugs, curtains, lamps, desks, chairs, or electronics may remain. Do NOT add new openings."
+        "OUTPUT RULE: Return a perfectly clean, empty architectural shell with all structural elements intact and all true vertical architectural lines upright. No bookshelves, cabinets, furniture, decor, rugs, curtains, portable lamps, ceiling light panels, flush-mount fluorescent fixtures, desks, chairs, or electronics may remain. Do NOT add new openings."
     )
 
 

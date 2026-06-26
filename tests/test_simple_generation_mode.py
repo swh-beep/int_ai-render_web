@@ -60,6 +60,30 @@ def test_empty_room_prompt_requests_architectural_grid_alignment():
     assert "perspective/grid rectification takes priority" in prompt
 
 
+def test_empty_room_prompt_erases_only_korean_flush_mount_ceiling_panels():
+    prompt = build_empty_room_prompt()
+
+    assert "KOREAN FLUSH-MOUNT CEILING LIGHT RULE" in prompt
+    assert "Korean apartment-style flush-mount fluorescent fixtures" in prompt
+    assert "large rectangular/square LED panel ceiling lights" in prompt
+    assert "Even if this fixture is centered, screwed into the ceiling, or appears semi-built-in" in prompt
+    assert "Patch that ceiling surface cleanly" in prompt
+    assert "ceiling light panels" in prompt
+    assert "flush-mount fluorescent fixtures" in prompt
+    assert "Remove every visible ceiling-mounted light fixture" not in prompt
+
+
+def test_empty_room_prompt_preserves_architectural_lighting_and_curtain_boxes():
+    prompt = build_empty_room_prompt()
+
+    assert "ARCHITECTURAL LIGHTING PRESERVATION" in prompt
+    assert "Do NOT remove track/rail lighting" in prompt
+    assert "recessed downlights" in prompt
+    assert "cove or indirect lighting" in prompt
+    assert "curtain boxes" in prompt
+    assert "lighting slots" in prompt
+
+
 def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata():
     specs = {
         "items": [
@@ -363,8 +387,8 @@ def test_run_render_room_workflow_uses_unified_best_of_three_main_mode(monkeypat
         "url://outputs/simple-c.png",
     ]
     assert result["candidate_result_urls"] == [
-        "url://outputs/simple-b.png",
         "url://outputs/simple-a.png",
+        "url://outputs/simple-b.png",
         "url://outputs/simple-c.png",
     ]
     assert result["scale_plan"]
