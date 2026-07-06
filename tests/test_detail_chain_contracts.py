@@ -1422,6 +1422,112 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
 
+def test_internal_generate_details_job_localizes_uploaded_item_targets_without_fresh_detection_loss(tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    sofa_crop_path = tmp_path / "sofa-crop.png"
+    table_crop_path = tmp_path / "table-crop.png"
+    lamp_crop_path = tmp_path / "lamp-crop.png"
+    sofa_crop_path.write_bytes(image_path.read_bytes())
+    table_crop_path.write_bytes(image_path.read_bytes())
+    lamp_crop_path.write_bytes(image_path.read_bytes())
+    detect_calls = []
+    recorded_styles = {}
+    recorded_crop_preferences = {}
+    localized = {
+        "Modular Sofa": (0.18, 0.15, 0.74, 0.54),
+        "Side Table": (0.48, 0.56, 0.62, 0.72),
+        "Floor Lamp": (0.74, 0.20, 0.88, 0.62),
+    }
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        recorded_styles[int(index)] = dict(style_config)
+        recorded_crop_preferences[int(index)] = kwargs.get("prefer_crop_extract")
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+            "aspect_ratio": style_config.get("ratio"),
+        }
+
+    result = run_generate_details_job(
+        {
+            "image_url": str(image_path),
+            "furniture_data": [
+                {
+                    "label": "Modular Sofa",
+                    "target_key": "internal_item-1_sofa_001",
+                    "category": "sofa",
+                    "category_canonical": "main_sofa",
+                    "box_2d": [0, 0, 1000, 1000],
+                    "crop_path": str(sofa_crop_path),
+                    "volume_rank": 1,
+                },
+                {
+                    "label": "Side Table",
+                    "target_key": "internal_item-2_table_002",
+                    "category": "table",
+                    "category_canonical": "sofa_table",
+                    "box_2d": [0, 0, 1000, 1000],
+                    "crop_path": str(table_crop_path),
+                    "volume_rank": 2,
+                },
+                {
+                    "label": "Floor Lamp",
+                    "target_key": "internal_item-3_floor-lamp_003",
+                    "category": "floor_lamp",
+                    "category_canonical": "floor_lamp",
+                    "box_2d": [0, 0, 1000, 1000],
+                    "crop_path": str(lamp_crop_path),
+                    "volume_rank": 3,
+                },
+            ],
+            "audience": "internal",
+        },
+        normalize_audience=lambda audience: audience or "internal",
+        build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+        persist_job_result=lambda payload, audience=None: None,
+        materialize_input=lambda url, prefix: url,
+        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+        log_section=lambda message: None,
+        detect_furniture_boxes=lambda path: detect_calls.append(path) or [{"label": "Generic Chair", "box_2d": [100, 100, 200, 200]}],
+        detect_item_bbox_norm=lambda staged_path, crop_path, label, item_context=None, timeout_sec=None: localized.get(label),
+        canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+        build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+        max_concurrency_analysis=1,
+        analyze_cropped_item=lambda path, item: item,
+        attach_volume_ranks=lambda items: sorted(
+            [{**item, "volume_rank": item.get("volume_rank") or index + 1} for index, item in enumerate(items)],
+            key=lambda item: int(item.get("volume_rank") or 10**9),
+        ),
+        construct_dynamic_styles=construct_dynamic_styles,
+        generate_detail_view=fake_generate_detail_view,
+        normalize_label_for_match=lambda label: str(label or "").strip().lower(),
+        volume_ranking_snapshot=lambda items: [{"target_key": row.get("target_key")} for row in items if isinstance(row, dict)],
+    )
+
+    detail_target_keys = {row.get("target_key") for row in result["details"] if row.get("target_key")}
+    assert detect_calls == []
+    assert detail_target_keys == {
+        "internal_item-1_sofa_001",
+        "internal_item-2_table_002",
+        "internal_item-3_floor-lamp_003",
+    }
+    assert [row["style_name"] for row in result["details"]][:3] == [
+        "High Angle Overview",
+        "Side Composition (Focus Left)",
+        "Side Composition (Focus Right)",
+    ]
+    assert recorded_styles[4]["detail_mode"] == "product_identity_lock"
+    assert recorded_styles[4]["target_box_source"] == "product_reference_localization"
+    assert recorded_crop_preferences[4] is True
+    assert all(
+        row.get("box_source") == "product_reference_localization"
+        for row in result["furniture_data"]
+    )
+
+
 def test_external_generate_details_job_uses_model_generation_for_detail_targets(tmp_path):
     image_path = tmp_path / "detail-src.png"
     image_path.write_bytes(
