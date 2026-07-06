@@ -369,7 +369,7 @@ def run_generate_details_job(
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
 
         use_product_reference_localization = (
-            aud == "external"
+            aud in {"external", "internal"}
             and bool(furniture_data)
             and detect_item_bbox_norm is not None
         )

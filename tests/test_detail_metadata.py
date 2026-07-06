@@ -205,6 +205,27 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
         self.assertNotIn("simple_scene_detail", styles[0])
 
+    def test_construct_dynamic_styles_treats_internal_upload_targets_as_product_backed(self):
+        styles = construct_dynamic_styles(
+            [
+                {
+                    "label": "Modular Sofa",
+                    "target_key": "internal_item-1_sofa_001",
+                    "source_index": 1,
+                    "category": "sofa",
+                    "category_canonical": "main_sofa",
+                    "box_2d": [150, 180, 540, 740],
+                    "box_source": "product_reference_localization",
+                    "detail_localization_status": "product_reference_verified",
+                    "crop_path": "/tmp/modular-sofa.png",
+                }
+            ]
+        )
+
+        self.assertEqual(styles[0]["target_key"], "internal_item-1_sofa_001")
+        self.assertEqual(styles[0]["detail_mode"], "product_identity_lock")
+        self.assertNotIn("simple_scene_detail", styles[0])
+
     def test_construct_dynamic_styles_keeps_cart_products_localized_by_current_render(self):
         styles = construct_dynamic_styles(
             [

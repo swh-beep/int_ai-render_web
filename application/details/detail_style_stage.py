@@ -164,6 +164,7 @@ def _is_source_backed_detail_target(item) -> bool:
         item_id.startswith("product_")
         or target_key.startswith("cart_product")
         or target_key.startswith("cart_")
+        or target_key.startswith("internal_")
     )
 
     if _has_localized_render_box(item) and has_product_reference:
