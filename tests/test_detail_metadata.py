@@ -409,7 +409,7 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail_styles[0]["target_label"], "sofa")
         self.assertEqual(detail_styles[1]["target_label"], "light")
 
-    def test_construct_dynamic_styles_deduplicates_detection_fragments_with_same_label(self):
+    def test_construct_dynamic_styles_deduplicates_overlapping_detection_fragments_with_same_label(self):
         analyzed_items = [
             {
                 "label": "Sofa",
@@ -431,7 +431,7 @@ class DetailMetadataTests(unittest.TestCase):
                 "label": "Floor Lamp",
                 "target_key": "detail_floor-lamp_008",
                 "category_canonical": "floor_lamp",
-                "box_2d": [399, 336, 550, 353],
+                "box_2d": [360, 128, 870, 232],
                 "box_source": "detail_current_image_analysis",
                 "volume_rank": 3,
             },
@@ -448,7 +448,31 @@ class DetailMetadataTests(unittest.TestCase):
         styles = construct_dynamic_styles(analyzed_items)
         detail_targets = [style.get("target_label") for style in styles]
 
-        self.assertEqual(detail_targets, ["Sofa", "Floor Lamp"])
+        self.assertEqual(detail_targets, ["Sofa", "Floor Lamp", "Floor Lamp"])
+
+    def test_construct_dynamic_styles_keeps_same_label_targets_when_spatially_distinct(self):
+        analyzed_items = [
+            {
+                "label": "Lounge Chair",
+                "target_key": "detail_lounge-chair_001",
+                "category_canonical": "lounge_chair",
+                "box_2d": [500, 110, 850, 290],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 1,
+            },
+            {
+                "label": "Lounge Chair",
+                "target_key": "detail_lounge-chair_002",
+                "category_canonical": "lounge_chair",
+                "box_2d": [500, 700, 850, 890],
+                "box_source": "detail_current_image_analysis",
+                "volume_rank": 2,
+            },
+        ]
+
+        styles = construct_dynamic_styles(analyzed_items)
+
+        self.assertEqual([style.get("target_key") for style in styles], ["detail_lounge-chair_001", "detail_lounge-chair_002"])
 
     def test_construct_dynamic_styles_keeps_separate_generic_decor_targets(self):
         analyzed_items = [

@@ -269,6 +269,9 @@ class RouteHelperTests(unittest.TestCase):
 
         self.assertEqual(resolved["room"], "livingroom")
         self.assertIs(job_payload["require_details"], True)
+        self.assertIs(job_payload["extra"]["video_enabled"], False)
+        self.assertEqual(job_payload["extra"]["detail_target_count"], 6)
+        self.assertEqual(job_payload["extra"]["detail_target_policy"], "preset_fixed_six_unique_targets")
 
     def test_build_external_render_video_job_validates_clip_count_range(self):
         payload = build_external_render_video_job(ExternalRenderVideoRequest(render_job_id="render-job-1", clip_count=5))

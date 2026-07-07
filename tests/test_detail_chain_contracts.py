@@ -100,6 +100,75 @@ class DetailChainContractsTests(unittest.TestCase):
             ["Detail: Pendant", "Detail: Rio Table", "Detail: Tabletop Decor"],
         )
 
+    def test_select_external_detail_styles_fills_six_unique_targets_before_duplicate_overlap(self):
+        styles = [
+            {
+                "name": "Detail: Lounge Chair",
+                "target_key": "detail_lounge-chair_001",
+                "target_label": "Lounge Chair",
+                "target_category": "lounge_chair",
+                "target_box_2d": [520, 640, 860, 830],
+            },
+            {
+                "name": "Detail: Armchair",
+                "target_key": "detail_armchair_002",
+                "target_label": "Armchair",
+                "target_category": "lounge_chair",
+                "target_box_2d": [528, 648, 858, 826],
+            },
+            {
+                "name": "Detail: Sofa",
+                "target_key": "detail_sofa_003",
+                "target_label": "Sofa",
+                "target_category": "main_sofa",
+                "target_box_2d": [540, 120, 820, 480],
+            },
+            {
+                "name": "Detail: Coffee Table",
+                "target_key": "detail_table_004",
+                "target_label": "Coffee Table",
+                "target_category": "coffee_table",
+                "target_box_2d": [660, 420, 820, 610],
+            },
+            {
+                "name": "Detail: Floor Lamp",
+                "target_key": "detail_lamp_005",
+                "target_label": "Floor Lamp",
+                "target_category": "floor_lamp",
+                "target_box_2d": [250, 820, 760, 900],
+            },
+            {
+                "name": "Detail: Side Table",
+                "target_key": "detail_side-table_006",
+                "target_label": "Side Table",
+                "target_category": "side_table",
+                "target_box_2d": [610, 500, 810, 680],
+            },
+            {
+                "name": "Detail: Pendant",
+                "target_key": "detail_pendant_007",
+                "target_label": "Pendant",
+                "target_category": "pendant",
+                "target_box_2d": [80, 450, 300, 560],
+            },
+        ]
+
+        selected = select_external_detail_styles(styles)
+
+        self.assertEqual(len(selected), 6)
+        self.assertNotIn("detail_armchair_002", [style.get("target_key") for style in selected])
+        self.assertEqual(
+            [style.get("target_key") for style in selected],
+            [
+                "detail_lounge-chair_001",
+                "detail_sofa_003",
+                "detail_table_004",
+                "detail_lamp_005",
+                "detail_side-table_006",
+                "detail_pendant_007",
+            ],
+        )
+
     def test_select_external_detail_styles_keeps_order_when_under_limit(self):
         three_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 4)]
         four_styles = [{"name": f"Detail: item-{idx}"} for idx in range(1, 5)]
@@ -1165,6 +1234,37 @@ def test_run_render_with_details_job_passes_shared_deadline_budget_to_details():
     assert result["details"]["details"][0]["url"] == "https://cdn.example/detail-1.png"
     assert result["resolved"]["room"] == "livingroom"
     assert persisted[-1][1] == "external"
+
+
+def test_run_render_with_details_job_passes_preset_detail_target_policy_to_details():
+    captured = {}
+
+    def fake_detail_job_runner(detail_payload):
+        captured["detail_payload"] = dict(detail_payload)
+        return {"details": [{"url": "https://cdn.example/detail-1.png"}], "message": "ok"}
+
+    run_render_with_details_job(
+        {
+            "require_details": True,
+            "render": {"audience": "external"},
+            "extra": {
+                "resolved": {"room": "livingroom", "style": "natural", "variant": "2"},
+                "detail_target_count": 6,
+                "detail_target_policy": "preset_fixed_six_unique_targets",
+            },
+        },
+        normalize_audience=lambda audience: audience or "external",
+        render_job_runner=lambda render_payload, persist_result=False: {
+            "result_url": "https://cdn.example/render.png",
+            "result_urls": ["https://cdn.example/render.png"],
+            "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+        },
+        detail_job_runner=fake_detail_job_runner,
+        persist_job_result=lambda payload, audience=None: None,
+    )
+
+    assert captured["detail_payload"]["detail_target_count"] == 6
+    assert captured["detail_payload"]["detail_target_policy"] == "preset_fixed_six_unique_targets"
 
 
 def test_run_render_with_details_job_skips_details_when_budget_is_exhausted():
