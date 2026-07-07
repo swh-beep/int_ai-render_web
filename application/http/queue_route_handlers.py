@@ -162,6 +162,17 @@ def _is_external_render_job_result(result: Any) -> bool:
     return any(key in result for key in ("resolved", "cart_kept", "cart_dropped"))
 
 
+def _external_video_disabled_reason(result: Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if result.get("video_enabled") is not False:
+        return None
+    reason = result.get("video_disabled_reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason.strip()
+    return "Video generation is disabled for this render job"
+
+
 def _has_external_video_source_images(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
@@ -741,6 +752,9 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
 
     if not _is_external_render_job_result(source_result):
         raise HTTPException(status_code=403, detail="render_job_id must belong to an external render job")
+    disabled_reason = _external_video_disabled_reason(source_result)
+    if disabled_reason:
+        raise HTTPException(status_code=400, detail=disabled_reason)
     if isinstance(source_result, dict) and (source_result.get("error") or not _has_external_video_source_images(source_result)):
         raise HTTPException(status_code=400, detail="render_job_id does not have usable image results")
 

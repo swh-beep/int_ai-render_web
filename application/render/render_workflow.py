@@ -116,6 +116,9 @@ def run_render_with_details_job(
         return result
 
     details_payload = build_detail_payload(render_result, audience=audience)
+    for key in ("detail_target_count", "detail_target_policy"):
+        if key in extra:
+            details_payload[key] = extra[key]
     if require_details:
         details_payload["require_details"] = True
         details_result = _normalize_detail_result(detail_job_runner(details_payload))

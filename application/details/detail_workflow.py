@@ -67,6 +67,24 @@ def _coerce_box_2d(value) -> list[float] | None:
     return box
 
 
+def _box_iou(box_a, box_b) -> float:
+    a = _coerce_box_2d(box_a)
+    b = _coerce_box_2d(box_b)
+    if not a or not b:
+        return 0.0
+    top = max(a[0], b[0])
+    left = max(a[1], b[1])
+    bottom = min(a[2], b[2])
+    right = min(a[3], b[3])
+    if bottom <= top or right <= left:
+        return 0.0
+    inter = (bottom - top) * (right - left)
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0.0 else 0.0
+
+
 def _clamp_bounds(bounds: tuple[float, float, float, float], image_size: tuple[int, int]) -> tuple[float, float, float, float]:
     width, height = image_size
     left, top, right, bottom = bounds
@@ -203,6 +221,59 @@ def _bounds_iou(
     return inter / denom if denom > 0.0 else 0.0
 
 
+def _style_label(style: dict) -> str:
+    raw = style.get("target_label") or ""
+    if not raw:
+        name = str(style.get("name") or "")
+        raw = name.split("Detail:", 1)[1] if name.startswith("Detail:") else name
+    return " ".join(str(raw or "").strip().lower().split())
+
+
+def _is_duplicate_external_detail_style(style: dict, accepted_styles: list[dict]) -> bool:
+    if not isinstance(style, dict):
+        return False
+    target_key = str(style.get("target_key") or "").strip().lower()
+    label = _style_label(style)
+    family = _style_family(style)
+    box = _coerce_box_2d(style.get("target_box_2d") or style.get("box_2d"))
+    bounds = _predicted_detail_crop_bounds(style)
+
+    for accepted in accepted_styles or []:
+        if not isinstance(accepted, dict):
+            continue
+        accepted_target_key = str(accepted.get("target_key") or "").strip().lower()
+        if target_key and accepted_target_key and target_key == accepted_target_key:
+            return True
+
+        accepted_label = _style_label(accepted)
+        accepted_family = _style_family(accepted)
+        same_label = bool(label and accepted_label and label == accepted_label)
+        same_family = bool(family and accepted_family and family == accepted_family)
+        if not same_label and not same_family:
+            continue
+
+        accepted_box = _coerce_box_2d(accepted.get("target_box_2d") or accepted.get("box_2d"))
+        if box is not None and accepted_box is not None and _box_iou(box, accepted_box) >= 0.45:
+            return True
+
+        accepted_bounds = _predicted_detail_crop_bounds(accepted)
+        if bounds is not None and accepted_bounds is not None and _bounds_iou(bounds, accepted_bounds) >= 0.68:
+            return True
+
+    return False
+
+
+def _dedupe_external_detail_styles(styles: list[dict]) -> list[dict]:
+    accepted: list[dict] = []
+    delayed_duplicates: list[dict] = []
+    for style in styles or []:
+        if _is_duplicate_external_detail_style(style, accepted):
+            delayed_duplicates.append(style)
+        else:
+            accepted.append(style)
+    return [*accepted, *delayed_duplicates]
+
+
 def _prioritize_spatially_diverse_styles(styles: list[dict]) -> list[dict]:
     selected: list[dict] = []
     selected_bounds: list[tuple[float, float, float, float]] = []
@@ -235,7 +306,7 @@ def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTER
     product_backed = [style for style in styles if _is_product_backed_external_style(style)]
     fallback = [style for style in styles if not _is_product_backed_external_style(style)]
     product_backed = _prioritize_spatially_diverse_styles(product_backed)
-    return [*product_backed, *fallback][:max_count]
+    return _dedupe_external_detail_styles([*product_backed, *fallback])[:max_count]
 
 
 def _should_prefer_crop_extract_for_detail(style: dict, *, audience: str) -> bool:
@@ -277,6 +348,11 @@ def run_generate_details_job(
         furniture_data = payload.get("furniture_data")
         audience = payload.get("audience")
         require_details = bool(payload.get("require_details"))
+        try:
+            requested_detail_target_count = int(payload.get("detail_target_count") or EXTERNAL_DETAIL_STYLE_LIMIT)
+        except Exception:
+            requested_detail_target_count = EXTERNAL_DETAIL_STYLE_LIMIT
+        requested_detail_target_count = max(1, requested_detail_target_count)
         raw_absolute_deadline_ts = payload.get("absolute_deadline_ts")
         raw_minimum_budget_sec = payload.get("minimum_detail_budget_sec")
         try:
@@ -404,7 +480,7 @@ def run_generate_details_job(
         if aud == "internal":
             dynamic_styles = with_internal_angle_styles(dynamic_styles)
         elif aud == "external":
-            dynamic_styles = select_external_detail_styles(dynamic_styles)
+            dynamic_styles = select_external_detail_styles(dynamic_styles, limit=requested_detail_target_count)
         print(
             ">> [Detail View] target counts "
             f"analyzed_items={detected_item_count} raw_styles={raw_style_count} final_styles={len(dynamic_styles or [])}",

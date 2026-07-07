@@ -373,6 +373,10 @@ def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tup
         "extra": {
             "preset_id": req.preset_id,
             "resolved": resolved_surface,
+            "video_enabled": False,
+            "video_disabled_reason": "Video generation is disabled for preset renders",
+            "detail_target_count": 6,
+            "detail_target_policy": "preset_fixed_six_unique_targets",
         },
     }
     return job_payload, resolved_surface

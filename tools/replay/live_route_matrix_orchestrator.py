@@ -316,6 +316,11 @@ def _external_video_block_reason(row: dict[str, Any]) -> str | None:
     if not _is_finished_success(row):
         return "source render job did not finish successfully"
     source_result = row["job_status"]["result"]
+    if isinstance(source_result, dict) and source_result.get("video_enabled") is False:
+        reason = source_result.get("video_disabled_reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+        return "video generation is disabled for this render job"
     render_result = source_result.get("render") if isinstance(source_result, dict) else None
     reason = _render_block_reason(render_result)
     if reason:

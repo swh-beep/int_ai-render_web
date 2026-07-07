@@ -270,6 +270,29 @@ class ExternalRouteContractsTests(unittest.TestCase):
             },
         )
 
+    def test_external_render_video_route_rejects_preset_render_when_video_disabled(self):
+        deps = _external_deps()
+        preset_result = _external_finished_result_payload()
+        preset_result["video_enabled"] = False
+        preset_result["video_disabled_reason"] = "Video generation is disabled for preset renders"
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(preset_result)
+
+        def fail_enqueue(*args, **kwargs):
+            raise AssertionError("video job should not be enqueued")
+
+        deps.enqueue_job = fail_enqueue
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/video",
+                json={"render_job_id": "job-xyz", "clip_count": 4},
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"detail": "Video generation is disabled for preset renders"})
+
     def test_external_render_video_route_rejects_internal_source_job(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: _FakeFinishedJob({"render": {"result_url": "https://cdn.example/internal.png"}})

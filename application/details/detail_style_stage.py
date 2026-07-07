@@ -229,9 +229,12 @@ def _is_duplicate_detail_target(item, accepted_items) -> bool:
         same_family = bool(family_key and accepted_family_key and family_key == accepted_family_key)
         both_detection_only = not _is_source_backed_detail_target(item) and not _is_source_backed_detail_target(accepted)
         if same_label and both_detection_only and (same_family or not family_key or not accepted_family_key):
-            if _is_generic_decor_detail_target(item) and _is_generic_decor_detail_target(accepted):
-                return _box_iou(box, (accepted or {}).get("box_2d")) >= 0.35
-            return True
+            overlap = _box_iou(box, (accepted or {}).get("box_2d"))
+            if overlap > 0.0:
+                return overlap >= 0.35
+            if _normalize_box(box) is None or _normalize_box((accepted or {}).get("box_2d")) is None:
+                return True
+            return False
         if (
             same_label
             and same_family
