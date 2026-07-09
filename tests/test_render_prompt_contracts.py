@@ -6,6 +6,7 @@ from PIL import Image
 
 from application.render.furnished_generation_stage import (
     _build_item_exactness_card_row,
+    _build_placement_plan_context,
     _build_reference_identity_suffix,
     generate_furnished_room,
 )
@@ -65,6 +66,36 @@ def test_item_exactness_card_marks_weak_analysis_item_as_image_contract(tmp_path
     assert "same_family_substitute=invalid" in row
     assert "WeakTextAnalysis=ignore sparse text if needed" in suffix
     assert "duplicate qty=1 instance" in suffix
+
+
+def test_build_placement_plan_context_includes_table_lamp_support_priority():
+    context = _build_placement_plan_context(
+        {
+            "anchor_item_key": "storage-1",
+            "placement_zones": {
+                "lamp-1": {
+                    "placement_family": "surface_placed",
+                    "zone": "table_lamp_support_priority_band",
+                    "support_priority": {
+                        "order": ["storage", "side_table", "floor"],
+                        "available_targets": [
+                            {"target_key": "storage-1", "label": "Low Storage Cabinet", "support_type": "storage"},
+                            {"target_key": "side-table-1", "label": "Round Side Table", "support_type": "side_table"},
+                        ],
+                        "rule": "Use storage/cabinet top first, side table second, and the floor only if neither support is present. Avoid sofa tables and coffee tables for table lamps.",
+                    },
+                }
+            },
+        },
+        {"lamp-1": "Taccia Small Table Lamp"},
+    )
+
+    assert "<PLACEMENT PLAN (BINDING)>" in context
+    assert "Taccia Small Table Lamp" in context
+    assert "support_priority=storage > side_table > floor" in context
+    assert "Low Storage Cabinet(storage)" in context
+    assert "Round Side Table(side_table)" in context
+    assert "Avoid sofa tables and coffee tables" in context
 
 
 def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):

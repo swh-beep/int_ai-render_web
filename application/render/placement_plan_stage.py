@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.render.postprocess_support import decor_prefers_surface_placement, resolve_item_family
+from application.render.postprocess_support import (
+    decor_prefers_surface_placement,
+    resolve_item_canonical_category,
+    resolve_item_family,
+)
 from application.render.render_contracts import PlacementPlan
 
 
@@ -12,6 +16,7 @@ _ADJACENT_SEATING_FAMILIES = {"chair", "lounge_chair"}
 _SECONDARY_ADJACENT_SEATING_FAMILIES = {"lounge_seating", "armchair", "loveseat"}
 _CEILING_ATTACHED_FAMILIES = {"ceiling_light"}
 _WALL_ATTACHED_FAMILIES = {"mirror", "wall_light"}
+_TABLE_LAMP_SUPPORT_PRIORITY = ("storage", "side_table", "floor")
 
 
 def _coerce_ratio(value: Any) -> float | None:
@@ -24,6 +29,10 @@ def _coerce_ratio(value: Any) -> float | None:
 
 def _item_family(item: dict) -> str:
     return resolve_item_family(item)
+
+
+def _item_canonical_category(item: dict) -> str:
+    return resolve_item_canonical_category(item)
 
 
 def _room_width_ratio_hint(item: dict) -> float | None:
@@ -81,6 +90,8 @@ def _zone_name(item: dict) -> str:
         return "center_floor_anchor"
     if family == "rug":
         return "under_anchor_band"
+    if family == "table_lamp":
+        return "table_lamp_support_priority_band"
     if placement_family == "surface_placed":
         return "surface_top_band"
     if placement_family == "small_free_object":
@@ -101,9 +112,56 @@ def _orientation_hint(item: dict) -> str | None:
         return "Keep this seat oriented toward the primary seating group instead of rotating it diagonally."
     if family == "rug":
         return "Keep a single rug centered under the anchor seating group. Do not duplicate or offset it."
+    if family == "table_lamp":
+        return "Place this table lamp by priority: storage/cabinet top first, side table second, floor fallback only when neither support exists. Do not default to a sofa or coffee table."
     if family in {"table", "desk"}:
         return "Keep the tabletop aligned to the seating anchor geometry unless explicit placement instructions say otherwise."
     return None
+
+
+def _support_target_type(item: dict) -> str | None:
+    family = _item_family(item)
+    canonical = _item_canonical_category(item)
+    if family == "storage" or canonical == "storage_cabinet_shelf":
+        return "storage"
+    if canonical == "side_table":
+        return "side_table"
+    return None
+
+
+def _table_lamp_support_priority(item: dict, items: list[dict]) -> dict[str, Any] | None:
+    if _item_family(item) != "table_lamp":
+        return None
+
+    item_key = str(item.get("target_key") or item.get("label") or "")
+    available_targets: list[dict[str, str]] = []
+    seen_keys: set[str] = set()
+    for support_type in _TABLE_LAMP_SUPPORT_PRIORITY:
+        if support_type == "floor":
+            continue
+        for candidate in items:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_key = str(candidate.get("target_key") or candidate.get("label") or "")
+            if not candidate_key or candidate_key == item_key or candidate_key in seen_keys:
+                continue
+            if _support_target_type(candidate) != support_type:
+                continue
+            seen_keys.add(candidate_key)
+            available_targets.append(
+                {
+                    "target_key": candidate_key,
+                    "label": str(candidate.get("label") or candidate_key),
+                    "support_type": support_type,
+                }
+            )
+
+    return {
+        "order": list(_TABLE_LAMP_SUPPORT_PRIORITY),
+        "available_targets": available_targets,
+        "fallback": "floor",
+        "rule": "Use storage/cabinet top first, side table second, and the floor only if neither support is present. Avoid sofa tables and coffee tables for table lamps.",
+    }
 
 
 def _anchor_relationship(item: dict, anchor_item_key: str | None) -> dict[str, Any]:
@@ -189,6 +247,9 @@ def build_placement_plan(
                 "footprint_ratio": _coerce_ratio(geometry_target.get("footprint_ratio")),
             },
         }
+        support_priority = _table_lamp_support_priority(item, analyzed_items or [])
+        if support_priority:
+            placement_contract["support_priority"] = support_priority
         placement_zones[item_key] = placement_contract
         item["placement_contract"] = placement_contract
         clamp = _small_item_absolute_clamp(item)

@@ -203,7 +203,15 @@ def _category_prompt_guardrails(category: str) -> list[str]:
     if any(token in text for token in ("lamp", "light", "pendant", "chandelier", "sconce")):
         rules.extend(["preserve_light_fixture_scale", "do_not_convert_into_furniture"])
     if "table_lamp" in text:
-        rules.extend(["exact_lampshade_shape", "exact_base_and_stem_geometry", "no_generic_lamp_substitution"])
+        rules.extend(
+            [
+                "exact_lampshade_shape",
+                "exact_base_and_stem_geometry",
+                "no_generic_lamp_substitution",
+                "support_priority_storage_then_side_table_then_floor",
+                "avoid_sofa_table_or_coffee_table_default",
+            ]
+        )
     if "chair" in text:
         rules.extend(["exact_back_seat_leg_geometry", "no_generic_chair_substitution"])
     if any(token in text for token in ("decor", "art", "frame")):
@@ -387,6 +395,25 @@ def _build_placement_plan_context(placement_plan: dict | None, item_labels_by_ke
             bits = [bit for bit in [f"zone={zone.get('zone')}" if zone.get("zone") else "", f"placement={zone.get('placement_family')}" if zone.get("placement_family") else ""] if bit]
             targets = zone.get("room_ratio_targets") if isinstance(zone.get("room_ratio_targets"), dict) else {}
             bits.extend(_ratio_bits(targets))
+            support_priority = zone.get("support_priority") if isinstance(zone.get("support_priority"), dict) else {}
+            if support_priority:
+                order = [str(value) for value in (support_priority.get("order") or []) if str(value).strip()]
+                if order:
+                    bits.append("support_priority=" + " > ".join(order))
+                available_targets = support_priority.get("available_targets") or []
+                available_bits = []
+                for target in available_targets[:4]:
+                    if not isinstance(target, dict):
+                        continue
+                    target_label = str(target.get("label") or target.get("target_key") or "").strip()
+                    support_type = str(target.get("support_type") or "").strip()
+                    if target_label:
+                        available_bits.append(f"{target_label}" + (f"({support_type})" if support_type else ""))
+                if available_bits:
+                    bits.append("available_supports=" + ", ".join(available_bits))
+                rule = str(support_priority.get("rule") or "").strip()
+                if rule:
+                    bits.append(f"support_rule={rule}")
             orientation = str(zone.get("orientation_hint") or "").strip()
             if orientation:
                 bits.append(f"orientation={orientation}")
@@ -1623,7 +1650,9 @@ def generate_furnished_room(
                             compact_note = "keep visually compact"
                             if "rug" in category_text:
                                 compact_note = "keep this rug compact relative to the room, not wall-to-wall"
-                            elif any(token in category_text for token in ("table_lamp", "vase", "accessory")):
+                            elif "table_lamp" in category_text:
+                                compact_note = "keep this as a surface-scale object and table-lamp scale object, never side-table sized; place by priority: storage/cabinet top first, side table second, floor fallback only when neither support exists"
+                            elif any(token in category_text for token in ("vase", "accessory")):
                                 compact_note = "keep this as a surface-scale object, never side-table sized"
                             elif surface_decor:
                                 compact_note = "keep this as a reference-scale compact object only when its dimensions/reference indicate tabletop scale, never side-table sized"
@@ -1918,7 +1947,7 @@ def generate_furnished_room(
             "4. **PRODUCT EXACTNESS FIRST:** Match each provided furniture cutout as the exact product identity. Same-family substitutes are invalid even if the placement and scale feel plausible.\n"
             "4a. **PRODUCT PART LOCK:** keep each product's facing direction, module count, visible part count, support geometry, lampshade color, and silhouette from its reference.\n"
             "4b. **NO PRODUCT RECOMPOSITION:** Do not rotate, simplify, fuse, split, or recompose product parts to improve styling. A less stylish exact product is better than a plausible substitute.\n"
-            "4c. **LIGHTING SCALE LOCK:** Do not miniaturize lighting products into tabletop decor, tabletop sculpture, or duplicated small props; floor lamps stay floor-standing, table lamps stay on valid support surfaces, and pendant/ceiling lights stay attached to the ceiling plane.\n"
+            "4c. **LIGHTING SCALE LOCK:** Do not miniaturize lighting products into tabletop decor, tabletop sculpture, or duplicated small props; floor lamps stay floor-standing, table lamps use this support priority: storage/cabinet top first, side table second, floor fallback only when neither support exists; pendant/ceiling lights stay attached to the ceiling plane.\n"
             + (
                 f"4d. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
                 if anchor_labels
