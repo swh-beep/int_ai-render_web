@@ -8,6 +8,7 @@ from application.render.furnished_generation_stage import (
     _build_item_exactness_card_row,
     _build_placement_plan_context,
     _build_reference_identity_suffix,
+    _category_prompt_guardrails,
     generate_furnished_room,
 )
 from application.render.postprocess_support import rank_best_variant_flash
@@ -66,6 +67,15 @@ def test_item_exactness_card_marks_weak_analysis_item_as_image_contract(tmp_path
     assert "same_family_substitute=invalid" in row
     assert "WeakTextAnalysis=ignore sparse text if needed" in suffix
     assert "duplicate qty=1 instance" in suffix
+
+
+def test_category_prompt_guardrails_keep_wall_art_off_windows():
+    rules = _category_prompt_guardrails("poster")
+
+    assert "solid_wall_first" in rules
+    assert "floor_leaning_against_wall_second" in rules
+    assert "never_on_window_surface" in rules
+    assert "never_directly_in_front_of_window" in rules
 
 
 def test_build_placement_plan_context_includes_table_lamp_support_priority():

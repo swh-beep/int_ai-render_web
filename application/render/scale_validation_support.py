@@ -1131,13 +1131,15 @@ def _placement_family(item: dict) -> str:
     placement_contract = (item.get("placement_contract") or {}) if isinstance(item, dict) else {}
     category = _normalized_item_category(item)
     placement_hint = str(placement_contract.get("placement_family") or envelope.get("placement_family") or "").strip().lower()
-    if placement_hint in {"wall_attached", "ceiling_attached", "rug", "surface_placed", "floor_placed", "small_free_object"}:
+    if placement_hint in {"wall_attached", "wall_or_floor_leaning", "ceiling_attached", "rug", "surface_placed", "floor_placed", "small_free_object"}:
         return placement_hint
     if identity_profile.get("wall_attached_expected"):
         return "wall_attached"
     if identity_profile.get("ceiling_attached_expected") or category == "ceiling_light":
         return "ceiling_attached"
-    if category in {"art", "poster", "mirror", "frame", "wall_art", "wall_decor"}:
+    if category in {"art", "poster", "frame", "wall_art", "wall_decor"}:
+        return "wall_or_floor_leaning"
+    if category in {"mirror"}:
         return "wall_attached"
     if category == "wall_light":
         return "wall_attached"
@@ -1679,6 +1681,9 @@ def validate_scale_from_detection_map(
                         detail["max_bottom"] = float(max_bottom)
                         if float(ymax) > max_bottom:
                             _append_issue("wall_attached_floor_collision", f"wall_attached_floor_collision: {item_key}", item_key=item_key, evidence=detail)
+                        placement_details.append(detail)
+                    elif family == "wall_or_floor_leaning":
+                        detail["allowed_positions"] = "solid wall mounted or slightly floor-leaning against a non-window wall"
                         placement_details.append(detail)
                     elif family == "ceiling_attached":
                         max_top = y_top + max(0.18, wall_h_norm * 0.22)

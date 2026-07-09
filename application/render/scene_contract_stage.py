@@ -91,6 +91,8 @@ def _collect_pairwise_ratio_contracts(items: list[dict], primary_item: dict | No
 def _placement_family_for_family(family: str, item: dict | None = None) -> str:
     if family in {"mirror", "wall_light"}:
         return "wall_attached"
+    if family == "wall_art":
+        return "wall_or_floor_leaning"
     if family == "ceiling_light":
         return "ceiling_attached"
     if family == "rug":
@@ -137,6 +139,7 @@ def _collect_geometry_targets(items: list[dict], room_dims_contract: RoomDimsCon
 def _build_placement_zones(items: list[dict]) -> dict[str, list[str]]:
     zones = {
         "wall_attached": [],
+        "wall_or_floor_leaning": [],
         "ceiling_attached": [],
         "floor_placed": [],
         "rug": [],
@@ -154,6 +157,8 @@ def _build_placement_zones(items: list[dict]) -> dict[str, list[str]]:
         family = _item_family(row)
         if placement_family == "wall_attached" or family == "mirror":
             zones["wall_attached"].append(key)
+        elif placement_family == "wall_or_floor_leaning" or family == "wall_art":
+            zones["wall_or_floor_leaning"].append(key)
         elif placement_family == "ceiling_attached" or family == "ceiling_light":
             zones["ceiling_attached"].append(key)
         elif placement_family == "rug" or family == "rug":

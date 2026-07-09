@@ -386,6 +386,48 @@ def test_build_placement_plan_routes_table_lamp_by_support_priority():
     assert enriched[-1]["placement_contract"]["support_priority"]["fallback"] == "floor"
 
 
+def test_build_placement_plan_routes_wall_art_to_wall_or_floor_leaning_band():
+    analyzed_items = [
+        {
+            "target_key": "poster-1",
+            "label": "Framed Poster",
+            "category": "poster",
+            "category_canonical": "wall_art",
+            "product_identity": {"family": "wall_art", "dims_mm": {"width_mm": 600, "depth_mm": 40, "height_mm": 900}},
+            "requested_dims_mm": {"width_mm": 600, "depth_mm": 40, "height_mm": 900},
+        }
+    ]
+    scene_contract = SceneContract(
+        room_dims_contract=RoomDimsContract(
+            source="explicit",
+            confidence="high",
+            dims_mm_center={"width_mm": 6000, "depth_mm": 5000, "height_mm": 2800},
+            dims_mm_range={},
+            estimation_basis=["user_dimensions"],
+            strict_scale_mode="strict_geometry_mode",
+            room_dims_valid=True,
+        ),
+        room="livingroom",
+        audience="external",
+        anchor_item_key="sofa-1",
+        geometry_targets={},
+    )
+
+    placement_plan, enriched = build_placement_plan(
+        analyzed_items=analyzed_items,
+        primary_item=None,
+        scene_contract=scene_contract,
+        placement_instructions="",
+    )
+
+    zone = placement_plan.placement_zones["poster-1"]
+    assert zone["family"] == "wall_art"
+    assert zone["placement_family"] == "wall_or_floor_leaning"
+    assert zone["zone"] == "wall_or_floor_leaning_art_band"
+    assert "Never place it on a window surface" in str(zone["orientation_hint"])
+    assert enriched[0]["placement_contract"]["placement_family"] == "wall_or_floor_leaning"
+
+
 def test_build_placement_plan_does_not_force_large_decor_to_surface_band():
     analyzed_items = [
         {

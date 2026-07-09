@@ -130,6 +130,8 @@ def _placement_family_for_item(item: dict) -> str:
     family = resolve_item_family(item)
     if family == "mirror":
         return "wall_attached"
+    if family == "wall_art":
+        return "wall_or_floor_leaning"
     if family == "rug":
         return "rug"
     if family == "table_lamp" or (family == "decor" and decor_prefers_surface_placement(item)):

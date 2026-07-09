@@ -52,6 +52,7 @@ _SHAPE_CUE_KEYWORDS = (
 _SEATING_FAMILIES = {"sofa", "lounge_sofa", "lounge_seating", "chair", "lounge_chair", "armchair", "loveseat"}
 _SUPPORT_GEOMETRY_FAMILIES = {"table", "desk", "stool", "storage"}
 _REFLECTIVE_FAMILIES = {"mirror"}
+_WALL_ART_FAMILIES = {"wall_art"}
 _RUG_FAMILIES = {"rug"}
 _LIGHT_FAMILIES = {"floor_lamp", "table_lamp", "light", "ceiling_light", "wall_light"}
 _HIGH_PRIORITY_REFERENCE_REASONS = {
@@ -61,6 +62,7 @@ _HIGH_PRIORITY_REFERENCE_REASONS = {
     "large_light_anchor_candidate",
     "light_fixture_identity_object",
     "decor_reference_identity_object",
+    "wall_art_identity_object",
 }
 _MEDIUM_PRIORITY_REFERENCE_REASONS = {
     "thin_floor_footprint_object",
@@ -180,6 +182,8 @@ def should_extract_reference_features(
 
     if family in _REFLECTIVE_FAMILIES:
         return True, "reflective_wall_object"
+    if family in _WALL_ART_FAMILIES:
+        return True, "wall_art_identity_object"
     if family in _LIGHT_FAMILIES:
         return True, "light_fixture_identity_object"
     if family in _SEATING_FAMILIES:
@@ -276,6 +280,17 @@ def _fallback_reference_features(
         _append_unique(preserve_rules, "ceiling suspended", "do not place on floor or table")
     elif family == "wall_light":
         _append_unique(preserve_rules, "wall attached", "do not place on floor or table")
+    elif family == "wall_art":
+        _append_unique(
+            silhouette_cues,
+            "wall-mounted or floor-leaning framed art",
+        )
+        _append_unique(
+            preserve_rules,
+            "solid wall first",
+            "floor leaning against a non-window wall second",
+            "do not place on window surface or directly in front of a window",
+        )
     elif family == "floor_lamp":
         _append_unique(preserve_rules, "floor standing")
     elif family == "table_lamp":

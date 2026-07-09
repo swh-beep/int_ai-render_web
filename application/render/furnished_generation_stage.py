@@ -196,6 +196,15 @@ def _item_category_for_prompt(item: dict | None) -> str:
 def _category_prompt_guardrails(category: str) -> list[str]:
     text = str(category or "").strip().lower()
     rules: list[str] = []
+    if any(token in text for token in ("wall_art", "wall decor", "poster", "painting", "artwork", "framed print")):
+        rules.extend(
+            [
+                "solid_wall_first",
+                "floor_leaning_against_wall_second",
+                "never_on_window_surface",
+                "never_directly_in_front_of_window",
+            ]
+        )
     if "mirror" in text:
         rules.extend(["wall_attached_or_leaning_as_reference", "preserve_reflective_face"])
     if "rug" in text or "carpet" in text:
@@ -1948,13 +1957,14 @@ def generate_furnished_room(
             "4a. **PRODUCT PART LOCK:** keep each product's facing direction, module count, visible part count, support geometry, lampshade color, and silhouette from its reference.\n"
             "4b. **NO PRODUCT RECOMPOSITION:** Do not rotate, simplify, fuse, split, or recompose product parts to improve styling. A less stylish exact product is better than a plausible substitute.\n"
             "4c. **LIGHTING SCALE LOCK:** Do not miniaturize lighting products into tabletop decor, tabletop sculpture, or duplicated small props; floor lamps stay floor-standing, table lamps use this support priority: storage/cabinet top first, side table second, floor fallback only when neither support exists; pendant/ceiling lights stay attached to the ceiling plane.\n"
+            "4d. **ARTWORK / POSTER PLACEMENT:** Paintings, posters, framed prints, and wall art go on a solid wall first; if not mounted, they may lean slightly from the floor against a non-window wall. Never place them on a window surface, window plane, or directly in front of a window.\n"
             + (
-                f"4d. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
+                f"4e. **PRIMARY LOCK ORDER:** Resolve these hero products first and keep them exact before refining any supporting item: {', '.join(anchor_labels[:4])}.\n"
                 if anchor_labels
                 else ""
             )
             + (
-                "4e. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
+                "4f. **SUPPORTING ITEM RULE:** If the scene becomes visually crowded, simplify secondary items before changing any primary lock silhouette, material, frame, or proportions.\n"
                 if anchor_labels
                 else ""
             )
