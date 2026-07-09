@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from application.render.furnished_generation_stage import _build_placement_plan_context, generate_furnished_room
+from application.render.furnished_generation_stage import _build_placement_plan_context, _category_prompt_guardrails, generate_furnished_room
 from application.render.postprocess_support import rank_best_variant_flash
 from application.render.render_room_workflow import _resolve_style_prompt
 
@@ -28,6 +28,15 @@ def _logger():
 
 def _summary_ref():
     return SimpleNamespace(get=lambda: {"dims_warn": 0, "primary_bbox_miss": 0})
+
+
+def test_category_prompt_guardrails_keep_wall_art_off_windows():
+    rules = _category_prompt_guardrails("poster")
+
+    assert "solid_wall_first" in rules
+    assert "floor_leaning_against_wall_second" in rules
+    assert "never_on_window_surface" in rules
+    assert "never_directly_in_front_of_window" in rules
 
 
 def test_build_placement_plan_context_includes_table_lamp_support_priority():

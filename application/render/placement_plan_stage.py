@@ -16,6 +16,7 @@ _ADJACENT_SEATING_FAMILIES = {"chair", "lounge_chair"}
 _SECONDARY_ADJACENT_SEATING_FAMILIES = {"lounge_seating", "armchair", "loveseat"}
 _CEILING_ATTACHED_FAMILIES = {"ceiling_light"}
 _WALL_ATTACHED_FAMILIES = {"mirror", "wall_light"}
+_WALL_ART_FAMILIES = {"wall_art"}
 _TABLE_LAMP_SUPPORT_PRIORITY = ("storage", "side_table", "floor")
 
 
@@ -64,6 +65,8 @@ def _placement_family(item: dict) -> str:
     family = _item_family(item)
     if family in _WALL_ATTACHED_FAMILIES:
         return "wall_attached"
+    if family in _WALL_ART_FAMILIES:
+        return "wall_or_floor_leaning"
     if family in _CEILING_ATTACHED_FAMILIES:
         return "ceiling_attached"
     if family == "rug":
@@ -84,6 +87,8 @@ def _zone_name(item: dict) -> str:
         return "ceiling_anchor_band"
     if placement_family == "wall_attached":
         return "wall_mid_band"
+    if placement_family == "wall_or_floor_leaning":
+        return "wall_or_floor_leaning_art_band"
     if _is_adjacent_seating(item):
         return "adjacent_seating_band"
     if family in {"table", "desk"}:
@@ -106,6 +111,8 @@ def _orientation_hint(item: dict) -> str | None:
         return "Keep this fixture suspended from the ceiling plane with a vertical drop. Do not pull it forward into the room."
     if placement_family == "wall_attached":
         return "Keep this object attached to the wall plane. Do not float it into room depth."
+    if placement_family == "wall_or_floor_leaning":
+        return "Place this artwork by priority: on a solid wall first; if not wall-mounted, lean it slightly against a non-window wall from the floor. Never place it on a window surface or directly in front of a window."
     if family in {"sofa", "lounge_sofa", "storage"}:
         return "Keep the back roughly parallel to the back wall and face the seating area toward the room center."
     if _is_adjacent_seating(item):

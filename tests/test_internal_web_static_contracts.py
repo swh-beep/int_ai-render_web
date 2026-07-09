@@ -56,7 +56,8 @@ class InternalWebStaticContractsTests(unittest.TestCase):
                 "스토리지/캐비닛/쉘",
                 "전자제품(TV,스피커 등)",
                 "거울",
-                "데코",
+                "소품",
+                "페인팅/포스터",
             ],
         )
 

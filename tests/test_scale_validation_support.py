@@ -1261,6 +1261,42 @@ def test_validate_scale_from_detection_map_flags_wall_attached_item_near_floor()
             "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 850},
         },
         {
+            "label": "Mirror",
+            "category": "mirror",
+            "target_key": "mirror_01",
+            "source_index": 1,
+            "dims_mm": {"width_mm": 600, "depth_mm": 50, "height_mm": 900},
+        },
+    ]
+
+    ok, issues, diagnostics = validate_scale_from_detection_map(
+        items,
+        {"width_mm": 5000, "depth_mm": 5000, "height_mm": 2600},
+        room_planes={"y_top": 0.10, "y_bottom": 0.86},
+        detected_rows=[
+            {"label": "Sofa", "target_key": "anchor_sofa", "source_index": 0, "bbox_norm": [0.18, 0.54, 0.58, 0.84]},
+            {"label": "Mirror", "target_key": "mirror_01", "source_index": 1, "bbox_norm": [0.72, 0.50, 0.84, 0.83]},
+        ],
+        primary_target_key="anchor_sofa",
+    )
+
+    assert ok is False
+    assert any(issue.startswith("wall_attached_floor_collision: mirror_01") for issue in issues)
+    assert "placement_family_checks" in diagnostics["rule_details"]
+
+
+def test_validate_scale_from_detection_map_allows_wall_art_floor_leaning():
+    from application.render.scale_validation_support import validate_scale_from_detection_map
+
+    items = [
+        {
+            "label": "Sofa",
+            "category": "sofa",
+            "target_key": "anchor_sofa",
+            "source_index": 0,
+            "dims_mm": {"width_mm": 2200, "depth_mm": 900, "height_mm": 850},
+        },
+        {
             "label": "Poster",
             "category": "poster",
             "target_key": "poster_01",
@@ -1280,9 +1316,10 @@ def test_validate_scale_from_detection_map_flags_wall_attached_item_near_floor()
         primary_target_key="anchor_sofa",
     )
 
-    assert ok is False
-    assert any(issue.startswith("wall_attached_floor_collision: poster_01") for issue in issues)
-    assert "placement_family_checks" in diagnostics["rule_details"]
+    assert ok is True
+    assert not any(issue.startswith("wall_attached_floor_collision: poster_01") for issue in issues)
+    families = {row["item_key"]: row["family"] for row in diagnostics["rule_details"]["placement_family_checks"]}
+    assert families["poster_01"] == "wall_or_floor_leaning"
 
 
 def test_validate_scale_from_detection_map_flags_ceiling_attached_item_too_low():

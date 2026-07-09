@@ -11,6 +11,8 @@ from application.render.batch_detection_support import (
 
 
 _CANONICAL_RULES = [
+    ("wall_art", ["wall art", "wall_art", "wall decor", "wall_decor", "poster", "painting", "artwork", "framed print", "print", "picture", "art panel", "frame", "페인팅", "포스터", "그림", "액자"]),
+    ("decor", ["decor", "vase", "object", "accessory", "small decor", "decorative object", "소품"]),
     ("lounge_sofa", ["lounge sofa", "lounge_sofa", "라운지소파", "라운지 소파"]),
     ("sofa_table", ["sofa table", "sofa_table", "coffee table", "coffee_table", "cocktail table", "center table", "living room table", "소파테이블", "소파 테이블", "커피테이블", "커피 테이블"]),
     ("main_sofa", ["main sofa", "main_sofa", "메인소파", "메인 소파", "sectional", "couch", "loveseat", "sofa", "소파"]),
@@ -40,6 +42,7 @@ _CANONICAL_RULES = [
 ]
 
 _FAMILY_KEYWORDS = {
+    "wall_art": ("wall art", "wall_art", "wall decor", "wall_decor", "poster", "painting", "artwork", "framed print", "print", "picture", "art panel", "frame", "페인팅", "포스터", "그림", "액자"),
     "mirror": ("mirror", "거울"),
     "storage": ("sideboard", "credenza", "dresser", "drawers", "cabinet", "storage", "wardrobe", "bookcase", "shelf", "shelving", "수납", "서랍", "캐비닛", "선반", "장식장", "수납장", "스토리지", "쉘", "쉘프"),
     "stool": ("stool", "pouf", "ottoman", "footstool", "스툴", "푸프", "오토만"),
@@ -67,6 +70,7 @@ _CATEGORY_FAMILY_MAP = {
     "rug": "rug",
     "storage_cabinet_shelf": "storage",
     "electronics": "electronics",
+    "wall_art": "wall_art",
     "mirror": "mirror",
     "decor": "decor",
     "sofa": "sofa",

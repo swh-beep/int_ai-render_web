@@ -152,6 +152,8 @@ def _expected_placement_family(family: str, item: dict | None = None) -> str:
     normalized = str(family or "").strip().lower()
     if normalized in {"mirror", "wall_light"}:
         return "wall_attached"
+    if normalized == "wall_art":
+        return "wall_or_floor_leaning"
     if normalized == "ceiling_light":
         return "ceiling_attached"
     if normalized == "rug":

@@ -72,6 +72,7 @@ _CRITICAL_FAMILIES = {
     "chair",
     "lounge_chair",
     "mirror",
+    "wall_art",
     "rug",
     "table",
     "desk",

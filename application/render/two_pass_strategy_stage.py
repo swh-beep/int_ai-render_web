@@ -18,7 +18,7 @@ _SECONDARY_ANCHOR_FAMILIES = {
     "chair": 60,
     "stool": 45,
 }
-_EXCLUDED_ANCHOR_FAMILIES = {"rug", "mirror", "decor", "floor_lamp", "table_lamp"}
+_EXCLUDED_ANCHOR_FAMILIES = {"rug", "mirror", "wall_art", "decor", "floor_lamp", "table_lamp"}
 _SURFACE_PLACED_FAMILIES = {"table_lamp"}
 
 
@@ -74,6 +74,8 @@ def _placement_family(item: dict) -> str:
 
     if family == "mirror":
         return "wall_attached"
+    if family == "wall_art":
+        return "wall_or_floor_leaning"
     if family == "rug":
         return "rug"
     if family in _SURFACE_PLACED_FAMILIES or (family == "decor" and decor_prefers_surface_placement(item)):
@@ -124,7 +126,7 @@ def is_anchor_eligible(item: dict) -> bool:
     placement_family = _placement_family(item)
     if family in _EXCLUDED_ANCHOR_FAMILIES:
         return False
-    if placement_family in {"wall_attached", "surface_placed", "small_free_object"}:
+    if placement_family in {"wall_attached", "wall_or_floor_leaning", "surface_placed", "small_free_object"}:
         return False
     if _is_tiny_absolute_object(item):
         return False
@@ -158,9 +160,9 @@ def _fallback_anchor_tier(item: dict) -> int:
         return 0
     family = _resolve_family(item)
     placement_family = _placement_family(item)
-    if family in {"rug", "mirror", "decor"}:
+    if family in {"rug", "mirror", "wall_art", "decor"}:
         return 0
-    if placement_family in {"wall_attached", "surface_placed", "small_free_object"}:
+    if placement_family in {"wall_attached", "wall_or_floor_leaning", "surface_placed", "small_free_object"}:
         return 0
     if _is_tiny_absolute_object(item):
         return 0
@@ -224,7 +226,7 @@ def _pass_role_for_item(item: dict, *, anchor_key: str | None) -> str:
         return "pass1_anchor"
     if family == "rug":
         return "pass1_footprint"
-    if placement_family == "wall_attached":
+    if placement_family in {"wall_attached", "wall_or_floor_leaning"}:
         return "pass2_wall"
     if placement_family == "surface_placed":
         return "pass2_support_sensitive"
