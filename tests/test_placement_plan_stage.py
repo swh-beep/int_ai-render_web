@@ -318,6 +318,74 @@ def test_build_placement_plan_keeps_tabletop_decor_on_surface_band():
     assert enriched[0]["placement_contract"]["family"] == "decor"
 
 
+def test_build_placement_plan_routes_table_lamp_by_support_priority():
+    analyzed_items = [
+        {
+            "target_key": "storage-1",
+            "label": "Low Storage Cabinet",
+            "category": "storage",
+            "category_canonical": "storage_cabinet_shelf",
+            "product_identity": {"family": "storage", "dims_mm": {"width_mm": 1600, "depth_mm": 450, "height_mm": 720}},
+        },
+        {
+            "target_key": "side-table-1",
+            "label": "Round Side Table",
+            "category": "side_table",
+            "category_canonical": "side_table",
+            "product_identity": {"family": "table", "dims_mm": {"width_mm": 420, "depth_mm": 420, "height_mm": 520}},
+        },
+        {
+            "target_key": "sofa-table-1",
+            "label": "Coffee Table",
+            "category": "sofa_table",
+            "category_canonical": "sofa_table",
+            "product_identity": {"family": "table", "dims_mm": {"width_mm": 1100, "depth_mm": 650, "height_mm": 320}},
+        },
+        {
+            "target_key": "lamp-1",
+            "label": "Taccia Small Table Lamp",
+            "category": "table_lamp",
+            "category_canonical": "table_lamp",
+            "product_identity": {"family": "table_lamp", "dims_mm": {"width_mm": 373, "depth_mm": 373, "height_mm": 485}},
+            "requested_dims_mm": {"width_mm": 373, "depth_mm": 373, "height_mm": 485},
+        },
+    ]
+    scene_contract = SceneContract(
+        room_dims_contract=RoomDimsContract(
+            source="explicit",
+            confidence="high",
+            dims_mm_center={"width_mm": 6000, "depth_mm": 5000, "height_mm": 2800},
+            dims_mm_range={},
+            estimation_basis=["user_dimensions"],
+            strict_scale_mode="strict_geometry_mode",
+            room_dims_valid=True,
+        ),
+        room="livingroom",
+        audience="external",
+        anchor_item_key="storage-1",
+        geometry_targets={},
+    )
+
+    placement_plan, enriched = build_placement_plan(
+        analyzed_items=analyzed_items,
+        primary_item=analyzed_items[0],
+        scene_contract=scene_contract,
+        placement_instructions="",
+    )
+
+    zone = placement_plan.placement_zones["lamp-1"]
+    assert zone["family"] == "table_lamp"
+    assert zone["placement_family"] == "surface_placed"
+    assert zone["zone"] == "table_lamp_support_priority_band"
+    assert zone["support_priority"]["order"] == ["storage", "side_table", "floor"]
+    assert [target["target_key"] for target in zone["support_priority"]["available_targets"]] == [
+        "storage-1",
+        "side-table-1",
+    ]
+    assert "sofa-table-1" not in str(zone["support_priority"])
+    assert enriched[-1]["placement_contract"]["support_priority"]["fallback"] == "floor"
+
+
 def test_build_placement_plan_does_not_force_large_decor_to_surface_band():
     analyzed_items = [
         {

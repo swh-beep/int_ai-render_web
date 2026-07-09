@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from application.render.furnished_generation_stage import generate_furnished_room
+from application.render.furnished_generation_stage import _build_placement_plan_context, generate_furnished_room
 from application.render.postprocess_support import rank_best_variant_flash
 from application.render.render_room_workflow import _resolve_style_prompt
 
@@ -28,6 +28,36 @@ def _logger():
 
 def _summary_ref():
     return SimpleNamespace(get=lambda: {"dims_warn": 0, "primary_bbox_miss": 0})
+
+
+def test_build_placement_plan_context_includes_table_lamp_support_priority():
+    context = _build_placement_plan_context(
+        {
+            "anchor_item_key": "storage-1",
+            "placement_zones": {
+                "lamp-1": {
+                    "placement_family": "surface_placed",
+                    "zone": "table_lamp_support_priority_band",
+                    "support_priority": {
+                        "order": ["storage", "side_table", "floor"],
+                        "available_targets": [
+                            {"target_key": "storage-1", "label": "Low Storage Cabinet", "support_type": "storage"},
+                            {"target_key": "side-table-1", "label": "Round Side Table", "support_type": "side_table"},
+                        ],
+                        "rule": "Use storage/cabinet top first, side table second, and the floor only if neither support is present. Avoid sofa tables and coffee tables for table lamps.",
+                    },
+                }
+            },
+        },
+        {"lamp-1": "Taccia Small Table Lamp"},
+    )
+
+    assert "<PLACEMENT PLAN (BINDING)>" in context
+    assert "Taccia Small Table Lamp" in context
+    assert "support_priority=storage > side_table > floor" in context
+    assert "Low Storage Cabinet(storage)" in context
+    assert "Round Side Table(side_table)" in context
+    assert "Avoid sofa tables and coffee tables" in context
 
 
 def test_rank_best_variant_flash_includes_product_cutout_references(tmp_path):
