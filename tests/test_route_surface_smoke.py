@@ -97,7 +97,8 @@ class RouteSurfaceSmokeTests(unittest.TestCase):
         fake_deps.persist_internal_room_upload.assert_called_once()
         fake_deps.persist_internal_item_source_uploads.assert_called_once()
         fake_deps.prepare_internal_item_upload_paths.assert_called_once_with(
-            ["outputs/cart_item_src_1.png", "outputs/cart_item_src_2.png"]
+            ["outputs/cart_item_src_1.png", "outputs/cart_item_src_2.png"],
+            item_specs=fake_deps.parse_internal_render_items_form.return_value,
         )
         build_call = fake_deps.build_internal_itemized_async_render_job_payload.call_args.kwargs
         self.assertEqual(build_call["room"], "livingroom")

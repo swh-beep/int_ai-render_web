@@ -5,6 +5,8 @@ from typing import Any
 
 from fastapi import UploadFile
 
+from application.render.curtain_material_stage import is_curtain_item
+
 
 def _require_non_empty_str(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -124,7 +126,10 @@ def parse_internal_render_items_form(items_json: str, item_images: list[UploadFi
             invalid_message="has invalid qty",
         )
 
-        dims_mm = _parse_dims_mm(raw_item.get("dims_mm"), row_index=row_index)
+        dims_mm = None if is_curtain_item({"category": category}) and raw_item.get("dims_mm") is None else _parse_dims_mm(
+            raw_item.get("dims_mm"),
+            row_index=row_index,
+        )
 
         parsed_items.append(
             {

@@ -4,6 +4,7 @@ import time
 from typing import Callable
 
 from PIL import Image, ImageDraw, ImageOps
+from application.render.curtain_material_stage import CURTAIN_BLACKOUT_PERCENT, CURTAIN_DETAIL_MODE
 from application.render.postprocess_support import category_match_family
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
@@ -620,6 +621,27 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
     )
 
 
+def _build_gpt_image_curtain_detail_prompt(style_config: dict, target_label: str) -> str:
+    clean_label = str(target_label or "").strip() or "the existing curtain"
+    try:
+        blackout_percent = int((style_config or {}).get("blackout_percent") or CURTAIN_BLACKOUT_PERCENT)
+    except Exception:
+        blackout_percent = CURTAIN_BLACKOUT_PERCENT
+    style_instructions = str((style_config or {}).get("prompt") or "").strip()
+    return (
+        f"Create a source-constrained editorial close detail of {clean_label} in this exact finished room. "
+        "Use the supplied CURTAIN MATERIAL SWATCH as the absolute reference for the existing curtain's material, color, "
+        "weave, threads, and surface texture. Change only the curtain surface appearance to match that swatch. "
+        f"Express exactly {blackout_percent}% blackout through the curtain fabric opacity. Do not darken the room: keep the "
+        "room exposure, lighting brightness, shadows, and white balance as bright as the main furnished room image. "
+        "Keep the curtain position, folds, scale, and geometry fixed. Preserve the camera-visible architecture, furniture, "
+        "decor, windows, object placement, and spatial relationships exactly as shown. Choose a clearly visible curtain "
+        "section even when furniture overlaps the main view. Do not add, remove, move, replace, or redesign any object. "
+        "No text or watermark. "
+        f"CURTAIN DETAIL STYLE INSTRUCTIONS: {style_instructions}"
+    )
+
+
 def _build_target_crop(original_image: Image.Image, target_box_2d) -> Image.Image | None:
     if not isinstance(target_box_2d, (list, tuple)) or len(target_box_2d) != 4:
         return None
@@ -671,6 +693,18 @@ def generate_detail_view(
             return _render_crop_detail(original_image_path, style_config, unique_id, index, target_item or {})
 
         img = Image.open(original_image_path)
+        material_reference_img = None
+        material_reference_path = str(style_config.get("material_reference_path") or "").strip()
+        if material_reference_path:
+            try:
+                local_material_path = materialize_input(material_reference_path, "detail_curtain_material")
+                if local_material_path and os.path.exists(local_material_path):
+                    with Image.open(local_material_path) as material_opened:
+                        material_reference_img = ImageOps.exif_transpose(material_opened).convert("RGB")
+                        material_reference_img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+                    extra_imgs.append(material_reference_img)
+            except Exception:
+                material_reference_img = None
         target_ratio = _normalize_ratio_string(style_config.get("ratio"))
         camera_mode = str(style_config.get("camera_mode") or "").strip().lower()
         focus_side = str(style_config.get("focus_side") or "").strip().lower()
@@ -727,13 +761,28 @@ def generate_detail_view(
             return None
 
         if _is_gpt_image_model_name(model_name):
+            if str(style_config.get("detail_mode") or "").strip().lower() == CURTAIN_DETAIL_MODE:
+                gpt_prompt = _build_gpt_image_curtain_detail_prompt(
+                    style_config,
+                    style_target_label or style_name,
+                )
+            else:
+                gpt_prompt = _build_gpt_image_detail_prompt(style_config, style_target_label or style_name, index)
+            gpt_content = [
+                gpt_prompt,
+                "Main furnished room image:",
+                img,
+            ]
+            if material_reference_img is not None:
+                gpt_content.extend(
+                    [
+                        "CURTAIN MATERIAL SWATCH (material/color/weave reference only; not an object or framing reference):",
+                        material_reference_img,
+                    ]
+                )
             response = call_gemini_with_failover(
                 model_name,
-                [
-                    _build_gpt_image_detail_prompt(style_config, style_target_label or style_name, index),
-                    "Main furnished room image:",
-                    img,
-                ],
+                gpt_content,
                 {
                     "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
                     "aspect_ratio": target_ratio,
@@ -906,6 +955,11 @@ def generate_detail_view(
 
         safety_settings = allow_harassment_only_safety_settings()
         content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
+        if material_reference_img is not None:
+            content += [
+                "CURTAIN MATERIAL SWATCH (material/color/weave reference only; not an object or framing reference):",
+                material_reference_img,
+            ]
         if target_crop is not None:
             content += [
                 "PRIMARY TARGET IN-ROOM CROP (match this target scale and perspective):",

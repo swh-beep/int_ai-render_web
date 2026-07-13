@@ -457,6 +457,57 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertFalse(os.path.exists(local_src))
         self.assertFalse(os.path.exists(normalized))
 
+    def test_job_render_preprocesses_curtain_as_full_frame_material_swatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_src = os.path.join(tmpdir, "curtain-source.png")
+            normalized = os.path.join(tmpdir, "curtain-material.png")
+            with open(local_src, "wb") as handle:
+                handle.write(b"src")
+            with open(normalized, "wb") as handle:
+                handle.write(b"normalized")
+            captured = {}
+
+            def fake_run_render_job(payload, **kwargs):
+                captured["payload"] = payload
+                return {"result_url": "https://cdn.example/main.png"}
+
+            with (
+                patch.object(
+                    job_entrypoints,
+                    "_services",
+                    return_value=SimpleNamespace(
+                        materialize_input=lambda source_ref, prefix: local_src,
+                        normalize_item_image=lambda *args: (_ for _ in ()).throw(AssertionError("object cutout prep must not run")),
+                        normalize_material_swatch=lambda local_path, unique_id, index: normalized,
+                        resolve_image_url=lambda path, prefix=None: "https://cdn.example/curtain-material.png",
+                        build_s3_prefix=lambda audience, category: f"{audience}/{category}/",
+                        normalize_audience=lambda audience: audience or "external",
+                        render_room=lambda **kwargs: None,
+                    ),
+                ),
+                patch.object(job_entrypoints, "run_render_job", side_effect=fake_run_render_job),
+            ):
+                job_entrypoints.job_render(
+                    {
+                        "audience": "external",
+                        "file_path": "https://example.com/room.png",
+                        "moodboard_items": [
+                            {
+                                "label": "Curtain",
+                                "path": "https://example.com/curtain.png",
+                                "category": "curtain",
+                                "target_key": "cart_curtain-1_001",
+                                "worker_preprocess": "external_cart_item_v1",
+                            }
+                        ],
+                    },
+                    persist_result=False,
+                )
+
+        prepared_item = captured["payload"]["moodboard_items"][0]
+        self.assertEqual(prepared_item["path"], "https://cdn.example/curtain-material.png")
+        self.assertNotIn("worker_preprocess", prepared_item)
+
     def test_external_cart_simple_job_status_finished_payload_has_no_details(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: _FakeFinishedJob(

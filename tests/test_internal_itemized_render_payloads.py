@@ -10,6 +10,7 @@ from PIL import Image
 
 from render_route_services import (
     build_internal_itemized_async_render_job_payload,
+    prepare_internal_item_upload_paths,
     persist_internal_item_uploads,
     persist_internal_room_upload,
 )
@@ -104,6 +105,29 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
                 self.assertLess(prepared.size[0], 120)
                 self.assertLess(prepared.size[1], 120)
                 self.assertEqual(prepared.getpixel((0, 0))[3], 0)
+
+    def test_prepare_internal_item_upload_paths_preserves_full_curtain_swatch(self):
+        swatch_bytes = _png_bytes(
+            "RGB",
+            (120, 90),
+            lambda image: image.paste((198, 176, 160), (0, 0, 120, 90)),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path("outputs").mkdir()
+                raw_path = Path("outputs", "curtain-source.png")
+                raw_path.write_bytes(swatch_bytes)
+                paths = prepare_internal_item_upload_paths(
+                    [str(raw_path)],
+                    item_specs=[{"category": "커튼"}],
+                )
+                with Image.open(paths[0]) as prepared:
+                    self.assertEqual(prepared.size, (120, 90))
+                    self.assertEqual(prepared.mode, "RGB")
+            finally:
+                os.chdir(cwd)
 
     def test_build_internal_itemized_async_render_job_payload_maps_item_specs(self):
         prefixes = []

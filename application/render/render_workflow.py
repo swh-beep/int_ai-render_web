@@ -1,6 +1,7 @@
 import time
 from typing import Any, Callable, Optional
 
+from application.render.curtain_material_stage import split_curtain_items
 from application.render.render_preparation import cleanup_render_resources, prepare_render_inputs, prepare_render_resources
 from application.render.render_result_stage import build_detail_payload, extract_render_result_url
 
@@ -43,9 +44,11 @@ def run_render_job(
     render_room: Callable[..., Any],
     json_from_response: Callable[[Any], dict],
     persist_job_result: Callable[[dict, Optional[str]], None],
+    curtain_material_editor: Callable[[dict, dict, str], dict] | None = None,
 ) -> dict:
+    base_payload, curtain_item = split_curtain_items(payload)
     prepared = prepare_render_inputs(
-        payload,
+        base_payload,
         materialize_input=materialize_input,
         normalize_audience=normalize_audience,
     )
@@ -69,13 +72,15 @@ def run_render_job(
             placement=prepared.placement,
             audience=prepared.audience,
             moodboard_items=resources.local_items,
-            simple_generation_mode=bool(payload.get("simple_generation_mode")),
+            simple_generation_mode=bool(base_payload.get("simple_generation_mode")),
             precomputed_empty_room_path=prepared.precomputed_empty_room_path,
             precomputed_empty_room_raw_path=prepared.precomputed_empty_room_raw_path,
             artifact_job_id=prepared.artifact_job_id,
             artifact_created_at=prepared.artifact_created_at,
         )
         result = json_from_response(response)
+        if curtain_item is not None and curtain_material_editor is not None and "error" not in result:
+            result = curtain_material_editor(result, curtain_item, prepared.audience)
         if persist_result:
             persist_job_result(result, audience=prepared.audience)
         return result

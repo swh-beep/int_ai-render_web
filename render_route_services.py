@@ -9,6 +9,7 @@ from typing import Callable
 from fastapi import UploadFile
 
 from application.render.direct_item_image_prep import prepare_direct_item_image
+from application.render.curtain_material_stage import is_curtain_item, prepare_material_swatch_image
 from api_models import (
     CartRenderRequest,
     CartSimpleBatchRequest,
@@ -133,15 +134,20 @@ def persist_internal_item_source_uploads(item_images: list[UploadFile]) -> list[
     return saved_paths
 
 
-def prepare_internal_item_upload_paths(raw_paths: list[str]) -> list[str]:
+def prepare_internal_item_upload_paths(raw_paths: list[str], item_specs: list[dict] | None = None) -> list[str]:
     unique_id = uuid.uuid4().hex[:8]
     timestamp = int(time.time())
     saved_paths: list[str] = []
     for idx, raw_path in enumerate(raw_paths, start=1):
+        item_spec = item_specs[idx - 1] if item_specs and idx - 1 < len(item_specs) else None
         basename = os.path.basename(str(raw_path)) or f"cart_item_{idx}.png"
         safe_name = "".join([c for c in basename if c.isalnum() or c in "._-"]) or f"cart_item_{idx}.png"
         final_path = os.path.join("outputs", f"cart_item_{timestamp}_{unique_id}_{safe_name}")
-        prepared_path = prepare_direct_item_image(raw_path, output_path=final_path, max_size=1024)
+        if is_curtain_item(item_spec):
+            final_path = os.path.join("outputs", f"curtain_material_{timestamp}_{unique_id}_{idx}.png")
+            prepared_path = prepare_material_swatch_image(raw_path, output_path=final_path, max_size=2048)
+        else:
+            prepared_path = prepare_direct_item_image(raw_path, output_path=final_path, max_size=1024)
         if prepared_path:
             try:
                 os.remove(raw_path)
@@ -496,7 +502,9 @@ def build_external_cart_job(
         placement_parts.append(f"STYLE: {req.style}")
     if req.placement:
         placement_parts.append(req.placement)
-    placement_parts.append(build_cart_summary(kept))
+    ordinary_cart_items = [item for item in kept if not is_curtain_item(item)]
+    if ordinary_cart_items:
+        placement_parts.append(build_cart_summary(ordinary_cart_items))
     placement = "\n".join([p for p in placement_parts if p])
 
     payload = {

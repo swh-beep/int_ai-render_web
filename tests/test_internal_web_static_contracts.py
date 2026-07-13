@@ -58,6 +58,7 @@ class InternalWebStaticContractsTests(unittest.TestCase):
                 "거울",
                 "소품",
                 "페인팅/포스터",
+                "커튼",
             ],
         )
 

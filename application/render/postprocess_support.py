@@ -11,6 +11,7 @@ from application.render.batch_detection_support import (
 
 
 _CANONICAL_RULES = [
+    ("curtain", ["curtain", "curtains", "drape", "drapes", "커튼"]),
     ("wall_art", ["wall art", "wall_art", "wall decor", "wall_decor", "poster", "painting", "artwork", "framed print", "print", "picture", "art panel", "frame", "페인팅", "포스터", "그림", "액자"]),
     ("decor", ["decor", "vase", "object", "accessory", "small decor", "decorative object", "소품"]),
     ("lounge_sofa", ["lounge sofa", "lounge_sofa", "라운지소파", "라운지 소파"]),
@@ -42,6 +43,7 @@ _CANONICAL_RULES = [
 ]
 
 _FAMILY_KEYWORDS = {
+    "curtain": ("curtain", "curtains", "drape", "drapes", "커튼"),
     "wall_art": ("wall art", "wall_art", "wall decor", "wall_decor", "poster", "painting", "artwork", "framed print", "print", "picture", "art panel", "frame", "페인팅", "포스터", "그림", "액자"),
     "mirror": ("mirror", "거울"),
     "storage": ("sideboard", "credenza", "dresser", "drawers", "cabinet", "storage", "wardrobe", "bookcase", "shelf", "shelving", "수납", "서랍", "캐비닛", "선반", "장식장", "수납장", "스토리지", "쉘", "쉘프"),
@@ -53,6 +55,7 @@ _FAMILY_KEYWORDS = {
 }
 
 _CATEGORY_FAMILY_MAP = {
+    "curtain": "curtain",
     "main_sofa": "sofa",
     "lounge_sofa": "lounge_sofa",
     "sofa_table": "table",

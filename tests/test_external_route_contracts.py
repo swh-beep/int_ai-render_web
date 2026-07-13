@@ -421,7 +421,13 @@ class ExternalRouteContractsTests(unittest.TestCase):
                         "requested_dims_mm": {"width_mm": 500},
                         "item_id": "chair-1",
                         "identity_profile": {"large": "debug-only"},
-                    }
+                    },
+                    {
+                        "label": "Narcis Curtain",
+                        "item_id": "curtain-1",
+                        "detail_role": "curtain_material",
+                        "material_reference_path": "https://cdn.example/swatch.png",
+                    },
                 ],
             }
         )
@@ -465,6 +471,46 @@ class ExternalRouteContractsTests(unittest.TestCase):
         self.assertEqual(body["result"]["cart_kept"], [{"id": "chair-1", "category": "chair"}])
         self.assertNotIn("candidate_result_urls", body["result"]["render"])
         self.assertNotIn("identity_profile", body["result"]["render"]["furniture_data"][0])
+
+    def test_external_batch_job_status_compact_payload_sanitizes_each_nested_render(self):
+        deps = _external_deps()
+        result = {
+            "empty_room_url": "https://cdn.example/empty.png",
+            "results": [
+                {
+                    "variant_index": 1,
+                    "render": {
+                        "result_url": "https://cdn.example/main-1.png",
+                        "candidate_result_urls": ["https://cdn.example/debug.png"],
+                        "furniture_data": [
+                            {"label": "chair", "item_id": "chair-1", "identity_profile": {"debug": True}},
+                            {
+                                "label": "Narcis Curtain",
+                                "detail_role": "curtain_material",
+                                "material_reference_path": "https://cdn.example/swatch.png",
+                            },
+                        ],
+                    },
+                    "cart_kept": [{"id": "chair-1"}],
+                }
+            ],
+        }
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(result)
+        deps.load_job_result_s3 = lambda job_id: None
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["result_compacted"])
+        batch_row = body["result"]["results"][0]
+        self.assertEqual(batch_row["variant_index"], 1)
+        self.assertEqual(batch_row["cart_kept"], [{"id": "chair-1"}])
+        self.assertEqual(batch_row["render"]["furniture_data"], [{"label": "chair", "item_id": "chair-1"}])
+        self.assertNotIn("candidate_result_urls", batch_row["render"])
+        self.assertNotIn("material_reference_path", str(body))
 
     def test_external_cart_job_status_compact_payload_from_s3_uses_same_contract(self):
         deps = _external_deps()

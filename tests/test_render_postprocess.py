@@ -233,6 +233,8 @@ class RenderPostprocessTests(unittest.TestCase):
         self.assertEqual(canonical_category("painting"), "wall_art")
         self.assertEqual(category_match_family("framed print"), "wall_art")
         self.assertEqual(category_match_family("페인팅/포스터"), "wall_art")
+        self.assertEqual(canonical_category("커튼"), "curtain")
+        self.assertEqual(category_match_family("drapes"), "curtain")
         self.assertEqual(category_match_family("소품"), "decor")
         self.assertEqual(category_match_family("팬던트램프"), "ceiling_light")
         self.assertEqual(category_match_family("Arc Floor Lamp"), "floor_lamp")

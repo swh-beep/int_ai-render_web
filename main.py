@@ -87,6 +87,7 @@ from application.render.postprocess_support import (
     safe_key_token as safe_key_token_support,
     summarize_items_for_ranking as summarize_items_for_ranking_support,
 )
+from application.render.curtain_material_stage import prepare_material_swatch_image
 from application.render.moodboard_workflow import run_generate_moodboard_options
 from application.render.render_contracts import (
     build_explicit_room_dims_contract as build_explicit_room_dims_contract_stage,
@@ -800,6 +801,14 @@ def _normalize_item_image(local_path: str, unique_id: str, index: int, max_size:
     filename = f"cart_item_{unique_id}_{index}.png"
     out_path = os.path.join("outputs", filename)
     return prepare_direct_item_image(local_path, output_path=out_path, max_size=max_size)
+
+
+def _normalize_material_swatch(local_path: str, unique_id: str, index: int, max_size: int = 2048) -> Optional[str]:
+    if not local_path or not os.path.exists(local_path):
+        return None
+    filename = f"curtain_material_{unique_id}_{index}.png"
+    out_path = os.path.join("outputs", filename)
+    return prepare_material_swatch_image(local_path, output_path=out_path, max_size=max_size)
 
 def _get_rq_queue(queue_name: str | None = None):
     conn = _get_redis_conn()
@@ -2223,6 +2232,7 @@ job_entrypoints_module.configure_job_entrypoints(
         save_job_result=_save_job_result_s3,
         materialize_input=_materialize_input,
         normalize_item_image=lambda local_path, unique_id, index: _normalize_item_image(local_path, unique_id, index, max_size=1024),
+        normalize_material_swatch=lambda local_path, unique_id, index: _normalize_material_swatch(local_path, unique_id, index, max_size=2048),
         standardize_image=standardize_image,
         build_s3_prefix=_build_s3_prefix,
         resolve_image_url=resolve_image_url,

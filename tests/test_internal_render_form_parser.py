@@ -38,6 +38,20 @@ class InternalRenderFormParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Item 1 is missing required dims: depth_mm, height_mm"):
             parse_internal_render_items_form(items_json, [_upload("desk.png")])
 
+    def test_parse_internal_render_form_items_allows_curtain_without_dims(self):
+        items_json = '[{"client_id":"curtain-1","name":"Narcis","category":"커튼","qty":1}]'
+
+        parsed = parse_internal_render_items_form(items_json, [_upload("swatch.png")])
+
+        self.assertEqual(parsed[0]["category"], "커튼")
+        self.assertIsNone(parsed[0]["dims_mm"])
+
+    def test_parse_internal_render_form_items_validates_curtain_dims_when_supplied(self):
+        items_json = '[{"category":"커튼","qty":1,"dims_mm":{"width_mm":1200}}]'
+
+        with self.assertRaisesRegex(ValueError, "Item 1 is missing required dims: depth_mm, height_mm"):
+            parse_internal_render_items_form(items_json, [_upload("swatch.png")])
+
     def test_parse_internal_render_form_items_rejects_image_count_mismatch(self):
         items_json = (
             '[{"category":"table","qty":1,'

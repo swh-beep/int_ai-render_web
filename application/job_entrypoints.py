@@ -16,6 +16,7 @@ from application.details.regenerate_detail_workflow import run_regenerate_single
 from application.media.frontal_view_workflow import run_frontal_view_job
 from application.media.image_edit_workflow import run_image_edit_job
 from application.render.artifact_paths import artifact_subprefix, build_job_artifact_root
+from application.render.curtain_material_stage import apply_curtain_material_edit, is_curtain_item
 from application.render.empty_room_workflow import run_generate_empty_room_job
 from application.render.finalize_workflow import run_finalize_job
 from application.render.render_workflow import run_render_job, run_render_with_details_job
@@ -29,6 +30,7 @@ class JobEntrypointServices:
     save_job_result: Callable[[str, dict, Optional[str]], Optional[str]]
     materialize_input: Callable[[str, str], str | None]
     normalize_item_image: Callable[[str, str, int], str | None]
+    normalize_material_swatch: Callable[[str, str, int], str | None]
     standardize_image: Callable[..., str]
     build_s3_prefix: Callable[..., str]
     resolve_image_url: Callable[..., str | None]
@@ -177,7 +179,10 @@ def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointS
 
         source_ref = item.get("path") or item.get("url")
         local_src = services.materialize_input(source_ref, f"cart_item_{index - 1}")
-        norm_path = services.normalize_item_image(local_src, unique_id, index) if local_src else None
+        if local_src and is_curtain_item(item):
+            norm_path = services.normalize_material_swatch(local_src, unique_id, index)
+        else:
+            norm_path = services.normalize_item_image(local_src, unique_id, index) if local_src else None
         if not norm_path:
             _cleanup_temp_cart_source(local_src)
             continue
@@ -223,6 +228,15 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
         render_room=services.render_room,
         json_from_response=_json_from_response,
         persist_job_result=_persist_job_result,
+        curtain_material_editor=lambda result, curtain_item, audience: apply_curtain_material_edit(
+            result,
+            curtain_item,
+            audience=audience,
+            materialize_input=services.materialize_input,
+            process_image_edit_logic=services.process_image_edit_logic,
+            resolve_image_url=services.resolve_image_url,
+            build_s3_prefix=services.build_s3_prefix,
+        ),
     )
 
 

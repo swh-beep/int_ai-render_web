@@ -8,6 +8,7 @@ from application.details.detail_analysis_stage import prepare_detail_generation_
 from application.details.detail_result_stage import build_detail_generation_output
 from application.details.detail_style_stage import with_internal_angle_styles
 from application.render.artifact_paths import artifact_subprefix
+from application.render.curtain_material_stage import CURTAIN_DETAIL_MODE
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -304,10 +305,12 @@ def select_external_detail_styles(dynamic_styles: list[dict], limit: int = EXTER
     if max_count <= 0:
         return []
 
-    product_backed = [style for style in styles if _is_product_backed_external_style(style)]
-    fallback = [style for style in styles if not _is_product_backed_external_style(style)]
+    priority = [style for style in styles if bool((style or {}).get("priority_detail"))]
+    remaining = [style for style in styles if not bool((style or {}).get("priority_detail"))]
+    product_backed = [style for style in remaining if _is_product_backed_external_style(style)]
+    fallback = [style for style in remaining if not _is_product_backed_external_style(style)]
     product_backed = _prioritize_spatially_diverse_styles(product_backed)
-    return _dedupe_external_detail_styles([*product_backed, *fallback])[:max_count]
+    return _dedupe_external_detail_styles([*priority, *product_backed, *fallback])[:max_count]
 
 
 def _should_prefer_crop_extract_for_detail(style: dict, *, audience: str) -> bool:
@@ -316,6 +319,8 @@ def _should_prefer_crop_extract_for_detail(style: dict, *, audience: str) -> boo
     if not str(style.get("name") or "").startswith("Detail:"):
         return False
     detail_mode = str(style.get("detail_mode") or "").strip().lower()
+    if detail_mode == CURTAIN_DETAIL_MODE:
+        return False
     box_source = str(style.get("target_box_source") or "").strip().lower()
     if detail_mode == "product_identity_lock" and box_source == "product_reference_localization":
         return True

@@ -68,7 +68,7 @@ class QueueRouteDependencies:
     get_staging_job: Callable[[str], dict | None] | None = None
     start_background_task: Callable[[Callable[[], None]], None] | None = None
     persist_internal_item_source_uploads: Callable[[list[UploadFile]], list[str]] | None = None
-    prepare_internal_item_upload_paths: Callable[[list[str]], list[str]] | None = None
+    prepare_internal_item_upload_paths: Callable[..., list[str]] | None = None
 
 
 def _redis_not_configured_response() -> JSONResponse:
@@ -125,13 +125,7 @@ def _select_present_fields(payload: dict, field_names: tuple[str, ...]) -> dict:
     return {field: payload[field] for field in field_names if field in payload}
 
 
-def _compact_render_job_result(result: Any) -> Any:
-    if not isinstance(result, dict):
-        return result
-    render = result.get("render")
-    if not isinstance(render, dict):
-        return result
-
+def _compact_render_payload(render: dict) -> dict:
     compact_render = _select_present_fields(
         render,
         (
@@ -162,8 +156,36 @@ def _compact_render_job_result(result: Any) -> Any:
                 ),
             )
             for item in furniture_data
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("detail_role") != "curtain_material"
         ]
+    return compact_render
+
+
+def _compact_render_job_result(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return result
+    render = result.get("render")
+    if not isinstance(render, dict):
+        batch_results = result.get("results")
+        if not isinstance(batch_results, list):
+            return result
+        compact_rows = []
+        changed = False
+        for row in batch_results:
+            if isinstance(row, dict) and isinstance(row.get("render"), dict):
+                compact_row = dict(row)
+                compact_row["render"] = _compact_render_payload(row["render"])
+                compact_rows.append(compact_row)
+                changed = True
+            else:
+                compact_rows.append(row)
+        if not changed:
+            return result
+        compact_batch = dict(result)
+        compact_batch["results"] = compact_rows
+        return compact_batch
+
+    compact_render = _compact_render_payload(render)
 
     compact_result = {"render": compact_render}
     details = result.get("details")
@@ -384,7 +406,7 @@ def _stage_internal_render_publish_and_enqueue(
         prepare_item_paths = getattr(deps, "prepare_internal_item_upload_paths", None)
         if not callable(prepare_item_paths):
             raise RuntimeError("prepare_internal_item_upload_paths is not configured")
-        item_paths = prepare_item_paths(item_source_paths)
+        item_paths = prepare_item_paths(item_source_paths, item_specs=item_specs)
 
         _update_staging_job(deps, job_id, status="queued", stage="publishing_inputs")
         payload = deps.build_internal_itemized_async_render_job_payload(

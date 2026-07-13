@@ -1,5 +1,7 @@
 import os
 
+from application.render.curtain_material_stage import CURTAIN_BLACKOUT_PERCENT, CURTAIN_DETAIL_MODE, CURTAIN_DETAIL_ROLE
+
 _INTERNAL_ANGLE_STYLE_NAMES = (
     "High Angle Overview",
     "Side Composition (Focus Left)",
@@ -214,6 +216,44 @@ def _is_excluded_detail_target(item) -> bool:
     return False
 
 
+def _is_curtain_material_detail_target(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return bool(
+        item.get("detail_role") == CURTAIN_DETAIL_ROLE
+        and item.get("material_reference_path")
+        and _normalized_label(item.get("category_canonical") or item.get("category")) == "curtain"
+    )
+
+
+def _construct_curtain_material_style(item: dict, detail_index: int) -> dict:
+    label, original_label = _detail_label(item)
+    style = {
+        "name": f"Detail: {label}",
+        "target_label": label,
+        "target_key": item.get("target_key"),
+        "source_index": item.get("source_index"),
+        "detail_index": detail_index,
+        "target_category": item.get("category") or "curtain",
+        "target_category_canonical": "curtain",
+        "detail_mode": CURTAIN_DETAIL_MODE,
+        "priority_detail": True,
+        "material_reference_path": item.get("material_reference_path"),
+        "blackout_percent": int(item.get("blackout_percent") or CURTAIN_BLACKOUT_PERCENT),
+        "prompt": (
+            f"Create a generated editorial close detail of the existing curtain in this exact room, using the supplied curtain "
+            f"material swatch as the absolute reference for color, weave, threads, and surface texture. Express exactly "
+            f"{int(item.get('blackout_percent') or CURTAIN_BLACKOUT_PERCENT)}% blackout in the fabric opacity without darkening "
+            "the room. Keep the room exposure, lighting, white balance, curtain position, curtain folds, architecture, furniture, "
+            "and object layout unchanged. Choose a clear visible curtain section even when furniture overlaps the main view."
+        ),
+        "ratio": "4:5",
+    }
+    if original_label:
+        style["target_product_label"] = original_label
+    return style
+
+
 def _is_source_backed_detail_target(item) -> bool:
     if not isinstance(item, dict):
         return False
@@ -372,14 +412,21 @@ def construct_dynamic_styles(analyzed_items):
     except Exception:
         ranked_items = list(analyzed_items or [])
 
-    localized_items = [item for item in ranked_items if _has_localized_render_box(item)]
-    detail_items = localized_items if localized_items else ranked_items
+    curtain_material_items = [item for item in ranked_items if _is_curtain_material_detail_target(item)]
+    ordinary_items = [item for item in ranked_items if not _is_curtain_material_detail_target(item)]
+    localized_items = [item for item in ordinary_items if _has_localized_render_box(item)]
+    detail_items = [*curtain_material_items, *(localized_items if localized_items else ordinary_items)]
 
     count = 0
     accepted_detail_targets = []
     for item in detail_items:
         if count >= 20:
             break
+        if _is_curtain_material_detail_target(item):
+            styles.append(_construct_curtain_material_style(item, count + 1))
+            count += 1
+            accepted_detail_targets.append(item)
+            continue
         if _is_excluded_detail_target(item):
             continue
         if _is_product_backed_detail_target(item) and not _has_localized_render_box(item):

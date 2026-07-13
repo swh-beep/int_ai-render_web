@@ -203,6 +203,55 @@ class RouteHelperTests(unittest.TestCase):
             "https://example.com/chair.png",
         )
 
+    def test_build_external_cart_job_excludes_curtain_from_base_placement_summary(self):
+        summarized = []
+        req = CartRenderRequest(
+            image_url="https://example.com/room.png",
+            items=[
+                CartItem(id="chair-1", category="chair", image_url="https://example.com/chair.png", name="Chair"),
+                CartItem(id="curtain-1", category="curtain", image_url="https://example.com/swatch.png", name="Narcis"),
+            ],
+        )
+
+        job_payload, kept, dropped = build_external_cart_job(
+            req,
+            cart_max_items=10,
+            apply_cart_limits=lambda items, limit: (items, []),
+            build_cart_summary=lambda items: summarized.extend(items) or "summary",
+            materialize_input=lambda *args: None,
+            normalize_item_image=lambda *args: None,
+            resolve_image_url=lambda *args: None,
+            build_s3_prefix=lambda *parts: "/".join(parts),
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
+        )
+
+        self.assertEqual([item["id"] for item in summarized], ["chair-1"])
+        self.assertEqual([item["id"] for item in kept], ["chair-1", "curtain-1"])
+        self.assertEqual(dropped, [])
+        self.assertEqual(len(job_payload["render"]["moodboard_items"]), 2)
+
+    def test_build_external_cart_job_skips_empty_base_summary_for_curtain_only_cart(self):
+        req = CartRenderRequest(
+            image_url="https://example.com/room.png",
+            items=[CartItem(id="curtain-1", category="curtain", image_url="https://example.com/swatch.png", name="Narcis")],
+        )
+
+        job_payload, kept, dropped = build_external_cart_job(
+            req,
+            cart_max_items=10,
+            apply_cart_limits=lambda items, limit: (items, []),
+            build_cart_summary=lambda items: (_ for _ in ()).throw(AssertionError("empty summary must be skipped")),
+            materialize_input=lambda *args: None,
+            normalize_item_image=lambda *args: None,
+            resolve_image_url=lambda *args: None,
+            build_s3_prefix=lambda *parts: "/".join(parts),
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{item_id}_{index:03d}",
+        )
+
+        self.assertEqual(job_payload["render"]["placement"], "")
+        self.assertEqual([item["id"] for item in kept], ["curtain-1"])
+        self.assertEqual(dropped, [])
+
     def test_build_external_cart_job_preserves_product_category_metadata(self):
         req = CartRenderRequest(
             image_url="https://example.com/room.png",
@@ -334,7 +383,10 @@ class RouteHelperTests(unittest.TestCase):
         staged_job_id = deps.set_staging_job.call_args.args[0]
         staged_tasks[0]()
 
-        deps.prepare_internal_item_upload_paths.assert_called_once_with(["outputs/item_src_1.png"])
+        deps.prepare_internal_item_upload_paths.assert_called_once_with(
+            ["outputs/item_src_1.png"],
+            item_specs=deps.parse_internal_render_items_form.return_value,
+        )
         deps.build_internal_itemized_async_render_job_payload.assert_called_once()
         build_call = deps.build_internal_itemized_async_render_job_payload.call_args.kwargs
         self.assertIs(build_call["publish_inputs"], True)

@@ -411,6 +411,21 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function isCurtainCategoryValue(value) {
+        return String(value || '').trim() === '커튼';
+    }
+
+    function syncCurtainDimensionFields(card) {
+        const fields = getFurnitureFields(card);
+        const curtainSelected = isCurtainCategoryValue(fields.categorySelect?.value);
+        [fields.widthInput, fields.depthInput, fields.heightInput].forEach((field) => {
+            if (!field) return;
+            field.disabled = curtainSelected;
+            field.required = !curtainSelected;
+            if (curtainSelected) field.value = '';
+        });
+    }
+
     function setFurnitureCardNumber(card, index) {
         const fields = getFurnitureFields(card);
         if (fields.heading) fields.heading.textContent = `Item ${index}`;
@@ -461,13 +476,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const width = Number(fields.widthInput?.value);
         const depth = Number(fields.depthInput?.value);
         const height = Number(fields.heightInput?.value);
+        const dimensionsComplete = isCurtainCategoryValue(fields.categorySelect?.value) || (
+            Number.isInteger(width) && width > 0 &&
+            Number.isInteger(depth) && depth > 0 &&
+            Number.isInteger(height) && height > 0
+        );
 
         return !!card._itemFile &&
             !!fields.categorySelect?.value &&
             Number.isInteger(qty) && qty >= 1 &&
-            Number.isInteger(width) && width > 0 &&
-            Number.isInteger(depth) && depth > 0 &&
-            Number.isInteger(height) && height > 0;
+            dimensionsComplete;
     }
 
     function hasCompleteFurnitureItems() {
@@ -506,11 +524,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!Number.isInteger(qty) || qty < 1) {
                 invalidQuantities.push(itemLabel);
             }
-            if (
+            if (!isCurtainCategoryValue(fields.categorySelect?.value) && (
                 !Number.isInteger(width) || width <= 0 ||
                 !Number.isInteger(depth) || depth <= 0 ||
                 !Number.isInteger(height) || height <= 0
-            ) {
+            )) {
                 missingDimensions.push(`Item ${index + 1}`);
             }
         });
@@ -556,17 +574,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const depth = Number(fields.depthInput.value);
                 const height = Number(fields.heightInput.value);
                 const name = fields.nameInput?.value.trim();
+                const dimsMm = isCurtainCategoryValue(fields.categorySelect?.value)
+                    ? undefined
+                    : {
+                        width_mm: width,
+                        depth_mm: depth,
+                        height_mm: height,
+                    };
 
                 return {
                     client_id: card.dataset.clientId || generateFurnitureClientId(),
                     name: name || undefined,
                     category: fields.categorySelect.value,
                     qty,
-                    dims_mm: {
-                        width_mm: width,
-                        depth_mm: depth,
-                        height_mm: height,
-                    },
+                    dims_mm: dimsMm,
                     file: card._itemFile,
                 };
             });
@@ -607,6 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fields.categorySelect.selectedIndex = -1;
             fields.categorySelect.dataset.categoryInitialized = 'true';
         }
+        syncCurtainDimensionFields(card);
 
         fields.input?.addEventListener('change', (e) => {
             if (e.target.files && e.target.files.length) {
@@ -678,7 +700,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fields.heightInput,
         ].forEach((field) => field?.addEventListener('input', syncAndValidate));
 
-        fields.categorySelect?.addEventListener('change', syncAndValidate);
+        fields.categorySelect?.addEventListener('change', () => {
+            syncCurtainDimensionFields(card);
+            syncAndValidate();
+        });
         fields.qtyInput?.addEventListener('change', syncAndValidate);
         fields.widthInput?.addEventListener('change', syncAndValidate);
         fields.depthInput?.addEventListener('change', syncAndValidate);
