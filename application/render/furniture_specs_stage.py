@@ -359,6 +359,9 @@ def build_furniture_specs_json(
             {
                 "index": idx,
                 "label": label,
+                "product_name": it.get("product_name"),
+                "item_id": it.get("item_id"),
+                "item_analysis_profile": it.get("item_analysis_profile"),
                 "target_key": it.get("target_key"),
                 "source_index": it.get("source_index"),
                 "category": it.get("category"),

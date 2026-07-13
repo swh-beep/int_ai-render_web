@@ -90,7 +90,7 @@ def test_simple_generation_specs_keep_exactness_metadata_and_two_pass_metadata()
     assert item["target_key"] == "chair-1"
     assert item["crop_path"] == "outputs/chair.png"
     assert item["dims_mm"] == {"width_mm": 500, "depth_mm": 520, "height_mm": 780}
-    assert "description" not in item
+    assert item["description"] == "Soft boucle lounge chair"
     assert item["identity_profile"] == {"silhouette": "long text"}
     assert item["product_identity"] == {"family": "chair"}
     assert item["archetype_strategy"] == {"avoid": ["sofa"]}

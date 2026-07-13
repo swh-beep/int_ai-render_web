@@ -285,6 +285,67 @@ def test_analyze_cropped_item_can_model_extract_reference_features_without_text_
     assert "block base" in result["description"]
 
 
+def test_analyze_cropped_item_detailed_profile_runs_long_visual_analysis_without_ocr(monkeypatch, tmp_path):
+    image_path = tmp_path / "perla.png"
+    _write_png(image_path)
+    model_prompts = []
+    feature_inputs = []
+    detailed_description = (
+        "A low sculptural lounge chair upholstered in light warm beige leather, with a broad folded seat, "
+        "a continuous softly padded back, visible diagonal seam transitions, and a grounded legless silhouette. "
+        "The pale beige material, low profile, and folded triangular side geometry must remain distinct from the black sibling chair."
+    )
+
+    def _call_model(_model, contents, *_args, **_kwargs):
+        model_prompts.append(contents[0])
+        return SimpleNamespace(text=json.dumps({"description": detailed_description}))
+
+    def _fake_extract_reference_features(**kwargs):
+        feature_inputs.append(kwargs)
+        return {
+            "silhouette_cues": ["low folded lounge-chair silhouette", "triangular padded side profile"],
+            "material_cues": ["light warm beige leather"],
+            "color_cues": ["light warm beige"],
+            "distinctive_parts": ["diagonal seam transitions"],
+            "preserve_rules": ["keep the chair light beige rather than black"],
+            "analysis_quality": "model_sufficient",
+        }
+
+    monkeypatch.setattr(item_analysis_stage, "extract_reference_features", _fake_extract_reference_features)
+
+    result = item_analysis_stage.analyze_cropped_item(
+        str(image_path),
+        {
+            "label": "Lounge Chair",
+            "product_name": "DS-266_SELECT PERLA",
+            "box_2d": [0, 0, 1000, 1000],
+            "category": "lounge_chair",
+            "category_canonical": "lounge_chair",
+            "target_key": "cart_23963_006",
+            "source_index": 6,
+        },
+        call_gemini_with_failover=_call_model,
+        analysis_model_name="model",
+        safe_extract_json=lambda text: json.loads(text),
+        normalize_dims_dict=lambda dims: dims,
+        log_brief=True,
+        unique_id="test",
+        item_index=1,
+        save_crop=False,
+        enable_text_read=False,
+        analysis_profile="detailed",
+        allow_reference_feature_model=True,
+        provided_dims_mm={"width_mm": 1000, "depth_mm": 800, "height_mm": 700},
+    )
+
+    assert len(model_prompts) == 1
+    assert "Write a 90-120 word visual description" in model_prompts[0]
+    assert "Look specifically at the TEXT" not in model_prompts[0]
+    assert feature_inputs[0]["description"].startswith(detailed_description)
+    assert result["description"].startswith("A low sculptural lounge chair upholstered in light warm beige leather")
+    assert result["reference_features"]["analysis_profile"] == "detailed"
+
+
 def test_analyze_cropped_item_merges_options_reference_features_when_model_fallback_is_weak(monkeypatch, tmp_path):
     image_path = tmp_path / "layer-lamp.png"
     _write_png(image_path)

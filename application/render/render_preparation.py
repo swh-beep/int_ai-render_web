@@ -2,6 +2,11 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from application.render.item_analysis_profile import (
+    DETAILED_ITEM_ANALYSIS_PROFILE,
+    normalize_item_analysis_profile,
+)
+
 
 _CATEGORY_METADATA_FIELDS = (
     "category_path",
@@ -25,6 +30,7 @@ class RenderInputs:
     dimensions: str
     placement: str
     audience: str
+    item_analysis_profile: str = DETAILED_ITEM_ANALYSIS_PROFILE
     precomputed_empty_room_path: str | None = None
     precomputed_empty_room_raw_path: str | None = None
 
@@ -58,6 +64,7 @@ def prepare_render_inputs(
         dimensions=payload.get("dimensions", ""),
         placement=payload.get("placement", ""),
         audience=normalize_audience(payload.get("audience")),
+        item_analysis_profile=normalize_item_analysis_profile(payload.get("item_analysis_profile")),
         precomputed_empty_room_path=payload.get("precomputed_empty_room_path"),
         precomputed_empty_room_raw_path=payload.get("precomputed_empty_room_raw_path"),
     )
@@ -92,6 +99,7 @@ def collect_local_moodboard_items(
                         "options": item.get("options"),
                         "qty": qty_val,
                         "category": item.get("category"),
+                        "product_name": item.get("product_name"),
                         "item_id": item.get("item_id"),
                         "payload_index": item.get("payload_index"),
                         "target_key": item.get("target_key"),

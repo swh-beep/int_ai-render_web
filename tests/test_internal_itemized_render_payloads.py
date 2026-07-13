@@ -144,6 +144,7 @@ class InternalItemizedRenderPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["audience"], "internal")
+        self.assertEqual(payload["item_analysis_profile"], "detailed")
         self.assertEqual(payload["file_path"], "https://cdn.example/raw_room.png")
         self.assertEqual(payload["room"], "livingroom")
         self.assertEqual(payload["style"], "Customize")
