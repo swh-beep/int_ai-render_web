@@ -461,7 +461,11 @@ class ExternalRouteContractsTests(unittest.TestCase):
                     "options": "oak",
                     "requested_dims_mm": {"width_mm": 500},
                     "item_id": "chair-1",
-                }
+                },
+                {
+                    "label": "Narcis Curtain",
+                    "item_id": "curtain-1",
+                },
             ],
         )
         self.assertEqual(
@@ -471,6 +475,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
         self.assertEqual(body["result"]["cart_kept"], [{"id": "chair-1", "category": "chair"}])
         self.assertNotIn("candidate_result_urls", body["result"]["render"])
         self.assertNotIn("identity_profile", body["result"]["render"]["furniture_data"][0])
+        self.assertNotIn("material_reference_path", str(body))
 
     def test_external_batch_job_status_compact_payload_sanitizes_each_nested_render(self):
         deps = _external_deps()
@@ -486,6 +491,7 @@ class ExternalRouteContractsTests(unittest.TestCase):
                             {"label": "chair", "item_id": "chair-1", "identity_profile": {"debug": True}},
                             {
                                 "label": "Narcis Curtain",
+                                "item_id": "curtain-1",
                                 "detail_role": "curtain_material",
                                 "material_reference_path": "https://cdn.example/swatch.png",
                             },
@@ -508,7 +514,13 @@ class ExternalRouteContractsTests(unittest.TestCase):
         batch_row = body["result"]["results"][0]
         self.assertEqual(batch_row["variant_index"], 1)
         self.assertEqual(batch_row["cart_kept"], [{"id": "chair-1"}])
-        self.assertEqual(batch_row["render"]["furniture_data"], [{"label": "chair", "item_id": "chair-1"}])
+        self.assertEqual(
+            batch_row["render"]["furniture_data"],
+            [
+                {"label": "chair", "item_id": "chair-1"},
+                {"label": "Narcis Curtain", "item_id": "curtain-1"},
+            ],
+        )
         self.assertNotIn("candidate_result_urls", batch_row["render"])
         self.assertNotIn("material_reference_path", str(body))
 

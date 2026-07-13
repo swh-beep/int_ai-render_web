@@ -156,7 +156,7 @@ def _compact_render_payload(render: dict) -> dict:
                 ),
             )
             for item in furniture_data
-            if isinstance(item, dict) and item.get("detail_role") != "curtain_material"
+            if isinstance(item, dict)
         ]
     return compact_render
 
