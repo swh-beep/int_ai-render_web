@@ -262,6 +262,9 @@ def _sync_furniture_specs_contracts(
                 item["archetype_strategy"] = dict(enriched.get("archetype_strategy") or {})
             if enriched.get("two_pass_strategy"):
                 item["two_pass_strategy"] = dict(enriched.get("two_pass_strategy") or {})
+            for identity_key in ("product_name", "item_id", "item_analysis_profile", "description"):
+                if enriched.get(identity_key) not in (None, ""):
+                    item[identity_key] = enriched.get(identity_key)
             for metadata_key in (
                 "category_path",
                 "category_source",
@@ -319,6 +322,10 @@ def _sync_furniture_specs_contracts(
             "strategy_priority",
             "requires_identity_validation",
             "identity_validation_reason",
+            "product_name",
+            "item_id",
+            "item_analysis_profile",
+            "description",
         ):
             if fallback.get(key) is not None:
                 merged[key] = fallback.get(key)
@@ -356,6 +363,8 @@ def _copy_prompt_payload_value(value: Any) -> Any:
 
 _MAIN_PROMPT_ITEM_KEYS = (
     "label",
+    "product_name",
+    "description",
     "category",
     "category_canonical",
     "category_path",
@@ -1246,6 +1255,7 @@ def run_render_room_workflow(
             log_brief=deps.runtime.log_brief,
             max_concurrency_analysis=deps.runtime.max_concurrency_analysis,
             cart_max_analysis_workers=deps.runtime.cart_max_analysis_workers,
+            item_analysis_profile=request.item_analysis_profile,
             absolute_deadline_ts=absolute_deadline_ts,
         )
         windows_present = analysis_result.windows_present

@@ -6,6 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from application.render.item_analysis_profile import (
+    DETAILED_ITEM_ANALYSIS_PROFILE,
+    normalize_item_analysis_profile,
+)
 from application.render.postprocess_support import (
     category_match_family,
     decor_prefers_surface_placement,
@@ -421,6 +425,7 @@ def _build_item_metas(
                         "qty": qty_val,
                         "source_path": src_path,
                         "category": category_val,
+                        "product_name": meta.get("product_name"),
                         "category_canonical": canonical_category(category_val or label_val),
                         "item_id": item_id_val,
                         "source_index": source_index,
@@ -622,15 +627,17 @@ def _analyze_items(
     room_dims_parsed: dict,
     max_concurrency_analysis: int,
     cart_max_analysis_workers: int,
+    item_analysis_profile: str = DETAILED_ITEM_ANALYSIS_PROFILE,
     absolute_deadline_ts: float | None = None,
 ) -> list[dict]:
     full_analyzed_data: list[dict] = []
     if not item_metas:
         return full_analyzed_data
 
-    is_cart_mode = bool(item_refs)
-    ocr_text_read_enabled = not is_cart_mode
-    if is_cart_mode:
+    is_direct_item_mode = bool(item_refs)
+    resolved_analysis_profile = normalize_item_analysis_profile(item_analysis_profile)
+    ocr_text_read_enabled = not is_direct_item_mode
+    if is_direct_item_mode:
         analysis_workers = min(
             max_concurrency_analysis,
             cart_max_analysis_workers,
@@ -650,6 +657,7 @@ def _analyze_items(
                 "source_index": meta.get("source_index"),
                 "category": meta.get("category"),
                 "category_canonical": meta.get("category_canonical"),
+                "product_name": meta.get("product_name"),
                 "item_id": meta.get("item_id"),
                 **{
                     field: meta.get(field)
@@ -668,7 +676,8 @@ def _analyze_items(
                         item_index=index + 1,
                         save_crop=True,
                         enable_text_read=ocr_text_read_enabled,
-                        allow_reference_feature_model=is_cart_mode,
+                        analysis_profile=resolved_analysis_profile,
+                        allow_reference_feature_model=is_direct_item_mode,
                         provided_dims_mm=meta.get("dims_mm"),
                         absolute_deadline_ts=absolute_deadline_ts,
                     ),
@@ -700,7 +709,7 @@ def _analyze_items(
         extra_lines = []
         if qty and qty > 1:
             extra_lines.append(f"Quantity: {qty}")
-        if req_dims and not is_cart_mode:
+        if req_dims and not is_direct_item_mode:
             extra_lines.append(
                 f"Requested size: W={req_dims.get('width_mm') or 'null'} "
                 f"D={req_dims.get('depth_mm') or 'null'} "
@@ -783,7 +792,9 @@ def _analyze_items(
                 "target_key": target_key,
                 "category": category_val,
                 "category_canonical": category_canonical_val,
+                "product_name": meta.get("product_name") or res_item.get("product_name"),
                 "item_id": meta.get("item_id") or res_item.get("item_id"),
+                "item_analysis_profile": resolved_analysis_profile,
                 "reference_features": reference_features,
                 "identity_profile": identity_profile,
                 "layout_envelope": identity_profile.get("layout_envelope"),
@@ -909,6 +920,7 @@ def run_render_analysis_stage(
     log_brief: bool,
     max_concurrency_analysis: int,
     cart_max_analysis_workers: int,
+    item_analysis_profile: str = DETAILED_ITEM_ANALYSIS_PROFILE,
     absolute_deadline_ts: float | None = None,
 ) -> RenderAnalysisStageResult:
     result = RenderAnalysisStageResult(full_analyzed_data=[])
@@ -973,6 +985,7 @@ def run_render_analysis_stage(
             room_dims_parsed=room_dims_parsed,
             max_concurrency_analysis=max_concurrency_analysis,
             cart_max_analysis_workers=cart_max_analysis_workers,
+            item_analysis_profile=item_analysis_profile,
             absolute_deadline_ts=absolute_deadline_ts,
         )
 

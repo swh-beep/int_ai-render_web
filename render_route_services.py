@@ -10,6 +10,7 @@ from fastapi import UploadFile
 
 from application.render.direct_item_image_prep import prepare_direct_item_image
 from application.render.curtain_material_stage import is_curtain_item, prepare_material_swatch_image
+from application.render.item_analysis_profile import DETAILED_ITEM_ANALYSIS_PROFILE
 from api_models import (
     CartRenderRequest,
     CartSimpleBatchRequest,
@@ -243,6 +244,7 @@ def build_internal_async_render_job_payload(
         "dimensions": dimensions,
         "placement": placement,
         "audience": audience,
+        "item_analysis_profile": DETAILED_ITEM_ANALYSIS_PROFILE,
         "simple_generation_mode": True,
     }
 
@@ -340,6 +342,7 @@ def build_internal_itemized_async_render_job_payload(
         "dimensions": dimensions,
         "placement": placement,
         "audience": audience,
+        "item_analysis_profile": DETAILED_ITEM_ANALYSIS_PROFILE,
         "simple_generation_mode": True,
     }
 
@@ -392,6 +395,7 @@ def build_internal_render_job_payload(req: InternalRenderRequest) -> dict:
         "dimensions": req.dimensions or "",
         "placement": req.placement or "",
         "audience": "internal",
+        "item_analysis_profile": DETAILED_ITEM_ANALYSIS_PROFILE,
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     return {"render": payload}
@@ -424,6 +428,7 @@ def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tup
         "dimensions": resolved["dimensions"],
         "placement": resolved["placement"],
         "audience": "external",
+        "item_analysis_profile": DETAILED_ITEM_ANALYSIS_PROFILE,
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {
@@ -516,6 +521,7 @@ def build_external_cart_job(
         "dimensions": req.dimensions or "",
         "placement": placement,
         "audience": "external",
+        "item_analysis_profile": DETAILED_ITEM_ANALYSIS_PROFILE,
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
     }
     job_payload = {

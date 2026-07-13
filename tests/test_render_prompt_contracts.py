@@ -742,7 +742,7 @@ def test_generate_furnished_room_includes_strict_estimated_scale_contract_contex
             output_path.unlink()
 
 
-def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose(tmp_path, monkeypatch):
+def test_generate_furnished_room_includes_detailed_item_analysis_with_identity_cards(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
     ref_path = tmp_path / "ref.png"
@@ -841,7 +841,7 @@ def test_generate_furnished_room_uses_compact_identity_cards_not_long_item_prose
         assert "preserve_rules=" not in prompt
         assert "PRODUCT EXACTNESS FIRST" in prompt
         assert "Do not miniaturize lighting products into tabletop decor" in prompt
-        assert long_item_prose not in prompt
+        assert long_item_prose in prompt
         assert "PRIMARY EXACTNESS ANCHOR" in content[3]
         assert output_path.exists()
     finally:

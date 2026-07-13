@@ -72,6 +72,7 @@ def run_render_job(
             placement=prepared.placement,
             audience=prepared.audience,
             moodboard_items=resources.local_items,
+            item_analysis_profile=prepared.item_analysis_profile,
             simple_generation_mode=bool(base_payload.get("simple_generation_mode")),
             precomputed_empty_room_path=prepared.precomputed_empty_room_path,
             precomputed_empty_room_raw_path=prepared.precomputed_empty_room_raw_path,

@@ -5,6 +5,11 @@ import time
 from typing import Any, Callable, Optional
 
 from PIL import Image
+from application.render.item_analysis_profile import (
+    COMPACT_ITEM_ANALYSIS_PROFILE,
+    DETAILED_ITEM_ANALYSIS_PROFILE,
+    normalize_item_analysis_profile,
+)
 from application.render.reference_features_stage import (
     extract_reference_features,
     should_extract_reference_features,
@@ -304,6 +309,7 @@ def _analysis_catalog_context(item_data: dict | None, *, label: str, dims_mm: di
     dims = _normalize_dims_for_description(dims_mm)
     lines = [
         f"Label: {label or 'Item'}",
+        f"Product name: {item_data.get('product_name') or 'unknown'}",
         f"Category: {item_data.get('category') or 'unknown'}",
         f"Canonical category: {item_data.get('category_canonical') or 'unknown'}",
     ]
@@ -542,6 +548,7 @@ def analyze_cropped_item(
     item_index=None,
     save_crop=True,
     enable_text_read=True,
+    analysis_profile: str | None = None,
     allow_reference_feature_model: bool = False,
     provided_dims_mm=None,
     absolute_deadline_ts: float | None = None,
@@ -627,8 +634,16 @@ def analyze_cropped_item(
             crop_path = None
 
         resolved_dims_mm = normalize_dims_dict(provided_dims_mm or {})
+        default_analysis_profile = (
+            DETAILED_ITEM_ANALYSIS_PROFILE if enable_text_read else COMPACT_ITEM_ANALYSIS_PROFILE
+        )
+        resolved_analysis_profile = normalize_item_analysis_profile(
+            analysis_profile,
+            default=default_analysis_profile,
+        )
+        detailed_analysis_enabled = resolved_analysis_profile == DETAILED_ITEM_ANALYSIS_PROFILE
         ultra_detailed_analysis = _ultra_detailed_item_analysis_enabled()
-        if not enable_text_read and not ultra_detailed_analysis:
+        if not detailed_analysis_enabled and not ultra_detailed_analysis:
             extract_ref_features, extraction_reason = should_extract_reference_features(
                 label=label,
                 category=item_data.get("category"),
@@ -653,6 +668,7 @@ def analyze_cropped_item(
             if isinstance(reference_features, dict):
                 reference_features["extraction_mode"] = "model" if reference_model_allowed else "deterministic"
                 reference_features["extraction_reason"] = extraction_reason or "authoritative_reference_image"
+                reference_features["analysis_profile"] = resolved_analysis_profile
             reference_features = _merge_options_reference_features(reference_features, item_data)
             final_desc = _stabilize_description(
                 label=label,
@@ -681,7 +697,9 @@ def analyze_cropped_item(
                 "source_index": item_data.get("source_index"),
                 "category": item_data.get("category"),
                 "category_canonical": item_data.get("category_canonical"),
+                "product_name": item_data.get("product_name"),
                 "item_id": item_data.get("item_id"),
+                "item_analysis_profile": resolved_analysis_profile,
             }
 
         if ultra_detailed_analysis:
@@ -898,6 +916,7 @@ def analyze_cropped_item(
         if isinstance(reference_features, dict):
             reference_features["extraction_mode"] = "model" if extract_ref_features else "fallback"
             reference_features["extraction_reason"] = extraction_reason
+            reference_features["analysis_profile"] = resolved_analysis_profile
         if ultra_detailed_analysis:
             reference_features = _merge_ultra_reference_features(reference_features, crop_reference_features)
         reference_features = _merge_options_reference_features(reference_features, item_data)
@@ -921,7 +940,9 @@ def analyze_cropped_item(
             "source_index": item_data.get("source_index"),
             "category": item_data.get("category"),
             "category_canonical": item_data.get("category_canonical"),
+            "product_name": item_data.get("product_name"),
             "item_id": item_data.get("item_id"),
+            "item_analysis_profile": resolved_analysis_profile,
         }
 
     except Exception as exc:

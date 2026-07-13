@@ -78,6 +78,7 @@ def prepare_render_references(
                             "options": item.get("options"),
                             "qty": qty_val,
                             "category": category,
+                            "product_name": item.get("product_name"),
                             "item_id": item_id,
                             "payload_index": payload_index,
                             "target_key": target_key,

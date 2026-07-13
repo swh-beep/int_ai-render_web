@@ -286,6 +286,9 @@ def _item_display_label_for_prompt(item: dict | None) -> str:
     if not isinstance(item, dict):
         return "Unknown Item"
     raw_label = str(item.get("label") or item.get("category") or "Unknown Item").strip() or "Unknown Item"
+    product_name = str(item.get("product_name") or "").strip()
+    if product_name:
+        return product_name
     alias = _visual_alias_for_prompt(item)
     if alias and _is_generic_product_label(raw_label):
         item_id = str(item.get("item_id") or item.get("source_index") or item.get("target_key") or "").strip()
@@ -632,6 +635,15 @@ def _item_identifier_bits_for_prompt(item: dict | None) -> list[str]:
     return bits
 
 
+def _item_analysis_description_for_prompt(item: dict | None, *, limit: int = 2400) -> str:
+    if not isinstance(item, dict):
+        return ""
+    text = " ".join(str(item.get("description") or "").split()).strip()
+    if not text:
+        return ""
+    return text[: max(1, int(limit))].strip()
+
+
 def _item_anchor_priority(item: dict | None, *, explicit_primary_key: str) -> tuple:
     if not isinstance(item, dict):
         return (-1, -1, -1, -1, -1)
@@ -784,6 +796,9 @@ def _build_item_exactness_card_row(item: dict | None) -> str:
     bits = ["reference_image=authoritative_cutout", f"qty={qty}"]
     if category:
         bits.append(f"category={category}")
+    analysis_description = _item_analysis_description_for_prompt(item)
+    if analysis_description:
+        bits.append(f"detailed_visual_analysis={analysis_description}")
     if raw_label and raw_label != label:
         bits.append(f"raw_label={raw_label}")
     visual_alias = _visual_alias_for_prompt(item)

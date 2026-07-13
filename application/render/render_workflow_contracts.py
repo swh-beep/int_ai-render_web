@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from application.render.item_analysis_profile import DETAILED_ITEM_ANALYSIS_PROFILE
+
 
 def _noop_explicit_room_dims_contract(*args, **kwargs):
     return None
@@ -44,6 +46,7 @@ class RenderWorkflowRequest:
     placement: str = ""
     audience: str = ""
     moodboard_items: list[dict[str, Any]] | None = None
+    item_analysis_profile: str = DETAILED_ITEM_ANALYSIS_PROFILE
     simple_generation_mode: bool = False
     precomputed_empty_room_path: str | None = None
     precomputed_empty_room_raw_path: str | None = None

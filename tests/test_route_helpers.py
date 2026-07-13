@@ -163,6 +163,7 @@ class RouteHelperTests(unittest.TestCase):
         self.assertEqual(len(dropped), 1)
         item_refs = job_payload["render"]["moodboard_items"]
         self.assertIs(job_payload["require_details"], True)
+        self.assertEqual(job_payload["render"]["item_analysis_profile"], "detailed")
         self.assertEqual(item_refs[0]["path"], "https://example.com/chair.png")
         self.assertEqual(item_refs[1]["path"], "https://example.com/sofa.png")
         self.assertEqual(item_refs[0]["worker_preprocess"], "external_cart_item_v1")
