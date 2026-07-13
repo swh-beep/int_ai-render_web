@@ -5,6 +5,7 @@ import os
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -67,6 +68,7 @@ class JobEntrypointServices:
 
 _SERVICES: JobEntrypointServices | None = None
 _DEFERRED_CART_ITEM_MARKER = "external_cart_item_v1"
+CART_SIMPLE_BATCH_MAX_WORKERS = max(1, int(os.getenv("CART_SIMPLE_BATCH_MAX_WORKERS", "3") or "3"))
 
 
 def configure_job_entrypoints(services: JobEntrypointServices) -> None:
@@ -329,9 +331,10 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         _persist_job_result(result, audience=audience)
         return result
 
-    results: list[dict] = []
     variant_count = len(variants)
-    for fallback_index, variant in enumerate(variants, start=1):
+
+    def _render_variant(indexed_variant: tuple[int, dict]) -> dict:
+        fallback_index, variant = indexed_variant
         variant_index = int(variant.get("variant_index") or fallback_index)
         render_payload = dict(variant.get("render") or {})
         extra = dict(variant.get("extra") or {})
@@ -363,7 +366,11 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
                 "render": normalized_render,
                 **extra,
             }
-        results.append(row)
+        return row
+
+    worker_count = min(CART_SIMPLE_BATCH_MAX_WORKERS, variant_count)
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="cart-simple-batch") as executor:
+        results = list(executor.map(_render_variant, enumerate(variants, start=1)))
 
     result = {
         "empty_room_url": shared_empty["empty_room_url"],
