@@ -1,6 +1,7 @@
 import unittest
 import os
 import tempfile
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -329,6 +330,78 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertEqual([row["variant_index"] for row in result["results"]], [1, 2])
         self.assertNotIn("original_url", result["results"][0]["render"])
         self.assertEqual(persisted[-1][1], "external")
+
+    def test_job_render_cart_simple_batch_runs_variants_concurrently_and_preserves_order(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = os.path.join(tmpdir, "room.png")
+            std_path = os.path.join(tmpdir, "room-std.png")
+            empty_path = os.path.join(tmpdir, "empty.png")
+            empty_raw_path = os.path.join(tmpdir, "empty-raw.png")
+            for path in (source_path, std_path, empty_path, empty_raw_path):
+                with open(path, "wb") as handle:
+                    handle.write(b"img")
+
+            lock = threading.Lock()
+            all_started = threading.Event()
+            active_calls = 0
+            max_active_calls = 0
+            completion_order = []
+
+            def fake_job_render(payload, persist_result=True):
+                nonlocal active_calls, max_active_calls
+                variant_index = payload["batch_variant_index"]
+                with lock:
+                    active_calls += 1
+                    max_active_calls = max(max_active_calls, active_calls)
+                    if active_calls == 3:
+                        all_started.set()
+
+                all_started.wait(timeout=1.0)
+                threading.Event().wait({1: 0.06, 2: 0.03, 3: 0.0}[variant_index])
+
+                with lock:
+                    completion_order.append(variant_index)
+                    active_calls -= 1
+
+                return {
+                    "original_url": f"https://cdn.example/original-{variant_index}.png",
+                    "result_url": f"https://cdn.example/main-{variant_index}.png",
+                    "result_urls": [f"https://cdn.example/main-{variant_index}.png"],
+                }
+
+            with (
+                patch.object(
+                    job_entrypoints,
+                    "_services",
+                    return_value=SimpleNamespace(
+                        normalize_audience=lambda audience: audience or "external",
+                        materialize_input=lambda source_ref, prefix: source_path,
+                        standardize_image=lambda path: std_path,
+                        generate_empty_room=lambda *args, **kwargs: (empty_path, empty_raw_path),
+                        resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{prefix}/{os.path.basename(path)}",
+                        build_s3_prefix=lambda audience, category, subfolder=None: "/".join(
+                            [part for part in [audience, category, subfolder] if part]
+                        ),
+                    ),
+                ),
+                patch.object(job_entrypoints, "job_render", side_effect=fake_job_render),
+                patch.object(job_entrypoints, "_persist_job_result"),
+                patch.object(job_entrypoints, "CART_SIMPLE_BATCH_MAX_WORKERS", 3),
+            ):
+                result = job_entrypoints.job_render_cart_simple_batch(
+                    {
+                        "audience": "external",
+                        "image_url": "https://example.com/room.png",
+                        "variants": [
+                            {"variant_index": index, "render": {"file_path": "https://example.com/room.png"}}
+                            for index in range(1, 4)
+                        ],
+                    }
+                )
+
+        self.assertEqual(max_active_calls, 3)
+        self.assertEqual(completion_order, [3, 2, 1])
+        self.assertEqual([row["variant_index"] for row in result["results"]], [1, 2, 3])
 
     def test_job_render_preprocesses_deferred_cart_items_before_run_render_job(self):
         with tempfile.TemporaryDirectory() as tmpdir:
