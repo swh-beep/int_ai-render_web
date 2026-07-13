@@ -1995,8 +1995,8 @@ def download_proxy(url: str, request: Request):
     return StreamingResponse(resp.iter_content(chunk_size=1024 * 1024), media_type=content_type, headers=headers)
 
 @app.get("/jobs/{job_id}")
-def get_job_status(job_id: str):
-    return handle_get_job_status(job_id, deps=_queue_route_deps())
+def get_job_status(job_id: str, compact: bool = False):
+    return handle_get_job_status(job_id, deps=_queue_route_deps(), compact=compact)
 
 @app.post("/async/render")
 @async_wrap

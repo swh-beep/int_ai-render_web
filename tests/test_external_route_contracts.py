@@ -405,6 +405,89 @@ class ExternalRouteContractsTests(unittest.TestCase):
         self.assertEqual(body["result"]["render"]["scene_contract"]["geometry_source"], "explicit")
         self.assertEqual(body["result"]["details"]["selected_item_review"][0]["target_key"], "sofa-1")
 
+    def test_external_cart_job_status_compact_payload_keeps_consumer_fields_only(self):
+        deps = _external_deps()
+        result = _external_cart_finished_result_payload()
+        result["render"].update(
+            {
+                "empty_room_url": "https://cdn.example/empty.png",
+                "furniture_data": [
+                    {
+                        "label": "chair",
+                        "description": "consumer description",
+                        "box_2d": [10, 20, 30, 40],
+                        "qty": 1,
+                        "options": "oak",
+                        "requested_dims_mm": {"width_mm": 500},
+                        "item_id": "chair-1",
+                        "identity_profile": {"large": "debug-only"},
+                    }
+                ],
+            }
+        )
+        result["details"]["details"] = [
+            {
+                "index": 1,
+                "url": "https://cdn.example/detail-1.png",
+                "target_key": "chair-1",
+                "debug_metadata": {"large": "debug-only"},
+            }
+        ]
+        result["details"]["furniture_data"] = [{"large": "debug-only"}]
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(result)
+        deps.load_job_result_s3 = lambda job_id: None
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["result_compacted"])
+        self.assertEqual(
+            body["result"]["render"]["furniture_data"],
+            [
+                {
+                    "label": "chair",
+                    "description": "consumer description",
+                    "box_2d": [10, 20, 30, 40],
+                    "qty": 1,
+                    "options": "oak",
+                    "requested_dims_mm": {"width_mm": 500},
+                    "item_id": "chair-1",
+                }
+            ],
+        )
+        self.assertEqual(
+            body["result"]["details"],
+            {"details": [{"index": 1, "url": "https://cdn.example/detail-1.png"}]},
+        )
+        self.assertEqual(body["result"]["cart_kept"], [{"id": "chair-1", "category": "chair"}])
+        self.assertNotIn("candidate_result_urls", body["result"]["render"])
+        self.assertNotIn("identity_profile", body["result"]["render"]["furniture_data"][0])
+
+    def test_external_cart_job_status_compact_payload_from_s3_uses_same_contract(self):
+        deps = _external_deps()
+        result = _external_cart_finished_result_payload()
+        result["render"]["furniture_data"] = [
+            {"label": "chair", "item_id": "chair-1", "identity_profile": {"large": "debug-only"}}
+        ]
+        deps.fetch_job = lambda job_id: None
+        deps.load_job_result_s3 = lambda job_id: result
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result_source"], "s3")
+        self.assertTrue(body["result_compacted"])
+        self.assertEqual(
+            body["result"]["render"]["furniture_data"],
+            [{"label": "chair", "item_id": "chair-1"}],
+        )
+
     def test_external_cart_job_status_finished_payload_from_s3_stays_stable(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: None

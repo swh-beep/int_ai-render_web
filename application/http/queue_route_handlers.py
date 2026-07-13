@@ -121,6 +121,81 @@ def _saved_result_can_finish_stale_job(result: Any) -> bool:
     return any(key in result for key in terminal_keys)
 
 
+def _select_present_fields(payload: dict, field_names: tuple[str, ...]) -> dict:
+    return {field: payload[field] for field in field_names if field in payload}
+
+
+def _compact_render_job_result(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return result
+    render = result.get("render")
+    if not isinstance(render, dict):
+        return result
+
+    compact_render = _select_present_fields(
+        render,
+        (
+            "empty_room_url",
+            "result_url",
+            "result_urls",
+            "original_url",
+            "message",
+            "error",
+        ),
+    )
+    furniture_data = render.get("furniture_data")
+    if isinstance(furniture_data, list):
+        compact_render["furniture_data"] = [
+            _select_present_fields(
+                item,
+                (
+                    "label",
+                    "description",
+                    "box_2d",
+                    "qty",
+                    "options",
+                    "requested_dims_mm",
+                    "item_id",
+                    "itemId",
+                    "cart_item_id",
+                    "cartItemId",
+                ),
+            )
+            for item in furniture_data
+            if isinstance(item, dict)
+        ]
+
+    compact_result = {"render": compact_render}
+    details = result.get("details")
+    if isinstance(details, dict):
+        detail_items = details.get("details")
+        if isinstance(detail_items, list):
+            compact_result["details"] = {
+                "details": [
+                    _select_present_fields(item, ("index", "url"))
+                    for item in detail_items
+                    if isinstance(item, dict)
+                ]
+            }
+
+    for field in ("cart_kept", "cart_dropped", "error", "message"):
+        if field in result:
+            compact_result[field] = result[field]
+    return compact_result
+
+
+def _compact_job_status_payload(payload: dict, *, compact: bool) -> dict:
+    if not compact or "result" not in payload:
+        return payload
+    compact_result = _compact_render_job_result(payload["result"])
+    if compact_result is payload["result"]:
+        return payload
+    compact_payload = dict(payload)
+    compact_payload["result"] = compact_result
+    compact_payload["result_compacted"] = True
+    return compact_payload
+
+
 def _set_staging_job(deps: QueueRouteDependencies, job_id: str, state: dict) -> None:
     setter = getattr(deps, "set_staging_job", None)
     if callable(setter):
@@ -351,7 +426,7 @@ def _stage_internal_render_publish_and_enqueue(
         )
 
 
-def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONResponse:
+def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies, compact: bool = False) -> JSONResponse:
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     job = deps.fetch_job(job_id)
@@ -362,7 +437,7 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONR
         saved = deps.load_job_result_s3(job_id)
         if saved is not None:
             return JSONResponse(
-                content={
+                content=_compact_job_status_payload({
                     "id": job_id,
                     "status": "finished",
                     "enqueued_at": None,
@@ -370,7 +445,7 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONR
                     "ended_at": None,
                     "result": saved,
                     "result_source": "s3",
-                }
+                }, compact=compact)
             )
         return JSONResponse(content={"error": "Job not found"}, status_code=404)
 
@@ -397,7 +472,7 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies) -> JSONR
             payload["stale_job_status"] = job.get_status()
     if job.is_failed:
         payload["error"] = job.exc_info
-    return JSONResponse(content=payload)
+    return JSONResponse(content=_compact_job_status_payload(payload, compact=compact))
 
 
 def handle_render_room_async(
