@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 
 from fastapi.responses import JSONResponse
 from rq import get_current_job
+from rq.timeouts import JobTimeoutException
 
 from application.details.detail_workflow import run_generate_details_job
 from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
@@ -22,6 +23,11 @@ from application.render.empty_room_workflow import run_generate_empty_room_job
 from application.render.finalize_workflow import run_finalize_job
 from application.render.render_workflow import run_render_job, run_render_with_details_job
 from application.render.upscale_workflow import run_upscale_job
+from application.tracker_metadata import (
+    build_child_tracker_metadata,
+    normalize_job_result_manifest,
+    tracker_metadata_from_payload,
+)
 from application.video.external_render_video_workflow import run_external_render_video_job
 
 
@@ -105,16 +111,107 @@ def _json_from_response(resp: Any) -> dict:
     return {"result": resp}
 
 
-def _persist_job_result(result: dict, audience: Optional[str] = None) -> None:
+def _persist_job_result(result: dict, audience: Optional[str] = None, metadata: dict | None = None) -> None:
     try:
         job = get_current_job()
         if not job:
             return
         services = _services()
         normalized_audience = services.normalize_audience(audience)
-        services.save_job_result(job.id, result, audience=normalized_audience)
+        job_id = str(job.id)
+        normalized_result = normalize_job_result_manifest(
+            result,
+            metadata=metadata,
+            job_id=job_id,
+            created_at_utc=getattr(job, "created_at", None) or getattr(job, "enqueued_at", None),
+            completed_at_utc=getattr(job, "ended_at", None),
+        )
+        if isinstance(normalized_result.get("results"), list):
+            parent_metadata = dict(metadata or {})
+            parent_metadata.pop("result_id", None)
+            for index, row in enumerate(normalized_result["results"], start=1):
+                if not isinstance(row, dict):
+                    continue
+                child_job_id = row.get("job_id")
+                child_metadata = build_child_tracker_metadata(
+                    parent_metadata,
+                    parent_job_id=job_id,
+                    child_result_id=row.get("result_id"),
+                )
+                normalized_result["results"][index - 1] = normalize_job_result_manifest(
+                    row,
+                    metadata=child_metadata,
+                    job_id=str(child_job_id) if child_job_id else None,
+                    created_at_utc=normalized_result["created_at_utc"],
+                    completed_at_utc=normalized_result["completed_at_utc"],
+                )
+        services.save_job_result(job_id, normalized_result, audience=normalized_audience)
     except Exception:
         pass
+
+
+def _persist_job_result_with_optional_metadata(
+    result: dict,
+    *,
+    audience: Optional[str],
+    metadata: dict | None,
+) -> None:
+    if metadata:
+        _persist_job_result(result, audience=audience, metadata=metadata)
+    else:
+        _persist_job_result(result, audience=audience)
+
+
+def _payload_from_failed_job(job: Any) -> dict | None:
+    try:
+        args = getattr(job, "args", None) or ()
+    except Exception:
+        return None
+    for arg in args:
+        if isinstance(arg, dict) and tracker_metadata_from_payload(arg):
+            return arg
+    return None
+
+
+def _audience_from_payload(payload: dict | None) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    render_payload = payload.get("render")
+    if isinstance(render_payload, dict):
+        return render_payload.get("audience") or payload.get("audience")
+    return payload.get("audience")
+
+
+def _is_timeout_exception(exc_type: Any) -> bool:
+    try:
+        return isinstance(exc_type, type) and issubclass(exc_type, JobTimeoutException)
+    except TypeError:
+        return False
+
+
+def persist_tracked_failure_manifest(job: Any, connection: Any, exc_type: Any, exc_value: Any, traceback_obj: Any) -> None:
+    try:
+        retries_left = getattr(job, "retries_left", None)
+        if isinstance(retries_left, int) and retries_left > 0:
+            return
+        payload = _payload_from_failed_job(job)
+        metadata = tracker_metadata_from_payload(payload)
+        if not metadata:
+            return
+        services = _services()
+        audience = services.normalize_audience(_audience_from_payload(payload))
+        terminal_status = "timeout" if _is_timeout_exception(exc_type) else "failed"
+        result = normalize_job_result_manifest(
+            {"error": f"Job {terminal_status} before result persistence"},
+            metadata=metadata,
+            job_id=str(getattr(job, "id", "") or ""),
+            terminal_status=terminal_status,
+            created_at_utc=getattr(job, "created_at", None) or getattr(job, "enqueued_at", None),
+            completed_at_utc=getattr(job, "ended_at", None),
+        )
+        services.save_job_result(str(getattr(job, "id", "") or ""), result, audience=audience)
+    except Exception:
+        return
 
 
 def _cleanup_temp_cart_source(local_src: str | None) -> None:
@@ -246,6 +343,7 @@ def job_render_with_extra(payload: dict) -> dict:
     services = _services()
     render_payload = payload.get("render") or {}
     extra = payload.get("extra") or {}
+    tracker_metadata = tracker_metadata_from_payload(payload)
 
     audience = services.normalize_audience(render_payload.get("audience"))
     render_payload["audience"] = audience
@@ -259,7 +357,7 @@ def job_render_with_extra(payload: dict) -> dict:
     else:
         result = {"render": render_result, **extra}
 
-    _persist_job_result(result, audience=audience)
+    _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
     return result
 
 
@@ -320,15 +418,16 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         payload.setdefault("artifact_created_at", artifact_created_at)
     variants = [row for row in (payload.get("variants") or []) if isinstance(row, dict)]
     audience = services.normalize_audience(payload.get("audience") or "external")
+    tracker_metadata = tracker_metadata_from_payload(payload)
     if not variants:
         result = {"error": "variants are required"}
-        _persist_job_result(result, audience=audience)
+        _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
         return result
 
     shared_empty = _generate_shared_cart_empty_room(payload, services, audience)
     if shared_empty.get("error"):
         result = {"error": shared_empty.get("error"), "results": []}
-        _persist_job_result(result, audience=audience)
+        _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
         return result
 
     variant_count = len(variants)
@@ -376,11 +475,16 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         "empty_room_url": shared_empty["empty_room_url"],
         "results": results,
     }
-    _persist_job_result(result, audience=audience)
+    _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
     return result
 
 
 def job_render_with_details(payload: dict) -> dict:
+    tracker_metadata = tracker_metadata_from_payload(payload)
+
+    def _persist_tracked(result: dict, audience: Optional[str] = None) -> None:
+        _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
+
     return run_render_with_details_job(
         payload,
         normalize_audience=_services().normalize_audience,
@@ -389,7 +493,7 @@ def job_render_with_details(payload: dict) -> dict:
             persist_result=persist_result,
         ),
         detail_job_runner=job_generate_details,
-        persist_job_result=_persist_job_result,
+        persist_job_result=_persist_tracked,
     )
 
 

@@ -36,6 +36,7 @@ from application.http.queue_route_handlers import (
     handle_generate_frontal_view_async,
     handle_generate_image_edit_async,
     handle_get_job_status,
+    handle_patch_external_tracker_manifest,
     handle_regenerate_single_detail,
     handle_render_room_async,
     handle_upscale_async,
@@ -199,6 +200,7 @@ from api_models import (
     RegenerateDetailRequest,
     SourceGenRequest,
     SourceItem,
+    TrackerManifestPatchRequest,
     UpscaleRequest,
     VideoClip,
     VideoCreateRequest,
@@ -817,6 +819,14 @@ def _get_rq_queue(queue_name: str | None = None):
     name = (queue_name or RQ_QUEUE_NAME).strip() or RQ_QUEUE_NAME
     return Queue(name, connection=conn, default_timeout=RQ_JOB_TIMEOUT, default_result_ttl=RQ_RESULT_TTL)
 
+
+def _has_tracker_metadata_arg(args) -> bool:
+    for arg in args or ():
+        if isinstance(arg, dict) and isinstance(arg.get("tracker_metadata"), dict) and arg.get("tracker_metadata"):
+            return True
+    return False
+
+
 def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
     q = _get_rq_queue(queue_name)
     retry = None
@@ -848,6 +858,8 @@ def _enqueue_job(func, *args, queue_name: str | None = None, **kwargs):
                 "result_ttl": result_ttl,
                 "retry": retry,
             }
+            if _has_tracker_metadata_arg(args):
+                enqueue_kwargs["on_failure"] = job_entrypoints_module.persist_tracked_failure_manifest
             if custom_job_id:
                 enqueue_kwargs["job_id"] = str(custom_job_id)
             job = q.enqueue(func, *args, **kwargs, **enqueue_kwargs)
@@ -1931,6 +1943,7 @@ def _queue_route_deps() -> QueueRouteDependencies:
         enqueue_job=_enqueue_job,
         fetch_job=_fetch_job,
         load_job_result_s3=_load_job_result_s3,
+        save_job_result_s3=_save_job_result_s3,
         load_preset_map=_load_preset_map,
         require_role=require_role,
         apply_cart_limits=apply_cart_limits,
@@ -2010,6 +2023,11 @@ def download_proxy(url: str, request: Request):
 @app.get("/jobs/{job_id}")
 def get_job_status(job_id: str, compact: bool = False):
     return handle_get_job_status(job_id, deps=_queue_route_deps(), compact=compact)
+
+@app.patch("/api/external/jobs/{job_id}/tracker-manifest")
+@async_wrap
+def patch_external_tracker_manifest(job_id: str, req: TrackerManifestPatchRequest, request: Request):
+    return handle_patch_external_tracker_manifest(req, request, job_id, deps=_queue_route_deps())
 
 @app.post("/async/render")
 @async_wrap

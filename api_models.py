@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from application.tracker_metadata import TrackerMetadataRequestMixin
+
 
 class UpscaleRequest(BaseModel):
     image_url: str
@@ -22,7 +24,7 @@ class InternalRenderRequest(BaseModel):
     simple_generation_mode: Optional[bool] = None
 
 
-class PresetRenderRequest(BaseModel):
+class PresetRenderRequest(TrackerMetadataRequestMixin):
     image_url: str
     preset_id: Optional[str] = None
     room: Optional[str] = None
@@ -50,7 +52,7 @@ class CartItem(BaseModel):
     product_type: Optional[str] = None
 
 
-class CartRenderRequest(BaseModel):
+class CartRenderRequest(TrackerMetadataRequestMixin):
     image_url: str
     items: List[CartItem]
     room: Optional[str] = None
@@ -71,7 +73,7 @@ class CartSimpleBatchVariant(BaseModel):
     simple_generation_mode: Optional[bool] = None
 
 
-class CartSimpleBatchRequest(BaseModel):
+class CartSimpleBatchRequest(TrackerMetadataRequestMixin):
     image_url: str
     variants: List[CartSimpleBatchVariant]
     room: Optional[str] = None
@@ -86,6 +88,17 @@ class ExternalRenderVideoRequest(BaseModel):
     render_job_id: str
     clip_count: int = 7
     cfg_scale: float = 0.5
+
+
+class TrackerManifestPatchRequest(TrackerMetadataRequestMixin):
+    service_source: str
+    client_service: str
+    environment: str
+    is_internal: bool
+    journey_id: str
+    request_id: str
+    result_id: str
+    job_kind: str
 
 
 class DetailRequest(BaseModel):
