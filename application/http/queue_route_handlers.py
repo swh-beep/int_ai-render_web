@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import traceback
 import uuid
 from pathlib import Path
@@ -10,6 +11,18 @@ from typing import Any, Callable
 
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+
+from application.tracker_metadata import TRACKER_MANIFEST_FIELDS
+
+
+logger = logging.getLogger(__name__)
+
+
+EXTERNAL_CART_SIMPLE_BATCH_SETUP_ERROR = "external_cart_simple_batch_setup_failed"
+EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_ERROR = "external_cart_simple_batch_enqueue_failed"
+EXTERNAL_CART_SIMPLE_BATCH_SETUP_MESSAGE = "Unable to prepare cart-simple-batch render request"
+EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_MESSAGE = "Unable to enqueue cart-simple-batch render request"
+
 
 @dataclass
 class QueueRouteDependencies:
@@ -24,6 +37,7 @@ class QueueRouteDependencies:
     enqueue_job: Callable[..., tuple[Any, str | None]]
     fetch_job: Callable[[str], Any]
     load_job_result_s3: Callable[[str], dict | None]
+    save_job_result_s3: Callable[[str, dict, str | None], str | None]
     load_preset_map: Callable[[], dict]
     require_role: Callable[..., Any]
     apply_cart_limits: Callable[[list[dict], int], tuple[list[dict], list[dict]]]
@@ -73,6 +87,13 @@ class QueueRouteDependencies:
 
 def _redis_not_configured_response() -> JSONResponse:
     return JSONResponse(content={"error": "REDIS_URL not configured"}, status_code=500)
+
+
+def _stable_external_error_response(error_code: str, message: str, *, status_code: int = 500) -> JSONResponse:
+    return JSONResponse(
+        content={"error": error_code, "message": message},
+        status_code=status_code,
+    )
 
 
 def _queue_backend_available(deps: QueueRouteDependencies) -> bool:
@@ -165,7 +186,12 @@ def _compact_render_job_result(result: Any) -> Any:
             if isinstance(item, dict)
         ]
 
-    compact_result = {"render": compact_render}
+    compact_result = {
+        field: result[field]
+        for field in TRACKER_MANIFEST_FIELDS
+        if field in result
+    }
+    compact_result["render"] = compact_render
     details = result.get("details")
     if isinstance(details, dict):
         detail_items = details.get("details")
@@ -194,6 +220,34 @@ def _compact_job_status_payload(payload: dict, *, compact: bool) -> dict:
     compact_payload["result"] = compact_result
     compact_payload["result_compacted"] = True
     return compact_payload
+
+
+def _safe_failed_error(saved: dict | None) -> str:
+    if isinstance(saved, dict) and saved.get("terminal_status") == "timeout":
+        return "render_job_timeout"
+    return "render_job_failed"
+
+
+def _manifest_identity_fields(body: Any) -> dict:
+    return {
+        "service_source": body.service_source,
+        "client_service": body.client_service,
+        "environment": body.environment,
+        "is_internal": body.is_internal,
+        "journey_id": body.journey_id,
+        "request_id": body.request_id,
+        "job_kind": body.job_kind,
+    }
+
+
+def _validate_manifest_identity(job_id: str, manifest: dict, body: Any) -> None:
+    if manifest.get("terminal_status") != "success":
+        raise HTTPException(status_code=409, detail="tracker manifest is not successful")
+    if manifest.get("job_id") != job_id:
+        raise HTTPException(status_code=409, detail="tracker manifest identity mismatch")
+    for field, expected in _manifest_identity_fields(body).items():
+        if manifest.get(field) != expected:
+            raise HTTPException(status_code=409, detail="tracker manifest identity mismatch")
 
 
 def _set_staging_job(deps: QueueRouteDependencies, job_id: str, state: dict) -> None:
@@ -451,12 +505,12 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies, compact:
         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
     }
     if job.is_finished:
-        payload["result"] = job.result
-        if payload["result"] is None:
-            saved = deps.load_job_result_s3(job_id)
-            if saved is not None:
-                payload["result"] = saved
-                payload["result_source"] = "s3"
+        saved = deps.load_job_result_s3(job_id)
+        if saved is not None:
+            payload["result"] = saved
+            payload["result_source"] = "s3"
+        else:
+            payload["result"] = job.result
     elif not job.is_failed:
         saved = deps.load_job_result_s3(job_id)
         if _saved_result_can_finish_stale_job(saved):
@@ -465,8 +519,46 @@ def handle_get_job_status(job_id: str, *, deps: QueueRouteDependencies, compact:
             payload["result_source"] = "s3"
             payload["stale_job_status"] = job.get_status()
     if job.is_failed:
-        payload["error"] = job.exc_info
+        saved = deps.load_job_result_s3(job_id)
+        if saved is not None:
+            payload["result"] = saved
+            payload["result_source"] = "s3"
+        payload["error"] = _safe_failed_error(saved)
     return JSONResponse(content=_compact_job_status_payload(payload, compact=compact))
+
+
+def handle_patch_external_tracker_manifest(req: Any, request: Request, job_id: str, *, deps: QueueRouteDependencies) -> JSONResponse:
+    deps.require_role(
+        request,
+        {"external"},
+        deps.api_auth_disabled,
+        deps.internal_api_keys,
+        deps.external_api_keys,
+    )
+
+    manifest = deps.load_job_result_s3(job_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="tracker manifest not found")
+    if not isinstance(manifest, dict):
+        raise HTTPException(status_code=409, detail="tracker manifest is invalid")
+
+    _validate_manifest_identity(job_id, manifest, req)
+    existing_result_id = manifest.get("result_id")
+    if existing_result_id is None:
+        updated = dict(manifest)
+        updated["result_id"] = req.result_id
+    elif existing_result_id == req.result_id:
+        updated = manifest
+    else:
+        raise HTTPException(status_code=409, detail="tracker manifest result_id conflict")
+
+    try:
+        saved_path = deps.save_job_result_s3(job_id, updated, "external")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="tracker manifest save failed") from exc
+    if not saved_path:
+        raise HTTPException(status_code=502, detail="tracker manifest save failed")
+    return JSONResponse(content={"result_source": "s3", "result": updated})
 
 
 def handle_render_room_async(
@@ -738,6 +830,7 @@ def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: 
     try:
         job_payload, kept, dropped = deps.build_external_cart_job(
             req,
+            default_job_kind="cart_simple",
             cart_max_items=deps.cart_max_items,
             apply_cart_limits=deps.apply_cart_limits,
             build_cart_summary=deps.build_cart_summary,
@@ -787,12 +880,27 @@ def handle_api_external_render_cart_simple_batch(req: Any, request: Request, *, 
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        return JSONResponse(content={"error": str(exc)}, status_code=500)
+    except Exception:
+        logger.exception("External cart-simple-batch setup failed")
+        return _stable_external_error_response(
+            EXTERNAL_CART_SIMPLE_BATCH_SETUP_ERROR,
+            EXTERNAL_CART_SIMPLE_BATCH_SETUP_MESSAGE,
+        )
 
-    job, err = deps.enqueue_job(deps.job_render_cart_simple_batch, job_payload, queue_name=deps.rq_queue_render)
+    try:
+        job, err = deps.enqueue_job(deps.job_render_cart_simple_batch, job_payload, queue_name=deps.rq_queue_render)
+    except Exception:
+        logger.exception("External cart-simple-batch enqueue failed")
+        return _stable_external_error_response(
+            EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_ERROR,
+            EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_MESSAGE,
+        )
     if err:
-        return JSONResponse(content={"error": err}, status_code=500)
+        logger.error("External cart-simple-batch enqueue failed: %s", err)
+        return _stable_external_error_response(
+            EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_ERROR,
+            EXTERNAL_CART_SIMPLE_BATCH_ENQUEUE_MESSAGE,
+        )
     return JSONResponse(content={"job_id": job.id, "status": "queued", "variants": variants})
 
 

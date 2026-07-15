@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 import main
+from application.tracker_metadata import TRACKER_MANIFEST_FIELDS
 from application.render.render_audience_stage import run_render_audience_stage
 
 
@@ -57,6 +58,7 @@ def _external_deps():
         job_generate_render_video=lambda payload: payload,
         fetch_job=lambda job_id: None,
         load_job_result_s3=lambda job_id: None,
+        save_job_result_s3=lambda job_id, result, audience=None: f"{audience}/job-results/{job_id}.json",
         rq_video_job_timeout=3600,
     )
 
@@ -128,6 +130,35 @@ def _external_cart_finished_result_payload():
     payload.pop("resolved", None)
     payload["cart_kept"] = [{"id": "chair-1", "category": "chair"}]
     payload["cart_dropped"] = [{"id": "lamp-1", "drop_reason": "max_items_exceeded"}]
+    return payload
+
+
+def _tracked_s3_cart_result_payload():
+    payload = _external_cart_finished_result_payload()
+    payload.update(
+        {
+            "service_source": "ai_designer",
+            "client_service": "ai-consultant",
+            "environment": "production",
+            "is_internal": False,
+            "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+            "request_id": "337",
+            "result_id": "601",
+            "job_id": "job-xyz",
+            "parent_job_id": None,
+            "job_kind": "cart",
+            "terminal_status": "success",
+            "created_at_utc": "2026-07-14T01:02:03+00:00",
+            "completed_at_utc": "2026-07-14T01:05:06+00:00",
+            "usable_result_url_count": 1,
+            "candidate_generation_count": 3,
+        }
+    )
+    payload["render"]["candidate_result_urls"] = [
+        "https://cdn.example/candidate-1.png",
+        "https://cdn.example/candidate-2.png",
+        "https://cdn.example/candidate-3.png",
+    ]
     return payload
 
 
@@ -485,6 +516,128 @@ class ExternalRouteContractsTests(unittest.TestCase):
             [{"label": "chair", "item_id": "chair-1"}],
         )
 
+    def test_finished_job_status_prefers_saved_s3_result_under_compact(self):
+        deps = _external_deps()
+        raw_result = _external_cart_finished_result_payload()
+        raw_result["render"]["result_url"] = "https://cdn.example/raw-rq.png"
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(raw_result)
+        deps.load_job_result_s3 = lambda job_id: _tracked_s3_cart_result_payload()
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        result = body["result"]
+        self.assertEqual(body["result_source"], "s3")
+        self.assertTrue(body["result_compacted"])
+        self.assertEqual(result["render"]["result_url"], "https://cdn.example/render.png")
+        self.assertEqual(result["job_id"], "job-xyz")
+        self.assertEqual(result["journey_id"], "123e4567-e89b-12d3-a456-426614174000")
+        self.assertEqual(result["request_id"], "337")
+        self.assertEqual(result["terminal_status"], "success")
+        self.assertEqual(result["created_at_utc"], "2026-07-14T01:02:03+00:00")
+        self.assertEqual(result["completed_at_utc"], "2026-07-14T01:05:06+00:00")
+        self.assertEqual(result["usable_result_url_count"], 1)
+        self.assertEqual(result["candidate_generation_count"], 3)
+        self.assertNotIn("candidate_result_urls", result["render"])
+
+    def test_finished_job_status_falls_back_to_rq_result_when_s3_unavailable(self):
+        deps = _external_deps()
+        raw_result = _external_cart_finished_result_payload()
+        raw_result["render"]["furniture_data"] = [
+            {"label": "chair", "item_id": "chair-1", "identity_profile": {"large": "debug-only"}}
+        ]
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(raw_result)
+        deps.load_job_result_s3 = lambda job_id: None
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertNotIn("result_source", body)
+        self.assertTrue(body["result_compacted"])
+        self.assertEqual(body["result"]["render"]["result_url"], "https://cdn.example/render.png")
+        self.assertEqual(body["result"]["render"]["furniture_data"], [{"label": "chair", "item_id": "chair-1"}])
+
+    def test_compact_status_retains_all_present_tracker_manifest_fields(self):
+        deps = _external_deps()
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(_external_cart_finished_result_payload())
+        deps.load_job_result_s3 = lambda job_id: _tracked_s3_cart_result_payload()
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["result"]
+        for field in TRACKER_MANIFEST_FIELDS:
+            self.assertIn(field, result)
+
+    def test_failed_job_status_includes_saved_s3_manifest_noncompact(self):
+        deps = _external_deps()
+        saved = _tracked_s3_cart_result_payload()
+        saved["terminal_status"] = "failed"
+        saved["usable_result_url_count"] = 0
+        saved["candidate_generation_count"] = 0
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(
+            {"error": "rq raw failure"},
+            status="failed",
+            is_failed=True,
+            exc_info="traceback text",
+        )
+        deps.load_job_result_s3 = lambda job_id: saved
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"], "render_job_failed")
+        self.assertNotIn("traceback text", str(body))
+        self.assertEqual(body["result_source"], "s3")
+        self.assertEqual(body["result"]["terminal_status"], "failed")
+        self.assertEqual(body["result"]["job_id"], "job-xyz")
+        self.assertEqual(body["result"]["candidate_generation_count"], 0)
+
+    def test_failed_job_status_includes_saved_s3_manifest_compact(self):
+        deps = _external_deps()
+        saved = _tracked_s3_cart_result_payload()
+        saved["terminal_status"] = "failed"
+        saved["usable_result_url_count"] = 0
+        saved["candidate_generation_count"] = 0
+        deps.fetch_job = lambda job_id: _FakeFinishedJob(
+            {"error": "rq raw failure"},
+            status="failed",
+            is_failed=True,
+            exc_info="traceback text",
+        )
+        deps.load_job_result_s3 = lambda job_id: saved
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.get("/jobs/job-xyz?compact=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        result = body["result"]
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"], "render_job_failed")
+        self.assertNotIn("traceback text", str(body))
+        self.assertEqual(body["result_source"], "s3")
+        self.assertTrue(body["result_compacted"])
+        self.assertEqual(result["terminal_status"], "failed")
+        self.assertEqual(result["job_id"], "job-xyz")
+        self.assertEqual(result["journey_id"], "123e4567-e89b-12d3-a456-426614174000")
+        self.assertEqual(result["usable_result_url_count"], 0)
+        self.assertEqual(result["candidate_generation_count"], 0)
+        self.assertNotIn("candidate_result_urls", result["render"])
+
     def test_external_cart_job_status_finished_payload_from_s3_stays_stable(self):
         deps = _external_deps()
         deps.fetch_job = lambda job_id: None
@@ -537,6 +690,141 @@ class ExternalRouteContractsTests(unittest.TestCase):
         self.assertEqual(body["status"], "started")
         self.assertNotIn("result", body)
         self.assertNotIn("result_source", body)
+
+    def test_patch_external_tracker_manifest_sets_missing_result_id_idempotently(self):
+        deps = _external_deps()
+        saved_calls = []
+        manifest = _tracked_s3_cart_result_payload()
+        manifest["result_id"] = None
+        deps.load_job_result_s3 = lambda job_id: manifest
+        deps.save_job_result_s3 = lambda job_id, result, audience=None: saved_calls.append((job_id, result, audience)) or "external/job-results/job-xyz.json"
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.patch(
+                "/api/external/jobs/job-xyz/tracker-manifest",
+                json={
+                    "service_source": "ai_designer",
+                    "client_service": "ai-consultant",
+                    "environment": "production",
+                    "is_internal": False,
+                    "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "request_id": "337",
+                    "result_id": "601",
+                    "job_kind": "cart",
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["result_source"], "s3")
+        self.assertEqual(response.json()["result"]["result_id"], "601")
+        self.assertEqual(saved_calls[0][2], "external")
+
+    def test_patch_external_tracker_manifest_succeeds_without_queue_backend(self):
+        deps = _external_deps()
+        deps.redis_url = None
+        deps.local_inline_queue_enabled = False
+        saved_calls = []
+        manifest = _tracked_s3_cart_result_payload()
+        manifest["result_id"] = None
+        deps.load_job_result_s3 = lambda job_id: manifest
+        deps.save_job_result_s3 = lambda job_id, result, audience=None: saved_calls.append((job_id, result, audience)) or "external/job-results/job-xyz.json"
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.patch(
+                "/api/external/jobs/job-xyz/tracker-manifest",
+                json={
+                    "service_source": "ai_designer",
+                    "client_service": "ai-consultant",
+                    "environment": "production",
+                    "is_internal": False,
+                    "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "request_id": "337",
+                    "result_id": "601",
+                    "job_kind": "cart",
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["result_source"], "s3")
+        self.assertEqual(saved_calls, [("job-xyz", response.json()["result"], "external")])
+
+    def test_patch_external_tracker_manifest_rejects_conflicting_result_id(self):
+        deps = _external_deps()
+        deps.load_job_result_s3 = lambda job_id: _tracked_s3_cart_result_payload()
+
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.patch(
+                "/api/external/jobs/job-xyz/tracker-manifest",
+                json={
+                    "service_source": "ai_designer",
+                    "client_service": "ai-consultant",
+                    "environment": "production",
+                    "is_internal": False,
+                    "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "request_id": "337",
+                    "result_id": "602",
+                    "job_kind": "cart",
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_patch_external_tracker_manifest_rejects_unknown_non_success_identity_and_save_fail(self):
+        base_body = {
+            "service_source": "ai_designer",
+            "client_service": "ai-consultant",
+            "environment": "production",
+            "is_internal": False,
+            "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+            "request_id": "337",
+            "result_id": "601",
+            "job_kind": "cart",
+        }
+        for manifest, status_code, save_fn in (
+            (None, 404, None),
+            ({**_tracked_s3_cart_result_payload(), "terminal_status": "failed"}, 409, None),
+            ({**_tracked_s3_cart_result_payload(), "request_id": "338"}, 409, None),
+            ({**_tracked_s3_cart_result_payload(), "result_id": None}, 502, lambda *args, **kwargs: None),
+        ):
+            deps = _external_deps()
+            deps.load_job_result_s3 = lambda job_id, manifest=manifest: manifest
+            if save_fn:
+                deps.save_job_result_s3 = save_fn
+            with patch.object(main, "_queue_route_deps", return_value=deps):
+                client = TestClient(main.app)
+                response = client.patch(
+                    "/api/external/jobs/job-xyz/tracker-manifest",
+                    json=base_body,
+                    headers={"x-api-key": "external-key"},
+                )
+            self.assertEqual(response.status_code, status_code)
+
+    def test_patch_external_tracker_manifest_requires_auth_and_strict_boolean(self):
+        deps = _external_deps()
+        with patch.object(main, "_queue_route_deps", return_value=deps):
+            client = TestClient(main.app)
+            response = client.patch(
+                "/api/external/jobs/job-xyz/tracker-manifest",
+                json={
+                    "service_source": "ai_designer",
+                    "client_service": "ai-consultant",
+                    "environment": "production",
+                    "is_internal": "false",
+                    "journey_id": "123e4567-e89b-12d3-a456-426614174000",
+                    "request_id": "337",
+                    "result_id": "601",
+                    "job_kind": "cart",
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

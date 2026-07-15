@@ -219,6 +219,98 @@ class ExternalCartSimpleRouteContractsTests(unittest.TestCase):
         self.assertIs(enqueued[-1][0], deps.job_render_cart_simple_batch)
         self.assertEqual(enqueued[-1][2], "render")
 
+    def test_external_cart_simple_batch_setup_failure_response_hides_internal_text(self):
+        deps = _external_deps()
+        secret_text = "db password=super-secret traceback marker"
+
+        def build_external_cart_batch_job(req, **kwargs):
+            raise RuntimeError(secret_text)
+
+        deps.build_external_cart_batch_job = build_external_cart_batch_job
+
+        with (
+            patch.object(main, "_queue_route_deps", return_value=deps),
+            self.assertLogs("application.http.queue_route_handlers", level="ERROR") as logs,
+        ):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/cart-simple-batch",
+                json={
+                    "image_url": "https://example.com/room.png",
+                    "variants": [
+                        {
+                            "items": [
+                                {
+                                    "id": "chair-1",
+                                    "category": "chair",
+                                    "image_url": "https://example.com/chair.png",
+                                    "qty": 1,
+                                }
+                            ]
+                        }
+                    ],
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "external_cart_simple_batch_setup_failed",
+                "message": "Unable to prepare cart-simple-batch render request",
+            },
+        )
+        self.assertNotIn("super-secret", response.text)
+        self.assertNotIn("traceback", response.text.lower())
+        self.assertIn(secret_text, "\n".join(logs.output))
+
+    def test_external_cart_simple_batch_enqueue_failure_response_hides_internal_text(self):
+        deps = _external_deps()
+        secret_text = "redis://:super-secret@example internal queue refused"
+
+        def enqueue_job(job_func, payload, queue_name=None, **kwargs):
+            return None, secret_text
+
+        deps.enqueue_job = enqueue_job
+
+        with (
+            patch.object(main, "_queue_route_deps", return_value=deps),
+            self.assertLogs("application.http.queue_route_handlers", level="ERROR") as logs,
+        ):
+            client = TestClient(main.app)
+            response = client.post(
+                "/api/external/render/cart-simple-batch",
+                json={
+                    "image_url": "https://example.com/room.png",
+                    "variants": [
+                        {
+                            "items": [
+                                {
+                                    "id": "chair-1",
+                                    "category": "chair",
+                                    "image_url": "https://example.com/chair.png",
+                                    "qty": 1,
+                                }
+                            ]
+                        }
+                    ],
+                },
+                headers={"x-api-key": "external-key"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "external_cart_simple_batch_enqueue_failed",
+                "message": "Unable to enqueue cart-simple-batch render request",
+            },
+        )
+        self.assertNotIn("super-secret", response.text)
+        self.assertNotIn("redis://", response.text)
+        self.assertIn(secret_text, "\n".join(logs.output))
+
     def test_job_render_with_extra_returns_render_and_cart_metadata_without_details(self):
         persisted = []
 

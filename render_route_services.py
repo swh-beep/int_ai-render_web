@@ -10,6 +10,7 @@ from fastapi import UploadFile
 
 from application.render.direct_item_image_prep import prepare_direct_item_image
 from application.render.item_analysis_profile import DETAILED_ITEM_ANALYSIS_PROFILE
+from application.tracker_metadata import attach_tracker_metadata, extract_tracker_metadata
 from api_models import (
     CartRenderRequest,
     CartSimpleBatchRequest,
@@ -384,12 +385,17 @@ def build_external_preset_job(req: PresetRenderRequest, preset_map: dict) -> tup
             "detail_target_policy": "preset_fixed_six_unique_targets",
         },
     }
+    job_payload = attach_tracker_metadata(
+        job_payload,
+        extract_tracker_metadata(req, default_job_kind="preset"),
+    )
     return job_payload, resolved_surface
 
 
 def build_external_cart_job(
     req: CartRenderRequest,
     *,
+    default_job_kind: str = "cart",
     cart_max_items: int,
     apply_cart_limits: Callable[[list[dict], int], tuple[list[dict], list[dict]]],
     build_cart_summary: Callable[[list[dict]], str],
@@ -466,6 +472,10 @@ def build_external_cart_job(
         "render": payload,
         "extra": {"cart_kept": kept, "cart_dropped": dropped},
     }
+    job_payload = attach_tracker_metadata(
+        job_payload,
+        extract_tracker_metadata(req, default_job_kind=default_job_kind),
+    )
     return job_payload, kept, dropped
 
 
@@ -512,6 +522,14 @@ def build_external_cart_batch_job(
                 if variant.simple_generation_mode is not None
                 else req.simple_generation_mode
             ),
+            service_source=req.service_source,
+            client_service=req.client_service,
+            environment=req.environment,
+            journey_id=req.journey_id,
+            request_id=req.request_id,
+            result_id=req.result_id,
+            parent_job_id=req.parent_job_id,
+            job_kind=req.job_kind,
         )
         job_payload, kept, dropped = build_external_cart_job(
             variant_req,
@@ -540,11 +558,14 @@ def build_external_cart_batch_job(
         )
 
     return (
-        {
+        attach_tracker_metadata(
+            {
             "audience": "external",
             "image_url": req.image_url,
             "variants": job_variants,
-        },
+            },
+            extract_tracker_metadata(req, default_job_kind="cart_simple_batch"),
+        ),
         response_variants,
     )
 
