@@ -11,6 +11,7 @@ from infrastructure.ai.service_scope import (
     INTERNAL_SCOPE,
     ScopedProviderKeys,
     attach_ai_service_scope,
+    ai_service_scope,
     current_ai_service_scope,
     gemini_pool_for_scope,
     load_external_scope_key_map,
@@ -182,3 +183,216 @@ def test_provider_key_missing_scope_fails_after_fallback_disabled():
 
     with pytest.raises(RuntimeError, match="kr_ai_designer"):
         provider_key_source("kr_ai_designer", "openai", keys, MagicMock())
+
+
+class _CaptureLogger:
+    def __init__(self):
+        self.messages = []
+
+    def info(self, message, *args):
+        self.messages.append(message % args)
+
+    def warning(self, message, *args):
+        self.messages.append(message % args)
+
+
+def test_brief_mode_still_logs_safe_gemini_key_attribution(monkeypatch):
+    import main
+
+    secret = "gemini-secret-value"
+    fake_logger = _CaptureLogger()
+    monkeypatch.setattr(main, "LOG_BRIEF", True)
+    monkeypatch.setattr(main, "logger", fake_logger)
+    monkeypatch.setattr(
+        main,
+        "SCOPED_PROVIDER_KEYS",
+        ScopedProviderKeys(
+            openai_by_scope={},
+            gemini_by_scope={"kr_ai_designer": [secret]},
+            legacy_openai_key="",
+            legacy_gemini_pool=[],
+            legacy_fallback_enabled=False,
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "call_gemini_with_failover_impl",
+        lambda *args, **kwargs: SimpleNamespace(text="ok"),
+    )
+
+    with ai_service_scope("kr_ai_designer"):
+        response = main._call_gemini_generation("gemini-test-model", ["prompt"], {}, {})
+
+    log_output = "\n".join(fake_logger.messages)
+    assert response.text == "ok"
+    assert "[AIKey] scope=kr_ai_designer provider=gemini model=gemini-test-model key_source=scoped" in log_output
+    assert secret not in log_output
+    assert "prompt" not in log_output
+
+
+def test_brief_mode_still_logs_safe_openai_image_key_attribution(monkeypatch):
+    import main
+
+    secret = "openai-image-secret-value"
+    fake_logger = _CaptureLogger()
+    monkeypatch.setattr(main, "LOG_BRIEF", True)
+    monkeypatch.setattr(main, "logger", fake_logger)
+    monkeypatch.setattr(
+        main,
+        "SCOPED_PROVIDER_KEYS",
+        ScopedProviderKeys(
+            openai_by_scope={"kr_ai_designer": secret},
+            gemini_by_scope={},
+            legacy_openai_key="",
+            legacy_gemini_pool=[],
+            legacy_fallback_enabled=False,
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "call_openai_image_impl",
+        lambda *args, **kwargs: SimpleNamespace(text="ok"),
+    )
+
+    with ai_service_scope("kr_ai_designer"):
+        response = main._call_openai_image_generation("gpt-image-test", ["prompt"], {}, {})
+
+    log_output = "\n".join(fake_logger.messages)
+    assert response.text == "ok"
+    assert "[AIKey] scope=kr_ai_designer provider=openai model=gpt-image-test key_source=scoped" in log_output
+    assert secret not in log_output
+    assert "prompt" not in log_output
+
+
+def test_brief_mode_still_logs_safe_openai_analysis_key_attribution(monkeypatch):
+    import main
+
+    secret = "openai-analysis-secret-value"
+    captured = {}
+    fake_logger = _CaptureLogger()
+    monkeypatch.setattr(main, "LOG_BRIEF", True)
+    monkeypatch.setattr(main, "logger", fake_logger)
+    monkeypatch.setattr(
+        main,
+        "SCOPED_PROVIDER_KEYS",
+        ScopedProviderKeys(
+            openai_by_scope={"kr_ai_consultant": secret},
+            gemini_by_scope={},
+            legacy_openai_key="",
+            legacy_gemini_pool=[],
+            legacy_fallback_enabled=False,
+        ),
+    )
+
+    def fake_openai_analysis(*args, **kwargs):
+        captured["api_key"] = kwargs["api_key"]
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(main, "call_openai_analysis_impl", fake_openai_analysis)
+
+    with ai_service_scope("kr_ai_consultant"):
+        response = main._call_openai_analysis_generation("gpt-analysis-test", ["prompt"], {})
+
+    log_output = "\n".join(fake_logger.messages)
+    assert response.text == "ok"
+    assert captured["api_key"] == secret
+    assert "[AIKey] scope=kr_ai_consultant provider=openai model=gpt-analysis-test key_source=scoped" in log_output
+    assert secret not in log_output
+    assert "prompt" not in log_output
+
+
+def test_analysis_dispatch_scoped_marker_resolves_secret_and_logs_once(monkeypatch):
+    import main
+    from infrastructure.ai.analysis_provider_dispatch import build_analysis_provider_dispatch
+
+    secret = "openai-dispatch-secret-value"
+    captured = {}
+    fake_logger = _CaptureLogger()
+    monkeypatch.setattr(main, "LOG_BRIEF", True)
+    monkeypatch.setattr(main, "logger", fake_logger)
+    monkeypatch.setattr(
+        main,
+        "SCOPED_PROVIDER_KEYS",
+        ScopedProviderKeys(
+            openai_by_scope={"kr_ai_consultant": secret},
+            gemini_by_scope={},
+            legacy_openai_key="",
+            legacy_gemini_pool=[],
+            legacy_fallback_enabled=False,
+        ),
+    )
+
+    def fake_openai_analysis(*args, **kwargs):
+        captured["api_key"] = kwargs["api_key"]
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(main, "call_openai_analysis_impl", fake_openai_analysis)
+    dispatch = build_analysis_provider_dispatch(
+        provider="openai",
+        gemini_caller=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("gemini should not be called")),
+        openai_caller=main._call_openai_analysis_generation,
+        openai_model_set={"gpt-analysis-test"},
+        openai_api_key="scoped",
+        openai_reasoning_effort="xhigh",
+        logger=fake_logger,
+        log_brief=True,
+    )
+
+    with ai_service_scope("kr_ai_consultant"):
+        response = dispatch("gpt-analysis-test", ["prompt"], {}, {}, log_tag="unit")
+
+    log_output = "\n".join(fake_logger.messages)
+    attribution_logs = [message for message in fake_logger.messages if message.startswith("[AIKey]")]
+    assert response.text == "ok"
+    assert captured["api_key"] == secret
+    assert captured["api_key"] != "scoped"
+    assert attribution_logs == [
+        "[AIKey] scope=kr_ai_consultant provider=openai model=gpt-analysis-test key_source=scoped"
+    ]
+    assert secret not in log_output
+    assert "prompt" not in log_output
+
+
+def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
+    import main
+
+    scoped_secret = "openai-scoped-secret-value"
+    explicit_secret = "openai-explicit-secret-value"
+    captured = {}
+    fake_logger = _CaptureLogger()
+    monkeypatch.setattr(main, "LOG_BRIEF", True)
+    monkeypatch.setattr(main, "logger", fake_logger)
+    monkeypatch.setattr(
+        main,
+        "SCOPED_PROVIDER_KEYS",
+        ScopedProviderKeys(
+            openai_by_scope={"kr_ai_consultant": scoped_secret},
+            gemini_by_scope={},
+            legacy_openai_key="",
+            legacy_gemini_pool=[],
+            legacy_fallback_enabled=False,
+        ),
+    )
+
+    def fake_openai_analysis(*args, **kwargs):
+        captured["api_key"] = kwargs["api_key"]
+        return SimpleNamespace(text="ok")
+
+    monkeypatch.setattr(main, "call_openai_analysis_impl", fake_openai_analysis)
+
+    with ai_service_scope("kr_ai_consultant"):
+        response = main._call_openai_analysis_generation(
+            "gpt-analysis-test",
+            ["prompt"],
+            {},
+            api_key=explicit_secret,
+        )
+
+    log_output = "\n".join(fake_logger.messages)
+    assert response.text == "ok"
+    assert captured["api_key"] == explicit_secret
+    assert "key_source=explicit" in log_output
+    assert "key_source=scoped" not in log_output
+    assert scoped_secret not in log_output
+    assert explicit_secret not in log_output
+    assert "prompt" not in log_output

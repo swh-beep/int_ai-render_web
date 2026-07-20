@@ -1083,11 +1083,14 @@ QUOTA_EXCEEDED_KEYS = set()
 _analysis_dispatch_logger = logging.getLogger("app")
 
 
+def _log_ai_key_attribution(scope: str, provider: str, model_name: str, key_source: str) -> None:
+    logger.info("[AIKey] scope=%s provider=%s model=%s key_source=%s", scope, provider, model_name, key_source)
+
+
 def _call_gemini_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
     scope = current_ai_service_scope()
     api_key_pool, key_source = gemini_pool_for_scope(scope, SCOPED_PROVIDER_KEYS, logger)
-    if not LOG_BRIEF:
-        logger.info("[AIKey] scope=%s provider=gemini model=%s key_source=%s", scope, model_name, key_source)
+    _log_ai_key_attribution(scope, "gemini", model_name, key_source)
     return call_gemini_with_failover_impl(
         model_name,
         contents,
@@ -1105,8 +1108,7 @@ def _call_gemini_generation(model_name, contents, request_options, safety_settin
 def _call_openai_image_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
     scope = current_ai_service_scope()
     api_key, key_source = provider_key_source(scope, "openai", SCOPED_PROVIDER_KEYS, logger)
-    if not LOG_BRIEF:
-        logger.info("[AIKey] scope=%s provider=openai model=%s key_source=%s", scope, model_name, key_source)
+    _log_ai_key_attribution(scope, "openai", model_name, key_source)
     return call_openai_image_impl(
         model_name,
         contents,
@@ -1121,17 +1123,45 @@ def _call_openai_image_generation(model_name, contents, request_options, safety_
     )
 
 
+def _call_openai_analysis_generation(
+    model_name,
+    contents,
+    request_options,
+    *,
+    api_key=None,
+    logger=None,
+    log_brief=None,
+    system_instruction=None,
+    log_tag=None,
+    reasoning_effort=None,
+):
+    scope = current_ai_service_scope()
+    provided_api_key = str(api_key or "").strip()
+    if provided_api_key and provided_api_key.lower() != "scoped":
+        resolved_api_key = api_key
+        key_source = "explicit"
+    else:
+        resolved_api_key, key_source = provider_key_source(scope, "openai", SCOPED_PROVIDER_KEYS, globals()["logger"])
+    _log_ai_key_attribution(scope, "openai", model_name, key_source)
+    return call_openai_analysis_impl(
+        model_name,
+        contents,
+        request_options,
+        api_key=resolved_api_key,
+        logger=logger or globals()["logger"],
+        log_brief=LOG_BRIEF if log_brief is None else log_brief,
+        system_instruction=system_instruction,
+        log_tag=log_tag,
+        reasoning_effort=reasoning_effort,
+    )
+
+
 CALL_ANALYSIS_WITH_PROVIDER = build_analysis_provider_dispatch(
     provider=ANALYSIS_PROVIDER,
     gemini_caller=_call_gemini_generation,
-    openai_caller=call_openai_analysis_impl,
+    openai_caller=_call_openai_analysis_generation,
     openai_model_set=OPENAI_ANALYSIS_MODEL_SET,
-    openai_api_key=lambda: provider_key_source(
-        current_ai_service_scope(),
-        "openai",
-        SCOPED_PROVIDER_KEYS,
-        logger,
-    )[0],
+    openai_api_key=OPENAI_PROVIDER_AVAILABLE_KEY_MARKER,
     openai_reasoning_effort=OPENAI_ANALYSIS_REASONING_EFFORT,
     logger=_analysis_dispatch_logger,
     log_brief=LOG_BRIEF,
