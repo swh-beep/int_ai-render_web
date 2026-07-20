@@ -3,6 +3,12 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from infrastructure.ai.service_scope import (
+    INTERNAL_SCOPE,
+    LEGACY_SCOPE,
+    resolve_external_scope,
+)
+
 
 def extract_api_key(request: Request) -> Optional[str]:
     key = request.headers.get("x-api-key") or request.headers.get("X-API-KEY")
@@ -27,6 +33,22 @@ def resolve_api_role(
     return None
 
 
+def resolve_api_scope(
+    api_key: Optional[str],
+    internal_api_keys: set[str],
+    external_api_keys: set[str],
+    external_scope_keys: dict[str, set[str]] | None = None,
+) -> Optional[str]:
+    if not api_key:
+        return None
+    if api_key in internal_api_keys:
+        return INTERNAL_SCOPE
+    external_scope = resolve_external_scope(api_key, external_scope_keys or {}, external_api_keys)
+    if external_scope:
+        return external_scope
+    return None
+
+
 def require_role(
     request: Request,
     allowed_roles: set[str],
@@ -46,6 +68,26 @@ def require_role(
     if role not in allowed_roles:
         raise HTTPException(status_code=403, detail="Forbidden")
     return role
+
+
+def require_ai_service_scope(
+    request: Request,
+    allowed_roles: set[str],
+    api_auth_disabled: bool,
+    internal_api_keys: set[str],
+    external_api_keys: set[str],
+    external_scope_keys: dict[str, set[str]] | None = None,
+) -> str:
+    if api_auth_disabled or not (internal_api_keys or external_api_keys or any((external_scope_keys or {}).values())):
+        return INTERNAL_SCOPE
+    api_key = extract_api_key(request)
+    scope = resolve_api_scope(api_key, internal_api_keys, external_api_keys, external_scope_keys)
+    if not scope:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    role = "external" if scope in (set((external_scope_keys or {}).keys()) | {LEGACY_SCOPE}) else "internal"
+    if role not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return scope
 
 
 def apply_cart_limits(items: list[dict], cart_max_items: int) -> tuple[list[dict], list[dict]]:

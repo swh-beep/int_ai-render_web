@@ -32,22 +32,23 @@ def build_analysis_provider_dispatch(
     gemini_caller: Callable[..., Any],
     openai_caller: Callable[..., Any],
     openai_model_set: set[str],
-    openai_api_key: str,
+    openai_api_key: str | Callable[[], str],
     openai_reasoning_effort: str,
     logger: Any,
     log_brief: bool,
 ):
     provider_normalized = str(provider or "").strip().lower()
-    if provider_normalized == "openai" and not str(openai_api_key or "").strip():
+    if provider_normalized == "openai" and not (callable(openai_api_key) or str(openai_api_key or "").strip()):
         raise RuntimeError("OPENAI_API_KEY is required when ANALYSIS_PROVIDER=openai")
 
     def _dispatch(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
         if should_route_analysis_to_openai(provider_normalized, model_name, openai_model_set):
+            resolved_openai_api_key = openai_api_key() if callable(openai_api_key) else openai_api_key
             return openai_caller(
                 model_name,
                 contents,
                 request_options,
-                api_key=openai_api_key,
+                api_key=resolved_openai_api_key,
                 logger=logger,
                 log_brief=log_brief,
                 system_instruction=system_instruction,

@@ -13,6 +13,7 @@ from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from application.tracker_metadata import TRACKER_MANIFEST_FIELDS
+from infrastructure.ai.service_scope import INTERNAL_SCOPE, LEGACY_SCOPE, attach_ai_service_scope
 
 
 logger = logging.getLogger(__name__)
@@ -34,12 +35,14 @@ class QueueRouteDependencies:
     api_auth_disabled: bool
     internal_api_keys: set[str]
     external_api_keys: set[str]
+    external_scope_keys: dict[str, set[str]]
     enqueue_job: Callable[..., tuple[Any, str | None]]
     fetch_job: Callable[[str], Any]
     load_job_result_s3: Callable[[str], dict | None]
     save_job_result_s3: Callable[[str, dict, str | None], str | None]
     load_preset_map: Callable[[], dict]
     require_role: Callable[..., Any]
+    require_ai_service_scope: Callable[..., str]
     apply_cart_limits: Callable[[list[dict], int], tuple[list[dict], list[dict]]]
     build_cart_summary: Callable[[list[dict]], str]
     materialize_input: Callable[[str, str], str | None]
@@ -307,6 +310,35 @@ def _enqueue_or_error(job_func: Callable[..., Any], payload: dict, *, queue_name
     return JSONResponse(content={"job_id": job.id, "status": "queued"})
 
 
+def _internal_payload(payload: dict) -> dict:
+    return attach_ai_service_scope(payload, INTERNAL_SCOPE)
+
+
+def _scope_from_request(request: Request, *, deps: QueueRouteDependencies) -> str:
+    resolver = getattr(deps, "require_ai_service_scope", None)
+    if not callable(resolver):
+        deps.require_role(
+            request,
+            {"external"},
+            deps.api_auth_disabled,
+            deps.internal_api_keys,
+            deps.external_api_keys,
+        )
+        return LEGACY_SCOPE
+    return deps.require_ai_service_scope(
+        request,
+        {"external"},
+        deps.api_auth_disabled,
+        deps.internal_api_keys,
+        deps.external_api_keys,
+        getattr(deps, "external_scope_keys", {}),
+    )
+
+
+def _external_payload(payload: dict, scope: str) -> dict:
+    return attach_ai_service_scope(payload, scope)
+
+
 def _is_external_render_job_result(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
@@ -477,6 +509,7 @@ def _stage_internal_render_publish_and_enqueue(
             build_item_target_key=deps.build_item_target_key,
             publish_inputs=True,
         )
+        payload = _internal_payload(payload)
 
         _update_staging_job(deps, job_id, status="queued", stage="enqueueing")
         job, err = deps.enqueue_job(deps.job_render, payload, queue_name=deps.rq_queue_render, job_id=job_id)
@@ -676,7 +709,7 @@ def handle_api_internal_render(req: Any, request: Request, *, deps: QueueRouteDe
         raise HTTPException(status_code=400, detail="image_url is required")
     return _enqueue_or_error(
         deps.job_render_with_details,
-        deps.build_internal_render_job_payload(req),
+        _internal_payload(deps.build_internal_render_job_payload(req)),
         queue_name=deps.rq_queue_render,
         deps=deps,
     )
@@ -711,7 +744,7 @@ def handle_generate_image_edit_async(
         )
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
-    return _enqueue_or_error(deps.job_image_edit, payload, queue_name=deps.rq_queue_render, deps=deps)
+    return _enqueue_or_error(deps.job_image_edit, _internal_payload(payload), queue_name=deps.rq_queue_render, deps=deps)
 
 
 def handle_generate_frontal_view_async(
@@ -732,7 +765,7 @@ def handle_generate_frontal_view_async(
         )
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
-    return _enqueue_or_error(deps.job_frontal_view, payload, queue_name=deps.rq_queue_render, deps=deps)
+    return _enqueue_or_error(deps.job_frontal_view, _internal_payload(payload), queue_name=deps.rq_queue_render, deps=deps)
 
 
 def handle_upscale_async(req: Any, *, deps: QueueRouteDependencies) -> JSONResponse:
@@ -740,7 +773,7 @@ def handle_upscale_async(req: Any, *, deps: QueueRouteDependencies) -> JSONRespo
         return _redis_not_configured_response()
     return _enqueue_or_error(
         deps.job_upscale,
-        deps.build_upscale_job_payload(req),
+        _internal_payload(deps.build_upscale_job_payload(req)),
         queue_name=deps.rq_queue_upscale,
         deps=deps,
     )
@@ -751,7 +784,7 @@ def handle_finalize_async(req: Any, *, deps: QueueRouteDependencies) -> JSONResp
         return _redis_not_configured_response()
     return _enqueue_or_error(
         deps.job_finalize,
-        deps.build_finalize_download_job_payload(req),
+        _internal_payload(deps.build_finalize_download_job_payload(req)),
         queue_name=deps.rq_queue_upscale,
         deps=deps,
     )
@@ -762,20 +795,14 @@ def handle_generate_empty_room_async(req: Any, *, deps: QueueRouteDependencies) 
         return _redis_not_configured_response()
     return _enqueue_or_error(
         deps.job_generate_empty_room,
-        deps.build_empty_room_job_payload(req),
+        _internal_payload(deps.build_empty_room_job_payload(req)),
         queue_name=deps.rq_queue_render,
         deps=deps,
     )
 
 
 def handle_api_external_render_preset(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
-    deps.require_role(
-        request,
-        {"external"},
-        deps.api_auth_disabled,
-        deps.internal_api_keys,
-        deps.external_api_keys,
-    )
+    ai_scope = _scope_from_request(request, deps=deps)
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     if not req.image_url:
@@ -786,7 +813,7 @@ def handle_api_external_render_preset(req: Any, request: Request, *, deps: Queue
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    job, err = deps.enqueue_job(deps.job_render_with_details, job_payload, queue_name=deps.rq_queue_render)
+    job, err = deps.enqueue_job(deps.job_render_with_details, _external_payload(job_payload, ai_scope), queue_name=deps.rq_queue_render)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(
@@ -803,13 +830,7 @@ def handle_api_external_render_preset(req: Any, request: Request, *, deps: Queue
 
 
 def handle_api_external_render_cart(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
-    deps.require_role(
-        request,
-        {"external"},
-        deps.api_auth_disabled,
-        deps.internal_api_keys,
-        deps.external_api_keys,
-    )
+    ai_scope = _scope_from_request(request, deps=deps)
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     if not req.image_url:
@@ -834,20 +855,14 @@ def handle_api_external_render_cart(req: Any, request: Request, *, deps: QueueRo
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
-    job, err = deps.enqueue_job(deps.job_render_with_details, job_payload, queue_name=deps.rq_queue_render)
+    job, err = deps.enqueue_job(deps.job_render_with_details, _external_payload(job_payload, ai_scope), queue_name=deps.rq_queue_render)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
 
 
 def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
-    deps.require_role(
-        request,
-        {"external"},
-        deps.api_auth_disabled,
-        deps.internal_api_keys,
-        deps.external_api_keys,
-    )
+    ai_scope = _scope_from_request(request, deps=deps)
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     if not req.image_url:
@@ -873,20 +888,14 @@ def handle_api_external_render_cart_simple(req: Any, request: Request, *, deps: 
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
-    job, err = deps.enqueue_job(deps.job_render_with_extra, job_payload, queue_name=deps.rq_queue_render)
+    job, err = deps.enqueue_job(deps.job_render_with_extra, _external_payload(job_payload, ai_scope), queue_name=deps.rq_queue_render)
     if err:
         return JSONResponse(content={"error": err}, status_code=500)
     return JSONResponse(content={"job_id": job.id, "status": "queued", "cart_kept": kept, "cart_dropped": dropped})
 
 
 def handle_api_external_render_cart_simple_batch(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
-    deps.require_role(
-        request,
-        {"external"},
-        deps.api_auth_disabled,
-        deps.internal_api_keys,
-        deps.external_api_keys,
-    )
+    ai_scope = _scope_from_request(request, deps=deps)
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
     if not req.image_url:
@@ -916,7 +925,7 @@ def handle_api_external_render_cart_simple_batch(req: Any, request: Request, *, 
         )
 
     try:
-        job, err = deps.enqueue_job(deps.job_render_cart_simple_batch, job_payload, queue_name=deps.rq_queue_render)
+        job, err = deps.enqueue_job(deps.job_render_cart_simple_batch, _external_payload(job_payload, ai_scope), queue_name=deps.rq_queue_render)
     except Exception:
         logger.exception("External cart-simple-batch enqueue failed")
         return _stable_external_error_response(
@@ -933,13 +942,7 @@ def handle_api_external_render_cart_simple_batch(req: Any, request: Request, *, 
 
 
 def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueRouteDependencies) -> JSONResponse:
-    deps.require_role(
-        request,
-        {"external"},
-        deps.api_auth_disabled,
-        deps.internal_api_keys,
-        deps.external_api_keys,
-    )
+    ai_scope = _scope_from_request(request, deps=deps)
     if not _queue_backend_available(deps):
         return _redis_not_configured_response()
 
@@ -978,7 +981,7 @@ def handle_api_external_render_video(req: Any, request: Request, *, deps: QueueR
 
     job, err = deps.enqueue_job(
         deps.job_generate_render_video,
-        job_payload,
+        _external_payload(job_payload, ai_scope),
         queue_name=deps.rq_queue_render,
         job_timeout=int(getattr(deps, "rq_video_job_timeout", 3600) or 3600),
     )
@@ -1002,7 +1005,7 @@ def handle_regenerate_single_detail(req: Any, *, deps: QueueRouteDependencies) -
         return _redis_not_configured_response()
     return _enqueue_or_error(
         deps.job_regenerate_single_detail,
-        deps.build_regenerate_detail_job_payload(req),
+        _internal_payload(deps.build_regenerate_detail_job_payload(req)),
         queue_name=deps.rq_queue_render,
         deps=deps,
     )
@@ -1013,7 +1016,7 @@ def handle_generate_details(req: Any, *, deps: QueueRouteDependencies) -> JSONRe
         return _redis_not_configured_response()
     return _enqueue_or_error(
         deps.job_generate_details,
-        deps.build_detail_generation_job_payload(req),
+        _internal_payload(deps.build_detail_generation_job_payload(req)),
         queue_name=deps.rq_queue_render,
         deps=deps,
     )

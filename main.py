@@ -153,6 +153,15 @@ from infrastructure.ai.image_provider_dispatch import build_image_provider_dispa
 from infrastructure.ai.gemini_client import call_gemini_with_failover as call_gemini_with_failover_impl
 from infrastructure.ai.openai_analysis_client import call_openai_analysis as call_openai_analysis_impl
 from infrastructure.ai.openai_image_client import call_openai_image as call_openai_image_impl
+from infrastructure.ai.service_scope import (
+    ScopedProviderKeys,
+    current_ai_service_scope,
+    gemini_pool_for_scope,
+    load_external_scope_key_map,
+    load_scoped_provider_keys,
+    provider_key_source,
+    validate_external_scope_keys,
+)
 from infrastructure.ai.provider_defaults import (
     resolve_provider_defaults,
     resolve_runtime_image_provider,
@@ -227,7 +236,7 @@ from render_route_services import (
     persist_internal_item_source_uploads,
     persist_internal_room_upload,
 )
-from request_helpers import apply_cart_limits, build_cart_summary, require_role
+from request_helpers import apply_cart_limits, build_cart_summary, require_ai_service_scope, require_role
 from storage_helpers import (
     find_s3_moodboard_key,
     is_allowed_download_url,
@@ -323,12 +332,14 @@ FORCE_GEMINI_IMAGE_PROVIDERS = PROVIDER_DEFAULTS.force_gemini_image_providers
 CONFIGURED_ANALYSIS_PROVIDER = os.getenv("ANALYSIS_PROVIDER", "gemini").strip().lower() or "gemini"
 OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").strip() or "gpt-5.4"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+SCOPED_PROVIDER_KEYS = load_scoped_provider_keys(os.environ)
+OPENAI_PROVIDER_AVAILABLE_KEY_MARKER = OPENAI_API_KEY or ("scoped" if SCOPED_PROVIDER_KEYS.openai_by_scope else "")
 OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
 CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
 CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
 ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.analysis_provider
-MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_API_KEY)
-REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_API_KEY)
+MAIN_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.main_image_provider, OPENAI_PROVIDER_AVAILABLE_KEY_MARKER)
+REPAIR_IMAGE_PROVIDER = resolve_runtime_image_provider(PROVIDER_DEFAULTS.repair_image_provider, OPENAI_PROVIDER_AVAILABLE_KEY_MARKER)
 OPENAI_IMAGE_MODEL_NAME = PROVIDER_DEFAULTS.openai_image_model_name
 
 
@@ -407,6 +418,13 @@ if not API_KEY_POOL:
     if single_key: API_KEY_POOL.append(single_key)
 
 print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
+SCOPED_PROVIDER_KEYS = ScopedProviderKeys(
+    openai_by_scope=SCOPED_PROVIDER_KEYS.openai_by_scope,
+    gemini_by_scope=SCOPED_PROVIDER_KEYS.gemini_by_scope,
+    legacy_openai_key=SCOPED_PROVIDER_KEYS.legacy_openai_key,
+    legacy_gemini_pool=list(API_KEY_POOL),
+    legacy_fallback_enabled=SCOPED_PROVIDER_KEYS.legacy_fallback_enabled,
+)
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
 MAGNIFIC_ENDPOINT = os.getenv("MAGNIFIC_ENDPOINT", "https://api.freepik.com/v1/ai/image-upscaler")
@@ -488,6 +506,8 @@ def _parse_key_list(value: str) -> set:
 
 INTERNAL_INTEA_API_KEYS = _parse_key_list(os.getenv("INTERNAL_INTEA_API_KEYS", ""))
 EXTERNAL_INTEA_API_KEYS = _parse_key_list(os.getenv("EXTERNAL_INTEA_API_KEYS", ""))
+EXTERNAL_SCOPE_KEYS = load_external_scope_key_map(os.environ)
+validate_external_scope_keys(EXTERNAL_SCOPE_KEYS)
 DOWNLOAD_ALLOWED_HOSTS = _parse_key_list(os.getenv("DOWNLOAD_ALLOWED_HOSTS", ""))
 DOWNLOAD_ALLOW_PUBLIC_CLOUD_HOSTS = os.getenv("DOWNLOAD_ALLOW_PUBLIC_CLOUD_HOSTS", "0").strip().lower() in ("1", "true", "yes", "y")
 OUTPUTS_API_ROLE = os.getenv("OUTPUTS_API_ROLE", "").strip().lower()
@@ -1064,12 +1084,16 @@ _analysis_dispatch_logger = logging.getLogger("app")
 
 
 def _call_gemini_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
+    scope = current_ai_service_scope()
+    api_key_pool, key_source = gemini_pool_for_scope(scope, SCOPED_PROVIDER_KEYS, logger)
+    if not LOG_BRIEF:
+        logger.info("[AIKey] scope=%s provider=gemini model=%s key_source=%s", scope, model_name, key_source)
     return call_gemini_with_failover_impl(
         model_name,
         contents,
         request_options,
         safety_settings,
-        api_key_pool=API_KEY_POOL,
+        api_key_pool=api_key_pool,
         quota_exceeded_keys=QUOTA_EXCEEDED_KEYS,
         logger=logger,
         log_brief=LOG_BRIEF,
@@ -1079,12 +1103,16 @@ def _call_gemini_generation(model_name, contents, request_options, safety_settin
 
 
 def _call_openai_image_generation(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
+    scope = current_ai_service_scope()
+    api_key, key_source = provider_key_source(scope, "openai", SCOPED_PROVIDER_KEYS, logger)
+    if not LOG_BRIEF:
+        logger.info("[AIKey] scope=%s provider=openai model=%s key_source=%s", scope, model_name, key_source)
     return call_openai_image_impl(
         model_name,
         contents,
         request_options,
         safety_settings,
-        api_key=OPENAI_API_KEY,
+        api_key=api_key,
         logger=logger,
         log_brief=LOG_BRIEF,
         system_instruction=system_instruction,
@@ -1098,7 +1126,12 @@ CALL_ANALYSIS_WITH_PROVIDER = build_analysis_provider_dispatch(
     gemini_caller=_call_gemini_generation,
     openai_caller=call_openai_analysis_impl,
     openai_model_set=OPENAI_ANALYSIS_MODEL_SET,
-    openai_api_key=OPENAI_API_KEY,
+    openai_api_key=lambda: provider_key_source(
+        current_ai_service_scope(),
+        "openai",
+        SCOPED_PROVIDER_KEYS,
+        logger,
+    )[0],
     openai_reasoning_effort=OPENAI_ANALYSIS_REASONING_EFFORT,
     logger=_analysis_dispatch_logger,
     log_brief=LOG_BRIEF,
@@ -1108,14 +1141,14 @@ CALL_MAIN_IMAGE_WITH_PROVIDER = build_image_provider_dispatch(
     provider=MAIN_IMAGE_PROVIDER,
     gemini_caller=_call_gemini_generation,
     openai_image_caller=_call_openai_image_generation,
-    openai_api_key=OPENAI_API_KEY,
+    openai_api_key=OPENAI_PROVIDER_AVAILABLE_KEY_MARKER,
 )
 
 CALL_REPAIR_IMAGE_WITH_PROVIDER = build_image_provider_dispatch(
     provider=REPAIR_IMAGE_PROVIDER,
     gemini_caller=_call_gemini_generation,
     openai_image_caller=_call_openai_image_generation,
-    openai_api_key=OPENAI_API_KEY,
+    openai_api_key=OPENAI_PROVIDER_AVAILABLE_KEY_MARKER,
 )
 
 def call_gemini_with_failover(model_name, contents, request_options, safety_settings, system_instruction=None, log_tag=None):
@@ -1940,12 +1973,14 @@ def _queue_route_deps() -> QueueRouteDependencies:
         api_auth_disabled=API_AUTH_DISABLED,
         internal_api_keys=INTERNAL_INTEA_API_KEYS,
         external_api_keys=EXTERNAL_INTEA_API_KEYS,
+        external_scope_keys=EXTERNAL_SCOPE_KEYS,
         enqueue_job=_enqueue_job,
         fetch_job=_fetch_job,
         load_job_result_s3=_load_job_result_s3,
         save_job_result_s3=_save_job_result_s3,
         load_preset_map=_load_preset_map,
         require_role=require_role,
+        require_ai_service_scope=require_ai_service_scope,
         apply_cart_limits=apply_cart_limits,
         build_cart_summary=build_cart_summary,
         materialize_input=_materialize_input,

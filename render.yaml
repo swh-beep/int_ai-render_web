@@ -79,6 +79,14 @@ envVarGroups:
 
       - key: EXTERNAL_INTEA_API_KEYS
         sync: false
+      - key: KR_AI_DESIGNER_RENDER_CLIENT_KEYS
+        sync: false
+      - key: KR_AI_CONSULTANT_RENDER_CLIENT_KEYS
+        sync: false
+      - key: GLOBAL_AI_DESIGNER_RENDER_CLIENT_KEYS
+        sync: false
+      - key: GLOBAL_AI_CONSULTANT_RENDER_CLIENT_KEYS
+        sync: false
       - key: INTERNAL_INTEA_API_KEYS
         sync: false
       - key: DEFAULT_AUDIENCE
@@ -108,6 +116,28 @@ envVarGroups:
       - key: NANOBANANA_API_KEY_4
         sync: false
       - key: NANOBANANA_API_KEY_5
+        sync: false
+      - key: AI_SERVICE_LEGACY_PROVIDER_FALLBACK
+        value: "1"
+      - key: OPENAI_API_KEY_INTERNAL_TOOL
+        sync: false
+      - key: GEMINI_API_KEY_INTERNAL_TOOL
+        sync: false
+      - key: OPENAI_API_KEY_KR_AI_DESIGNER
+        sync: false
+      - key: GEMINI_API_KEY_KR_AI_DESIGNER
+        sync: false
+      - key: OPENAI_API_KEY_KR_AI_CONSULTANT
+        sync: false
+      - key: GEMINI_API_KEY_KR_AI_CONSULTANT
+        sync: false
+      - key: OPENAI_API_KEY_GLOBAL_AI_DESIGNER
+        sync: false
+      - key: GEMINI_API_KEY_GLOBAL_AI_DESIGNER
+        sync: false
+      - key: OPENAI_API_KEY_GLOBAL_AI_CONSULTANT
+        sync: false
+      - key: GEMINI_API_KEY_GLOBAL_AI_CONSULTANT
         sync: false
 
       - key: ANALYSIS_MODEL_NAME

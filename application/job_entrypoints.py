@@ -29,6 +29,7 @@ from application.tracker_metadata import (
     tracker_metadata_from_payload,
 )
 from application.video.external_render_video_workflow import run_external_render_video_job
+from infrastructure.ai.service_scope import ai_service_scope, attach_ai_service_scope, scope_from_payload
 
 
 @dataclass
@@ -310,6 +311,7 @@ def _prepare_worker_cart_moodboard_items(payload: dict, services: JobEntrypointS
 def job_render(payload: dict, persist_result: bool = True) -> dict:
     services = _services()
     payload = dict(payload or {})
+    scope = scope_from_payload(payload)
     artifact_job_id, artifact_created_at = _current_artifact_context(payload)
     if artifact_job_id:
         payload.setdefault("artifact_job_id", artifact_job_id)
@@ -318,25 +320,26 @@ def job_render(payload: dict, persist_result: bool = True) -> dict:
     prepared_payload = _prepare_worker_cart_moodboard_items(payload, services)
     if isinstance(prepared_payload, dict) and prepared_payload.get("error"):
         return prepared_payload
-    return run_render_job(
-        prepared_payload,
-        persist_result=persist_result,
-        materialize_input=services.materialize_input,
-        normalize_audience=services.normalize_audience,
-        local_upload_factory=_LocalUpload,
-        render_room=services.render_room,
-        json_from_response=_json_from_response,
-        persist_job_result=_persist_job_result,
-        curtain_material_editor=lambda result, curtain_item, audience: apply_curtain_material_edit(
-            result,
-            curtain_item,
-            audience=audience,
+    with ai_service_scope(scope):
+        return run_render_job(
+            prepared_payload,
+            persist_result=persist_result,
             materialize_input=services.materialize_input,
-            process_image_edit_logic=services.process_image_edit_logic,
-            resolve_image_url=services.resolve_image_url,
-            build_s3_prefix=services.build_s3_prefix,
-        ),
-    )
+            normalize_audience=services.normalize_audience,
+            local_upload_factory=_LocalUpload,
+            render_room=services.render_room,
+            json_from_response=_json_from_response,
+            persist_job_result=_persist_job_result,
+            curtain_material_editor=lambda result, curtain_item, audience: apply_curtain_material_edit(
+                result,
+                curtain_item,
+                audience=audience,
+                materialize_input=services.materialize_input,
+                process_image_edit_logic=services.process_image_edit_logic,
+                resolve_image_url=services.resolve_image_url,
+                build_s3_prefix=services.build_s3_prefix,
+            ),
+        )
 
 
 def job_render_with_extra(payload: dict) -> dict:
@@ -344,11 +347,14 @@ def job_render_with_extra(payload: dict) -> dict:
     render_payload = payload.get("render") or {}
     extra = payload.get("extra") or {}
     tracker_metadata = tracker_metadata_from_payload(payload)
+    scope = scope_from_payload(payload)
 
     audience = services.normalize_audience(render_payload.get("audience"))
     render_payload["audience"] = audience
+    render_payload = attach_ai_service_scope(render_payload, scope) if scope else render_payload
 
-    render_result = job_render(render_payload, persist_result=False)
+    with ai_service_scope(scope):
+        render_result = job_render(render_payload, persist_result=False)
     if isinstance(render_result, dict) and ("cart_kept" in extra or "cart_dropped" in extra):
         render_result.pop("original_url", None)
 
@@ -411,6 +417,7 @@ def _generate_shared_cart_empty_room(payload: dict, services: JobEntrypointServi
 def job_render_cart_simple_batch(payload: dict) -> dict:
     services = _services()
     payload = dict(payload or {})
+    scope = scope_from_payload(payload)
     artifact_job_id, artifact_created_at = _current_artifact_context(payload)
     if artifact_job_id:
         payload.setdefault("artifact_job_id", artifact_job_id)
@@ -424,7 +431,8 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
         return result
 
-    shared_empty = _generate_shared_cart_empty_room(payload, services, audience)
+    with ai_service_scope(scope):
+        shared_empty = _generate_shared_cart_empty_room(payload, services, audience)
     if shared_empty.get("error"):
         result = {"error": shared_empty.get("error"), "results": []}
         _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
@@ -438,6 +446,8 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         render_payload = dict(variant.get("render") or {})
         extra = dict(variant.get("extra") or {})
         render_payload["audience"] = audience
+        if scope:
+            render_payload = attach_ai_service_scope(render_payload, scope)
         render_payload.setdefault("file_path", payload.get("image_url"))
         render_payload["precomputed_empty_room_path"] = shared_empty["empty_room_path"]
         render_payload["precomputed_empty_room_raw_path"] = shared_empty["empty_room_raw_path"]
@@ -448,7 +458,8 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
         if payload.get("artifact_created_at"):
             render_payload.setdefault("artifact_created_at", payload.get("artifact_created_at"))
 
-        render_result = job_render(render_payload, persist_result=False)
+        with ai_service_scope(scope):
+            render_result = job_render(render_payload, persist_result=False)
         if isinstance(render_result, dict) and render_result.get("error"):
             row = {
                 "variant_index": variant_index,
@@ -481,32 +492,37 @@ def job_render_cart_simple_batch(payload: dict) -> dict:
 
 def job_render_with_details(payload: dict) -> dict:
     tracker_metadata = tracker_metadata_from_payload(payload)
+    scope = scope_from_payload(payload)
 
     def _persist_tracked(result: dict, audience: Optional[str] = None) -> None:
         _persist_job_result_with_optional_metadata(result, audience=audience, metadata=tracker_metadata)
 
-    return run_render_with_details_job(
-        payload,
-        normalize_audience=_services().normalize_audience,
-        render_job_runner=lambda render_payload, persist_result=False: job_render(
-            render_payload,
-            persist_result=persist_result,
-        ),
-        detail_job_runner=job_generate_details,
-        persist_job_result=_persist_tracked,
-    )
+    with ai_service_scope(scope):
+        return run_render_with_details_job(
+            payload,
+            normalize_audience=_services().normalize_audience,
+            render_job_runner=lambda render_payload, persist_result=False: job_render(
+                attach_ai_service_scope(render_payload, scope) if scope else render_payload,
+                persist_result=persist_result,
+            ),
+            detail_job_runner=lambda detail_payload: job_generate_details(
+                attach_ai_service_scope(detail_payload, scope) if scope else detail_payload
+            ),
+            persist_job_result=_persist_tracked,
+        )
 
 
 def job_image_edit(payload: dict) -> dict:
     services = _services()
-    return run_image_edit_job(
-        payload,
-        normalize_audience=services.normalize_audience,
-        build_s3_prefix=services.build_s3_prefix,
-        materialize_input=services.materialize_input,
-        resolve_image_url=services.resolve_image_url,
-        process_image_edit_logic=services.process_image_edit_logic,
-    )
+    with ai_service_scope(scope_from_payload(payload)):
+        return run_image_edit_job(
+            payload,
+            normalize_audience=services.normalize_audience,
+            build_s3_prefix=services.build_s3_prefix,
+            materialize_input=services.materialize_input,
+            resolve_image_url=services.resolve_image_url,
+            process_image_edit_logic=services.process_image_edit_logic,
+        )
 
 
 def job_finalize(payload: dict) -> dict:
@@ -524,15 +540,16 @@ def job_finalize(payload: dict) -> dict:
 
 def job_generate_empty_room(payload: dict) -> dict:
     services = _services()
-    return run_generate_empty_room_job(
-        payload,
-        normalize_audience=services.normalize_audience,
-        materialize_input=services.materialize_input,
-        generate_empty_room=services.generate_empty_room,
-        build_s3_prefix=services.build_s3_prefix,
-        resolve_image_url=services.resolve_image_url,
-        persist_job_result=_persist_job_result,
-    )
+    with ai_service_scope(scope_from_payload(payload)):
+        return run_generate_empty_room_job(
+            payload,
+            normalize_audience=services.normalize_audience,
+            materialize_input=services.materialize_input,
+            generate_empty_room=services.generate_empty_room,
+            build_s3_prefix=services.build_s3_prefix,
+            resolve_image_url=services.resolve_image_url,
+            persist_job_result=_persist_job_result,
+        )
 
 
 def job_upscale(payload: dict) -> dict:
@@ -549,59 +566,62 @@ def job_upscale(payload: dict) -> dict:
 
 def job_frontal_view(payload: dict) -> dict:
     services = _services()
-    return run_frontal_view_job(
-        payload,
-        normalize_audience=services.normalize_audience,
-        build_s3_prefix=services.build_s3_prefix,
-        materialize_input=services.materialize_input,
-        resolve_image_url=services.resolve_image_url,
-        generate_frontal_room_from_photos=services.generate_frontal_room_from_photos,
-    )
+    with ai_service_scope(scope_from_payload(payload)):
+        return run_frontal_view_job(
+            payload,
+            normalize_audience=services.normalize_audience,
+            build_s3_prefix=services.build_s3_prefix,
+            materialize_input=services.materialize_input,
+            resolve_image_url=services.resolve_image_url,
+            generate_frontal_room_from_photos=services.generate_frontal_room_from_photos,
+        )
 
 
 def job_generate_details(payload: dict) -> dict:
     services = _services()
-    return run_generate_details_job(
-        payload,
-        normalize_audience=services.normalize_audience,
-        build_s3_prefix=services.build_s3_prefix,
-        persist_job_result=_persist_job_result,
-        materialize_input=services.materialize_input,
-        resolve_image_url=services.resolve_image_url,
-        log_section=services.log_section,
-        detect_furniture_boxes=services.detect_furniture_boxes,
-        detect_item_bbox_norm=services.detect_item_bbox_norm,
-        canonical_category=services.canonical_category,
-        build_item_target_key=services.build_item_target_key,
-        max_concurrency_analysis=services.max_concurrency_analysis,
-        analyze_cropped_item=services.analyze_cropped_item,
-        attach_volume_ranks=services.attach_volume_ranks,
-        construct_dynamic_styles=services.construct_dynamic_styles,
-        generate_detail_view=services.generate_detail_view,
-        normalize_label_for_match=services.normalize_label_for_match,
-        volume_ranking_snapshot=services.volume_ranking_snapshot,
-    )
+    with ai_service_scope(scope_from_payload(payload)):
+        return run_generate_details_job(
+            payload,
+            normalize_audience=services.normalize_audience,
+            build_s3_prefix=services.build_s3_prefix,
+            persist_job_result=_persist_job_result,
+            materialize_input=services.materialize_input,
+            resolve_image_url=services.resolve_image_url,
+            log_section=services.log_section,
+            detect_furniture_boxes=services.detect_furniture_boxes,
+            detect_item_bbox_norm=services.detect_item_bbox_norm,
+            canonical_category=services.canonical_category,
+            build_item_target_key=services.build_item_target_key,
+            max_concurrency_analysis=services.max_concurrency_analysis,
+            analyze_cropped_item=services.analyze_cropped_item,
+            attach_volume_ranks=services.attach_volume_ranks,
+            construct_dynamic_styles=services.construct_dynamic_styles,
+            generate_detail_view=services.generate_detail_view,
+            normalize_label_for_match=services.normalize_label_for_match,
+            volume_ranking_snapshot=services.volume_ranking_snapshot,
+        )
 
 
 def job_regenerate_single_detail(payload: dict) -> dict:
     services = _services()
-    return run_regenerate_single_detail_job(
-        payload,
-        normalize_audience=services.normalize_audience,
-        build_s3_prefix=services.build_s3_prefix,
-        materialize_input=services.materialize_input,
-        resolve_image_url=services.resolve_image_url,
-        detect_furniture_boxes=services.detect_furniture_boxes,
-        canonical_category=services.canonical_category,
-        build_item_target_key=services.build_item_target_key,
-        max_concurrency_analysis=services.max_concurrency_analysis,
-        analyze_cropped_item=services.analyze_cropped_item,
-        attach_volume_ranks=services.attach_volume_ranks,
-        construct_dynamic_styles=services.construct_dynamic_styles,
-        normalize_label_for_match=services.normalize_label_for_match,
-        generate_detail_view=services.generate_detail_view,
-        volume_ranking_snapshot=services.volume_ranking_snapshot,
-    )
+    with ai_service_scope(scope_from_payload(payload)):
+        return run_regenerate_single_detail_job(
+            payload,
+            normalize_audience=services.normalize_audience,
+            build_s3_prefix=services.build_s3_prefix,
+            materialize_input=services.materialize_input,
+            resolve_image_url=services.resolve_image_url,
+            detect_furniture_boxes=services.detect_furniture_boxes,
+            canonical_category=services.canonical_category,
+            build_item_target_key=services.build_item_target_key,
+            max_concurrency_analysis=services.max_concurrency_analysis,
+            analyze_cropped_item=services.analyze_cropped_item,
+            attach_volume_ranks=services.attach_volume_ranks,
+            construct_dynamic_styles=services.construct_dynamic_styles,
+            normalize_label_for_match=services.normalize_label_for_match,
+            generate_detail_view=services.generate_detail_view,
+            volume_ranking_snapshot=services.volume_ranking_snapshot,
+        )
 
 
 def job_generate_render_video(payload: dict) -> dict:
