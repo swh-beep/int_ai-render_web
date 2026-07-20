@@ -5,7 +5,7 @@ import time
 import threading
 from pathlib import Path
 import subprocess
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 import shutil
 import base64
 import uuid
@@ -496,6 +496,26 @@ def _build_s3_prefix(audience: Optional[str], category: Optional[str] = None, su
 
 def _s3_prefix_from_url(url: str) -> Optional[str]:
     return s3_prefix_from_url(url, S3_BUCKET)
+
+def _s3_key_from_configured_bucket_url(url: str) -> Optional[str]:
+    try:
+        if not url or not S3_BUCKET:
+            return None
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        host = (parsed.netloc or "").split("@")[-1].split(":")[0].lower()
+        bucket = S3_BUCKET.lower()
+        key_path = parsed.path.lstrip("/")
+        if host == f"{bucket}.s3.amazonaws.com" or host.startswith(f"{bucket}.s3.") and host.endswith(".amazonaws.com"):
+            return unquote(key_path) if key_path else None
+        if host.startswith("s3.") and host.endswith(".amazonaws.com"):
+            bucket_segment, _, key = key_path.partition("/")
+            if bucket_segment.lower() == bucket and key:
+                return unquote(key)
+        return None
+    except Exception:
+        return None
 
 
 def _parse_key_list(value: str) -> set:
@@ -999,7 +1019,12 @@ def _materialize_input(path_or_url: str, prefix: str = "input") -> str | None:
             base = f"{prefix}_{uuid.uuid4().hex}.bin"
         local_path = os.path.join("outputs", f"{prefix}_{uuid.uuid4().hex[:8]}_{base}")
         try:
-            _download_to_path(path_or_url, Path(local_path))
+            s3_key = _s3_key_from_configured_bucket_url(path_or_url)
+            if s3_key:
+                Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+                _get_s3_client().download_file(S3_BUCKET, s3_key, local_path)
+            else:
+                _download_to_path(path_or_url, Path(local_path))
         except Exception:
             return None
         return local_path

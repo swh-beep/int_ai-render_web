@@ -396,3 +396,59 @@ def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
     assert scoped_secret not in log_output
     assert explicit_secret not in log_output
     assert "prompt" not in log_output
+
+
+def test_materialize_input_downloads_configured_s3_bucket_url_with_authenticated_client(monkeypatch, tmp_path):
+    import main
+
+    captured = {}
+
+    class FakeS3Client:
+        def download_file(self, bucket, key, local_path):
+            captured["bucket"] = bucket
+            captured["key"] = key
+            captured["local_path"] = local_path
+            with open(local_path, "wb") as handle:
+                handle.write(b"private-image")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "S3_BUCKET", "configured-bucket")
+    monkeypatch.setattr(main, "AWS_REGION", "ap-northeast-2")
+    monkeypatch.setattr(main, "_get_s3_client", lambda: FakeS3Client())
+    monkeypatch.setattr(
+        main,
+        "_download_to_path",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("same-bucket URL should use S3 client")),
+    )
+
+    local_path = main._materialize_input(
+        "https://configured-bucket.s3.ap-northeast-2.amazonaws.com/internal/uploads/source.png?X-Amz-Signature=hidden",
+        "room",
+    )
+
+    assert local_path is not None
+    assert captured["bucket"] == "configured-bucket"
+    assert captured["key"] == "internal/uploads/source.png"
+    assert (tmp_path / local_path).read_bytes() == b"private-image"
+
+
+def test_materialize_input_keeps_http_download_for_external_urls(monkeypatch, tmp_path):
+    import main
+
+    captured = {}
+
+    def fake_download(url, local_path):
+        captured["url"] = url
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(b"external-image")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "S3_BUCKET", "configured-bucket")
+    monkeypatch.setattr(main, "_get_s3_client", lambda: (_ for _ in ()).throw(AssertionError("external URL should not use S3 client")))
+    monkeypatch.setattr(main, "_download_to_path", fake_download)
+
+    local_path = main._materialize_input("https://cdn.example.com/source.png", "room")
+
+    assert local_path is not None
+    assert captured["url"] == "https://cdn.example.com/source.png"
+    assert (tmp_path / local_path).read_bytes() == b"external-image"

@@ -25,6 +25,7 @@ from application.render.render_room_workflow import _sync_furniture_specs_contra
 from application.render.render_room_workflow import run_render_room_workflow
 from application.render.render_variant_stage import _generate_one_variant, run_render_variant_stage
 from application.render.room_analysis import analyze_room_structure
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 from application.render.render_workflow_contracts import (
     RenderWorkflowAnalysisServices,
     RenderWorkflowDependencies,
@@ -1872,6 +1873,43 @@ def test_run_render_variant_stage_returns_structured_rows_for_mixed_variant_resu
             "scalecheck_failed_rules": [],
         },
     ]
+
+
+def test_run_render_variant_stage_preserves_ai_service_scope_in_worker_threads():
+    observed_scopes: list[str | None] = []
+
+    def fake_generate_furnished_room(*args, **kwargs):
+        observed_scopes.append(current_ai_service_scope())
+        unique_id = args[3]
+        return {"path": f"outputs/{unique_id}.png"}
+
+    with ai_service_scope("kr_ai_designer"):
+        results = run_render_variant_stage(
+            step1_img="step1.png",
+            style_prompt="style",
+            ref_input="ref.png",
+            unique_id="job-scope",
+            furniture_specs_text=None,
+            furniture_specs_json={},
+            dimensions="",
+            placement="",
+            scale_guide_path=None,
+            primary_item=None,
+            room_dims_parsed={},
+            wall_span_norm=(0.0, 1.0),
+            size_hierarchy=[],
+            start_time=0.0,
+            room_planes=None,
+            windows_present=False,
+            room_analysis_text="",
+            enable_scale_check=True,
+            generate_furnished_room=fake_generate_furnished_room,
+            max_variants=3,
+            max_workers=3,
+        )
+
+    assert len(results) == 3
+    assert observed_scopes == ["kr_ai_designer", "kr_ai_designer", "kr_ai_designer"]
 
 
 def test_run_render_variant_stage_coerces_scalar_scale_metadata():

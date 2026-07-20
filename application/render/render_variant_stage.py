@@ -2,6 +2,8 @@ import gc
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
+
 
 def _normalize_variant_result(result: Any) -> dict[str, Any]:
     def _coerce_list(value: Any) -> list[Any]:
@@ -135,10 +137,11 @@ def run_render_variant_stage(
     variant_indexes = [int(start_index) + index for index in range(variant_count)]
     if not variant_indexes:
         return generated_results
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [
-            executor.submit(
-                _generate_one_variant,
+    scoped_ai_service_scope = current_ai_service_scope()
+
+    def _scoped_generate_one_variant(index: int):
+        with ai_service_scope(scoped_ai_service_scope):
+            return _generate_one_variant(
                 index,
                 step1_img=step1_img,
                 style_prompt=style_prompt,
@@ -165,6 +168,10 @@ def run_render_variant_stage(
                 max_generation_attempts=max_generation_attempts,
                 generate_furnished_room=generate_furnished_room,
             )
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [
+            executor.submit(_scoped_generate_one_variant, index)
             for index in variant_indexes
         ]
         for future in futures:
