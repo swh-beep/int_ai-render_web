@@ -2,6 +2,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
+
 DETAIL_PRODUCT_LOCALIZATION_LIMIT = max(0, int(os.getenv("DETAIL_PRODUCT_LOCALIZATION_LIMIT", "10")))
 DETAIL_PRODUCT_LOCALIZATION_WORKERS = max(1, int(os.getenv("DETAIL_PRODUCT_LOCALIZATION_WORKERS", "4")))
 
@@ -178,25 +180,27 @@ def _localize_product_backed_items(
     if DETAIL_PRODUCT_LOCALIZATION_LIMIT > 0:
         candidate_indexes = candidate_indexes[:DETAIL_PRODUCT_LOCALIZATION_LIMIT]
     candidate_index_set = set(candidate_indexes)
+    scoped_ai_service_scope = current_ai_service_scope()
 
     def _localize(index: int) -> tuple[int, list[int] | None]:
-        item = rows[index]
-        crop_path = str(item.get("crop_path") or "").strip()
-        local_crop_path = crop_path
-        if crop_path:
-            try:
-                materialized = materialize_input(crop_path, f"detail_product_ref_{index + 1}")
-            except Exception:
-                materialized = None
-            if materialized:
-                local_crop_path = materialized
-        box = _call_product_localizer(
-            detect_item_bbox_norm=detect_item_bbox_norm,
-            staged_path=local_path,
-            crop_path=local_crop_path,
-            item=item,
-        )
-        return index, box
+        with ai_service_scope(scoped_ai_service_scope):
+            item = rows[index]
+            crop_path = str(item.get("crop_path") or "").strip()
+            local_crop_path = crop_path
+            if crop_path:
+                try:
+                    materialized = materialize_input(crop_path, f"detail_product_ref_{index + 1}")
+                except Exception:
+                    materialized = None
+                if materialized:
+                    local_crop_path = materialized
+            box = _call_product_localizer(
+                detect_item_bbox_norm=detect_item_bbox_norm,
+                staged_path=local_path,
+                crop_path=local_crop_path,
+                item=item,
+            )
+            return index, box
 
     localized_boxes: dict[int, list[int] | None] = {}
     if candidate_indexes:
@@ -514,8 +518,14 @@ def load_analyzed_items(
                     analyzed_items = enriched_items
                 else:
                     analysis_workers = min(max_concurrency_analysis, max(1, len(enriched_items)))
+                    scoped_ai_service_scope = current_ai_service_scope()
+
+                    def _analyze_with_scope(item: dict) -> dict:
+                        with ai_service_scope(scoped_ai_service_scope):
+                            return analyze_cropped_item(target_analysis_path, item)
+
                     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
-                        futures = [executor.submit(analyze_cropped_item, target_analysis_path, item) for item in enriched_items]
+                        futures = [executor.submit(_analyze_with_scope, item) for item in enriched_items]
                         analyzed_items = [future.result() for future in futures]
             except Exception as exc:
                 print(f"!! [Deep Analysis Failed] {exc}", flush=True)

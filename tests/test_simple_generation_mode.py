@@ -18,6 +18,7 @@ from application.render.render_workflow_contracts import (
     RenderWorkflowStorageServices,
 )
 from infrastructure.ai.gemini_prompts import build_empty_room_prompt
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 
 
 class _SummaryRef:
@@ -809,3 +810,74 @@ def test_prepare_detail_generation_items_simple_mode_refreshes_current_boxes_but
     assert result[0]["reference_features"] == {"material_cues": ["boucle"]}
     assert result[0]["placement_contract"] == {"zone": "left"}
     assert result[0]["volume_rank"] == 1
+
+
+def test_prepare_detail_generation_items_preserves_ai_service_scope_in_crop_analysis_threads(tmp_path):
+    source_path = tmp_path / "main.png"
+    source_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    observed_scopes: list[str | None] = []
+
+    def analyze_cropped_item(_path, item):
+        observed_scopes.append(current_ai_service_scope())
+        return {**item, "description": "analyzed"}
+
+    with ai_service_scope("kr_ai_designer"):
+        result = prepare_detail_generation_items(
+            furniture_data=None,
+            moodboard_url=None,
+            local_path=str(source_path),
+            materialize_input=lambda *args, **kwargs: None,
+            detect_furniture_boxes=lambda _path: [
+                {"label": "Chair", "box_2d": [100, 100, 500, 500]},
+                {"label": "Table", "box_2d": [520, 100, 820, 500]},
+            ],
+            canonical_category=lambda value: value or "unknown",
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index}_{label}",
+            max_concurrency_analysis=2,
+            analyze_cropped_item=analyze_cropped_item,
+            attach_volume_ranks=lambda items: items,
+            normalize_label_for_match=lambda value: str(value or "").strip().lower(),
+        )
+
+    assert [item["description"] for item in result] == ["analyzed", "analyzed"]
+    assert observed_scopes == ["kr_ai_designer", "kr_ai_designer"]
+
+
+def test_prepare_detail_generation_items_preserves_ai_service_scope_in_product_localization_threads(tmp_path):
+    source_path = tmp_path / "main.png"
+    source_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    cached_items = [
+        {"target_key": "internal_1", "label": "Chair", "box_2d": [100, 100, 500, 500], "crop_path": "s3://bucket/chair.png"},
+        {"target_key": "cart_product_2", "label": "Table", "box_2d": [520, 100, 820, 500], "crop_path": "s3://bucket/table.png"},
+    ]
+    observed_scopes: list[str | None] = []
+
+    def detect_item_bbox_norm(*args, **kwargs):
+        observed_scopes.append(current_ai_service_scope())
+        return [0.1, 0.1, 0.5, 0.5]
+
+    with ai_service_scope("global_ai_designer"):
+        result = prepare_detail_generation_items(
+            furniture_data=cached_items,
+            moodboard_url=None,
+            local_path=str(source_path),
+            materialize_input=lambda *args, **kwargs: None,
+            detect_furniture_boxes=lambda _path: [],
+            canonical_category=lambda value: value or "unknown",
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index}_{label}",
+            max_concurrency_analysis=2,
+            analyze_cropped_item=lambda path, item: item,
+            attach_volume_ranks=lambda items: [dict(item, volume_rank=index + 1) for index, item in enumerate(items)],
+            normalize_label_for_match=lambda value: str(value or "").strip().lower(),
+            detect_item_bbox_norm=detect_item_bbox_norm,
+        )
+
+    assert [item["detail_localization_status"] for item in result] == [
+        "product_reference_verified",
+        "product_reference_verified",
+    ]
+    assert observed_scopes == ["global_ai_designer", "global_ai_designer"]
