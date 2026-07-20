@@ -16,7 +16,6 @@ EXTERNAL_SCOPES = (
     "global_ai_consultant",
 )
 PROVIDER_SCOPES = (INTERNAL_SCOPE, *EXTERNAL_SCOPES)
-LEGACY_SCOPE = "legacy_external"
 
 _SCOPE_ENV_SUFFIXES = {
     INTERNAL_SCOPE: "INTERNAL_TOOL",
@@ -39,9 +38,6 @@ _current_scope: contextvars.ContextVar[str | None] = contextvars.ContextVar("ai_
 class ScopedProviderKeys:
     openai_by_scope: dict[str, str]
     gemini_by_scope: dict[str, list[str]]
-    legacy_openai_key: str
-    legacy_gemini_pool: list[str]
-    legacy_fallback_enabled: bool
 
 
 def parse_key_list(value: str | None) -> set[str]:
@@ -130,7 +126,7 @@ def validate_external_scope_keys(scope_key_map: dict[str, set[str]]) -> None:
         raise RuntimeError(f"Renderer client key configured in multiple AI service scopes: {scopes}")
 
 
-def resolve_external_scope(api_key: str | None, scope_key_map: dict[str, set[str]], legacy_keys: set[str]) -> str | None:
+def resolve_external_scope(api_key: str | None, scope_key_map: dict[str, set[str]]) -> str | None:
     if not api_key:
         return None
     matches = [scope for scope, keys in scope_key_map.items() if api_key in keys]
@@ -138,8 +134,6 @@ def resolve_external_scope(api_key: str | None, scope_key_map: dict[str, set[str
         raise RuntimeError("Renderer client key configured in multiple AI service scopes")
     if matches:
         return matches[0]
-    if api_key in legacy_keys:
-        return LEGACY_SCOPE
     return None
 
 
@@ -150,20 +144,13 @@ def load_scoped_provider_keys(env: dict[str, str] | None = None) -> ScopedProvid
     for scope in PROVIDER_SCOPES:
         suffix = _SCOPE_ENV_SUFFIXES[scope]
         openai_key = str(env.get(f"OPENAI_API_KEY_{suffix}") or "").strip()
-        gemini_keys = [
-            str(env.get(f"GEMINI_API_KEY_{suffix}") or "").strip(),
-            str(env.get(f"NANOBANANA_API_KEY_{suffix}") or "").strip(),
-        ]
+        gemini_key = str(env.get(f"GEMINI_API_KEY_{suffix}") or "").strip()
         if openai_key:
             openai_by_scope[scope] = openai_key
-        gemini_by_scope[scope] = [key for key in gemini_keys if key]
+        gemini_by_scope[scope] = [gemini_key] if gemini_key else []
     return ScopedProviderKeys(
         openai_by_scope=openai_by_scope,
         gemini_by_scope=gemini_by_scope,
-        legacy_openai_key=str(env.get("OPENAI_API_KEY") or "").strip(),
-        legacy_gemini_pool=[],
-        legacy_fallback_enabled=str(env.get("AI_SERVICE_LEGACY_PROVIDER_FALLBACK", "1")).strip().lower()
-        in ("1", "true", "yes", "y"),
     )
 
 
@@ -171,30 +158,16 @@ def provider_key_source(scope: str | None, provider: str, keys: ScopedProviderKe
     normalized = normalize_scope(scope) or current_ai_service_scope()
     if not normalized:
         raise RuntimeError(f"ai_service_scope is required for {provider}")
-    if normalized in PROVIDER_SCOPES:
-        if provider == "openai":
-            key = keys.openai_by_scope.get(normalized)
-            if key:
-                return key, "scoped"
-        elif provider == "gemini":
-            pool = keys.gemini_by_scope.get(normalized) or []
-            if pool:
-                return pool[0], "scoped"
-        if keys.legacy_fallback_enabled:
-            legacy_key = keys.legacy_openai_key if provider == "openai" else (keys.legacy_gemini_pool[0] if keys.legacy_gemini_pool else "")
-            if legacy_key:
-                logger.warning(
-                    "[AIKeyFallback] scope=%s provider=%s key_source=legacy reason=missing_scoped_key",
-                    normalized,
-                    provider,
-                )
-                return legacy_key, "legacy"
+    if normalized not in PROVIDER_SCOPES:
         raise RuntimeError(f"{provider} key is not configured for ai_service_scope={normalized}")
-    if normalized == LEGACY_SCOPE and keys.legacy_fallback_enabled:
-        legacy_key = keys.legacy_openai_key if provider == "openai" else (keys.legacy_gemini_pool[0] if keys.legacy_gemini_pool else "")
-        if legacy_key:
-            logger.warning("[AIKeyFallback] scope=%s provider=%s key_source=legacy", normalized, provider)
-            return legacy_key, "legacy"
+    if provider == "openai":
+        key = keys.openai_by_scope.get(normalized)
+        if key:
+            return key, "scoped"
+    elif provider == "gemini":
+        pool = keys.gemini_by_scope.get(normalized) or []
+        if pool:
+            return pool[0], "scoped"
     raise RuntimeError(f"{provider} key is not configured for ai_service_scope={normalized}")
 
 

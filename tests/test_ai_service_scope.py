@@ -118,6 +118,20 @@ def test_missing_or_wrong_scoped_credential_fails_closed():
     assert exc.value.status_code == 401
 
 
+def test_legacy_external_credential_does_not_resolve_an_ai_service_scope():
+    with pytest.raises(HTTPException) as exc:
+        require_ai_service_scope(
+            _FakeRequest({"x-api-key": "legacy-external-key"}),
+            {"external"},
+            False,
+            {"internal-key"},
+            {"legacy-external-key"},
+            {"kr_ai_designer": {"designer-key"}},
+        )
+
+    assert exc.value.status_code == 401
+
+
 def test_worker_sets_scope_context_from_payload(monkeypatch):
     captured = {}
 
@@ -153,16 +167,7 @@ def test_scoped_provider_keys_prefer_selected_scope_and_do_not_cross_scopes():
             "OPENAI_API_KEY_KR_AI_CONSULTANT": "openai-consultant",
             "GEMINI_API_KEY_KR_AI_DESIGNER": "gemini-designer",
             "GEMINI_API_KEY_KR_AI_CONSULTANT": "gemini-consultant",
-            "OPENAI_API_KEY": "openai-legacy",
-            "NANOBANANA_API_KEY": "gemini-legacy",
         }
-    )
-    keys = ScopedProviderKeys(
-        openai_by_scope=keys.openai_by_scope,
-        gemini_by_scope=keys.gemini_by_scope,
-        legacy_openai_key=keys.legacy_openai_key,
-        legacy_gemini_pool=["gemini-legacy"],
-        legacy_fallback_enabled=True,
     )
     logger = MagicMock()
 
@@ -172,17 +177,29 @@ def test_scoped_provider_keys_prefer_selected_scope_and_do_not_cross_scopes():
     assert gemini_pool_for_scope("kr_ai_consultant", keys, logger) == (["gemini-consultant"], "scoped")
 
 
-def test_provider_key_missing_scope_fails_after_fallback_disabled():
+def test_provider_key_missing_scope_fails_closed():
     keys = ScopedProviderKeys(
         openai_by_scope={},
         gemini_by_scope={},
-        legacy_openai_key="openai-legacy",
-        legacy_gemini_pool=["gemini-legacy"],
-        legacy_fallback_enabled=False,
     )
 
     with pytest.raises(RuntimeError, match="kr_ai_designer"):
         provider_key_source("kr_ai_designer", "openai", keys, MagicMock())
+
+
+def test_legacy_provider_envs_and_nanobanana_alias_are_ignored():
+    keys = load_scoped_provider_keys(
+        {
+            "OPENAI_API_KEY": "legacy-openai",
+            "NANOBANANA_API_KEY": "legacy-gemini",
+            "NANOBANANA_API_KEY_KR_AI_DESIGNER": "legacy-scoped-alias",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="kr_ai_designer"):
+        provider_key_source("kr_ai_designer", "openai", keys, MagicMock())
+    with pytest.raises(RuntimeError, match="kr_ai_designer"):
+        gemini_pool_for_scope("kr_ai_designer", keys, MagicMock())
 
 
 class _CaptureLogger:
@@ -209,9 +226,6 @@ def test_brief_mode_still_logs_safe_gemini_key_attribution(monkeypatch):
         ScopedProviderKeys(
             openai_by_scope={},
             gemini_by_scope={"kr_ai_designer": [secret]},
-            legacy_openai_key="",
-            legacy_gemini_pool=[],
-            legacy_fallback_enabled=False,
         ),
     )
     monkeypatch.setattr(
@@ -243,9 +257,6 @@ def test_brief_mode_still_logs_safe_openai_image_key_attribution(monkeypatch):
         ScopedProviderKeys(
             openai_by_scope={"kr_ai_designer": secret},
             gemini_by_scope={},
-            legacy_openai_key="",
-            legacy_gemini_pool=[],
-            legacy_fallback_enabled=False,
         ),
     )
     monkeypatch.setattr(
@@ -278,9 +289,6 @@ def test_brief_mode_still_logs_safe_openai_analysis_key_attribution(monkeypatch)
         ScopedProviderKeys(
             openai_by_scope={"kr_ai_consultant": secret},
             gemini_by_scope={},
-            legacy_openai_key="",
-            legacy_gemini_pool=[],
-            legacy_fallback_enabled=False,
         ),
     )
 
@@ -316,9 +324,6 @@ def test_analysis_dispatch_scoped_marker_resolves_secret_and_logs_once(monkeypat
         ScopedProviderKeys(
             openai_by_scope={"kr_ai_consultant": secret},
             gemini_by_scope={},
-            legacy_openai_key="",
-            legacy_gemini_pool=[],
-            legacy_fallback_enabled=False,
         ),
     )
 
@@ -353,7 +358,7 @@ def test_analysis_dispatch_scoped_marker_resolves_secret_and_logs_once(monkeypat
     assert "prompt" not in log_output
 
 
-def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
+def test_openai_analysis_rejects_explicit_key_override(monkeypatch):
     import main
 
     scoped_secret = "openai-scoped-secret-value"
@@ -368,9 +373,6 @@ def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
         ScopedProviderKeys(
             openai_by_scope={"kr_ai_consultant": scoped_secret},
             gemini_by_scope={},
-            legacy_openai_key="",
-            legacy_gemini_pool=[],
-            legacy_fallback_enabled=False,
         ),
     )
 
@@ -380,8 +382,8 @@ def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
 
     monkeypatch.setattr(main, "call_openai_analysis_impl", fake_openai_analysis)
 
-    with ai_service_scope("kr_ai_consultant"):
-        response = main._call_openai_analysis_generation(
+    with ai_service_scope("kr_ai_consultant"), pytest.raises(RuntimeError, match="Explicit OpenAI API keys are disabled"):
+        main._call_openai_analysis_generation(
             "gpt-analysis-test",
             ["prompt"],
             {},
@@ -389,10 +391,7 @@ def test_openai_analysis_explicit_key_logs_explicit_source(monkeypatch):
         )
 
     log_output = "\n".join(fake_logger.messages)
-    assert response.text == "ok"
-    assert captured["api_key"] == explicit_secret
-    assert "key_source=explicit" in log_output
-    assert "key_source=scoped" not in log_output
+    assert captured == {}
     assert scoped_secret not in log_output
     assert explicit_secret not in log_output
     assert "prompt" not in log_output

@@ -9,6 +9,7 @@ from application.details.detail_result_stage import build_detail_generation_outp
 from application.details.detail_style_stage import with_internal_angle_styles
 from application.render.artifact_paths import artifact_subprefix
 from application.render.curtain_material_stage import CURTAIN_DETAIL_MODE
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -34,6 +35,28 @@ DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVA
 DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT", 768)
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = _env_int("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", 400)
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = _env_int("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", 500)
+
+
+def _generate_detail_view_in_scope(
+    generate_detail_view: Callable,
+    scope: str | None,
+    original_image_path: str,
+    style_config: dict,
+    unique_id: str,
+    index: int,
+    furniture_data: list | None,
+    *,
+    prefer_crop_extract: bool,
+):
+    with ai_service_scope(scope):
+        return generate_detail_view(
+            original_image_path,
+            style_config,
+            unique_id,
+            index,
+            furniture_data,
+            prefer_crop_extract=prefer_crop_extract,
+        )
 
 
 def _is_product_backed_external_style(style: dict) -> bool:
@@ -539,6 +562,7 @@ def run_generate_details_job(
             if len(dynamic_styles) > 1:
                 futures = []
                 max_workers = min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, len(dynamic_styles))
+                scoped_ai_service_scope = current_ai_service_scope()
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     for index, style in enumerate(dynamic_styles):
                         remaining_budget = _remaining_deadline_sec()
@@ -555,7 +579,9 @@ def run_generate_details_job(
                                 index,
                                 style_payload,
                                 executor.submit(
+                                    _generate_detail_view_in_scope,
                                     generate_detail_view,
+                                    scoped_ai_service_scope,
                                     local_path,
                                     style_payload,
                                     unique_id,
@@ -589,6 +615,7 @@ def run_generate_details_job(
                     _append_detail_result(index, style_payload, result)
         else:
             print(f"?? Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
+            scoped_ai_service_scope = current_ai_service_scope()
             with ThreadPoolExecutor(max_workers=min(DETAIL_GENERATION_MAX_WORKERS, len(dynamic_styles))) as executor:
                 futures = []
                 for index, style in enumerate(dynamic_styles):
@@ -596,7 +623,9 @@ def run_generate_details_job(
                         (
                             index,
                             executor.submit(
+                                _generate_detail_view_in_scope,
                                 generate_detail_view,
+                                scoped_ai_service_scope,
                                 local_path,
                                 style,
                                 unique_id,

@@ -154,7 +154,6 @@ from infrastructure.ai.gemini_client import call_gemini_with_failover as call_ge
 from infrastructure.ai.openai_analysis_client import call_openai_analysis as call_openai_analysis_impl
 from infrastructure.ai.openai_image_client import call_openai_image as call_openai_image_impl
 from infrastructure.ai.service_scope import (
-    ScopedProviderKeys,
     current_ai_service_scope,
     gemini_pool_for_scope,
     load_external_scope_key_map,
@@ -331,9 +330,8 @@ FORCE_GEMINI_ANALYSIS_PROVIDER = PROVIDER_DEFAULTS.force_gemini_analysis_provide
 FORCE_GEMINI_IMAGE_PROVIDERS = PROVIDER_DEFAULTS.force_gemini_image_providers
 CONFIGURED_ANALYSIS_PROVIDER = os.getenv("ANALYSIS_PROVIDER", "gemini").strip().lower() or "gemini"
 OPENAI_ANALYSIS_MODEL_NAME = os.getenv("OPENAI_ANALYSIS_MODEL_NAME", "gpt-5.4").strip() or "gpt-5.4"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 SCOPED_PROVIDER_KEYS = load_scoped_provider_keys(os.environ)
-OPENAI_PROVIDER_AVAILABLE_KEY_MARKER = OPENAI_API_KEY or ("scoped" if SCOPED_PROVIDER_KEYS.openai_by_scope else "")
+OPENAI_PROVIDER_AVAILABLE_KEY_MARKER = "scoped" if SCOPED_PROVIDER_KEYS.openai_by_scope else ""
 OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME = os.getenv("OPENAI_IMAGE_VERIFICATION_FALLBACK_MODEL_NAME", "").strip()
 CONFIGURED_MAIN_IMAGE_PROVIDER = os.getenv("MAIN_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
 CONFIGURED_REPAIR_IMAGE_PROVIDER = os.getenv("REPAIR_IMAGE_PROVIDER", "gemini").strip().lower() or "gemini"
@@ -403,27 +401,9 @@ OPENAI_ANALYSIS_MODEL_SET = build_analysis_model_set(
     REMAP_MODEL_NAME,
 )
 
-API_KEY_POOL = []
-i = 1
-while True:
-    key = os.getenv(f"NANOBANANA_API_KEY_{i}")
-    if not key:
-        key = os.getenv(f"NANOBANANA_API_KEY{i}")
-        if not key: break
-    API_KEY_POOL.append(key)
-    i += 1
-
-if not API_KEY_POOL:
-    single_key = os.getenv("NANOBANANA_API_KEY")
-    if single_key: API_KEY_POOL.append(single_key)
-
-print(f"[Env] API key count: {len(API_KEY_POOL)}", flush=True)
-SCOPED_PROVIDER_KEYS = ScopedProviderKeys(
-    openai_by_scope=SCOPED_PROVIDER_KEYS.openai_by_scope,
-    gemini_by_scope=SCOPED_PROVIDER_KEYS.gemini_by_scope,
-    legacy_openai_key=SCOPED_PROVIDER_KEYS.legacy_openai_key,
-    legacy_gemini_pool=list(API_KEY_POOL),
-    legacy_fallback_enabled=SCOPED_PROVIDER_KEYS.legacy_fallback_enabled,
+print(
+    f"[Env] Scoped Gemini service key count: {sum(bool(pool) for pool in SCOPED_PROVIDER_KEYS.gemini_by_scope.values())}",
+    flush=True,
 )
 
 MAGNIFIC_API_KEY = os.getenv("MAGNIFIC_API_KEY")
@@ -1163,10 +1143,8 @@ def _call_openai_analysis_generation(
     scope = current_ai_service_scope()
     provided_api_key = str(api_key or "").strip()
     if provided_api_key and provided_api_key.lower() != "scoped":
-        resolved_api_key = api_key
-        key_source = "explicit"
-    else:
-        resolved_api_key, key_source = provider_key_source(scope, "openai", SCOPED_PROVIDER_KEYS, globals()["logger"])
+        raise RuntimeError("Explicit OpenAI API keys are disabled; configure the scoped service key")
+    resolved_api_key, key_source = provider_key_source(scope, "openai", SCOPED_PROVIDER_KEYS, globals()["logger"])
     _log_ai_key_attribution(scope, "openai", model_name, key_source)
     return call_openai_analysis_impl(
         model_name,

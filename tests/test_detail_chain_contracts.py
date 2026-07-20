@@ -9,6 +9,7 @@ from application.details.regenerate_detail_workflow import run_regenerate_single
 from application.details.detail_workflow import run_generate_details_job, select_external_detail_styles
 from application.render.render_result_stage import build_detail_payload
 from application.render.render_workflow import run_render_with_details_job
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 from render_route_services import (
     build_detail_generation_job_payload,
     build_regenerate_detail_job_payload,
@@ -1452,6 +1453,107 @@ def test_run_generate_details_job_budgeted_mode_caps_style_timeouts_at_180(monke
 
     assert len(result["details"]) == 1
     assert recorded_timeouts == [180.0]
+
+
+def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_threads(monkeypatch, tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    observed_scopes = []
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        observed_scopes.append(current_ai_service_scope())
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+        }
+
+    with ai_service_scope("internal_tool"):
+        result = run_generate_details_job(
+            {
+                "image_url": str(image_path),
+                "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+                "audience": "external",
+            },
+            normalize_audience=lambda audience: audience or "external",
+            build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+            persist_job_result=lambda payload, audience=None: None,
+            materialize_input=lambda url, prefix: url,
+            resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+            log_section=lambda message: None,
+            detect_furniture_boxes=lambda path: [],
+            canonical_category=lambda label: label or "",
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+            max_concurrency_analysis=1,
+            analyze_cropped_item=lambda path, item: item,
+            attach_volume_ranks=lambda items: items,
+            construct_dynamic_styles=lambda analyzed_items: [
+                {"name": "Detail: Chair", "target_key": "cart_chair"},
+                {"name": "Detail: Lamp", "target_key": "cart_lamp"},
+            ],
+            generate_detail_view=fake_generate_detail_view,
+            normalize_label_for_match=lambda label: label.strip().lower(),
+            volume_ranking_snapshot=lambda items: [
+                {"target_key": row.get("target_key")} for row in items if isinstance(row, dict)
+            ],
+        )
+
+    assert len(result["details"]) == 2
+    assert observed_scopes == ["internal_tool", "internal_tool"]
+
+
+def test_run_generate_details_job_preserves_ai_service_scope_in_budgeted_parallel_threads(monkeypatch, tmp_path):
+    image_path = tmp_path / "detail-src.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    monkeypatch.setattr("application.details.detail_workflow.time.time", lambda: 100.0)
+
+    observed_scopes = []
+
+    def fake_generate_detail_view(original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs):
+        observed_scopes.append(current_ai_service_scope())
+        return {
+            "path": original_image_path,
+            "style_name": style_config.get("name"),
+        }
+
+    with ai_service_scope("internal_tool"):
+        result = run_generate_details_job(
+            {
+                "image_url": str(image_path),
+                "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+                "audience": "external",
+                "absolute_deadline_ts": 500.0,
+                "minimum_detail_budget_sec": 5.0,
+            },
+            normalize_audience=lambda audience: audience or "external",
+            build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+            persist_job_result=lambda payload, audience=None: None,
+            materialize_input=lambda url, prefix: url,
+            resolve_image_url=lambda path, prefix=None: f"https://cdn.example/{Path(path).name}" if path else None,
+            log_section=lambda message: None,
+            detect_furniture_boxes=lambda path: [],
+            canonical_category=lambda label: label or "",
+            build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+            max_concurrency_analysis=1,
+            analyze_cropped_item=lambda path, item: item,
+            attach_volume_ranks=lambda items: items,
+            construct_dynamic_styles=lambda analyzed_items: [
+                {"name": "Detail: Chair", "target_key": "cart_chair"},
+                {"name": "Detail: Lamp", "target_key": "cart_lamp"},
+            ],
+            generate_detail_view=fake_generate_detail_view,
+            normalize_label_for_match=lambda label: label.strip().lower(),
+            volume_ranking_snapshot=lambda items: [
+                {"target_key": row.get("target_key")} for row in items if isinstance(row, dict)
+            ],
+        )
+
+    assert len(result["details"]) == 2
+    assert observed_scopes == ["internal_tool", "internal_tool"]
 
 
 def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path):

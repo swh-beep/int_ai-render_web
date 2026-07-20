@@ -13,7 +13,7 @@ from fastapi import HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from application.tracker_metadata import TRACKER_MANIFEST_FIELDS
-from infrastructure.ai.service_scope import INTERNAL_SCOPE, LEGACY_SCOPE, attach_ai_service_scope
+from infrastructure.ai.service_scope import INTERNAL_SCOPE, attach_ai_service_scope
 
 
 logger = logging.getLogger(__name__)
@@ -317,14 +317,7 @@ def _internal_payload(payload: dict) -> dict:
 def _scope_from_request(request: Request, *, deps: QueueRouteDependencies) -> str:
     resolver = getattr(deps, "require_ai_service_scope", None)
     if not callable(resolver):
-        deps.require_role(
-            request,
-            {"external"},
-            deps.api_auth_disabled,
-            deps.internal_api_keys,
-            deps.external_api_keys,
-        )
-        return LEGACY_SCOPE
+        raise HTTPException(status_code=500, detail="AI service scope resolver is not configured")
     return deps.require_ai_service_scope(
         request,
         {"external"},

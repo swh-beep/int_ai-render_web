@@ -105,20 +105,6 @@ envVarGroups:
       - key: KLING_ENDPOINT
         sync: false
 
-      - key: NANOBANANA_API_KEY
-        sync: false
-      - key: NANOBANANA_API_KEY_1
-        sync: false
-      - key: NANOBANANA_API_KEY_2
-        sync: false
-      - key: NANOBANANA_API_KEY_3
-        sync: false
-      - key: NANOBANANA_API_KEY_4
-        sync: false
-      - key: NANOBANANA_API_KEY_5
-        sync: false
-      - key: AI_SERVICE_LEGACY_PROVIDER_FALLBACK
-        value: "1"
       - key: OPENAI_API_KEY_INTERNAL_TOOL
         sync: false
       - key: GEMINI_API_KEY_INTERNAL_TOOL
