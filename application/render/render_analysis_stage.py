@@ -17,6 +17,7 @@ from application.render.postprocess_support import (
     resolve_item_family,
 )
 from application.render.scale_plan_support import build_scale_plan
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 
 
 _CATEGORY_METADATA_FIELDS = (
@@ -647,6 +648,12 @@ def _analyze_items(
         analysis_workers = min(max_concurrency_analysis, max(1, len(item_metas)))
 
     results = [None] * len(item_metas)
+    scoped_ai_service_scope = current_ai_service_scope()
+
+    def _analyze_item(source_path: str | None, item_data: dict, **kwargs) -> dict:
+        with ai_service_scope(scoped_ai_service_scope):
+            return analyze_cropped_item(source_path, item_data, **kwargs)
+
     with ThreadPoolExecutor(max_workers=analysis_workers) as executor:
         futures = []
         for index, meta in enumerate(item_metas):
@@ -669,7 +676,7 @@ def _analyze_items(
                 (
                     index,
                     executor.submit(
-                        analyze_cropped_item,
+                        _analyze_item,
                         meta.get("source_path"),
                         item_data,
                         unique_id=unique_id,

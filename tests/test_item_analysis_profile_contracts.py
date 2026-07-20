@@ -1,5 +1,6 @@
 from application.render.render_analysis_stage import _analyze_items
 from application.render.render_workflow import run_render_job
+from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
 
 
 def test_direct_item_analysis_uses_detailed_profile_without_enabling_ocr():
@@ -52,6 +53,37 @@ def test_direct_item_analysis_uses_detailed_profile_without_enabling_ocr():
     assert kwargs["allow_reference_feature_model"] is True
     assert rows[0]["item_analysis_profile"] == "detailed"
     assert rows[0]["product_name"] == "DS-266_SELECT PERLA"
+
+
+def test_direct_item_analysis_preserves_ai_service_scope_in_worker_threads():
+    observed_scopes = []
+
+    def _analyze(_path, item_data, **_kwargs):
+        observed_scopes.append(current_ai_service_scope())
+        return {"description": item_data["label"]}
+
+    with ai_service_scope("kr_ai_designer"):
+        _analyze_items(
+            item_metas=[
+                {
+                    "label": "라운지체어",
+                    "source_path": "outputs/perla-source.png",
+                    "box_2d": [0, 0, 1000, 1000],
+                    "category": "lounge_chair",
+                }
+            ],
+            item_refs=[{"item_id": "23963"}],
+            unique_id="scope-test",
+            analyze_cropped_item=_analyze,
+            normalize_dims_dict=lambda dims: dict(dims or {}),
+            canonical_category=lambda value: value or "unknown",
+            build_item_target_key=lambda *args, **kwargs: "fallback-key",
+            room_dims_parsed={},
+            max_concurrency_analysis=2,
+            cart_max_analysis_workers=2,
+        )
+
+    assert observed_scopes == ["kr_ai_designer"]
 
 
 def test_render_job_forwards_analysis_profile_to_shared_render_workflow(tmp_path):
