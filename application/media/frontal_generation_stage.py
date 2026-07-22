@@ -63,7 +63,7 @@ def generate_frontal_room_from_photos(
         response = generation_caller(
             model_name,
             content_list,
-            {"timeout": 100, "aspect_ratio": "16:9", "max_attempts": 1},
+            {"timeout": 100, "aspect_ratio": "16:9", "image_size": "4K", "max_attempts": 1},
             safety_settings,
             log_tag="Frontal.Generate",
         )

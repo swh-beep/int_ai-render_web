@@ -33,6 +33,7 @@ def test_main_wires_frontal_generation_to_repair_provider_but_keeps_analysis_pro
     assert "call_generation_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER" in frontal_block
     assert "model_name=REPAIR_IMAGE_MODEL_NAME" in frontal_block
     assert "model_name=GEMINI_IMAGE_MODEL_NAME" not in frontal_block
+    assert "standardize_image=lambda path: standardize_image(path, keep_ratio=True)" in frontal_block
 
 
 def test_frontal_stage_uses_separate_generation_caller(tmp_path):
@@ -73,6 +74,7 @@ def test_frontal_stage_uses_separate_generation_caller(tmp_path):
         assert captured["analysis"][0][4]["log_tag"] == "Frontal.Analysis"
         assert captured["generation"][0][0] == "gemini-3.1-flash-image"
         assert captured["generation"][0][2]["aspect_ratio"] == "16:9"
+        assert captured["generation"][0][2]["image_size"] == "4K"
         assert captured["generation"][0][2]["max_attempts"] == 1
         assert captured["generation"][0][4]["log_tag"] == "Frontal.Generate"
     finally:

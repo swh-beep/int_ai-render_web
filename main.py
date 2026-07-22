@@ -2353,7 +2353,7 @@ job_entrypoints_module.configure_job_entrypoints(
             analysis_model_name=ANALYSIS_MODEL_NAME,
             model_name=REPAIR_IMAGE_MODEL_NAME,
             allow_all_safety_settings=allow_all_safety_settings,
-            standardize_image=standardize_image,
+            standardize_image=lambda path: standardize_image(path, keep_ratio=True),
             call_generation_with_failover=CALL_REPAIR_IMAGE_WITH_PROVIDER,
         ),
         log_section=log_section,
