@@ -2256,6 +2256,7 @@ def generate_furnished_room(
             request_options = {
                 "timeout": current_timeout,
                 "aspect_ratio": "16:9",
+                "image_size": "4K",
                 "thinking_level": "high",
                 "include_thoughts": False,
             }

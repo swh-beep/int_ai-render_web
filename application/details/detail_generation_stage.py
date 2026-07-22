@@ -9,8 +9,8 @@ from application.render.postprocess_support import category_match_family
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
-DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "400") or "400"))
-DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "500") or "500"))
+DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "1280") or "1280"))
+DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "1600") or "1600"))
 
 
 def _normalize_ratio_string(value: str | None, default: str = "4:5") -> str:
@@ -1131,6 +1131,7 @@ def generate_detail_view(
             {
                 "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
                 "aspect_ratio": requested_ratio,
+                **({"image_size": "4K"} if is_angle_style else {}),
                 "thinking_level": "high",
                 "include_thoughts": False,
             },

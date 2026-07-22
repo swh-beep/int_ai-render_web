@@ -407,6 +407,7 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path):
     try:
         assert result["aspect_ratio"] == "16:9"
         assert captured["request_options"]["aspect_ratio"] == "16:9"
+        assert captured["request_options"]["image_size"] == "4K"
         assert "OUTPUT ASPECT RATIO: 16:9" in captured["prompt"]
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
@@ -459,6 +460,7 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
     output_path = Path(result["path"])
     try:
         assert captured["request_options"]["aspect_ratio"] == "16:9"
+        assert captured["request_options"]["image_size"] == "4K"
         assert "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED SIDE REFRAME>" in captured["prompt"]
         assert "Do not create a new camera angle that reveals unseen sides of furniture." in captured["prompt"]
         assert "SOURCE-CONSTRAINED REFRAME ONLY" in captured["prompt"]
@@ -610,7 +612,7 @@ def test_generate_detail_view_defaults_ratio_less_detail_crop_to_vertical_canvas
 
 def test_generate_detail_view_crop_first_enforces_minimum_source_crop_area(tmp_path):
     source_path = tmp_path / "room.png"
-    Image.new("RGB", (1376, 768), color=(245, 245, 245)).save(source_path, format="PNG")
+    Image.new("RGB", (5504, 3072), color=(245, 245, 245)).save(source_path, format="PNG")
 
     result = generate_detail_view(
         str(source_path),
@@ -649,10 +651,10 @@ def test_generate_detail_view_crop_first_enforces_minimum_source_crop_area(tmp_p
     output_path = Path(result["path"])
     try:
         left, top, right, bottom = result["crop_bounds_px"]
-        assert right - left >= 400
-        assert bottom - top >= 500
+        assert right - left >= 1280
+        assert bottom - top >= 1600
         with Image.open(output_path) as rendered:
-            assert rendered.size[1] == 1600
+            assert rendered.size == (1280, 1600)
             assert abs((rendered.size[0] / rendered.size[1]) - (4.0 / 5.0)) < 0.02
     finally:
         if output_path.exists():

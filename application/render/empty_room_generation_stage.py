@@ -95,6 +95,7 @@ def generate_empty_room(
                 {
                     "timeout": remaining,
                     "aspect_ratio": "16:9",
+                    "image_size": "4K",
                     "thinking_level": "high",
                     "include_thoughts": False,
                 },

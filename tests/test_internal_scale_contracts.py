@@ -162,6 +162,7 @@ def test_generate_empty_room_requests_landscape_ratio_and_high_thinking(tmp_path
         assert os.path.exists(result)
         assert captured["model_name"] == "gemini-3.1-flash-image"
         assert captured["request_options"]["aspect_ratio"] == "16:9"
+        assert captured["request_options"]["image_size"] == "4K"
         assert captured["request_options"]["thinking_level"] == "high"
         assert captured["request_options"]["include_thoughts"] is False
     finally:
@@ -881,6 +882,7 @@ def test_generate_furnished_room_requests_landscape_ratio_and_high_thinking(tmp_
     assert result["path"] == os.path.join("outputs", "result_1010_job-main-config.png")
     assert captured["model_name"] == "gemini-3.1-flash-image"
     assert captured["request_options"]["aspect_ratio"] == "16:9"
+    assert captured["request_options"]["image_size"] == "4K"
     assert captured["request_options"]["thinking_level"] == "high"
     assert captured["request_options"]["include_thoughts"] is False
 
