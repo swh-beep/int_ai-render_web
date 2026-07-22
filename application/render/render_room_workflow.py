@@ -40,6 +40,15 @@ def _coerce_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _render_variant_max_workers() -> int:
+    raw_value = os.getenv("AI_RENDER_VARIANT_MAX_WORKERS", "3")
+    try:
+        configured = int(raw_value or "3")
+    except (TypeError, ValueError):
+        configured = 3
+    return max(1, min(3, configured))
+
+
 def _room_dims_summary_line(room_dims_contract) -> str:
     contract = room_dims_contract.as_dict() if hasattr(room_dims_contract, "as_dict") else dict(room_dims_contract or {})
     dims = dict(contract.get("dims_mm_center") or {})
@@ -1429,7 +1438,7 @@ def run_render_room_workflow(
             enable_scale_check=stage2_enable_scale_check,
             generate_furnished_room=deps.generation.generate_furnished_room,
             max_variants=3,
-            max_workers=3,
+            max_workers=_render_variant_max_workers(),
             max_generation_attempts=1,
             start_index=0,
         )
