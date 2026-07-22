@@ -1437,6 +1437,7 @@ def run_render_room_workflow(
             room_analysis_text=room_analysis_text,
             enable_scale_check=stage2_enable_scale_check,
             generate_furnished_room=deps.generation.generate_furnished_room,
+            color_reference_path=std_path,
             max_variants=3,
             max_workers=_render_variant_max_workers(),
             max_generation_attempts=1,

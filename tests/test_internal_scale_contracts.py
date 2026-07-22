@@ -169,6 +169,62 @@ def test_generate_empty_room_requests_landscape_ratio_and_high_thinking(tmp_path
         empty_stage.time.time = original_time
 
 
+def test_generate_empty_room_returns_corrected_path_but_preserves_raw_provenance(tmp_path, monkeypatch):
+    room_path = tmp_path / "room.png"
+    corrected_path = tmp_path / "empty-corrected.png"
+    (tmp_path / "outputs").mkdir()
+    monkeypatch.chdir(tmp_path)
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    corrected_path.write_bytes(_make_png_bytes(160, 90))
+    captured = {}
+
+    import application.render.empty_room_generation_stage as empty_stage
+
+    original_time = empty_stage.time.time
+    empty_stage.time.time = lambda: 1001.0
+
+    def _correct(image_path, *, reference_path, empty_room):
+        captured.update(
+            image_path=image_path,
+            reference_path=reference_path,
+            empty_room=empty_room,
+        )
+        return SimpleNamespace(path=str(corrected_path))
+
+    monkeypatch.setattr(empty_stage, "apply_reference_relative_white_balance", _correct)
+
+    try:
+        result, raw_path = generate_empty_room(
+            str(room_path),
+            "empty-wb-hook",
+            1000.0,
+            stage_name="Stage 1",
+            return_raw=True,
+            total_timeout_limit=60,
+            log_step=lambda *_args, **_kwargs: None,
+            model_name="model",
+            build_empty_room_prompt=lambda: "prompt",
+            allow_all_safety_settings=lambda: {},
+            call_gemini_with_failover=lambda *args, **kwargs: SimpleNamespace(
+                candidates=[SimpleNamespace()],
+                parts=[SimpleNamespace(inline_data=SimpleNamespace(data=_make_png_bytes(160, 90)))],
+            ),
+            match_aspect_to_target=lambda path, _room: path,
+        )
+
+        assert result == str(corrected_path)
+        assert Path(raw_path).exists()
+        assert captured == {
+            "image_path": raw_path,
+            "reference_path": str(room_path),
+            "empty_room": True,
+        }
+    finally:
+        empty_stage.time.time = original_time
+        if "raw_path" in locals() and Path(raw_path).exists():
+            Path(raw_path).unlink()
+
+
 def test_generate_empty_room_retries_when_landscape_crop_would_remove_too_much_scene(tmp_path):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
@@ -325,6 +381,54 @@ def test_generate_one_variant_normalizes_legacy_string_results_to_structured_sca
     assert result["scalecheck_fail_count"] == 0
     assert result["scalecheck_retry_count"] == 0
     assert result["scale_check_failed"] is False
+
+
+def test_generate_one_variant_replaces_main_path_with_reference_corrected_output(monkeypatch):
+    captured = {}
+
+    def _correct(image_path, *, reference_path, empty_room):
+        captured.update(
+            image_path=image_path,
+            reference_path=reference_path,
+            empty_room=empty_room,
+        )
+        return SimpleNamespace(path="outputs/result.wb.png")
+
+    monkeypatch.setattr(
+        "application.render.render_variant_stage.apply_reference_relative_white_balance",
+        _correct,
+    )
+
+    result = _generate_one_variant(
+        0,
+        step1_img="step1.png",
+        style_prompt="style",
+        ref_input="ref.png",
+        unique_id="job-wb",
+        furniture_specs_text=None,
+        furniture_specs_json={},
+        dimensions="",
+        placement="",
+        scale_guide_path=None,
+        primary_item=None,
+        room_dims_parsed={},
+        wall_span_norm=(0.0, 1.0),
+        size_hierarchy=[],
+        start_time=1000.0,
+        room_planes=None,
+        windows_present=False,
+        room_analysis_text="",
+        enable_scale_check=True,
+        color_reference_path="outputs/source-room.png",
+        generate_furnished_room=lambda *args, **kwargs: "outputs/result.png",
+    )
+
+    assert result["path"] == "outputs/result.wb.png"
+    assert captured == {
+        "image_path": "outputs/result.png",
+        "reference_path": "outputs/source-room.png",
+        "empty_room": False,
+    }
 
 
 def test_run_render_analysis_stage_exposes_room_geometry_when_room_analysis_returns_it(tmp_path):

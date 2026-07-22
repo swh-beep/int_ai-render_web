@@ -3,6 +3,7 @@ import time
 from typing import Any, Callable
 
 from PIL import Image
+from application.render.white_balance_correction import apply_reference_relative_white_balance
 from shared.image_canvas import (
     get_image_size,
     image_matches_ratio,
@@ -135,6 +136,12 @@ def generate_empty_room(
                             pass
                         print(f">> [Retry] unsafe empty-room aspect crop on attempt {try_count + 1}", flush=True)
                         break
+                    correction = apply_reference_relative_white_balance(
+                        out,
+                        reference_path=image_path,
+                        empty_room=True,
+                    )
+                    out = correction.path
                     if return_raw:
                         return (out, path)
                     if out != path:

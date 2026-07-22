@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
+from application.render.white_balance_correction import apply_reference_relative_white_balance
 
 
 def _normalize_variant_result(result: Any) -> dict[str, Any]:
@@ -58,6 +59,7 @@ def _generate_one_variant(
     windows_present: bool,
     room_analysis_text: str,
     enable_scale_check: bool,
+    color_reference_path: str | None = None,
     max_generation_attempts: int | None = None,
     generate_furnished_room: Callable[..., str | dict[str, Any] | None],
 ):
@@ -89,7 +91,15 @@ def _generate_one_variant(
             max_generation_attempts=max_generation_attempts,
         )
         if result:
-            return _normalize_variant_result(result)
+            normalized = _normalize_variant_result(result)
+            path = normalized.get("path")
+            if path and color_reference_path:
+                normalized["path"] = apply_reference_relative_white_balance(
+                    path,
+                    reference_path=color_reference_path,
+                    empty_room=False,
+                ).path
+            return normalized
     except Exception as exc:
         print(f"   ??[Variation {index+1}] ???: {exc}", flush=True)
     return None
@@ -120,6 +130,7 @@ def run_render_variant_stage(
     room_analysis_text: str,
     enable_scale_check: bool,
     generate_furnished_room: Callable[..., str | dict[str, Any] | None],
+    color_reference_path: str | None = None,
     max_variants: int = 2,
     max_workers: int = 2,
     max_generation_attempts: int | None = None,
@@ -165,6 +176,7 @@ def run_render_variant_stage(
                 windows_present=windows_present,
                 room_analysis_text=room_analysis_text,
                 enable_scale_check=enable_scale_check,
+                color_reference_path=color_reference_path,
                 max_generation_attempts=max_generation_attempts,
                 generate_furnished_room=generate_furnished_room,
             )
