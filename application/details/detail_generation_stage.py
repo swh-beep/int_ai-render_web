@@ -797,12 +797,17 @@ def _build_angle_refurnish_prompt(
         "<LOCKED CAMERA PLATE REFURNISH>\n"
         "Re-render the exact furnished scene from the Furnished Main Reference into the EMPTY LOCKED CAMERA PLATE.\n"
         f"{camera_assertion}\n\n"
-        "<IMAGE AUTHORITY>\n"
-        "- Image 1, the EMPTY LOCKED CAMERA PLATE, is absolute truth for camera pose, architecture, visible room extent, "
-        "perspective, vanishing points, openings, and permanent surfaces.\n"
-        "- Image 2, the Furnished Main Reference, is absolute truth for every furniture/decor identity, count, geometry, "
-        "material, color, size hierarchy, world-space footprint, orientation, and neighboring relationship. Its camera, crop, "
-        "vanishing points, perspective, and source-image pixel coordinates have ZERO authority.\n\n"
+        "<REFERENCE AUTHORITY BY LABEL>\n"
+        "- The reference labeled FINAL Locked Empty-Room Target Canvas (or EMPTY LOCKED CAMERA PLATE in the direct "
+        "fallback) is absolute truth for camera pose, architecture, visible room extent, perspective, vanishing points, "
+        "openings, permanent surfaces, and non-occluded pixel positions.\n"
+        "- The Furnished Scene Reference (or Furnished Main Reference in the direct fallback) is absolute truth for every "
+        "furniture/decor identity, count, geometry, material, color, size hierarchy, world-space footprint, orientation, "
+        "and neighboring relationship. Its camera, crop, vanishing points, perspective, and source-image pixel coordinates "
+        "have ZERO authority.\n"
+        "- The Furniture-Only Object Atlas Reference and every Furniture Cutout Reference are exact product-identity and "
+        "appearance evidence only. Their backgrounds, grid positions, crops, and camera views have ZERO scene-layout or "
+        "camera authority.\n\n"
         "<COMPOSITING CONTRACT>\n"
         "- Keep the locked plate architecture pixel-position consistent wherever furniture does not occlude it. Do not "
         "pan, orbit, truck, dolly, zoom, crop, mirror, or regenerate the room from the furnished source camera.\n"
@@ -2155,7 +2160,8 @@ def generate_detail_view(
                 if locked_plate_ignored:
                     refurnish_retry_feedback += (
                         f" The validated locked plate moved camera-{guide_translation.upper() or 'AS REQUESTED'}, but the "
-                        "previous furnished output reverted to the source camera. Image 1 must remain the only camera authority."
+                        "previous furnished output reverted to the source camera. The FINAL Locked Empty-Room Target "
+                        "Canvas must remain the only camera authority."
                     )
                 _retain_direction_only_candidate(
                     candidate_path,

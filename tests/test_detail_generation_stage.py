@@ -1044,6 +1044,8 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         assert "<LOCKED-PLATE QC RETRY FEEDBACK>" not in calls[4]["prompt"]
         assert "<LOCKED-PLATE QC RETRY FEEDBACK>" in calls[5]["prompt"]
         assert "Keep the EMPTY LOCKED CAMERA PLATE camera" in calls[5]["prompt"]
+        assert "FINAL Locked Empty-Room Target Canvas must remain the only camera authority" in calls[5]["prompt"]
+        assert "Image 1 must remain the only camera authority" not in calls[5]["prompt"]
         assert len(qc_calls) == 4
         assert {call[0] for call in qc_calls} == {str(source_path)}
         assert result["generation_mode"] == "angle_generation_two_stage"
@@ -1251,6 +1253,12 @@ def test_angle_refurnish_prompt_uses_observed_locked_plate_direction_not_request
 
     assert "observed physical camera-RIGHT viewpoint" in prompt
     assert "source-image pixel coordinates have ZERO authority" in prompt
+    assert "FINAL Locked Empty-Room Target Canvas" in prompt
+    assert "Furnished Scene Reference" in prompt
+    assert "Furniture-Only Object Atlas Reference" in prompt
+    assert "Furniture Cutout Reference" in prompt
+    assert "Image 1" not in prompt
+    assert "Image 2" not in prompt
 
 
 def test_generate_detail_view_cleans_salvage_and_guide_when_two_stage_fallback_raises(
