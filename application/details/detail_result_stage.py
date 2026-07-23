@@ -129,6 +129,7 @@ def _build_detail_entries(
             "angle_direction_reconciled",
             "angle_qc_attempts",
             "angle_qc",
+            "angle_pipeline_trace",
         ):
             metadata_value = item.get(metadata_key)
             if metadata_value is not None and metadata_value != "":

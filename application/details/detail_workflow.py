@@ -743,6 +743,7 @@ def run_generate_details_job(
                         "angle_direction_reconciled": result.get("angle_direction_reconciled"),
                         "angle_qc_attempts": result.get("angle_qc_attempts"),
                         "angle_qc": result.get("angle_qc"),
+                        "angle_pipeline_trace": result.get("angle_pipeline_trace"),
                     }
                 )
                 return

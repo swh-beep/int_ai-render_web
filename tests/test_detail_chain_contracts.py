@@ -1679,6 +1679,13 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
             "camera_travel_side": "left",
             "angle_qc_attempts": 1,
             "angle_qc": {"passed": True, "reject_reasons": []},
+            "angle_pipeline_trace": {
+                "version": 1,
+                "direct_attempts": 1,
+                "guide_attempts": [],
+                "refurnish_attempts": [],
+                "locked_plate_ignored": False,
+            },
         }
 
     with ai_service_scope("internal_tool"):
@@ -1719,6 +1726,7 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
     assert result["details"][0]["camera_travel_side"] == "left"
     assert result["details"][0]["angle_qc_attempts"] == 1
     assert result["details"][0]["angle_qc"]["passed"] is True
+    assert result["details"][0]["angle_pipeline_trace"]["direct_attempts"] == 1
 
 
 def test_run_generate_details_job_preserves_ai_service_scope_in_budgeted_parallel_threads(monkeypatch, tmp_path):

@@ -911,6 +911,12 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         2,
         raising=False,
     )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
     correction_calls = []
     monkeypatch.setattr(
         detail_generation_stage,
@@ -950,6 +956,12 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         return qc_results[len(qc_calls) - 1]
 
     monkeypatch.setattr(detail_generation_stage, "assess_angle_candidate", _assess)
+    guide_qc_results = [hard_failure, passing_qc]
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: guide_qc_results.pop(0),
+    )
 
     calls = []
 
@@ -1008,6 +1020,7 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
             "Detail.Generate",
             "Detail.Generate",
             "Detail.AngleGuide",
+            "Detail.AngleGuide",
             "Detail.AngleRefurnish",
             "Detail.AngleRefurnish",
         ]
@@ -1015,20 +1028,25 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         assert all(call["request_options"]["image_size"] == "4K" for call in calls)
         assert "EMPTY ARCHITECTURE CAMERA GUIDE" in calls[2]["prompt"]
         assert "physical camera-body toward LEFT" in calls[2]["prompt"]
-        assert "Remove all movable furniture" in calls[2]["prompt"]
+        assert "Do not add furniture" in calls[2]["prompt"]
         assert "Never remove furniture because it is absent" not in calls[2]["prompt"]
-        assert len([part for part in calls[2]["content"] if isinstance(part, Image.Image)]) == 2
+        assert len([part for part in calls[2]["content"] if isinstance(part, Image.Image)]) == 1
         assert "Original Empty Room Architecture Reference" in calls[2]["content"][1]
-        assert "Furnished Main Reference" in calls[2]["content"][3]
-        assert "LOCKED CAMERA PLATE" in calls[3]["prompt"]
+        assert not any(
+            isinstance(part, str) and "Furnished Main Reference" in part
+            for part in calls[2]["content"]
+        )
+        assert "<EMPTY-GUIDE QC RETRY FEEDBACK>" not in calls[2]["prompt"]
+        assert "<EMPTY-GUIDE QC RETRY FEEDBACK>" in calls[3]["prompt"]
+        assert "LOCKED CAMERA PLATE" in calls[4]["prompt"]
         assert any(
             isinstance(part, str) and "Furnished Main Reference" in part
-            for part in calls[3]["content"]
+            for part in calls[4]["content"]
         )
-        assert len([part for part in calls[3]["content"] if isinstance(part, Image.Image)]) == 2
-        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" not in calls[3]["prompt"]
-        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" in calls[4]["prompt"]
-        assert "Keep the EMPTY LOCKED CAMERA PLATE camera" in calls[4]["prompt"]
+        assert len([part for part in calls[4]["content"] if isinstance(part, Image.Image)]) == 2
+        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" not in calls[4]["prompt"]
+        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" in calls[5]["prompt"]
+        assert "Keep the EMPTY LOCKED CAMERA PLATE camera" in calls[5]["prompt"]
         assert len(qc_calls) == 4
         assert {call[0] for call in qc_calls} == {str(source_path)}
         assert result["generation_mode"] == "angle_generation_two_stage"
@@ -1038,6 +1056,11 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         assert result["camera_direction_matches"] is True
         assert result["angle_qc_attempts"] == 4
         assert result["angle_qc"] == passing_qc
+        assert result["angle_pipeline_trace"]["direct_attempts"] == 2
+        assert result["angle_pipeline_trace"]["guide_reference_mode"] == "empty_room"
+        assert len(result["angle_pipeline_trace"]["guide_attempts"]) == 2
+        assert len(result["angle_pipeline_trace"]["refurnish_attempts"]) == 2
+        assert result["angle_pipeline_trace"]["locked_plate_ignored"] is True
         assert correction_calls == [str(output_path)]
         assert artifacts == [output_path]
         assert guide_artifacts == []
@@ -1045,6 +1068,20 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
         for path in artifacts:
             if path.exists():
                 path.unlink()
+
+
+def test_angle_refurnish_prompt_uses_observed_locked_plate_direction_not_requested_slot():
+    prompt = detail_generation_stage._build_angle_refurnish_prompt(
+        {
+            "name": "Side Composition (Focus Left)",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+        },
+        locked_camera_side="right",
+    )
+
+    assert "observed physical camera-RIGHT viewpoint" in prompt
+    assert "source-image pixel coordinates have ZERO authority" in prompt
 
 
 def test_generate_detail_view_cleans_salvage_and_guide_when_two_stage_fallback_raises(
@@ -1095,6 +1132,21 @@ def test_generate_detail_view_cleans_salvage_and_guide_when_two_stage_fallback_r
         detail_generation_stage,
         "assess_angle_candidate",
         lambda *_args, **_kwargs: qc_results.pop(0),
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: {
+            "passed": True,
+            "passed_for_requested_slot": True,
+            "direction_only_mismatch": False,
+            "inferred_camera_translation": "left",
+            "camera_direction_matches": True,
+            "reject_reasons": [],
+            "warnings": [],
+            "metrics": {"camera_motion_score": 0.82, "model_confidence": 0.91},
+            "model_payload": {"reasons": []},
+        },
     )
 
     call_count = 0
@@ -1147,6 +1199,108 @@ def test_generate_detail_view_cleans_salvage_and_guide_when_two_stage_fallback_r
     try:
         assert result is None
         assert call_count == 4
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_never_refurnishes_when_all_camera_guides_fail_qc(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "camera_direction_matches": None,
+        "reject_reasons": ["same_frame_or_crop", "insufficient_camera_motion"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.1, "model_confidence": 0.9},
+        "model_payload": {"reasons": ["The camera did not move."]},
+    }
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: hard_failure,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: hard_failure,
+    )
+
+    log_tags = []
+
+    def _call_gemini(_model_name, _content, _request_options, _safety_settings, **kwargs):
+        log_tags.append(kwargs.get("log_tag"))
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+        },
+        "guide-qc-stop",
+        45,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("*guide-qc-stop*"))
+    try:
+        assert result is None
+        assert log_tags == [
+            "Detail.Generate",
+            "Detail.AngleGuide",
+            "Detail.AngleGuide",
+        ]
         assert leaked == []
     finally:
         for path in leaked:
@@ -1280,6 +1434,11 @@ def test_generate_detail_view_cleans_two_stage_artifacts_when_white_balance_rais
         detail_generation_stage,
         "assess_angle_candidate",
         lambda *_args, **_kwargs: qc_results.pop(0),
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: passing_qc,
     )
     monkeypatch.setattr(
         detail_generation_stage,

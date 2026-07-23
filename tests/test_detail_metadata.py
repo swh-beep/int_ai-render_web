@@ -51,6 +51,14 @@ class DetailMetadataTests(unittest.TestCase):
                     "reject_reasons": [],
                     "metrics": {"camera_motion_score": 0.81},
                 },
+                "angle_pipeline_trace": {
+                    "version": 1,
+                    "direct_attempts": 2,
+                    "guide_reference_mode": "empty_room",
+                    "guide_attempts": [{"attempt": 1, "materialized": True}],
+                    "refurnish_attempts": [{"attempt": 1, "materialized": True}],
+                    "locked_plate_ignored": False,
+                },
             }
         ]
         output = build_detail_generation_output(
@@ -78,6 +86,8 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertIs(detail["angle_direction_reconciled"], True)
         self.assertEqual(detail["angle_qc_attempts"], 2)
         self.assertEqual(detail["angle_qc"]["metrics"]["camera_motion_score"], 0.81)
+        self.assertEqual(detail["angle_pipeline_trace"]["guide_reference_mode"], "empty_room")
+        self.assertIs(detail["angle_pipeline_trace"]["locked_plate_ignored"], False)
         self.assertEqual(output["furniture_data"][0]["target_key"], "cart_product-1_accent-chair_001")
         self.assertEqual(output["furniture_data"][0]["description"], "Soft boucle accent chair")
         self.assertNotIn("_normalized_label", output["furniture_data"][0])

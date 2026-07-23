@@ -157,6 +157,53 @@ def build_angle_quality_prompt(camera_mode: str, focus_side: str | None = None) 
     )
 
 
+def build_angle_camera_guide_quality_prompt(camera_mode: str, focus_side: str | None = None) -> str:
+    normalized_mode = str(camera_mode or "").strip().lower()
+    normalized_side = str(focus_side or "").strip().upper()
+    if normalized_mode == "overview_angle":
+        camera_requirement = (
+            "The EMPTY ANGLE GUIDE must be a genuinely elevated camera move from the source architecture with real downward "
+            "pitch, visibly increased floor or top-plane exposure, and coherent architectural projection. Inferred camera "
+            "translation may be up when these overview indicators are present. A crop, zoom, or fake tilt fails."
+        )
+    else:
+        camera_travel_side = normalized_side if normalized_side in {"LEFT", "RIGHT"} else "REQUESTED"
+        camera_requirement = (
+            f"The EMPTY ANGLE GUIDE must show a real lateral camera translation toward the {camera_travel_side} side of the "
+            "source viewpoint, with visible lateral parallax and coherent architectural projection. Judge the physical "
+            "camera-body movement; do not reject solely because the observed left/right direction differs from the requested slot."
+        )
+
+    return (
+        "You are the strict V4 quality gate for an empty-room angle camera guide.\n"
+        "Image #1 is SOURCE ARCHITECTURE. Image #2 is EMPTY ANGLE GUIDE.\n"
+        f"{camera_requirement}\n"
+        "The guide must preserve the same fixed room topology: walls, windows, doors, stairs, ceiling edges, floor boundaries, "
+        "openings, built-ins, and architectural planes. Reject if architecture is added, removed, moved, mirrored, or warped. "
+        "Reject if the output is only a same-frame crop, a background-only rotation, a large artificial panel/slab, or if movable "
+        "furniture appears in the empty guide.\n"
+        "Report the camera movement you actually observe. For inferred_camera_translation use exactly one of: "
+        "left, right, up, down, forward, backward, none, unclear. Do not compare it with the requested direction yourself.\n"
+        "Return STRICT JSON ONLY with every key present:\n"
+        "{\n"
+        '  "same_frame_or_crop": false,\n'
+        '  "inferred_camera_translation": "left",\n'
+        '  "room_topology_preserved": true,\n'
+        '  "architecture_projection_coherent": true,\n'
+        '  "background_only_rotation": false,\n'
+        '  "lateral_parallax_visible": true,\n'
+        '  "downward_pitch_visible": false,\n'
+        '  "floor_or_top_plane_exposure_increased": false,\n'
+        '  "movable_furniture_present": false,\n'
+        '  "large_artificial_panel": false,\n'
+        '  "severe_geometry_warp": false,\n'
+        '  "camera_motion_score": 0.0,\n'
+        '  "confidence": 0.0,\n'
+        '  "reasons": []\n'
+        "}"
+    )
+
+
 def _coerce_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
@@ -190,7 +237,7 @@ def _parse_model_payload(
     return parsed if isinstance(parsed, dict) else {}
 
 
-def assess_angle_candidate(
+def _assess_angle_quality(
     source_path: str,
     candidate_path: str,
     *,
@@ -200,6 +247,11 @@ def assess_angle_candidate(
     analysis_model_name: str | None = None,
     safe_json_from_model_text: Callable[[str], Any] | None = None,
     require_model_qc: bool = True,
+    prompt_builder: Callable[[str, str | None], str] = build_angle_quality_prompt,
+    source_label: str = "SOURCE MAIN:",
+    candidate_label: str = "ANGLE CANDIDATE:",
+    log_tag: str = "Analysis.DetailAngleQC",
+    guide_qc: bool = False,
 ) -> dict[str, Any]:
     source_probe = _load_probe(source_path)
     candidate_probe = _load_probe(candidate_path)
@@ -229,10 +281,10 @@ def assess_angle_candidate(
             response = call_analysis_with_failover(
                 analysis_model_name,
                 [
-                    build_angle_quality_prompt(camera_mode, focus_side),
-                    "SOURCE MAIN:",
+                    prompt_builder(camera_mode, focus_side),
+                    source_label,
                     source_for_model,
-                    "ANGLE CANDIDATE:",
+                    candidate_label,
                     candidate_for_model,
                 ],
                 {
@@ -243,7 +295,7 @@ def assess_angle_candidate(
                     "response_mime_type": "application/json",
                 },
                 {},
-                log_tag="Analysis.DetailAngleQC",
+                log_tag=log_tag,
             )
             model_payload = _parse_model_payload(response, safe_json_from_model_text)
             model_checked = bool(model_payload)
@@ -255,14 +307,28 @@ def assess_angle_candidate(
             if candidate_for_model is not None:
                 candidate_for_model.close()
 
-    required_boolean_fields = {
-        "same_frame_or_crop",
-        "room_topology_preserved",
-        "background_only_rotation",
-        "furniture_projection_coherent",
-        "large_artificial_panel",
-        "severe_geometry_warp",
-    }
+    if guide_qc:
+        required_boolean_fields = {
+            "same_frame_or_crop",
+            "room_topology_preserved",
+            "architecture_projection_coherent",
+            "background_only_rotation",
+            "lateral_parallax_visible",
+            "downward_pitch_visible",
+            "floor_or_top_plane_exposure_increased",
+            "movable_furniture_present",
+            "large_artificial_panel",
+            "severe_geometry_warp",
+        }
+    else:
+        required_boolean_fields = {
+            "same_frame_or_crop",
+            "room_topology_preserved",
+            "background_only_rotation",
+            "furniture_projection_coherent",
+            "large_artificial_panel",
+            "severe_geometry_warp",
+        }
     inferred_camera_translation = ""
     camera_direction_matches: bool | None = None
     direction_warnings: list[str] = []
@@ -293,7 +359,12 @@ def assess_angle_candidate(
             reject_reasons.append("room_topology_changed")
         if _coerce_bool(model_payload.get("background_only_rotation")) is True:
             reject_reasons.append("background_only_rotation")
-        if _coerce_bool(model_payload.get("furniture_projection_coherent")) is False:
+        if guide_qc:
+            if _coerce_bool(model_payload.get("architecture_projection_coherent")) is False:
+                reject_reasons.append("architecture_projection_incoherent")
+            if _coerce_bool(model_payload.get("movable_furniture_present")) is True:
+                reject_reasons.append("movable_furniture_present")
+        elif _coerce_bool(model_payload.get("furniture_projection_coherent")) is False:
             reject_reasons.append("furniture_projection_incoherent")
         if _coerce_bool(model_payload.get("large_artificial_panel")) is True:
             reject_reasons.append("large_artificial_panel")
@@ -310,12 +381,23 @@ def assess_angle_candidate(
         metrics["model_confidence"] = confidence
 
         if normalized_mode == "side_angle":
+            if guide_qc and _coerce_bool(model_payload.get("lateral_parallax_visible")) is not True:
+                reject_reasons.append("lateral_parallax_not_visible")
             if inferred_camera_translation not in {"left", "right"}:
                 reject_reasons.append("camera_translation_unclear")
             elif normalized_focus_side in {"left", "right"}:
                 camera_direction_matches = inferred_camera_translation == normalized_focus_side
                 if camera_direction_matches is False:
-                    direction_warnings.append("camera_direction_mismatch")
+                    direction_warnings.append(
+                        "direction_only_mismatch" if guide_qc else "camera_direction_mismatch"
+                    )
+        elif guide_qc and normalized_mode == "overview_angle":
+            if _coerce_bool(model_payload.get("downward_pitch_visible")) is not True:
+                reject_reasons.append("downward_pitch_not_visible")
+            if _coerce_bool(model_payload.get("floor_or_top_plane_exposure_increased")) is not True:
+                reject_reasons.append("floor_or_top_plane_exposure_not_increased")
+            if inferred_camera_translation != "up":
+                reject_reasons.append("camera_translation_unclear")
     elif require_model_qc:
         reject_reasons.append("model_qc_unavailable")
 
@@ -335,3 +417,54 @@ def assess_angle_candidate(
         "inferred_camera_translation": inferred_camera_translation or None,
         "camera_direction_matches": camera_direction_matches,
     }
+
+
+def assess_angle_candidate(
+    source_path: str,
+    candidate_path: str,
+    *,
+    camera_mode: str,
+    focus_side: str | None = None,
+    call_analysis_with_failover: Callable[..., Any] | None = None,
+    analysis_model_name: str | None = None,
+    safe_json_from_model_text: Callable[[str], Any] | None = None,
+    require_model_qc: bool = True,
+) -> dict[str, Any]:
+    return _assess_angle_quality(
+        source_path,
+        candidate_path,
+        camera_mode=camera_mode,
+        focus_side=focus_side,
+        call_analysis_with_failover=call_analysis_with_failover,
+        analysis_model_name=analysis_model_name,
+        safe_json_from_model_text=safe_json_from_model_text,
+        require_model_qc=require_model_qc,
+    )
+
+
+def assess_angle_camera_guide(
+    source_architecture_path: str,
+    empty_guide_path: str,
+    *,
+    camera_mode: str,
+    focus_side: str | None = None,
+    call_analysis_with_failover: Callable[..., Any] | None = None,
+    analysis_model_name: str | None = None,
+    safe_json_from_model_text: Callable[[str], Any] | None = None,
+    require_model_qc: bool = True,
+) -> dict[str, Any]:
+    return _assess_angle_quality(
+        source_architecture_path,
+        empty_guide_path,
+        camera_mode=camera_mode,
+        focus_side=focus_side,
+        call_analysis_with_failover=call_analysis_with_failover,
+        analysis_model_name=analysis_model_name,
+        safe_json_from_model_text=safe_json_from_model_text,
+        require_model_qc=require_model_qc,
+        prompt_builder=build_angle_camera_guide_quality_prompt,
+        source_label="SOURCE ARCHITECTURE:",
+        candidate_label="EMPTY ANGLE GUIDE:",
+        log_tag="Analysis.DetailAngleGuideQC",
+        guide_qc=True,
+    )

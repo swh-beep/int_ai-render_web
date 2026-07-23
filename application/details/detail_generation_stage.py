@@ -4,7 +4,10 @@ import time
 from typing import Callable
 
 from PIL import Image, ImageOps
-from application.details.detail_angle_quality import assess_angle_candidate
+from application.details.detail_angle_quality import (
+    assess_angle_camera_guide,
+    assess_angle_candidate,
+)
 from application.render.curtain_material_stage import CURTAIN_BLACKOUT_PERCENT, CURTAIN_DETAIL_MODE
 from application.render.postprocess_support import category_match_family
 from application.render.white_balance_correction import apply_reference_relative_white_balance
@@ -19,6 +22,10 @@ DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS = max(
 DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS = max(
     1,
     int(os.getenv("DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS", "2") or "2"),
+)
+DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS = max(
+    1,
+    int(os.getenv("DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS", "2") or "2"),
 )
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "1280") or "1280"))
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "1600") or "1600"))
@@ -681,7 +688,11 @@ def _build_gpt_image_curtain_detail_prompt(style_config: dict, target_label: str
     )
 
 
-def _build_angle_camera_guide_prompt(style_config: dict) -> str:
+def _build_angle_camera_guide_prompt(
+    style_config: dict,
+    *,
+    reference_mode: str = "furnished_main",
+) -> str:
     style_name = str((style_config or {}).get("name") or "")
     camera_mode = str((style_config or {}).get("camera_mode") or "").strip().lower()
     focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
@@ -721,15 +732,28 @@ def _build_angle_camera_guide_prompt(style_config: dict) -> str:
         else ""
     )
 
+    if reference_mode == "empty_room":
+        reference_authority = (
+            "- Image 1 is the SOLE architecture source. Preserve its exact room identity, topology, materials, and permanent "
+            "features.\n"
+            "- Its camera is only the STARTING pose and is forbidden as the output pose. The output must execute the requested "
+            "physical camera move.\n"
+            "- The source is already empty. Do not add furniture, decor, silhouettes, or ghost objects.\n\n"
+        )
+    else:
+        reference_authority = (
+            "- Image 1 is the sole source viewpoint and architecture reference.\n"
+            "- Its camera is only the STARTING pose and is forbidden as the output pose. The output must execute the requested "
+            "physical camera move.\n"
+            "- Remove all movable furniture, rugs, lamps, art, plants, and decor from this guide. Preserve permanent built-ins.\n\n"
+        )
+
     return (
         "<EMPTY ARCHITECTURE CAMERA GUIDE>\n"
         "Create one photorealistic EMPTY architectural camera plate for the exact same room from the requested new camera pose.\n"
         f"{camera_instruction}\n\n"
         "<REFERENCE AUTHORITY>\n"
-        "- The furnished main image identifies the source viewpoint and the exact room architecture.\n"
-        "- If an original empty-room reference is attached, it is the strongest evidence for walls, windows, doors, "
-        "openings, ceiling, floor, built-ins, materials, and topology.\n"
-        "- Remove all movable furniture, rugs, lamps, art, plants, and decor from this guide. Preserve permanent built-ins.\n\n"
+        f"{reference_authority}"
         "<ARCHITECTURE LOCK>\n"
         "- Preserve the same room topology, dimensions, wall/window/door count, opening locations, ceiling structure, "
         "floor boundaries, permanent materials, and exterior views.\n"
@@ -742,15 +766,25 @@ def _build_angle_camera_guide_prompt(style_config: dict) -> str:
     )
 
 
-def _build_angle_refurnish_prompt(style_config: dict) -> str:
+def _build_angle_refurnish_prompt(
+    style_config: dict,
+    *,
+    locked_camera_side: str | None = None,
+) -> str:
     style_name = str((style_config or {}).get("name") or "")
     camera_mode = str((style_config or {}).get("camera_mode") or "").strip().lower()
     focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
     is_side_angle = camera_mode == "side_angle" or style_name.startswith("Side Composition")
     if is_side_angle:
-        requested_side = "left" if focus_side == "left" else "right"
+        requested_side = (
+            locked_camera_side
+            if str(locked_camera_side or "").strip().lower() in {"left", "right"}
+            else "left"
+            if focus_side == "left"
+            else "right"
+        )
         camera_assertion = (
-            f"The locked plate is the requested physical camera-{requested_side.upper()} viewpoint. Preserve its exact "
+            f"The locked plate is the observed physical camera-{requested_side.upper()} viewpoint. Preserve its exact "
             "camera location, vanishing points, perspective, and framing."
         )
     else:
@@ -767,7 +801,8 @@ def _build_angle_refurnish_prompt(style_config: dict) -> str:
         "- Image 1, the EMPTY LOCKED CAMERA PLATE, is absolute truth for camera pose, architecture, visible room extent, "
         "perspective, vanishing points, openings, and permanent surfaces.\n"
         "- Image 2, the Furnished Main Reference, is absolute truth for every furniture/decor identity, count, geometry, "
-        "material, color, size hierarchy, world-space footprint, orientation, and neighboring relationship.\n\n"
+        "material, color, size hierarchy, world-space footprint, orientation, and neighboring relationship. Its camera, crop, "
+        "vanishing points, perspective, and source-image pixel coordinates have ZERO authority.\n\n"
         "<COMPOSITING CONTRACT>\n"
         "- Keep the locked plate architecture pixel-position consistent wherever furniture does not occlude it. Do not "
         "pan, orbit, truck, dolly, zoom, crop, mirror, or regenerate the room from the furnished source camera.\n"
@@ -1357,6 +1392,18 @@ def generate_detail_view(
             max_attempts = min(max_attempts, DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS)
         last_angle_qc = None
         angle_retry_feedback = ""
+        angle_pipeline_trace = (
+            {
+                "version": 1,
+                "direct_attempts": 0,
+                "guide_reference_mode": None,
+                "guide_attempts": [],
+                "refurnish_attempts": [],
+                "locked_plate_ignored": False,
+            }
+            if is_internal_angle
+            else None
+        )
 
         def _clear_angle_fallback_artifacts() -> None:
             for artifact_path in list(angle_fallback_artifacts):
@@ -1430,6 +1477,10 @@ def generate_detail_view(
                     result["angle_qc_attempts"] = attempts_used
                     if angle_qc is not None:
                         result["angle_qc"] = angle_qc
+                    if angle_pipeline_trace is not None:
+                        result["angle_pipeline_trace"] = json.loads(
+                            json.dumps(angle_pipeline_trace, ensure_ascii=True)
+                        )
                 return result
             except Exception:
                 for artifact_path in candidate_artifacts | {candidate_path, finalized_path}:
@@ -1496,7 +1547,10 @@ def generate_detail_view(
                 observed_side = str(
                     angle_qc.get("inferred_camera_translation") or ""
                 ).strip().lower()
-                if "camera_direction_mismatch" in warnings and observed_side in {"left", "right"}:
+                if (
+                    {"camera_direction_mismatch", "direction_only_mismatch"} & set(warnings)
+                    and observed_side in {"left", "right"}
+                ):
                     retry_lines.append(
                         f"The previous camera physically moved {observed_side.upper()}. This slot requires the opposite physical "
                         f"camera-body location: {requested_side.upper()}. Do not mirror the image."
@@ -1636,51 +1690,238 @@ def generate_detail_view(
                 feedback += " Observed failure details: " + " | ".join(model_reasons)
             return feedback
 
+        def _discard_fallback_artifacts(artifacts: set[str]) -> None:
+            for artifact_path in artifacts:
+                _remove_file_quietly(artifact_path)
+            angle_fallback_artifacts.difference_update(artifacts)
+
+        def _guide_retry_feedback(guide_qc: dict) -> str:
+            hard_reasons = [
+                str(reason)
+                for reason in guide_qc.get("reject_reasons") or []
+                if str(reason).strip()
+            ]
+            warnings = [
+                str(reason)
+                for reason in guide_qc.get("warnings") or []
+                if str(reason).strip()
+            ]
+            observed_side = str(
+                guide_qc.get("inferred_camera_translation") or ""
+            ).strip().lower()
+            feedback = [
+                "The previous empty camera guide failed strict camera/architecture QC for "
+                + (", ".join([*hard_reasons, *warnings]) or "an unknown guide error")
+                + ".",
+                "Generate a new EMPTY architecture plate from the same source. Do not reuse, crop, zoom, or pixel-align the previous source camera.",
+            ]
+            geometry_failure = any(
+                reason
+                in {
+                    "room_topology_changed",
+                    "architecture_projection_incoherent",
+                    "background_only_rotation",
+                    "large_artificial_panel",
+                    "severe_geometry_warp",
+                }
+                for reason in hard_reasons
+            )
+            static_failure = any(
+                reason in {"same_frame_or_crop", "insufficient_camera_motion"}
+                for reason in hard_reasons
+            )
+            if is_side_angle:
+                requested_side = "left" if focus_side == "left" else "right"
+                foreground_side = "right" if requested_side == "left" else "left"
+                if "camera_direction_mismatch" in warnings and observed_side in {"left", "right"}:
+                    feedback.append(
+                        f"The previous guide moved camera-{observed_side.upper()}, but this slot requires physical camera-"
+                        f"{requested_side.upper()} travel. Do not mirror the image."
+                    )
+                if geometry_failure:
+                    feedback.append(
+                        f"Use a controlled 10-16% room-width camera-{requested_side.upper()} move with 12-22 degrees of yaw."
+                    )
+                elif static_failure:
+                    feedback.append(
+                        f"Use an unmistakable 20-28% room-width camera-{requested_side.upper()} move with 25-35 degrees of yaw."
+                    )
+                else:
+                    feedback.append(
+                        f"Use a clear 16-22% room-width camera-{requested_side.upper()} move with 18-28 degrees of yaw."
+                    )
+                feedback.append(
+                    f"Nearby architecture must shift toward screen-{foreground_side.upper()} relative to distant architecture."
+                )
+            elif geometry_failure:
+                feedback.append(
+                    "Raise the camera 0.9-1.2 m and pitch downward 20-28 degrees while preserving exact room topology."
+                )
+            else:
+                feedback.append(
+                    "Raise the camera 1.2-1.6 m and pitch downward 28-38 degrees so floor and top-plane exposure clearly increase."
+                )
+            return " ".join(feedback)
+
         def _run_two_stage_internal_angle_fallback() -> dict | None:
             nonlocal last_angle_qc, salvage_candidate
 
-            guide_prompt = _build_angle_camera_guide_prompt(style_config)
-            if angle_empty_room_img is not None:
-                guide_content = [
-                    guide_prompt,
-                    "Original Empty Room Architecture Reference (strongest topology evidence):",
-                    angle_empty_room_img,
-                    "Furnished Main Reference (supplemental source viewpoint evidence):",
-                    img,
-                ]
-            else:
-                guide_content = [
-                    guide_prompt,
-                    "Furnished Main Reference (source viewpoint and architecture evidence):",
-                    img,
-                ]
-            guide_response = call_gemini_with_failover(
-                model_name,
-                guide_content,
-                {
-                    "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
-                    "aspect_ratio": requested_ratio,
-                    "image_size": "4K",
-                    "thinking_level": "high",
-                    "include_thoughts": False,
-                },
-                safety_settings,
-                log_tag="Detail.AngleGuide",
+            reference_mode = "empty_room" if angle_empty_room_img is not None else "furnished_main"
+            guide_source_path = (
+                empty_room_path
+                if reference_mode == "empty_room"
+                else original_image_path
             )
-            guide_result = _materialize_fallback_response_image(
-                guide_response,
-                "detail_angle_guide",
-            )
-            if guide_result is None:
-                _clear_angle_fallback_artifacts()
-                return None
-            guide_path, _guide_artifacts = guide_result
+            guide_source_image = angle_empty_room_img if reference_mode == "empty_room" else img
+            guide_retry_feedback = ""
+            selected_guide = None
+            direction_only_guide = None
+            if angle_pipeline_trace is not None:
+                angle_pipeline_trace["guide_reference_mode"] = reference_mode
 
+            for guide_attempt_index in range(DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS):
+                guide_prompt = _build_angle_camera_guide_prompt(
+                    style_config,
+                    reference_mode=reference_mode,
+                )
+                if guide_retry_feedback:
+                    guide_prompt += (
+                        "\n\n<EMPTY-GUIDE QC RETRY FEEDBACK>\n"
+                        + guide_retry_feedback
+                    )
+                guide_content = [
+                    guide_prompt,
+                    (
+                        "Original Empty Room Architecture Reference (SOLE architecture source; starting pose only):"
+                        if reference_mode == "empty_room"
+                        else "Furnished Main Architecture Reference (SOLE source; starting pose only; remove movable contents):"
+                    ),
+                    guide_source_image,
+                ]
+                guide_response = call_gemini_with_failover(
+                    model_name,
+                    guide_content,
+                    {
+                        "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
+                        "aspect_ratio": requested_ratio,
+                        "image_size": "4K",
+                        "thinking_level": "high",
+                        "include_thoughts": False,
+                    },
+                    safety_settings,
+                    log_tag="Detail.AngleGuide",
+                )
+                guide_result = _materialize_fallback_response_image(
+                    guide_response,
+                    f"detail_angle_guide_a{guide_attempt_index + 1}",
+                )
+                if guide_result is None:
+                    if angle_pipeline_trace is not None:
+                        angle_pipeline_trace["guide_attempts"].append(
+                            {
+                                "attempt": guide_attempt_index + 1,
+                                "materialized": False,
+                            }
+                        )
+                    continue
+                guide_path, guide_artifacts = guide_result
+                try:
+                    guide_qc = assess_angle_camera_guide(
+                        guide_source_path,
+                        guide_path,
+                        camera_mode=camera_mode
+                        or ("side_angle" if style_name.startswith("Side Composition") else "overview_angle"),
+                        focus_side=focus_side,
+                        call_analysis_with_failover=call_analysis_with_failover,
+                        analysis_model_name=analysis_model_name,
+                        safe_json_from_model_text=safe_json_from_model_text,
+                        require_model_qc=True,
+                    )
+                except Exception:
+                    _discard_fallback_artifacts(guide_artifacts)
+                    raise
+
+                trace_guide_qc = json.loads(json.dumps(guide_qc, ensure_ascii=True))
+                if angle_pipeline_trace is not None:
+                    angle_pipeline_trace["guide_attempts"].append(
+                        {
+                            "attempt": guide_attempt_index + 1,
+                            "materialized": True,
+                            "qc": trace_guide_qc,
+                        }
+                    )
+                requested_slot_passed = bool(
+                    guide_qc.get(
+                        "passed_for_requested_slot",
+                        guide_qc.get("passed"),
+                    )
+                )
+                print(
+                    "[DetailAngleGuideQC] "
+                    f"unique_id={unique_id!r} index={index} style={style_name!r} "
+                    f"guide_attempt={guide_attempt_index + 1}/{DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS} "
+                    f"reference_mode={reference_mode!r} physical_passed={bool(guide_qc.get('passed'))} "
+                    f"requested_slot_passed={requested_slot_passed} "
+                    f"reasons={json.dumps([*(guide_qc.get('reject_reasons') or []), *(guide_qc.get('warnings') or [])], ensure_ascii=True)} "
+                    f"metrics={json.dumps(guide_qc.get('metrics') or {}, ensure_ascii=True, sort_keys=True)} "
+                    f"model={json.dumps(guide_qc.get('model_payload') or {}, ensure_ascii=True, sort_keys=True)}",
+                    flush=True,
+                )
+                if requested_slot_passed:
+                    selected_guide = {
+                        "path": guide_path,
+                        "artifacts": guide_artifacts,
+                        "qc": guide_qc,
+                        "attempt": guide_attempt_index + 1,
+                    }
+                    if direction_only_guide is not None:
+                        _discard_fallback_artifacts(direction_only_guide["artifacts"])
+                        direction_only_guide = None
+                    break
+
+                guide_retry_feedback = _guide_retry_feedback(guide_qc)
+                if bool(guide_qc.get("direction_only_mismatch")):
+                    motion_score = float(
+                        (guide_qc.get("metrics") or {}).get("camera_motion_score")
+                        or 0.0
+                    )
+                    confidence = float(
+                        (guide_qc.get("metrics") or {}).get("model_confidence")
+                        or 0.0
+                    )
+                    score = (0.75 * motion_score) + (0.25 * confidence)
+                    if direction_only_guide is None or score > direction_only_guide["score"]:
+                        if direction_only_guide is not None:
+                            _discard_fallback_artifacts(direction_only_guide["artifacts"])
+                        direction_only_guide = {
+                            "path": guide_path,
+                            "artifacts": guide_artifacts,
+                            "qc": guide_qc,
+                            "attempt": guide_attempt_index + 1,
+                            "score": score,
+                        }
+                        continue
+                _discard_fallback_artifacts(guide_artifacts)
+
+            if selected_guide is None and direction_only_guide is not None:
+                selected_guide = direction_only_guide
+                direction_only_guide = None
+            if selected_guide is None:
+                return None
+
+            guide_path = selected_guide["path"]
+            guide_qc = selected_guide["qc"]
+            guide_translation = str(
+                guide_qc.get("inferred_camera_translation") or ""
+            ).strip().lower()
             with Image.open(guide_path) as guide_opened:
                 guide_img = ImageOps.exif_transpose(guide_opened).convert("RGB")
             extra_imgs.append(guide_img)
 
-            refurnish_base_prompt = _build_angle_refurnish_prompt(style_config)
+            refurnish_base_prompt = _build_angle_refurnish_prompt(
+                style_config,
+                locked_camera_side=guide_translation,
+            )
             refurnish_retry_feedback = ""
             for fallback_attempt_index in range(DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS):
                 refurnish_prompt = refurnish_base_prompt
@@ -1691,9 +1932,12 @@ def generate_detail_view(
                     )
                 refurnish_content = [
                     refurnish_prompt,
-                    "EMPTY LOCKED CAMERA PLATE (camera and architecture truth):",
+                    "EMPTY LOCKED CAMERA PLATE (absolute camera and architecture truth):",
                     guide_img,
-                    "Furnished Main Reference (furniture identity and world-space scene truth):",
+                    (
+                        "Furnished Main Reference (furniture/world-space inventory ONLY; camera, crop, vanishing points, "
+                        "perspective, and source pixel coordinates have ZERO authority):"
+                    ),
                     img,
                 ]
                 refurnish_response = call_gemini_with_failover(
@@ -1714,6 +1958,15 @@ def generate_detail_view(
                     f"detail_angle_refurnish_a{fallback_attempt_index + 1}",
                 )
                 if materialized is None:
+                    if angle_pipeline_trace is not None:
+                        angle_pipeline_trace["refurnish_attempts"].append(
+                            {
+                                "attempt": fallback_attempt_index + 1,
+                                "materialized": False,
+                                "guide_attempt": selected_guide["attempt"],
+                                "guide_translation": guide_translation or None,
+                            }
+                        )
                     continue
                 candidate_path, candidate_artifacts = materialized
                 try:
@@ -1729,10 +1982,27 @@ def generate_detail_view(
                         require_model_qc=True,
                     )
                 except Exception:
-                    for artifact_path in candidate_artifacts:
-                        _remove_file_quietly(artifact_path)
-                    angle_fallback_artifacts.difference_update(candidate_artifacts)
+                    _discard_fallback_artifacts(candidate_artifacts)
                     raise
+
+                locked_plate_ignored = "same_frame_or_crop" in (
+                    last_angle_qc.get("reject_reasons") or []
+                )
+                if angle_pipeline_trace is not None:
+                    angle_pipeline_trace["locked_plate_ignored"] = bool(
+                        angle_pipeline_trace["locked_plate_ignored"]
+                        or locked_plate_ignored
+                    )
+                    angle_pipeline_trace["refurnish_attempts"].append(
+                        {
+                            "attempt": fallback_attempt_index + 1,
+                            "materialized": True,
+                            "guide_attempt": selected_guide["attempt"],
+                            "guide_translation": guide_translation or None,
+                            "locked_plate_ignored": locked_plate_ignored,
+                            "qc": json.loads(json.dumps(last_angle_qc, ensure_ascii=True)),
+                        }
+                    )
 
                 total_attempts_used = max_attempts + fallback_attempt_index + 1
                 requested_slot_passed = bool(
@@ -1769,8 +2039,11 @@ def generate_detail_view(
                 print(
                     "[DetailAngleQC] "
                     f"pipeline='two_stage' style={style_name!r} camera_mode={camera_mode!r} "
-                    f"focus_side={focus_side!r} attempt={fallback_attempt_index + 1}/"
-                    f"{DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS} "
+                    f"focus_side={focus_side!r} guide_attempt={selected_guide['attempt']} "
+                    f"guide_translation={guide_translation!r} "
+                    f"guide_qc_passed={bool(guide_qc.get('passed'))} "
+                    f"locked_plate_ignored={locked_plate_ignored} "
+                    f"attempt={fallback_attempt_index + 1}/{DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS} "
                     f"physical_passed={bool(last_angle_qc.get('passed'))} requested_slot_passed=False "
                     f"reasons={', '.join(qc_reasons) or 'unknown'} "
                     f"metrics={json.dumps(last_angle_qc.get('metrics') or {}, ensure_ascii=True, sort_keys=True)} "
@@ -1778,6 +2051,11 @@ def generate_detail_view(
                     flush=True,
                 )
                 refurnish_retry_feedback = _refurnish_retry_feedback(last_angle_qc)
+                if locked_plate_ignored:
+                    refurnish_retry_feedback += (
+                        f" The validated locked plate moved camera-{guide_translation.upper() or 'AS REQUESTED'}, but the "
+                        "previous furnished output reverted to the source camera. Image 1 must remain the only camera authority."
+                    )
                 _retain_direction_only_candidate(
                     candidate_path,
                     candidate_artifacts,
@@ -1795,6 +2073,8 @@ def generate_detail_view(
             return None
 
         for attempt_index in range(max_attempts):
+            if angle_pipeline_trace is not None:
+                angle_pipeline_trace["direct_attempts"] = attempt_index + 1
             generation_content = content
             if angle_retry_feedback:
                 generation_content = [
