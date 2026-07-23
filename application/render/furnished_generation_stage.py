@@ -1398,6 +1398,7 @@ def generate_furnished_room(
     enable_scale_check=False,
     max_generation_attempts: int | None = None,
     furnished_scene_reference_path: str | None = None,
+    furniture_atlas_reference_path: str | None = None,
     total_timeout_limit: float,
     detect_windows_present: Callable[[str], bool],
     logger,
@@ -2071,6 +2072,31 @@ def generate_furnished_room(
 
         reference_content = []
 
+        furniture_atlas_reference_attached = bool(
+            furniture_atlas_reference_path
+            and os.path.exists(furniture_atlas_reference_path)
+        )
+        if furniture_atlas_reference_attached:
+            with Image.open(furniture_atlas_reference_path) as atlas_reference_opened:
+                atlas_reference_img = ImageOps.exif_transpose(
+                    atlas_reference_opened
+                ).convert("RGB")
+            try:
+                atlas_reference_img.thumbnail((1536, 1536), Image.Resampling.LANCZOS)
+            except Exception:
+                pass
+            extra_imgs.append(atlas_reference_img)
+            reference_content += [
+                (
+                    "Furniture-Only Object Atlas Reference "
+                    "(MOVABLE OBJECT identity, count, material, color, and source adjacency evidence only; "
+                    "the neutral tiles contain no valid room camera, crop, perspective, vanishing-point, "
+                    "architecture, or source pixel-position authority. Reproject the listed objects into the "
+                    "FINAL locked target canvas and never duplicate fragmented atlas regions)."
+                ),
+                atlas_reference_img,
+            ]
+
         furnished_scene_reference_attached = bool(
             furnished_scene_reference_path
             and os.path.exists(furnished_scene_reference_path)
@@ -2105,7 +2131,7 @@ def generate_furnished_room(
             prompt = prompt_override if prompt_override is not None else base_prompt
             image = room_image_override if room_image_override is not None else room_img
             refs = reference_override if reference_override is not None else reference_content
-            if furnished_scene_reference_attached:
+            if furniture_atlas_reference_attached or furnished_scene_reference_attached:
                 return [
                     prompt,
                     *list(refs or []),

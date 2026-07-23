@@ -1371,6 +1371,89 @@ def test_generate_furnished_room_keeps_full_furnished_scene_as_inventory_only_re
         output_path.unlink(missing_ok=True)
 
 
+def test_generate_furnished_room_uses_camera_neutral_atlas_before_final_locked_canvas(
+    tmp_path,
+    monkeypatch,
+):
+    room_path = tmp_path / "locked-guide.png"
+    atlas_path = tmp_path / "furniture-atlas.jpg"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    Image.new("RGB", (900, 600), color=(238, 236, 232)).save(
+        atlas_path,
+        format="JPEG",
+    )
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 5350.0)
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["content"] = content
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Reproject the exact furniture onto the locked camera plate."},
+        None,
+        "locked-atlas-reference",
+        furniture_specs_json=None,
+        room_dimensions=None,
+        room_dims_parsed=None,
+        room_planes=None,
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=5350.0,
+        enable_scale_check=False,
+        max_generation_attempts=1,
+        furnished_scene_reference_path=None,
+        furniture_atlas_reference_path=str(atlas_path),
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: set(),
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (
+            True,
+            [],
+            {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}},
+        ),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        content = captured["content"]
+        atlas_label_index = next(
+            index
+            for index, part in enumerate(content)
+            if isinstance(part, str)
+            and part.startswith("Furniture-Only Object Atlas Reference")
+        )
+        assert not any(
+            isinstance(part, str) and part.startswith("Furnished Scene Reference")
+            for part in content
+        )
+        assert "no valid room camera" in content[atlas_label_index]
+        assert "never duplicate fragmented atlas regions" in content[atlas_label_index]
+        assert isinstance(content[atlas_label_index + 1], Image.Image)
+        assert atlas_label_index < len(content) - 2
+        assert content[-2].startswith("FINAL Locked Empty-Room Target Canvas")
+        assert isinstance(content[-1], Image.Image)
+        assert content[-1].size == (160, 90)
+        assert output_path.exists()
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
 def test_generate_furnished_room_falls_back_to_ref_images_when_json_items_are_unusable(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))

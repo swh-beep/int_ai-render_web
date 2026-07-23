@@ -22,6 +22,9 @@ from application.details.detail_generation_stage import (
     DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC,
     generate_detail_view as generate_detail_view_stage,
 )
+from application.details.furniture_reference_stage import (
+    build_furniture_only_reference_atlas,
+)
 from application.details.detail_style_stage import construct_dynamic_styles as construct_dynamic_styles_stage
 from application import job_entrypoints as job_entrypoints_module
 from application.job_entrypoints import JobEntrypointServices
@@ -1710,6 +1713,7 @@ def generate_furnished_room(
     enable_scale_check=False,
     max_generation_attempts=None,
     furnished_scene_reference_path=None,
+    furniture_atlas_reference_path=None,
     total_timeout_limit_override=None,
 ):
     return generate_furnished_room_stage(
@@ -1737,6 +1741,7 @@ def generate_furnished_room(
         enable_scale_check=enable_scale_check,
         max_generation_attempts=max_generation_attempts,
         furnished_scene_reference_path=furnished_scene_reference_path,
+        furniture_atlas_reference_path=furniture_atlas_reference_path,
         total_timeout_limit=(
             max(1.0, float(total_timeout_limit_override))
             if total_timeout_limit_override is not None
@@ -1814,6 +1819,7 @@ def _generate_locked_angle_furnishing(
     *,
     guide_path,
     furnished_main_path,
+    empty_room_path,
     style_prompt,
     unique_id,
     furniture_data=None,
@@ -1839,44 +1845,79 @@ def _generate_locked_angle_furnishing(
         else None
     )
     scene_contract = scene_contract if isinstance(scene_contract, dict) else None
-    return generate_furnished_room(
-        guide_path,
-        {
-            "prompt": (
-                f"{style_prompt}\n\n"
-                "Use the locked empty-room guide as the only camera and architecture canvas. "
-                "Restore every movable object visible in the furnished scene reference with the same identity, count, "
-                "material, color, physical orientation, relative arrangement, and world-space footprint. "
-                "The furnished scene reference has zero camera or pixel-position authority."
-            )
-        },
-        None,
-        unique_id,
-        furniture_specs_json=furniture_specs_json,
-        room_dimensions=room_dimensions,
-        room_dims_parsed=room_dims_parsed,
-        geometry_contract=geometry_contract if isinstance(geometry_contract, dict) else None,
-        scene_contract=scene_contract,
-        placement_plan=placement_plan if isinstance(placement_plan, dict) else None,
-        room_planes=(scene_contract or {}).get("room_planes"),
-        windows_present=(scene_contract or {}).get("windows_present"),
-        room_analysis_text=(scene_contract or {}).get("room_analysis_text"),
-        start_time=time.time(),
-        enable_scale_check=False,
-        max_generation_attempts=1,
-        furnished_scene_reference_path=furnished_main_path,
-        total_timeout_limit_override=(
-            max(
-                1.0,
-                min(
-                    float(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC),
-                    float(timeout_sec),
-                ),
-            )
-            if timeout_sec is not None
-            else DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC
-        ),
+    safe_unique_id = _safe_key_token(unique_id, fallback="angle", max_len=80)
+    furniture_atlas_path = os.path.join(
+        "outputs",
+        f"detail_furniture_atlas_{safe_unique_id}.jpg",
     )
+    built_atlas_path = build_furniture_only_reference_atlas(
+        furnished_main_path,
+        empty_room_path,
+        furniture_atlas_path,
+    )
+    if not built_atlas_path:
+        return {
+            "path": None,
+            "inventory_reference_mode": "furniture_only_atlas_unavailable",
+        }
+
+    try:
+        result = generate_furnished_room(
+            guide_path,
+            {
+                "prompt": (
+                    f"{style_prompt}\n\n"
+                    "Use the locked empty-room guide as the only camera and architecture canvas. "
+                    "Restore every movable object represented by the structured inventory and furniture-only atlas "
+                    "with the same identity, count, material, color, physical orientation, relative arrangement, and "
+                    "world-space footprint. The atlas contains isolated appearance evidence only and has zero camera, "
+                    "architecture, crop, perspective, or source pixel-position authority. Never reconstruct the source "
+                    "main camera from the atlas."
+                )
+            },
+            None,
+            unique_id,
+            furniture_specs_json=furniture_specs_json,
+            room_dimensions=room_dimensions,
+            room_dims_parsed=room_dims_parsed,
+            geometry_contract=geometry_contract if isinstance(geometry_contract, dict) else None,
+            scene_contract=scene_contract,
+            placement_plan=placement_plan if isinstance(placement_plan, dict) else None,
+            room_planes=(scene_contract or {}).get("room_planes"),
+            windows_present=(scene_contract or {}).get("windows_present"),
+            room_analysis_text=(scene_contract or {}).get("room_analysis_text"),
+            start_time=time.time(),
+            enable_scale_check=False,
+            max_generation_attempts=1,
+            furnished_scene_reference_path=None,
+            furniture_atlas_reference_path=built_atlas_path,
+            total_timeout_limit_override=(
+                max(
+                    1.0,
+                    min(
+                        float(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC),
+                        float(timeout_sec),
+                    ),
+                )
+                if timeout_sec is not None
+                else DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC
+            ),
+        )
+        if isinstance(result, dict):
+            result = dict(result)
+            result["inventory_reference_mode"] = "furniture_only_atlas"
+            return result
+        if result:
+            return {
+                "path": result,
+                "inventory_reference_mode": "furniture_only_atlas",
+            }
+        return result
+    finally:
+        try:
+            os.remove(built_atlas_path)
+        except OSError:
+            pass
 
 
 def call_magnific_api(image_path, unique_id, start_time):

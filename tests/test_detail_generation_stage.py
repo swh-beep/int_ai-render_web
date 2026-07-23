@@ -1160,7 +1160,11 @@ def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_valida
     def _refurnish_locked_angle(**kwargs):
         stage2_calls.append(dict(kwargs))
         stage2_path.write_bytes(_landscape_png_bytes())
-        return {"path": str(stage2_path), "scale_check_failed": False}
+        return {
+            "path": str(stage2_path),
+            "scale_check_failed": False,
+            "inventory_reference_mode": "furniture_only_atlas",
+        }
 
     contracts = {
         "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
@@ -1204,6 +1208,7 @@ def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_valida
         assert len(stage2_calls) == 1
         stage2_call = stage2_calls[0]
         assert stage2_call["furnished_main_path"] == str(source_path)
+        assert stage2_call["empty_room_path"] == str(empty_room_path)
         assert stage2_call["guide_path"] != str(source_path)
         assert Path(stage2_call["guide_path"]).name.startswith("detail_angle_guide_")
         assert stage2_call["furniture_data"][0]["target_key"] == "sofa-1"
@@ -1212,7 +1217,14 @@ def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_valida
         assert stage2_call["timeout_sec"] == 180.0
         assert result["generation_mode"] == "angle_generation_two_stage"
         assert result["angle_pipeline_trace"]["refurnish_backend"] == "main_stage2_locked_canvas"
+        assert result["angle_pipeline_trace"]["inventory_reference_mode"] == "furniture_only_atlas"
         assert result["angle_pipeline_trace"]["refurnish_attempts"][0]["backend"] == "main_stage2_locked_canvas"
+        assert (
+            result["angle_pipeline_trace"]["refurnish_attempts"][0][
+                "inventory_reference_mode"
+            ]
+            == "furniture_only_atlas"
+        )
         assert result["angle_pipeline_trace"]["locked_plate_ignored"] is False
         assert output_path == stage2_path
         assert output_path.exists()

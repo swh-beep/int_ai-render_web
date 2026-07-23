@@ -1395,12 +1395,13 @@ def generate_detail_view(
         angle_retry_feedback = ""
         angle_pipeline_trace = (
             {
-                "version": 1,
+                "version": 2,
                 "direct_attempts": 0,
                 "guide_reference_mode": None,
                 "guide_attempts": [],
                 "refurnish_attempts": [],
                 "refurnish_backend": None,
+                "inventory_reference_mode": None,
                 "locked_plate_ignored": False,
             }
             if is_internal_angle
@@ -1939,10 +1940,12 @@ def generate_detail_view(
                 )
                 if angle_pipeline_trace is not None:
                     angle_pipeline_trace["refurnish_backend"] = refurnish_backend
+                inventory_reference_mode = None
                 if refurnish_locked_angle is not None:
                     stage2_result = refurnish_locked_angle(
                         guide_path=guide_path,
                         furnished_main_path=original_image_path,
+                        empty_room_path=empty_room_path,
                         style_prompt=refurnish_prompt,
                         unique_id=(
                             f"{unique_id}_detail_angle_{index}_"
@@ -1961,6 +1964,17 @@ def generate_detail_view(
                             ),
                         ),
                     )
+                    if isinstance(stage2_result, dict):
+                        inventory_reference_mode = str(
+                            stage2_result.get("inventory_reference_mode") or ""
+                        ).strip() or None
+                    if (
+                        angle_pipeline_trace is not None
+                        and inventory_reference_mode
+                    ):
+                        angle_pipeline_trace["inventory_reference_mode"] = (
+                            inventory_reference_mode
+                        )
                     stage2_path = (
                         stage2_result.get("path")
                         if isinstance(stage2_result, dict)
@@ -2024,6 +2038,7 @@ def generate_detail_view(
                                 "guide_attempt": selected_guide["attempt"],
                                 "guide_translation": guide_translation or None,
                                 "backend": refurnish_backend,
+                                "inventory_reference_mode": inventory_reference_mode,
                             }
                         )
                     continue
@@ -2059,6 +2074,7 @@ def generate_detail_view(
                             "guide_attempt": selected_guide["attempt"],
                             "guide_translation": guide_translation or None,
                             "backend": refurnish_backend,
+                            "inventory_reference_mode": inventory_reference_mode,
                             "locked_plate_ignored": locked_plate_ignored,
                             "qc": json.loads(json.dumps(last_angle_qc, ensure_ascii=True)),
                         }
@@ -2103,6 +2119,7 @@ def generate_detail_view(
                     f"guide_translation={guide_translation!r} "
                     f"guide_qc_passed={bool(guide_qc.get('passed'))} "
                     f"refurnish_backend={refurnish_backend!r} "
+                    f"inventory_reference_mode={inventory_reference_mode!r} "
                     f"locked_plate_ignored={locked_plate_ignored} "
                     f"attempt={fallback_attempt_index + 1}/{DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS} "
                     f"physical_passed={bool(last_angle_qc.get('passed'))} requested_slot_passed=False "
