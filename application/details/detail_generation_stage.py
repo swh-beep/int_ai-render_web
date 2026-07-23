@@ -1238,11 +1238,10 @@ def generate_detail_view(
                     angle_empty_room_img = ImageOps.exif_transpose(empty_opened).convert("RGB")
                     angle_empty_room_img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
                 extra_imgs.append(angle_empty_room_img)
-                if is_overview_angle:
-                    content += [
-                        "Empty Room Architecture Reference (same room topology before furnishing):",
-                        angle_empty_room_img,
-                    ]
+                content += [
+                    "Empty Room Architecture Reference (same room topology before furnishing; architecture only, not camera framing):",
+                    angle_empty_room_img,
+                ]
             except Exception:
                 angle_empty_room_img = None
         if target_crop is not None:

@@ -443,7 +443,10 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
         assert "SOURCE-CONSTRAINED REFRAME" not in captured["prompt"]
         assert "facing direction from the main render" not in captured["prompt"]
         assert "PRIMARY TARGET IN-ROOM CROP" not in captured["content"]
-        assert "Empty Room Architecture Reference (same room topology before furnishing):" in captured["content"]
+        assert (
+            "Empty Room Architecture Reference (same room topology before furnishing; architecture only, not camera framing):"
+            in captured["content"]
+        )
         assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
@@ -568,8 +571,11 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             in captured["content"]
         )
         assert "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):" not in captured["content"]
-        assert "Empty Room Architecture Reference (same room topology before furnishing):" not in captured["content"]
-        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 1
+        assert (
+            "Empty Room Architecture Reference (same room topology before furnishing; architecture only, not camera framing):"
+            in captured["content"]
+        )
+        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
         assert result["aspect_ratio"] == "16:9"
         assert result["camera_travel_side"] == "right"
         assert correction_calls == [

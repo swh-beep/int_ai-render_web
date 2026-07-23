@@ -1377,9 +1377,14 @@ def test_generate_furnished_room_uses_camera_neutral_atlas_before_final_locked_c
 ):
     room_path = tmp_path / "locked-guide.png"
     atlas_path = tmp_path / "furniture-atlas.jpg"
+    furnished_scene_path = tmp_path / "furnished-scene.jpg"
     room_path.write_bytes(_make_png_bytes(160, 90))
     Image.new("RGB", (900, 600), color=(238, 236, 232)).save(
         atlas_path,
+        format="JPEG",
+    )
+    Image.new("RGB", (1600, 900), color=(224, 218, 210)).save(
+        furnished_scene_path,
         format="JPEG",
     )
 
@@ -1406,7 +1411,7 @@ def test_generate_furnished_room_uses_camera_neutral_atlas_before_final_locked_c
         start_time=5350.0,
         enable_scale_check=False,
         max_generation_attempts=1,
-        furnished_scene_reference_path=None,
+        furnished_scene_reference_path=str(furnished_scene_path),
         furniture_atlas_reference_path=str(atlas_path),
         total_timeout_limit=60,
         detect_windows_present=lambda path: False,
@@ -1438,14 +1443,17 @@ def test_generate_furnished_room_uses_camera_neutral_atlas_before_final_locked_c
             if isinstance(part, str)
             and part.startswith("Furniture-Only Object Atlas Reference")
         )
-        assert not any(
-            isinstance(part, str) and part.startswith("Furnished Scene Reference")
-            for part in content
+        scene_label_index = next(
+            index
+            for index, part in enumerate(content)
+            if isinstance(part, str) and part.startswith("Furnished Scene Reference")
         )
         assert "no valid room camera" in content[atlas_label_index]
         assert "never duplicate fragmented atlas regions" in content[atlas_label_index]
         assert isinstance(content[atlas_label_index + 1], Image.Image)
-        assert atlas_label_index < len(content) - 2
+        assert "ZERO authority over camera" in content[scene_label_index]
+        assert "world-space footprint" in content[scene_label_index]
+        assert atlas_label_index < scene_label_index < len(content) - 2
         assert content[-2].startswith("FINAL Locked Empty-Room Target Canvas")
         assert isinstance(content[-1], Image.Image)
         assert content[-1].size == (160, 90)

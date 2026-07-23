@@ -105,7 +105,10 @@ def test_locked_angle_stage2_uses_detail_timeout_budget(tmp_path, monkeypatch):
         "product_cutout_reference_count": 1,
     }
     assert captured["args"][0] == "outputs/validated-guide.png"
-    assert captured["kwargs"]["furnished_scene_reference_path"] is None
+    assert (
+        captured["kwargs"]["furnished_scene_reference_path"]
+        == "outputs/furnished-main.png"
+    )
     assert captured["kwargs"]["furniture_atlas_reference_path"] == str(atlas_paths[0])
     assert result["inventory_reference_mode"] == "detected_object_atlas"
     assert result["product_cutout_reference_count"] == 1

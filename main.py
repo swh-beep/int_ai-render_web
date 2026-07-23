@@ -2117,11 +2117,12 @@ def _generate_locked_angle_furnishing(
                 "prompt": (
                     f"{style_prompt}\n\n"
                     "Use the locked empty-room guide as the only camera and architecture canvas. "
-                    "Restore every movable object represented by the structured inventory and furniture-only atlas "
-                    "with the same identity, count, material, color, physical orientation, relative arrangement, and "
-                    "world-space footprint. The atlas contains isolated appearance evidence only and has zero camera, "
-                    "architecture, crop, perspective, or source pixel-position authority. Never reconstruct the source "
-                    "main camera from the atlas."
+                    "Use the furniture-only atlas as exact movable-object appearance evidence, and use the furnished "
+                    "scene reference only for movable-object identity, count, physical orientation, relative "
+                    "arrangement, adjacency, and world-space footprint. Restore every movable object with the same "
+                    "identity, count, material, color, and scene relationships. The atlas and furnished scene reference "
+                    "have zero camera, architecture, crop, perspective, vanishing-point, or source pixel-position "
+                    "authority. Never reconstruct the source main camera from either reference."
                 )
             },
             None,
@@ -2140,7 +2141,7 @@ def _generate_locked_angle_furnishing(
             start_time=locked_furnishing_started_at,
             enable_scale_check=False,
             max_generation_attempts=1,
-            furnished_scene_reference_path=None,
+            furnished_scene_reference_path=furnished_main_path,
             furniture_atlas_reference_path=built_atlas_path,
             total_timeout_limit_override=(
                 max(
