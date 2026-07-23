@@ -48,6 +48,63 @@ def _is_angle_style(style_payload: dict) -> bool:
     )
 
 
+def _reconcile_internal_side_angle_results(generated_paths: list[dict]) -> None:
+    side_rows = [
+        row
+        for row in generated_paths or []
+        if isinstance(row, dict)
+        and str(row.get("camera_mode") or "").strip().lower() == "side_angle"
+        and str(row.get("focus_side") or "").strip().lower() in {"left", "right"}
+    ]
+    if len(side_rows) != 2:
+        return
+
+    requested_slots = {
+        str(row.get("focus_side") or "").strip().lower(): {
+            key: row.get(key)
+            for key in (
+                "index",
+                "style_name",
+                "style_ratio",
+                "style_target_key",
+                "style_target_label",
+            )
+        }
+        for row in side_rows
+    }
+    if set(requested_slots) != {"left", "right"}:
+        return
+
+    actual_sides = [
+        str(row.get("camera_travel_side") or "").strip().lower()
+        for row in side_rows
+    ]
+    if sorted(actual_sides) != ["left", "right"]:
+        return
+
+    rows_by_actual_side = {
+        str(row.get("camera_travel_side") or "").strip().lower(): row
+        for row in side_rows
+    }
+
+    for actual_side, row in rows_by_actual_side.items():
+        original_requested_side = str(row.get("focus_side") or "").strip().lower()
+        target_slot = requested_slots[actual_side]
+        for metadata_key, metadata_value in target_slot.items():
+            row[metadata_key] = metadata_value
+        row["requested_focus_side"] = original_requested_side
+        row["focus_side"] = actual_side
+        row["camera_direction_matches"] = True
+        if original_requested_side != actual_side:
+            row["angle_direction_reconciled"] = True
+        angle_qc = row.get("angle_qc")
+        if isinstance(angle_qc, dict):
+            reconciled_qc = dict(angle_qc)
+            reconciled_qc["assigned_focus_side"] = actual_side
+            reconciled_qc["camera_direction_matches_after_reconcile"] = True
+            row["angle_qc"] = reconciled_qc
+
+
 def _detail_generation_max_workers(
     styles: list[dict] | None,
     *,
@@ -582,7 +639,11 @@ def run_generate_details_job(
                         "generation_mode": result.get("generation_mode"),
                         "camera_mode": result.get("camera_mode"),
                         "focus_side": result.get("focus_side"),
+                        "requested_focus_side": result.get("requested_focus_side"),
                         "camera_travel_side": result.get("camera_travel_side"),
+                        "camera_direction_matches": result.get("camera_direction_matches"),
+                        "angle_direction_fallback": result.get("angle_direction_fallback"),
+                        "angle_direction_reconciled": result.get("angle_direction_reconciled"),
                         "angle_qc_attempts": result.get("angle_qc_attempts"),
                         "angle_qc": result.get("angle_qc"),
                     }
@@ -687,6 +748,9 @@ def run_generate_details_job(
                     result = future.result()
                     style_payload = dynamic_styles[index] if index < len(dynamic_styles) else {}
                     _append_detail_result(index, style_payload, result)
+
+        if aud == "internal":
+            _reconcile_internal_side_angle_results(generated_paths)
 
         print(f"=== [Detail View] complete: {len(generated_paths)} generated ===", flush=True)
         if not generated_paths:

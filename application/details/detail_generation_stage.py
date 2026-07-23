@@ -11,7 +11,7 @@ from application.render.white_balance_correction import apply_reference_relative
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
-DETAIL_ANGLE_QC_MAX_ATTEMPTS = max(1, int(os.getenv("DETAIL_ANGLE_QC_MAX_ATTEMPTS", "3") or "3"))
+DETAIL_ANGLE_QC_MAX_ATTEMPTS = max(1, int(os.getenv("DETAIL_ANGLE_QC_MAX_ATTEMPTS", "5") or "5"))
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "1280") or "1280"))
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "1600") or "1600"))
 
@@ -589,10 +589,20 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
 
     if is_side:
         side_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "requested"
+        foreground_parallax_side = (
+            "right"
+            if side_text == "left"
+            else "left"
+            if side_text == "right"
+            else "the opposite screen direction"
+        )
         return (
             f"Using the provided image as the source room, create a genuine nearby {side_text}-side camera viewpoint. "
             f"Translate the camera toward the {side_text} side of the source viewpoint and yaw gently back into the room. "
-            "Use a clear 12-20% room-width lateral move plus a 15-30 degree yaw so the result has real parallax, changed occlusions, and newly visible side planes. "
+            f"{side_text.upper()} means the physical camera-body location, not which side of the room dominates the frame. "
+            f"Use a clear 12-18% room-width lateral move plus a 15-25 degree yaw; nearby furniture should shift toward "
+            f"screen-{foreground_parallax_side.upper()} relative to the far background. "
+            "The result must have real parallax, changed occlusions, and newly visible side planes. "
             "This must be a new side camera viewpoint, not a crop, zoom, or source reframe. "
             f"{_NO_FAKE_FOREGROUND_GUARD}"
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
@@ -747,12 +757,21 @@ def generate_detail_view(
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
         elif is_side_angle:
             camera_travel_side = "left" if focus_side == "left" else "right" if focus_side == "right" else "requested"
+            foreground_parallax_side = (
+                "right"
+                if camera_travel_side == "left"
+                else "left"
+                if camera_travel_side == "right"
+                else "the opposite screen direction"
+            )
             scene_lock_block = (
                 "<SCENE LOCK: SAME ROOM, REAL SIDE CAMERA MOVE>\n"
                 "Create a genuine nearby side-angle camera view of the exact same finished room.\n"
                 f"Move the camera toward the {camera_travel_side} side of the source viewpoint and yaw gently back into the room, "
                 f"so the {camera_travel_side} side viewpoint is unmistakable.\n"
-                "Use a clear lateral translation of roughly 12-20% of the visible room width plus a 15-30 degree yaw.\n"
+                "Camera direction means the physical camera-body location, not which side of the room dominates the image.\n"
+                f"Use a clear lateral translation of roughly 12-18% of the visible room width plus a 15-25 degree yaw. "
+                f"Nearby furniture should shift toward screen-{foreground_parallax_side} relative to the far background.\n"
                 "This must be a new side camera viewpoint, not a crop, zoom, or source reframe.\n"
                 "Priority order: (1) unmistakable real side-camera parallax with changed projected positions, side planes, and occlusions, "
                 "(2) same physical room topology, (3) same furniture identities and world-space placement.\n"
@@ -762,6 +781,7 @@ def generate_detail_view(
             camera_lock_line = (
                 "4. **REAL SIDE CAMERA MOVE REQUIRED:** Use a nearby lateral camera translation plus modest yaw. "
                 f"The camera travels toward the {camera_travel_side.upper()} side of the source viewpoint and looks back into the room. "
+                f"Foreground objects therefore move toward screen-{foreground_parallax_side.upper()} relative to distant architecture. "
                 "Keep object world-space placement, physical orientation, footprint, and room geometry fixed, while allowing the screen projection, visible sides, occlusions, and perspective to change naturally. "
                 "Do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
             )
@@ -1221,6 +1241,170 @@ def generate_detail_view(
         max_attempts = DETAIL_ANGLE_QC_MAX_ATTEMPTS if is_angle_style and call_analysis_with_failover else 1
         last_angle_qc = None
         angle_retry_feedback = ""
+        salvage_candidate = None
+
+        def _finalize_candidate_result(
+            candidate_path: str,
+            candidate_artifacts: set[str],
+            *,
+            angle_qc: dict | None,
+            attempts_used: int,
+            direction_fallback: bool = False,
+        ) -> dict:
+            finalized_path = candidate_path
+            if is_angle_style:
+                angle_stage = (
+                    "detail_side_angle"
+                    if camera_mode == "side_angle" or style_name.startswith("Side Composition")
+                    else "detail_high_angle"
+                )
+                corrected_path = apply_reference_relative_white_balance(
+                    finalized_path,
+                    reference_path=original_image_path,
+                    stage_name=angle_stage,
+                ).path
+                if corrected_path != finalized_path:
+                    candidate_artifacts.add(corrected_path)
+                    _remove_file_quietly(finalized_path)
+                    finalized_path = corrected_path
+
+            for artifact_path in candidate_artifacts - {finalized_path}:
+                _remove_file_quietly(artifact_path)
+
+            result = {
+                "path": finalized_path,
+                "style_name": style_config.get("name"),
+                "aspect_ratio": requested_ratio,
+                "cutout_ref_count": cutout_ref_count,
+                "cutout_ref_labels": cutout_labels,
+                "generation_mode": "angle_generation" if is_angle_style else "model_regeneration",
+            }
+            if is_angle_style:
+                result["camera_mode"] = camera_mode or (
+                    "side_angle" if style_name.startswith("Side Composition") else "overview_angle"
+                )
+                if focus_side:
+                    result["focus_side"] = focus_side
+                    result["requested_focus_side"] = focus_side
+                if is_side_angle:
+                    inferred_side = str(
+                        (angle_qc or {}).get("inferred_camera_translation") or ""
+                    ).strip().lower()
+                    result["camera_travel_side"] = (
+                        inferred_side
+                        if inferred_side in {"left", "right"}
+                        else "left"
+                        if focus_side == "left"
+                        else "right"
+                        if focus_side == "right"
+                        else "requested"
+                    )
+                    result["camera_direction_matches"] = (angle_qc or {}).get(
+                        "camera_direction_matches"
+                    )
+                    if direction_fallback:
+                        result["angle_direction_fallback"] = True
+                result["angle_qc_attempts"] = attempts_used
+                if angle_qc is not None:
+                    result["angle_qc"] = angle_qc
+            return result
+
+        def _retry_feedback_for_qc(angle_qc: dict) -> str:
+            hard_reasons = [
+                str(reason)
+                for reason in angle_qc.get("reject_reasons") or []
+                if str(reason).strip()
+            ]
+            warnings = [
+                str(reason)
+                for reason in angle_qc.get("warnings") or []
+                if str(reason).strip()
+            ]
+            all_reasons = hard_reasons + warnings
+            retry_lines = [
+                "The previous angle candidate failed the requested slot QC for: "
+                + (", ".join(all_reasons) if all_reasons else "unknown angle mismatch")
+                + ".",
+                "Reconstruct the next candidate from a genuinely different camera pose. Do not return another pixel-aligned copy of the source frame.",
+            ]
+            model_reasons = [
+                str(reason).strip()[:220]
+                for reason in ((angle_qc.get("model_payload") or {}).get("reasons") or [])
+                if str(reason).strip()
+            ][:3]
+            if model_reasons:
+                retry_lines.append("Observed failure details: " + " | ".join(model_reasons))
+
+            geometry_failure = any(
+                reason
+                in {
+                    "room_topology_changed",
+                    "furniture_projection_incoherent",
+                    "severe_geometry_warp",
+                    "background_only_rotation",
+                    "large_artificial_panel",
+                }
+                for reason in hard_reasons
+            )
+            static_failure = any(
+                reason in {"same_frame_or_crop", "insufficient_camera_motion"}
+                for reason in hard_reasons
+            )
+
+            if is_side_angle:
+                requested_side = (
+                    "left"
+                    if focus_side == "left"
+                    else "right"
+                    if focus_side == "right"
+                    else "requested"
+                )
+                foreground_side = (
+                    "right"
+                    if requested_side == "left"
+                    else "left"
+                    if requested_side == "right"
+                    else "the opposite screen direction"
+                )
+                observed_side = str(
+                    angle_qc.get("inferred_camera_translation") or ""
+                ).strip().lower()
+                if "camera_direction_mismatch" in warnings and observed_side in {"left", "right"}:
+                    retry_lines.append(
+                        f"The previous camera physically moved {observed_side.upper()}. This slot requires the opposite physical "
+                        f"camera-body location: {requested_side.upper()}. Do not mirror the image."
+                    )
+                if geometry_failure:
+                    retry_lines.append(
+                        f"Use a controlled 10-16% room-width move toward camera-{requested_side.upper()} with a 12-22 degree yaw; "
+                        "preserve architecture and furniture before making the move more dramatic."
+                    )
+                elif static_failure:
+                    retry_lines.append(
+                        f"Use an unmistakable 18-24% room-width move toward camera-{requested_side.upper()} with a 20-30 degree yaw."
+                    )
+                else:
+                    retry_lines.append(
+                        f"Use a clear 14-20% room-width move toward camera-{requested_side.upper()} with a 15-25 degree yaw."
+                    )
+                retry_lines.append(
+                    f"With camera-{requested_side.upper()} travel, nearby furniture must shift toward screen-{foreground_side.upper()} "
+                    "relative to the far background; that parallax sign is mandatory."
+                )
+            elif geometry_failure:
+                retry_lines.append(
+                    "Raise the camera about 0.9-1.2 m and pitch downward 20-28 degrees while preserving architecture and furniture exactly."
+                )
+            else:
+                retry_lines.append(
+                    "Raise the camera about 1.2-1.6 m and pitch downward 28-38 degrees so top-plane and floor exposure visibly increase."
+                )
+
+            retry_lines.append(
+                "Keep furniture count, identity, physical footprint, room topology, and architecture fixed; do not mirror, duplicate, relocate, or warp them."
+            )
+            return " ".join(retry_lines)
+
         for attempt_index in range(max_attempts):
             generation_content = content
             if angle_retry_feedback:
@@ -1247,7 +1431,9 @@ def generate_detail_view(
                 if hasattr(part, "inline_data"):
                     timestamp = int(time.time())
                     safe_style_name = "".join([c for c in style_config["name"] if c.isalnum()])[:20]
-                    filename = f"detail_{timestamp}_{unique_id}_{index}_{safe_style_name}.png"
+                    filename = (
+                        f"detail_{timestamp}_{unique_id}_{index}_a{attempt_index + 1}_{safe_style_name}.png"
+                    )
                     path = os.path.join("outputs", filename)
                     candidate_artifacts = {path}
                     with open(path, "wb") as file_obj:
@@ -1264,21 +1450,6 @@ def generate_detail_view(
                         candidate_artifacts.add(normalized_path)
                         _remove_file_quietly(path)
                         path = normalized_path
-                    if is_angle_style:
-                        angle_stage = (
-                            "detail_side_angle"
-                            if camera_mode == "side_angle" or style_name.startswith("Side Composition")
-                            else "detail_high_angle"
-                        )
-                        corrected_path = apply_reference_relative_white_balance(
-                            path,
-                            reference_path=original_image_path,
-                            stage_name=angle_stage,
-                        ).path
-                        if corrected_path != path:
-                            candidate_artifacts.add(corrected_path)
-                            _remove_file_quietly(path)
-                            path = corrected_path
                     if is_angle_style and call_analysis_with_failover:
                         try:
                             last_angle_qc = assess_angle_candidate(
@@ -1295,71 +1466,85 @@ def generate_detail_view(
                             for artifact_path in candidate_artifacts:
                                 _remove_file_quietly(artifact_path)
                             raise
-                        if not last_angle_qc.get("passed"):
-                            reasons = ", ".join(str(reason) for reason in last_angle_qc.get("reject_reasons") or [])
+                        requested_slot_passed = bool(
+                            last_angle_qc.get(
+                                "passed_for_requested_slot",
+                                last_angle_qc.get("passed"),
+                            )
+                        )
+                        if not requested_slot_passed:
+                            qc_reasons = [
+                                *[
+                                    str(reason)
+                                    for reason in last_angle_qc.get("reject_reasons") or []
+                                ],
+                                *[
+                                    str(reason)
+                                    for reason in last_angle_qc.get("warnings") or []
+                                ],
+                            ]
+                            reasons = ", ".join(qc_reasons)
                             print(
                                 "[DetailAngleQC] "
                                 f"style={style_name!r} camera_mode={camera_mode!r} focus_side={focus_side!r} "
-                                f"attempt={attempt_index + 1}/{max_attempts} passed=False "
+                                f"attempt={attempt_index + 1}/{max_attempts} "
+                                f"physical_passed={bool(last_angle_qc.get('passed'))} requested_slot_passed=False "
                                 f"reasons={reasons or 'unknown'} "
                                 f"metrics={json.dumps(last_angle_qc.get('metrics') or {}, ensure_ascii=True, sort_keys=True)} "
                                 f"model={json.dumps(last_angle_qc.get('model_payload') or {}, ensure_ascii=True, sort_keys=True)}",
                                 flush=True,
                             )
-                            if reasons:
-                                retry_lines = [
-                                    f"The previous angle candidate failed QC for: {reasons}.",
-                                    "Reconstruct the next candidate from a genuinely different camera pose. Do not return another pixel-aligned copy of the source frame.",
-                                ]
-                                if is_side_angle:
-                                    camera_travel_side = (
-                                        "left"
-                                        if focus_side == "left"
-                                        else "right"
-                                        if focus_side == "right"
-                                        else "requested"
-                                    )
-                                    retry_lines.append(
-                                        f"For this retry, move the camera to the {camera_travel_side.upper()} side of the source viewpoint "
-                                        "and yaw back into the room with an unmistakable 18-28% room-width translation."
-                                    )
-                                else:
-                                    retry_lines.append(
-                                        "For this retry, raise the camera about 1.0-1.4 m and pitch downward 22-32 degrees so top-plane and floor exposure visibly increase."
-                                    )
-                                retry_lines.append(
-                                    "Keep furniture count, identity, physical footprint, room topology, and architecture fixed; do not mirror, duplicate, relocate, or warp them."
+                            angle_retry_feedback = _retry_feedback_for_qc(last_angle_qc)
+
+                            if bool(last_angle_qc.get("direction_only_mismatch")):
+                                motion_score = float(
+                                    (last_angle_qc.get("metrics") or {}).get("camera_motion_score")
+                                    or 0.0
                                 )
-                                angle_retry_feedback = " ".join(retry_lines)
-                            for artifact_path in candidate_artifacts:
-                                _remove_file_quietly(artifact_path)
+                                confidence = float(
+                                    (last_angle_qc.get("metrics") or {}).get("model_confidence")
+                                    or 0.0
+                                )
+                                salvage_score = (0.75 * motion_score) + (0.25 * confidence)
+                                if (
+                                    salvage_candidate is None
+                                    or salvage_score > salvage_candidate["score"]
+                                ):
+                                    if salvage_candidate is not None:
+                                        for artifact_path in salvage_candidate["artifacts"]:
+                                            _remove_file_quietly(artifact_path)
+                                    salvage_candidate = {
+                                        "path": path,
+                                        "artifacts": set(candidate_artifacts),
+                                        "angle_qc": last_angle_qc,
+                                        "attempts_used": attempt_index + 1,
+                                        "score": salvage_score,
+                                    }
+                                else:
+                                    for artifact_path in candidate_artifacts:
+                                        _remove_file_quietly(artifact_path)
+                            else:
+                                for artifact_path in candidate_artifacts:
+                                    _remove_file_quietly(artifact_path)
                             continue
-                    for artifact_path in candidate_artifacts - {path}:
-                        _remove_file_quietly(artifact_path)
-                    result = {
-                        "path": path,
-                        "style_name": style_config.get("name"),
-                        "aspect_ratio": requested_ratio,
-                        "cutout_ref_count": cutout_ref_count,
-                        "cutout_ref_labels": cutout_labels,
-                        "generation_mode": "angle_generation" if is_angle_style else "model_regeneration",
-                    }
-                    if is_angle_style:
-                        result["camera_mode"] = camera_mode or ("side_angle" if style_name.startswith("Side Composition") else "overview_angle")
-                        if focus_side:
-                            result["focus_side"] = focus_side
-                        if is_side_angle:
-                            result["camera_travel_side"] = (
-                                "left"
-                                if focus_side == "left"
-                                else "right"
-                                if focus_side == "right"
-                                else "requested"
-                            )
-                        result["angle_qc_attempts"] = attempt_index + 1
-                        if last_angle_qc is not None:
-                            result["angle_qc"] = last_angle_qc
-                    return result
+                    if salvage_candidate is not None:
+                        for artifact_path in salvage_candidate["artifacts"]:
+                            _remove_file_quietly(artifact_path)
+                        salvage_candidate = None
+                    return _finalize_candidate_result(
+                        path,
+                        candidate_artifacts,
+                        angle_qc=last_angle_qc,
+                        attempts_used=attempt_index + 1,
+                    )
+        if salvage_candidate is not None:
+            return _finalize_candidate_result(
+                salvage_candidate["path"],
+                salvage_candidate["artifacts"],
+                angle_qc=salvage_candidate["angle_qc"],
+                attempts_used=max_attempts,
+                direction_fallback=True,
+            )
         return None
     except Exception as exc:
         print(f"!! Detail Generation Error: {exc}", flush=True)

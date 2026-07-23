@@ -6,7 +6,11 @@ from application.details.detail_analysis_stage import load_analyzed_items, prepa
 from application.details.detail_generation_stage import generate_detail_view as actual_generate_detail_view
 from application.details.detail_style_stage import construct_dynamic_styles
 from application.details.regenerate_detail_workflow import run_regenerate_single_detail_job
-from application.details.detail_workflow import run_generate_details_job, select_external_detail_styles
+from application.details.detail_workflow import (
+    _reconcile_internal_side_angle_results,
+    run_generate_details_job,
+    select_external_detail_styles,
+)
 from application.render.render_result_stage import build_detail_payload
 from application.render.render_workflow import run_render_with_details_job
 from infrastructure.ai.service_scope import ai_service_scope, current_ai_service_scope
@@ -14,6 +18,67 @@ from render_route_services import (
     build_detail_generation_job_payload,
     build_regenerate_detail_job_payload,
 )
+
+
+def test_reconcile_internal_side_angle_results_swaps_crossed_camera_directions():
+    generated_paths = [
+        {
+            "index": 1,
+            "path": "requested-left-actual-right.jpg",
+            "style_name": "Side Composition (Focus Left)",
+            "style_ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "requested_focus_side": "left",
+            "camera_travel_side": "right",
+            "camera_direction_matches": False,
+            "angle_direction_fallback": True,
+            "angle_qc": {
+                "passed": True,
+                "passed_for_requested_slot": False,
+                "direction_only_mismatch": True,
+            },
+        },
+        {
+            "index": 2,
+            "path": "requested-right-actual-left.jpg",
+            "style_name": "Side Composition (Focus Right)",
+            "style_ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "right",
+            "requested_focus_side": "right",
+            "camera_travel_side": "left",
+            "camera_direction_matches": False,
+            "angle_direction_fallback": True,
+            "angle_qc": {
+                "passed": True,
+                "passed_for_requested_slot": False,
+                "direction_only_mismatch": True,
+            },
+        },
+    ]
+
+    _reconcile_internal_side_angle_results(generated_paths)
+
+    left_row = next(
+        row for row in generated_paths if row["camera_travel_side"] == "left"
+    )
+    right_row = next(
+        row for row in generated_paths if row["camera_travel_side"] == "right"
+    )
+    assert left_row["index"] == 1
+    assert left_row["style_name"] == "Side Composition (Focus Left)"
+    assert left_row["focus_side"] == "left"
+    assert left_row["requested_focus_side"] == "right"
+    assert left_row["camera_direction_matches"] is True
+    assert left_row["angle_direction_reconciled"] is True
+    assert left_row["angle_qc"]["assigned_focus_side"] == "left"
+    assert right_row["index"] == 2
+    assert right_row["style_name"] == "Side Composition (Focus Right)"
+    assert right_row["focus_side"] == "right"
+    assert right_row["requested_focus_side"] == "left"
+    assert right_row["camera_direction_matches"] is True
+    assert right_row["angle_direction_reconciled"] is True
 
 
 class DetailChainContractsTests(unittest.TestCase):

@@ -43,7 +43,7 @@ def _save_structured_room(path, *, shifted: bool = False, slab_side: str | None 
 def _passing_model_payload() -> dict:
     return {
         "same_frame_or_crop": False,
-        "camera_direction_matches": True,
+        "inferred_camera_translation": "right",
         "room_topology_preserved": True,
         "background_only_rotation": False,
         "furniture_projection_coherent": True,
@@ -106,6 +106,9 @@ def test_angle_quality_accepts_coherent_camera_move(tmp_path):
     )
 
     assert result["passed"] is True
+    assert result["passed_for_requested_slot"] is True
+    assert result["camera_direction_matches"] is True
+    assert result["inferred_camera_translation"] == "right"
     assert result["reject_reasons"] == []
     assert captured["model_name"] == "analysis-model"
     assert captured["request_options"]["response_mime_type"] == "application/json"
@@ -116,6 +119,8 @@ def test_angle_quality_accepts_coherent_camera_move(tmp_path):
     assert "RIGHT side of the source viewpoint" in captured["content"][0]
     assert "yaw coherently back into the room" in captured["content"][0]
     assert "real lateral camera translation" in captured["content"][0]
+    assert "nearby furniture should shift toward screen-LEFT" in captured["content"][0]
+    assert "inferred_camera_translation" in captured["content"][0]
 
 
 def test_angle_quality_rejects_new_uniform_side_slab(tmp_path):
@@ -208,3 +213,78 @@ def test_angle_quality_rejects_incomplete_model_contract(tmp_path):
     assert "model_qc_incomplete" in result["reject_reasons"]
     assert "insufficient_camera_motion" in result["reject_reasons"]
     assert "model_qc_low_confidence" in result["reject_reasons"]
+
+
+def test_angle_quality_preserves_opposite_direction_as_physical_pass(tmp_path):
+    source_path = tmp_path / "source.png"
+    candidate_path = tmp_path / "candidate.png"
+    _save_structured_room(source_path)
+    _save_structured_room(candidate_path, shifted=True)
+    payload = _passing_model_payload()
+    payload["inferred_camera_translation"] = "right"
+
+    result = assess_angle_candidate(
+        str(source_path),
+        str(candidate_path),
+        camera_mode="side_angle",
+        focus_side="left",
+        call_analysis_with_failover=lambda *_args, **_kwargs: _analysis_response(payload),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    assert result["passed"] is True
+    assert result["passed_for_requested_slot"] is False
+    assert result["direction_only_mismatch"] is True
+    assert result["reject_reasons"] == []
+    assert result["warnings"] == ["camera_direction_mismatch"]
+    assert result["camera_direction_matches"] is False
+
+
+def test_angle_quality_never_salvages_opposite_direction_with_geometry_failure(tmp_path):
+    source_path = tmp_path / "source.png"
+    candidate_path = tmp_path / "candidate.png"
+    _save_structured_room(source_path)
+    _save_structured_room(candidate_path, shifted=True)
+    payload = _passing_model_payload()
+    payload["inferred_camera_translation"] = "right"
+    payload["background_only_rotation"] = True
+    payload["furniture_projection_coherent"] = False
+
+    result = assess_angle_candidate(
+        str(source_path),
+        str(candidate_path),
+        camera_mode="side_angle",
+        focus_side="left",
+        call_analysis_with_failover=lambda *_args, **_kwargs: _analysis_response(payload),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    assert result["passed"] is False
+    assert result["passed_for_requested_slot"] is False
+    assert result["direction_only_mismatch"] is False
+    assert "background_only_rotation" in result["reject_reasons"]
+    assert "furniture_projection_incoherent" in result["reject_reasons"]
+
+
+def test_angle_quality_rejects_unclear_side_translation(tmp_path):
+    source_path = tmp_path / "source.png"
+    candidate_path = tmp_path / "candidate.png"
+    _save_structured_room(source_path)
+    _save_structured_room(candidate_path, shifted=True)
+    payload = _passing_model_payload()
+    payload["inferred_camera_translation"] = "unclear"
+
+    result = assess_angle_candidate(
+        str(source_path),
+        str(candidate_path),
+        camera_mode="side_angle",
+        focus_side="left",
+        call_analysis_with_failover=lambda *_args, **_kwargs: _analysis_response(payload),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    assert result["passed"] is False
+    assert "camera_translation_unclear" in result["reject_reasons"]

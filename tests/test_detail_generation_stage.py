@@ -531,6 +531,8 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
         assert "Move the camera toward the right side of the source viewpoint" in captured["prompt"]
         assert "yaw gently back into the room" in captured["prompt"]
         assert "right side viewpoint is unmistakable" in captured["prompt"]
+        assert "physical camera-body location" in captured["prompt"]
+        assert "screen-LEFT relative to distant architecture" in captured["prompt"]
         assert "real side-camera parallax" in captured["prompt"]
         assert "changed projected positions, side planes, and occlusions" in captured["prompt"]
         assert "This must be a new side camera viewpoint, not a crop, zoom, or source reframe." in captured["prompt"]
@@ -586,7 +588,10 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
     monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 2)
 
+    correction_calls = []
+
     def _write_corrected_sibling(path, **_kwargs):
+        correction_calls.append(path)
         corrected_path = f"{path}.wb.jpg"
         Path(corrected_path).write_bytes(Path(path).read_bytes())
         return type("Correction", (), {"path": corrected_path})()
@@ -615,7 +620,7 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
         analysis_calls.append({"model_name": model_name, "request_options": dict(request_options)})
         payload = {
             "same_frame_or_crop": False,
-            "camera_direction_matches": True,
+            "inferred_camera_translation": "left",
             "room_topology_preserved": True,
             "background_only_rotation": False,
             "furniture_projection_coherent": True,
@@ -658,10 +663,11 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
         assert "<ANGLE QC RETRY FEEDBACK>" in generation_calls[1]["prompt"]
         assert "same_frame_or_crop" in generation_calls[1]["prompt"]
         assert "Do not return another pixel-aligned copy of the source frame" in generation_calls[1]["prompt"]
-        assert "move the camera to the LEFT side of the source viewpoint" in generation_calls[1]["prompt"]
-        assert "yaw back into the room" in generation_calls[1]["prompt"]
+        assert "camera-LEFT" in generation_calls[1]["prompt"]
+        assert "screen-RIGHT" in generation_calls[1]["prompt"]
         assert len(analysis_calls) == 2
         assert analysis_calls[0]["request_options"]["response_mime_type"] == "application/json"
+        assert correction_calls == []
         assert leaked == []
     finally:
         for path in leaked:
@@ -715,7 +721,7 @@ def test_generate_detail_view_retries_angle_then_returns_only_qc_passed_candidat
 
     passing_payload = {
         "same_frame_or_crop": False,
-        "camera_direction_matches": True,
+        "inferred_camera_translation": "right",
         "room_topology_preserved": True,
         "background_only_rotation": False,
         "furniture_projection_coherent": True,
@@ -760,9 +766,123 @@ def test_generate_detail_view_retries_angle_then_returns_only_qc_passed_candidat
         assert result["generation_mode"] == "angle_generation"
         assert result["camera_mode"] == "side_angle"
         assert result["focus_side"] == "right"
+        assert result["camera_travel_side"] == "right"
+        assert result["camera_direction_matches"] is True
         assert result["angle_qc_attempts"] == 2
         assert result["angle_qc"]["passed"] is True
         assert result["angle_qc"]["model_checked"] is True
+        assert artifacts == [output_path]
+    finally:
+        for path in artifacts:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_keeps_best_direction_only_candidate_as_fallback(tmp_path, monkeypatch):
+    source_path = tmp_path / "room.png"
+
+    def _room_bytes(*, shifted: bool) -> bytes:
+        image = Image.new("RGB", (1600, 900), color=(232, 228, 220))
+        draw = ImageDraw.Draw(image)
+        vanishing_x = 920 if shifted else 800
+        draw.line((0, 0, vanishing_x, 420), fill=(55, 55, 55), width=10)
+        draw.line((1599, 0, vanishing_x, 420), fill=(55, 55, 55), width=10)
+        draw.line((0, 899, vanishing_x, 420), fill=(80, 80, 80), width=10)
+        draw.line((1599, 899, vanishing_x, 420), fill=(80, 80, 80), width=10)
+        draw.rectangle((330 if shifted else 500, 500, 980, 760), fill=(145, 105, 80))
+        draw.rectangle((1160 if shifted else 1080, 130, 1480, 530), outline=(45, 75, 115), width=18)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image.close()
+        return buffer.getvalue()
+
+    source_path.write_bytes(_room_bytes(shifted=False))
+    candidate_bytes = _room_bytes(shifted=True)
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 2)
+    correction_calls = []
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda path, **_kwargs: (
+            correction_calls.append(path)
+            or type("Correction", (), {"path": path})()
+        ),
+    )
+
+    generation_prompts = []
+
+    def _call_gemini(_model_name, content, _request_options, _safety_settings, **_kwargs):
+        generation_prompts.append(content[0])
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": candidate_bytes})()},
+                    )()
+                ],
+            },
+        )()
+
+    opposite_direction_payload = {
+        "same_frame_or_crop": False,
+        "inferred_camera_translation": "left",
+        "room_topology_preserved": True,
+        "background_only_rotation": False,
+        "furniture_projection_coherent": True,
+        "large_artificial_panel": False,
+        "severe_geometry_warp": False,
+        "camera_motion_score": 0.88,
+        "confidence": 0.94,
+        "reasons": ["The camera moved left instead of right."],
+    }
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Right)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "right",
+            "prompt": "render a coherent right-side camera move",
+        },
+        "direction-fallback-qc",
+        37,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: type(
+            "Resp",
+            (),
+            {"text": json.dumps(opposite_direction_payload)},
+        )(),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    output_path = Path(result["path"])
+    artifacts = list(Path("outputs").glob("detail_*_direction-fallback-qc_37_*"))
+    try:
+        assert len(generation_prompts) == 2
+        assert "<ANGLE QC RETRY FEEDBACK>" in generation_prompts[1]
+        assert "previous camera physically moved LEFT" in generation_prompts[1]
+        assert result["angle_qc"]["passed"] is True
+        assert result["angle_qc"]["passed_for_requested_slot"] is False
+        assert result["angle_qc"]["direction_only_mismatch"] is True
+        assert result["focus_side"] == "right"
+        assert result["requested_focus_side"] == "right"
+        assert result["camera_travel_side"] == "left"
+        assert result["camera_direction_matches"] is False
+        assert result["angle_direction_fallback"] is True
+        assert result["angle_qc_attempts"] == 2
+        assert correction_calls == [str(output_path)]
         assert artifacts == [output_path]
     finally:
         for path in artifacts:

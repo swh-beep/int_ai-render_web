@@ -40,7 +40,11 @@ class DetailMetadataTests(unittest.TestCase):
                 "generation_mode": "angle_generation",
                 "camera_mode": "side_angle",
                 "focus_side": "left",
+                "requested_focus_side": "right",
                 "camera_travel_side": "left",
+                "camera_direction_matches": True,
+                "angle_direction_fallback": True,
+                "angle_direction_reconciled": True,
                 "angle_qc_attempts": 2,
                 "angle_qc": {
                     "passed": True,
@@ -67,7 +71,11 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail["generation_mode"], "angle_generation")
         self.assertEqual(detail["camera_mode"], "side_angle")
         self.assertEqual(detail["focus_side"], "left")
+        self.assertEqual(detail["requested_focus_side"], "right")
         self.assertEqual(detail["camera_travel_side"], "left")
+        self.assertIs(detail["camera_direction_matches"], True)
+        self.assertIs(detail["angle_direction_fallback"], True)
+        self.assertIs(detail["angle_direction_reconciled"], True)
         self.assertEqual(detail["angle_qc_attempts"], 2)
         self.assertEqual(detail["angle_qc"]["metrics"]["camera_motion_score"], 0.81)
         self.assertEqual(output["furniture_data"][0]["target_key"], "cart_product-1_accent-chair_001")

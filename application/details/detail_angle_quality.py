@@ -11,7 +11,7 @@ _ANGLE_QC_MODEL_MAX_EDGE = max(
     256,
     int(os.getenv("DETAIL_ANGLE_QC_MODEL_MAX_EDGE", "1024") or "1024"),
 )
-_SAME_FRAME_SCORE_THRESHOLD = float(os.getenv("DETAIL_ANGLE_QC_SAME_FRAME_THRESHOLD", "0.985") or "0.985")
+_SAME_FRAME_SCORE_THRESHOLD = float(os.getenv("DETAIL_ANGLE_QC_SAME_FRAME_THRESHOLD", "0.97") or "0.97")
 _ANGLE_QC_MIN_CAMERA_MOTION_SCORE = float(os.getenv("DETAIL_ANGLE_QC_MIN_CAMERA_MOTION_SCORE", "0.55") or "0.55")
 _ANGLE_QC_MIN_CONFIDENCE = float(os.getenv("DETAIL_ANGLE_QC_MIN_CONFIDENCE", "0.55") or "0.55")
 _ANGLE_QC_ANALYSIS_TIMEOUT_SEC = max(
@@ -114,10 +114,19 @@ def build_angle_quality_prompt(camera_mode: str, focus_side: str | None = None) 
         )
     else:
         camera_travel_side = normalized_side if normalized_side in {"LEFT", "RIGHT"} else "REQUESTED"
+        parallax_direction = (
+            "RIGHT"
+            if camera_travel_side == "LEFT"
+            else "LEFT"
+            if camera_travel_side == "RIGHT"
+            else "the opposite screen direction"
+        )
         camera_requirement = (
             f"The candidate must use a real lateral camera translation toward the {camera_travel_side} side of the "
             "source viewpoint, then yaw coherently back into the room. It must show real parallax and newly visible side planes. "
-            "A crop or zoom fails."
+            f"Camera travel means the physical camera-body movement, not which side of the room dominates the frame. With a "
+            f"{camera_travel_side} camera translation, nearby furniture should shift toward screen-{parallax_direction} relative "
+            "to the far background. A crop or zoom fails."
         )
 
     return (
@@ -130,10 +139,12 @@ def build_angle_quality_prompt(camera_mode: str, focus_side: str | None = None) 
         "Reject if any wall, window, door, stair, ceiling edge, floor boundary, or opening is added, removed, moved, mirrored, "
         "or severely warped. Reject large artificial gray/white foreground panels, wall slabs, or mask-like vertical bands.\n"
         "Ignore color temperature and white balance. Judge camera motion, physical coherence, and geometry only.\n"
+        "Report the camera movement you actually observe. For inferred_camera_translation use exactly one of: "
+        "left, right, up, down, forward, backward, none, unclear. Do not compare it with the requested direction yourself.\n"
         "Return STRICT JSON ONLY with every key present:\n"
         "{\n"
         '  "same_frame_or_crop": false,\n'
-        '  "camera_direction_matches": true,\n'
+        '  "inferred_camera_translation": "left",\n'
         '  "room_topology_preserved": true,\n'
         '  "background_only_rotation": false,\n'
         '  "furniture_projection_coherent": true,\n'
@@ -246,20 +257,38 @@ def assess_angle_candidate(
 
     required_boolean_fields = {
         "same_frame_or_crop",
-        "camera_direction_matches",
         "room_topology_preserved",
         "background_only_rotation",
         "furniture_projection_coherent",
         "large_artificial_panel",
         "severe_geometry_warp",
     }
+    inferred_camera_translation = ""
+    camera_direction_matches: bool | None = None
+    direction_warnings: list[str] = []
+    normalized_mode = str(camera_mode or "").strip().lower()
+    normalized_focus_side = str(focus_side or "").strip().lower()
+    allowed_camera_translations = {
+        "left",
+        "right",
+        "up",
+        "down",
+        "forward",
+        "backward",
+        "none",
+        "unclear",
+    }
+
     if model_checked:
         if any(_coerce_bool(model_payload.get(key)) is None for key in required_boolean_fields):
             reject_reasons.append("model_qc_incomplete")
+        inferred_camera_translation = str(
+            model_payload.get("inferred_camera_translation") or ""
+        ).strip().lower()
+        if inferred_camera_translation not in allowed_camera_translations:
+            reject_reasons.append("model_qc_incomplete")
         if _coerce_bool(model_payload.get("same_frame_or_crop")) is True:
             reject_reasons.append("same_frame_or_crop")
-        if _coerce_bool(model_payload.get("camera_direction_matches")) is False:
-            reject_reasons.append("camera_direction_mismatch")
         if _coerce_bool(model_payload.get("room_topology_preserved")) is False:
             reject_reasons.append("room_topology_changed")
         if _coerce_bool(model_payload.get("background_only_rotation")) is True:
@@ -279,14 +308,30 @@ def assess_angle_candidate(
             reject_reasons.append("model_qc_low_confidence")
         metrics["camera_motion_score"] = camera_motion_score
         metrics["model_confidence"] = confidence
+
+        if normalized_mode == "side_angle":
+            if inferred_camera_translation not in {"left", "right"}:
+                reject_reasons.append("camera_translation_unclear")
+            elif normalized_focus_side in {"left", "right"}:
+                camera_direction_matches = inferred_camera_translation == normalized_focus_side
+                if camera_direction_matches is False:
+                    direction_warnings.append("camera_direction_mismatch")
     elif require_model_qc:
         reject_reasons.append("model_qc_unavailable")
 
     deduped_reasons = list(dict.fromkeys(reject_reasons))
+    deduped_direction_warnings = list(dict.fromkeys(direction_warnings))
+    physical_qc_passed = not deduped_reasons
+    requested_direction_passed = physical_qc_passed and not deduped_direction_warnings
     return {
-        "passed": not deduped_reasons,
+        "passed": physical_qc_passed,
+        "passed_for_requested_slot": requested_direction_passed,
+        "direction_only_mismatch": physical_qc_passed and bool(deduped_direction_warnings),
         "reject_reasons": deduped_reasons,
+        "warnings": deduped_direction_warnings,
         "metrics": metrics,
         "model_checked": model_checked,
         "model_payload": model_payload,
+        "inferred_camera_translation": inferred_camera_translation or None,
+        "camera_direction_matches": camera_direction_matches,
     }
