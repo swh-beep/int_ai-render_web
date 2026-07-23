@@ -890,6 +890,459 @@ def test_generate_detail_view_keeps_best_direction_only_candidate_as_fallback(tm
                 path.unlink()
 
 
+def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_direct_failures(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 5)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+    correction_calls = []
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda path, **_kwargs: (
+            correction_calls.append(path)
+            or type("Correction", (), {"path": path})()
+        ),
+    )
+
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "reject_reasons": ["same_frame_or_crop", "insufficient_camera_motion"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.1, "model_confidence": 0.9},
+        "model_payload": {"reasons": ["The camera did not move."]},
+    }
+    passing_qc = {
+        "passed": True,
+        "passed_for_requested_slot": True,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "left",
+        "camera_direction_matches": True,
+        "reject_reasons": [],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.86, "model_confidence": 0.94},
+        "model_payload": {"reasons": []},
+    }
+    qc_results = [hard_failure, hard_failure, hard_failure, passing_qc]
+    qc_calls = []
+
+    def _assess(original_path, candidate_path, **kwargs):
+        qc_calls.append((original_path, candidate_path, dict(kwargs)))
+        return qc_results[len(qc_calls) - 1]
+
+    monkeypatch.setattr(detail_generation_stage, "assess_angle_candidate", _assess)
+
+    calls = []
+
+    def _call_gemini(_model_name, content, request_options, _safety_settings, **kwargs):
+        call = {
+            "content": list(content),
+            "prompt": content[0],
+            "request_options": dict(request_options),
+            "log_tag": kwargs.get("log_tag"),
+        }
+        calls.append(call)
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+        },
+        "two-stage-pass",
+        41,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    output_path = Path(result["path"])
+    artifacts = list(Path("outputs").glob("*two-stage-pass*"))
+    guide_artifacts = list(Path("outputs").glob("detail_angle_guide_*two-stage-pass*"))
+    try:
+        assert [call["log_tag"] for call in calls] == [
+            "Detail.Generate",
+            "Detail.Generate",
+            "Detail.AngleGuide",
+            "Detail.AngleRefurnish",
+            "Detail.AngleRefurnish",
+        ]
+        assert all(call["request_options"]["aspect_ratio"] == "16:9" for call in calls)
+        assert all(call["request_options"]["image_size"] == "4K" for call in calls)
+        assert "EMPTY ARCHITECTURE CAMERA GUIDE" in calls[2]["prompt"]
+        assert "physical camera-body toward LEFT" in calls[2]["prompt"]
+        assert "Remove all movable furniture" in calls[2]["prompt"]
+        assert "Never remove furniture because it is absent" not in calls[2]["prompt"]
+        assert len([part for part in calls[2]["content"] if isinstance(part, Image.Image)]) == 2
+        assert "Original Empty Room Architecture Reference" in calls[2]["content"][1]
+        assert "Furnished Main Reference" in calls[2]["content"][3]
+        assert "LOCKED CAMERA PLATE" in calls[3]["prompt"]
+        assert any(
+            isinstance(part, str) and "Furnished Main Reference" in part
+            for part in calls[3]["content"]
+        )
+        assert len([part for part in calls[3]["content"] if isinstance(part, Image.Image)]) == 2
+        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" not in calls[3]["prompt"]
+        assert "<LOCKED-PLATE QC RETRY FEEDBACK>" in calls[4]["prompt"]
+        assert "Keep the EMPTY LOCKED CAMERA PLATE camera" in calls[4]["prompt"]
+        assert len(qc_calls) == 4
+        assert {call[0] for call in qc_calls} == {str(source_path)}
+        assert result["generation_mode"] == "angle_generation_two_stage"
+        assert result["camera_mode"] == "side_angle"
+        assert result["focus_side"] == "left"
+        assert result["camera_travel_side"] == "left"
+        assert result["camera_direction_matches"] is True
+        assert result["angle_qc_attempts"] == 4
+        assert result["angle_qc"] == passing_qc
+        assert correction_calls == [str(output_path)]
+        assert artifacts == [output_path]
+        assert guide_artifacts == []
+    finally:
+        for path in artifacts:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_cleans_salvage_and_guide_when_two_stage_fallback_raises(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 5)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+
+    direction_mismatch = {
+        "passed": True,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": True,
+        "inferred_camera_translation": "right",
+        "camera_direction_matches": False,
+        "reject_reasons": [],
+        "warnings": ["camera_direction_mismatch"],
+        "metrics": {"camera_motion_score": 0.88, "model_confidence": 0.94},
+        "model_payload": {"reasons": ["The camera moved right."]},
+    }
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "reject_reasons": ["same_frame_or_crop"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.1, "model_confidence": 0.9},
+        "model_payload": {"reasons": []},
+    }
+    qc_results = [direction_mismatch, hard_failure]
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: qc_results.pop(0),
+    )
+
+    call_count = 0
+
+    def _call_gemini(_model_name, _content, _request_options, _safety_settings, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if kwargs.get("log_tag") == "Detail.AngleRefurnish":
+            raise RuntimeError("synthetic refurnish failure")
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+        },
+        "two-stage-cleanup",
+        42,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("*two-stage-cleanup*"))
+    try:
+        assert result is None
+        assert call_count == 4
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_cleans_direct_candidate_when_white_balance_raises(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 1)
+    passing_qc = {
+        "passed": True,
+        "passed_for_requested_slot": True,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "left",
+        "camera_direction_matches": True,
+        "reject_reasons": [],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.84, "model_confidence": 0.92},
+        "model_payload": {"reasons": []},
+    }
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: passing_qc,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("synthetic white-balance failure")
+        ),
+    )
+
+    def _call_gemini(*_args, **_kwargs):
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "prompt": "render a coherent left-side camera move",
+        },
+        "wb-direct-cleanup",
+        43,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("*wb-direct-cleanup*"))
+    try:
+        assert result is None
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_cleans_two_stage_artifacts_when_white_balance_raises(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 5)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "reject_reasons": ["same_frame_or_crop"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.1, "model_confidence": 0.9},
+        "model_payload": {"reasons": []},
+    }
+    passing_qc = {
+        "passed": True,
+        "passed_for_requested_slot": True,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "left",
+        "camera_direction_matches": True,
+        "reject_reasons": [],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.84, "model_confidence": 0.92},
+        "model_payload": {"reasons": []},
+    }
+    qc_results = [hard_failure, hard_failure, passing_qc]
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: qc_results.pop(0),
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("synthetic white-balance failure")
+        ),
+    )
+    call_count = 0
+
+    def _call_gemini(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+        },
+        "wb-two-stage-cleanup",
+        44,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("*wb-two-stage-cleanup*"))
+    try:
+        assert result is None
+        assert call_count == 4
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
 def test_generate_detail_view_sanitizes_invalid_ratio_to_vertical_canvas(tmp_path):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1200, 1500), color=(245, 245, 245)).save(source_path, format="PNG")

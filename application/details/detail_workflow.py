@@ -48,51 +48,110 @@ def _is_angle_style(style_payload: dict) -> bool:
     )
 
 
-def _reconcile_internal_side_angle_results(generated_paths: list[dict]) -> None:
+def _reconcile_internal_side_angle_results(
+    generated_paths: list[dict],
+    styles: list[dict] | None = None,
+) -> None:
     side_rows = [
         row
         for row in generated_paths or []
         if isinstance(row, dict)
         and str(row.get("camera_mode") or "").strip().lower() == "side_angle"
-        and str(row.get("focus_side") or "").strip().lower() in {"left", "right"}
+        and str(
+            row.get("requested_focus_side")
+            or row.get("focus_side")
+            or ""
+        ).strip().lower()
+        in {"left", "right"}
     ]
-    if len(side_rows) != 2:
+    if not side_rows:
         return
 
-    requested_slots = {
-        str(row.get("focus_side") or "").strip().lower(): {
-            key: row.get(key)
-            for key in (
-                "index",
-                "style_name",
-                "style_ratio",
-                "style_target_key",
-                "style_target_label",
-            )
+    slot_metadata_keys = (
+        "index",
+        "style_name",
+        "style_ratio",
+        "style_target_key",
+        "style_target_label",
+    )
+    requested_slots: dict[str, dict] = {}
+    for style_index, style in enumerate(styles or []):
+        if not isinstance(style, dict):
+            continue
+        camera_mode = str(style.get("camera_mode") or "").strip().lower()
+        style_name = str(style.get("name") or "")
+        if camera_mode != "side_angle" and not style_name.startswith("Side Composition"):
+            continue
+        requested_side = str(style.get("focus_side") or "").strip().lower()
+        if requested_side not in {"left", "right"}:
+            continue
+        requested_slots[requested_side] = {
+            "index": style_index,
+            "style_name": style.get("name"),
+            "style_ratio": style.get("ratio"),
+            "style_target_key": style.get("target_key"),
+            "style_target_label": style.get("target_label"),
         }
-        for row in side_rows
-    }
-    if set(requested_slots) != {"left", "right"}:
-        return
 
-    actual_sides = [
-        str(row.get("camera_travel_side") or "").strip().lower()
-        for row in side_rows
-    ]
-    if sorted(actual_sides) != ["left", "right"]:
-        return
+    for row in side_rows:
+        requested_side = str(
+            row.get("requested_focus_side")
+            or row.get("focus_side")
+            or ""
+        ).strip().lower()
+        if requested_side not in requested_slots:
+            requested_slots[requested_side] = {
+                key: row.get(key)
+                for key in slot_metadata_keys
+            }
 
-    rows_by_actual_side = {
-        str(row.get("camera_travel_side") or "").strip().lower(): row
-        for row in side_rows
-    }
+    def _quality_score(row: dict) -> float:
+        angle_qc = row.get("angle_qc") if isinstance(row.get("angle_qc"), dict) else {}
+        metrics = angle_qc.get("metrics") if isinstance(angle_qc.get("metrics"), dict) else {}
+        try:
+            motion = float(metrics.get("camera_motion_score") or 0.0)
+        except Exception:
+            motion = 0.0
+        try:
+            confidence = float(metrics.get("model_confidence") or 0.0)
+        except Exception:
+            confidence = 0.0
+        requested_side = str(
+            row.get("requested_focus_side")
+            or row.get("focus_side")
+            or ""
+        ).strip().lower()
+        actual_side = str(row.get("camera_travel_side") or "").strip().lower()
+        exact_bonus = 10.0 if requested_side == actual_side else 0.0
+        return exact_bonus + (0.75 * motion) + (0.25 * confidence)
 
-    for actual_side, row in rows_by_actual_side.items():
-        original_requested_side = str(row.get("focus_side") or "").strip().lower()
+    selected_by_actual_side: dict[str, dict] = {}
+    for row in side_rows:
+        actual_side = str(row.get("camera_travel_side") or "").strip().lower()
+        if actual_side not in {"left", "right"}:
+            continue
+        angle_qc = row.get("angle_qc")
+        if isinstance(angle_qc, dict) and angle_qc.get("passed") is False:
+            continue
+        current = selected_by_actual_side.get(actual_side)
+        if current is None or _quality_score(row) > _quality_score(current):
+            selected_by_actual_side[actual_side] = row
+
+    selected_rows = []
+    for actual_side in ("left", "right"):
+        row = selected_by_actual_side.get(actual_side)
+        target_slot = requested_slots.get(actual_side)
+        if row is None or not isinstance(target_slot, dict):
+            continue
+        original_requested_side = str(
+            row.get("requested_focus_side")
+            or row.get("focus_side")
+            or ""
+        ).strip().lower()
         target_slot = requested_slots[actual_side]
         for metadata_key, metadata_value in target_slot.items():
             row[metadata_key] = metadata_value
-        row["requested_focus_side"] = original_requested_side
+        row["requested_focus_side"] = actual_side
         row["focus_side"] = actual_side
         row["camera_direction_matches"] = True
         if original_requested_side != actual_side:
@@ -100,9 +159,45 @@ def _reconcile_internal_side_angle_results(generated_paths: list[dict]) -> None:
         angle_qc = row.get("angle_qc")
         if isinstance(angle_qc, dict):
             reconciled_qc = dict(angle_qc)
+            reconciled_qc["original_requested_focus_side"] = original_requested_side
             reconciled_qc["assigned_focus_side"] = actual_side
             reconciled_qc["camera_direction_matches_after_reconcile"] = True
             row["angle_qc"] = reconciled_qc
+        selected_rows.append(row)
+
+    side_row_ids = {id(row) for row in side_rows}
+    selected_row_ids = {id(row) for row in selected_rows}
+    retained_paths = {
+        os.path.normcase(os.path.abspath(str(row.get("path"))))
+        for row in [*selected_rows, *generated_paths]
+        if isinstance(row, dict)
+        and id(row) not in (side_row_ids - selected_row_ids)
+        and str(row.get("path") or "").strip()
+    }
+    generated_output_root = os.path.normcase(os.path.abspath("outputs"))
+    for row in side_rows:
+        if id(row) in selected_row_ids:
+            continue
+        discarded_path = str(row.get("path") or "").strip()
+        if not discarded_path:
+            continue
+        normalized_path = os.path.normcase(os.path.abspath(discarded_path))
+        if normalized_path in retained_paths:
+            continue
+        try:
+            if os.path.commonpath([generated_output_root, normalized_path]) != generated_output_root:
+                continue
+            if os.path.isfile(discarded_path):
+                os.remove(discarded_path)
+        except Exception:
+            pass
+
+    generated_paths[:] = [
+        row
+        for row in generated_paths
+        if id(row) not in side_row_ids
+    ]
+    generated_paths.extend(selected_rows)
 
 
 def _detail_generation_max_workers(
@@ -614,6 +709,8 @@ def run_generate_details_job(
         def _style_payload_for_generation(style: dict) -> dict:
             style_payload = dict(style or {})
             if _is_angle_style(style_payload):
+                if aud == "internal":
+                    style_payload["internal_angle_generation"] = True
                 if empty_room_path:
                     style_payload["empty_room_path"] = empty_room_path
                 for key in ("room_dims_contract", "geometry_contract", "scene_contract", "placement_plan"):
@@ -750,7 +847,7 @@ def run_generate_details_job(
                     _append_detail_result(index, style_payload, result)
 
         if aud == "internal":
-            _reconcile_internal_side_angle_results(generated_paths)
+            _reconcile_internal_side_angle_results(generated_paths, dynamic_styles)
 
         print(f"=== [Detail View] complete: {len(generated_paths)} generated ===", flush=True)
         if not generated_paths:

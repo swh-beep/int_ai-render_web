@@ -69,16 +69,146 @@ def test_reconcile_internal_side_angle_results_swaps_crossed_camera_directions()
     assert left_row["index"] == 1
     assert left_row["style_name"] == "Side Composition (Focus Left)"
     assert left_row["focus_side"] == "left"
-    assert left_row["requested_focus_side"] == "right"
+    assert left_row["requested_focus_side"] == "left"
     assert left_row["camera_direction_matches"] is True
     assert left_row["angle_direction_reconciled"] is True
+    assert left_row["angle_qc"]["original_requested_focus_side"] == "right"
     assert left_row["angle_qc"]["assigned_focus_side"] == "left"
     assert right_row["index"] == 2
     assert right_row["style_name"] == "Side Composition (Focus Right)"
     assert right_row["focus_side"] == "right"
-    assert right_row["requested_focus_side"] == "left"
+    assert right_row["requested_focus_side"] == "right"
     assert right_row["camera_direction_matches"] is True
     assert right_row["angle_direction_reconciled"] is True
+    assert right_row["angle_qc"]["original_requested_focus_side"] == "left"
+
+
+def test_reconcile_internal_side_angle_results_drops_wrong_slot_duplicate_of_exact_side(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    wrong_path = output_dir / "requested-left-actual-right.jpg"
+    exact_path = output_dir / "requested-right-actual-right.jpg"
+    wrong_path.write_bytes(b"wrong")
+    exact_path.write_bytes(b"exact")
+    styles = [
+        {"name": "High Angle Overview", "ratio": "16:9", "camera_mode": "overview_angle"},
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+        },
+        {
+            "name": "Side Composition (Focus Right)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "right",
+        },
+    ]
+    generated_paths = [
+        {
+            "index": 1,
+            "path": str(wrong_path),
+            "style_name": "Side Composition (Focus Left)",
+            "style_ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "requested_focus_side": "left",
+            "camera_travel_side": "right",
+            "camera_direction_matches": False,
+            "angle_direction_fallback": True,
+            "angle_qc": {
+                "passed": True,
+                "passed_for_requested_slot": False,
+                "direction_only_mismatch": True,
+                "metrics": {"camera_motion_score": 0.95, "model_confidence": 0.98},
+            },
+        },
+        {
+            "index": 2,
+            "path": str(exact_path),
+            "style_name": "Side Composition (Focus Right)",
+            "style_ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "right",
+            "requested_focus_side": "right",
+            "camera_travel_side": "right",
+            "camera_direction_matches": True,
+            "angle_qc": {
+                "passed": True,
+                "passed_for_requested_slot": True,
+                "direction_only_mismatch": False,
+                "metrics": {"camera_motion_score": 0.70, "model_confidence": 0.80},
+            },
+        },
+    ]
+
+    _reconcile_internal_side_angle_results(generated_paths, styles)
+
+    assert len(generated_paths) == 1
+    assert generated_paths[0]["path"] == str(exact_path)
+    assert generated_paths[0]["index"] == 2
+    assert generated_paths[0]["focus_side"] == "right"
+    assert generated_paths[0]["camera_travel_side"] == "right"
+    assert generated_paths[0]["camera_direction_matches"] is True
+    assert not wrong_path.exists()
+    assert exact_path.exists()
+
+
+def test_reconcile_internal_side_angle_results_reassigns_single_opposite_to_actual_missing_slot():
+    styles = [
+        {"name": "High Angle Overview", "ratio": "16:9", "camera_mode": "overview_angle"},
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+        },
+        {
+            "name": "Side Composition (Focus Right)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "right",
+        },
+    ]
+    generated_paths = [
+        {
+            "index": 1,
+            "path": "requested-left-actual-right.jpg",
+            "style_name": "Side Composition (Focus Left)",
+            "style_ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "requested_focus_side": "left",
+            "camera_travel_side": "right",
+            "camera_direction_matches": False,
+            "angle_direction_fallback": True,
+            "angle_qc": {
+                "passed": True,
+                "passed_for_requested_slot": False,
+                "direction_only_mismatch": True,
+                "metrics": {"camera_motion_score": 0.88, "model_confidence": 0.92},
+            },
+        },
+    ]
+
+    _reconcile_internal_side_angle_results(generated_paths, styles)
+
+    assert len(generated_paths) == 1
+    row = generated_paths[0]
+    assert row["index"] == 2
+    assert row["style_name"] == "Side Composition (Focus Right)"
+    assert row["focus_side"] == "right"
+    assert row["requested_focus_side"] == "right"
+    assert row["camera_travel_side"] == "right"
+    assert row["camera_direction_matches"] is True
+    assert row["angle_direction_reconciled"] is True
+    assert row["angle_qc"]["original_requested_focus_side"] == "left"
+    assert row["angle_qc"]["assigned_focus_side"] == "right"
 
 
 class DetailChainContractsTests(unittest.TestCase):
@@ -1714,6 +1844,7 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_styles[3].get("camera_mode") == "side_angle"
     assert recorded_styles[3].get("focus_side") == "right"
     for index in (1, 2, 3):
+        assert recorded_styles[index].get("internal_angle_generation") is True
         assert recorded_styles[index].get("empty_room_path") == str(empty_room_path)
         assert recorded_styles[index]["room_dims_contract"]["dims_mm_center"]["width_mm"] == 5000
         assert recorded_styles[index]["geometry_contract"]["geometry_source"] == "explicit_dimensions"
@@ -1721,6 +1852,7 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
         assert recorded_styles[index]["placement_plan"]["anchor_item_key"] == "detail_001"
     assert recorded_styles[4].get("ratio") == "4:5"
     assert recorded_styles[4].get("simple_scene_detail") is True
+    assert "internal_angle_generation" not in recorded_styles[4]
     assert "empty_room_path" not in recorded_styles[4]
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
