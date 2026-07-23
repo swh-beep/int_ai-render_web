@@ -859,6 +859,7 @@ def generate_detail_view(
     call_analysis_with_failover: Callable[..., object] | None = None,
     analysis_model_name: str | None = None,
     safe_json_from_model_text: Callable[[str], object] | None = None,
+    refurnish_locked_angle: Callable[..., object] | None = None,
 ):
     img = None
     extra_imgs = []
@@ -1399,6 +1400,11 @@ def generate_detail_view(
                 "guide_reference_mode": None,
                 "guide_attempts": [],
                 "refurnish_attempts": [],
+                "refurnish_backend": (
+                    "main_stage2_locked_canvas"
+                    if refurnish_locked_angle is not None
+                    else "detail_handcrafted"
+                ),
                 "locked_plate_ignored": False,
             }
             if is_internal_angle
@@ -1930,33 +1936,87 @@ def generate_detail_view(
                         "\n\n<LOCKED-PLATE QC RETRY FEEDBACK>\n"
                         + refurnish_retry_feedback
                     )
-                refurnish_content = [
-                    refurnish_prompt,
-                    "EMPTY LOCKED CAMERA PLATE (absolute camera and architecture truth):",
-                    guide_img,
-                    (
-                        "Furnished Main Reference (furniture/world-space inventory ONLY; camera, crop, vanishing points, "
-                        "perspective, and source pixel coordinates have ZERO authority):"
-                    ),
-                    img,
-                ]
-                refurnish_response = call_gemini_with_failover(
-                    model_name,
-                    refurnish_content,
-                    {
-                        "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
-                        "aspect_ratio": requested_ratio,
-                        "image_size": "4K",
-                        "thinking_level": "high",
-                        "include_thoughts": False,
-                    },
-                    safety_settings,
-                    log_tag="Detail.AngleRefurnish",
+                refurnish_backend = (
+                    "main_stage2_locked_canvas"
+                    if refurnish_locked_angle is not None
+                    else "detail_handcrafted"
                 )
-                materialized = _materialize_fallback_response_image(
-                    refurnish_response,
-                    f"detail_angle_refurnish_a{fallback_attempt_index + 1}",
-                )
+                if refurnish_locked_angle is not None:
+                    stage2_result = refurnish_locked_angle(
+                        guide_path=guide_path,
+                        furnished_main_path=original_image_path,
+                        style_prompt=refurnish_prompt,
+                        unique_id=(
+                            f"{unique_id}_detail_angle_{index}_"
+                            f"a{fallback_attempt_index + 1}"
+                        ),
+                        furniture_data=furniture_data,
+                        room_dims_contract=style_config.get("room_dims_contract"),
+                        geometry_contract=style_config.get("geometry_contract"),
+                        scene_contract=style_config.get("scene_contract"),
+                        placement_plan=style_config.get("placement_plan"),
+                        timeout_sec=max(
+                            1.0,
+                            min(
+                                DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC,
+                                request_timeout_sec,
+                            ),
+                        ),
+                    )
+                    stage2_path = (
+                        stage2_result.get("path")
+                        if isinstance(stage2_result, dict)
+                        else stage2_result
+                    )
+                    if stage2_path:
+                        stage2_path = str(stage2_path)
+                    protected_paths = {
+                        os.path.abspath(path)
+                        for path in (
+                            original_image_path,
+                            guide_path,
+                            empty_room_path,
+                        )
+                        if path
+                    }
+                    if (
+                        stage2_path
+                        and os.path.exists(stage2_path)
+                        and os.path.abspath(stage2_path) not in protected_paths
+                    ):
+                        candidate_artifacts = {stage2_path}
+                        angle_fallback_artifacts.add(stage2_path)
+                        materialized = (stage2_path, candidate_artifacts)
+                    else:
+                        materialized = None
+                else:
+                    refurnish_content = [
+                        refurnish_prompt,
+                        "EMPTY LOCKED CAMERA PLATE (absolute camera and architecture truth):",
+                        guide_img,
+                        (
+                            "Furnished Main Reference (furniture/world-space inventory ONLY; camera, crop, vanishing points, "
+                            "perspective, and source pixel coordinates have ZERO authority):"
+                        ),
+                        img,
+                    ]
+                    refurnish_response = call_gemini_with_failover(
+                        model_name,
+                        refurnish_content,
+                        {
+                            "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
+                            "aspect_ratio": requested_ratio,
+                            "image_size": "4K",
+                            "thinking_level": "high",
+                            "include_thoughts": False,
+                        },
+                        safety_settings,
+                        log_tag="Detail.AngleRefurnish",
+                    )
+                    materialized = _materialize_fallback_response_image(
+                        refurnish_response,
+                        f"detail_angle_refurnish_a{fallback_attempt_index + 1}",
+                    )
                 if materialized is None:
                     if angle_pipeline_trace is not None:
                         angle_pipeline_trace["refurnish_attempts"].append(
@@ -1965,6 +2025,7 @@ def generate_detail_view(
                                 "materialized": False,
                                 "guide_attempt": selected_guide["attempt"],
                                 "guide_translation": guide_translation or None,
+                                "backend": refurnish_backend,
                             }
                         )
                     continue
@@ -1999,6 +2060,7 @@ def generate_detail_view(
                             "materialized": True,
                             "guide_attempt": selected_guide["attempt"],
                             "guide_translation": guide_translation or None,
+                            "backend": refurnish_backend,
                             "locked_plate_ignored": locked_plate_ignored,
                             "qc": json.loads(json.dumps(last_angle_qc, ensure_ascii=True)),
                         }
@@ -2042,6 +2104,7 @@ def generate_detail_view(
                     f"focus_side={focus_side!r} guide_attempt={selected_guide['attempt']} "
                     f"guide_translation={guide_translation!r} "
                     f"guide_qc_passed={bool(guide_qc.get('passed'))} "
+                    f"refurnish_backend={refurnish_backend!r} "
                     f"locked_plate_ignored={locked_plate_ignored} "
                     f"attempt={fallback_attempt_index + 1}/{DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS} "
                     f"physical_passed={bool(last_angle_qc.get('passed'))} requested_slot_passed=False "

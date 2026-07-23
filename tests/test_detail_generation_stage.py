@@ -1070,6 +1070,158 @@ def test_generate_detail_view_uses_two_stage_internal_angle_fallback_after_two_d
                 path.unlink()
 
 
+def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_validated_guide(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    stage2_path = tmp_path / "locked-stage2.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda path, **_kwargs: type("Correction", (), {"path": path})(),
+    )
+
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "reject_reasons": ["same_frame_or_crop", "insufficient_camera_motion"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.0, "model_confidence": 1.0},
+        "model_payload": {"reasons": ["The camera did not move."]},
+    }
+    passing_qc = {
+        "passed": True,
+        "passed_for_requested_slot": True,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "left",
+        "camera_direction_matches": True,
+        "reject_reasons": [],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.9, "model_confidence": 0.95},
+        "model_payload": {"reasons": []},
+    }
+    candidate_qc = [hard_failure, hard_failure, passing_qc]
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: candidate_qc.pop(0),
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: passing_qc,
+    )
+
+    gemini_tags = []
+
+    def _call_gemini(_model_name, _content, _request_options, _safety_settings, **kwargs):
+        gemini_tags.append(kwargs.get("log_tag"))
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    stage2_calls = []
+
+    def _refurnish_locked_angle(**kwargs):
+        stage2_calls.append(dict(kwargs))
+        stage2_path.write_bytes(_landscape_png_bytes())
+        return {"path": str(stage2_path), "scale_check_failed": False}
+
+    contracts = {
+        "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
+        "geometry_contract": {"item_targets": [{"target_key": "sofa-1"}]},
+        "scene_contract": {"critical_item_keys": ["sofa-1"]},
+        "placement_plan": {"anchor_item_key": "sofa-1"},
+    }
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+            **contracts,
+        },
+        "stage2-callback",
+        52,
+        furniture_data=[{"target_key": "sofa-1", "label": "Sofa"}],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+        refurnish_locked_angle=_refurnish_locked_angle,
+    )
+
+    output_path = Path(result["path"])
+    try:
+        assert gemini_tags == [
+            "Detail.Generate",
+            "Detail.Generate",
+            "Detail.AngleGuide",
+        ]
+        assert len(stage2_calls) == 1
+        stage2_call = stage2_calls[0]
+        assert stage2_call["furnished_main_path"] == str(source_path)
+        assert stage2_call["guide_path"] != str(source_path)
+        assert Path(stage2_call["guide_path"]).name.startswith("detail_angle_guide_")
+        assert stage2_call["furniture_data"][0]["target_key"] == "sofa-1"
+        for key, value in contracts.items():
+            assert stage2_call[key] == value
+        assert stage2_call["timeout_sec"] == 180.0
+        assert result["generation_mode"] == "angle_generation_two_stage"
+        assert result["angle_pipeline_trace"]["refurnish_backend"] == "main_stage2_locked_canvas"
+        assert result["angle_pipeline_trace"]["refurnish_attempts"][0]["backend"] == "main_stage2_locked_canvas"
+        assert result["angle_pipeline_trace"]["locked_plate_ignored"] is False
+        assert output_path == stage2_path
+        assert output_path.exists()
+    finally:
+        output_path.unlink(missing_ok=True)
+        for path in Path("outputs").glob("*stage2-callback*"):
+            path.unlink(missing_ok=True)
+
+
 def test_angle_refurnish_prompt_uses_observed_locked_plate_direction_not_requested_slot():
     prompt = detail_generation_stage._build_angle_refurnish_prompt(
         {

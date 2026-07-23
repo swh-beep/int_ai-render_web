@@ -4,7 +4,7 @@ import os
 import time
 from typing import Any, Callable
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from application.render.placement_support import build_placement_prompt_block
 from application.render.postprocess_support import decor_prefers_surface_placement
 from shared.image_canvas import (
@@ -1397,6 +1397,7 @@ def generate_furnished_room(
     room_analysis_text=None,
     enable_scale_check=False,
     max_generation_attempts: int | None = None,
+    furnished_scene_reference_path: str | None = None,
     total_timeout_limit: float,
     detect_windows_present: Callable[[str], bool],
     logger,
@@ -2069,6 +2070,26 @@ def generate_furnished_room(
         ).replace("{size_hierarchy_hint}", size_hierarchy_hint or "")
 
         reference_content = []
+
+        if furnished_scene_reference_path and os.path.exists(furnished_scene_reference_path):
+            with Image.open(furnished_scene_reference_path) as scene_reference_opened:
+                scene_reference_img = ImageOps.exif_transpose(
+                    scene_reference_opened
+                ).convert("RGB")
+            try:
+                scene_reference_img.thumbnail((1536, 1536), Image.Resampling.LANCZOS)
+            except Exception:
+                pass
+            extra_imgs.append(scene_reference_img)
+            reference_content += [
+                (
+                    "Furnished Scene Reference (EXACT MOVABLE-SCENE INVENTORY AND APPEARANCE ONLY - "
+                    "restore every visible movable object with the same identity, count, material, color, physical "
+                    "orientation, relative arrangement, and world-space footprint; this reference has ZERO authority "
+                    "over camera, crop, perspective, vanishing points, architecture, or source pixel coordinates)."
+                ),
+                scene_reference_img,
+            ]
 
         def _build_content(
             *,

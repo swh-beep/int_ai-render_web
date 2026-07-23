@@ -18,7 +18,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
-from application.details.detail_generation_stage import generate_detail_view as generate_detail_view_stage
+from application.details.detail_generation_stage import (
+    DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC,
+    generate_detail_view as generate_detail_view_stage,
+)
 from application.details.detail_style_stage import construct_dynamic_styles as construct_dynamic_styles_stage
 from application import job_entrypoints as job_entrypoints_module
 from application.job_entrypoints import JobEntrypointServices
@@ -1706,6 +1709,8 @@ def generate_furnished_room(
     room_analysis_text=None,
     enable_scale_check=False,
     max_generation_attempts=None,
+    furnished_scene_reference_path=None,
+    total_timeout_limit_override=None,
 ):
     return generate_furnished_room_stage(
         room_path,
@@ -1731,7 +1736,12 @@ def generate_furnished_room(
         room_analysis_text=room_analysis_text,
         enable_scale_check=enable_scale_check,
         max_generation_attempts=max_generation_attempts,
-        total_timeout_limit=TOTAL_TIMEOUT_LIMIT,
+        furnished_scene_reference_path=furnished_scene_reference_path,
+        total_timeout_limit=(
+            max(1.0, float(total_timeout_limit_override))
+            if total_timeout_limit_override is not None
+            else TOTAL_TIMEOUT_LIMIT
+        ),
         detect_windows_present=detect_windows_present,
         logger=logger,
         parse_room_dimensions_mm=parse_room_dimensions_mm,
@@ -1746,6 +1756,126 @@ def generate_furnished_room(
         generation_model_name=MAIN_IMAGE_MODEL_NAME,
         match_aspect_to_target=match_aspect_to_target,
         validate_furnished_scale=validate_furnished_scale,
+    )
+
+
+def _build_locked_angle_inventory(furniture_data, geometry_contract):
+    cached_items = [
+        dict(item)
+        for item in (furniture_data or [])
+        if isinstance(item, dict)
+    ]
+    cached_by_key = {
+        str(item.get("target_key") or "").strip(): item
+        for item in cached_items
+        if str(item.get("target_key") or "").strip()
+    }
+    geometry_items = (
+        list(geometry_contract.get("item_targets") or [])
+        if isinstance(geometry_contract, dict)
+        else []
+    )
+    inventory = []
+    used_keys = set()
+    for target in geometry_items:
+        if not isinstance(target, dict):
+            continue
+        target_key = str(target.get("target_key") or "").strip()
+        row = dict(target)
+        if target.get("family") and not row.get("category"):
+            row["category"] = target.get("family")
+        if target.get("family") and not row.get("category_canonical"):
+            row["category_canonical"] = target.get("family")
+        if isinstance(target.get("dims_mm"), dict):
+            row.setdefault("requested_dims_mm", dict(target.get("dims_mm") or {}))
+        cached = cached_by_key.get(target_key)
+        if cached:
+            for key, value in cached.items():
+                if value not in (None, "", [], {}):
+                    row[key] = value
+            if isinstance(target.get("dims_mm"), dict) and not isinstance(row.get("dims_mm"), dict):
+                row["dims_mm"] = dict(target.get("dims_mm") or {})
+        try:
+            row["qty"] = max(1, int(row.get("qty") or 1))
+        except Exception:
+            row["qty"] = 1
+        inventory.append(row)
+        if target_key:
+            used_keys.add(target_key)
+    for cached in cached_items:
+        target_key = str(cached.get("target_key") or "").strip()
+        if target_key and target_key in used_keys:
+            continue
+        inventory.append(dict(cached))
+    return inventory
+
+
+def _generate_locked_angle_furnishing(
+    *,
+    guide_path,
+    furnished_main_path,
+    style_prompt,
+    unique_id,
+    furniture_data=None,
+    room_dims_contract=None,
+    geometry_contract=None,
+    scene_contract=None,
+    placement_plan=None,
+    timeout_sec=None,
+):
+    inventory = _build_locked_angle_inventory(furniture_data, geometry_contract)
+    furniture_specs_json = build_furniture_specs_json(inventory) if inventory else None
+    room_dims_parsed = None
+    if isinstance(room_dims_contract, dict):
+        room_dims_parsed = room_dims_contract.get("dims_mm_center")
+    if not isinstance(room_dims_parsed, dict) and isinstance(geometry_contract, dict):
+        nested_room_contract = geometry_contract.get("room_dims_contract")
+        if isinstance(nested_room_contract, dict):
+            room_dims_parsed = nested_room_contract.get("dims_mm_center")
+    room_dims_parsed = dict(room_dims_parsed or {}) or None
+    room_dimensions = (
+        json.dumps(room_dims_parsed, ensure_ascii=False)
+        if room_dims_parsed
+        else None
+    )
+    scene_contract = scene_contract if isinstance(scene_contract, dict) else None
+    return generate_furnished_room(
+        guide_path,
+        {
+            "prompt": (
+                f"{style_prompt}\n\n"
+                "Use the locked empty-room guide as the only camera and architecture canvas. "
+                "Restore every movable object visible in the furnished scene reference with the same identity, count, "
+                "material, color, physical orientation, relative arrangement, and world-space footprint. "
+                "The furnished scene reference has zero camera or pixel-position authority."
+            )
+        },
+        None,
+        unique_id,
+        furniture_specs_json=furniture_specs_json,
+        room_dimensions=room_dimensions,
+        room_dims_parsed=room_dims_parsed,
+        geometry_contract=geometry_contract if isinstance(geometry_contract, dict) else None,
+        scene_contract=scene_contract,
+        placement_plan=placement_plan if isinstance(placement_plan, dict) else None,
+        room_planes=(scene_contract or {}).get("room_planes"),
+        windows_present=(scene_contract or {}).get("windows_present"),
+        room_analysis_text=(scene_contract or {}).get("room_analysis_text"),
+        start_time=time.time(),
+        enable_scale_check=False,
+        max_generation_attempts=1,
+        furnished_scene_reference_path=furnished_main_path,
+        total_timeout_limit_override=(
+            max(
+                1.0,
+                min(
+                    float(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC),
+                    float(timeout_sec),
+                ),
+            )
+            if timeout_sec is not None
+            else DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC
+        ),
     )
 
 
@@ -2379,6 +2509,7 @@ job_entrypoints_module.configure_job_entrypoints(
             call_analysis_with_failover=call_gemini_with_failover,
             analysis_model_name=ANALYSIS_MODEL_NAME,
             safe_json_from_model_text=_safe_json_from_model_text,
+            refurnish_locked_angle=_generate_locked_angle_furnishing,
         ),
         normalize_label_for_match=_normalize_label_for_match,
         volume_ranking_snapshot=_volume_ranking_snapshot,

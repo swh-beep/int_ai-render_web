@@ -1294,6 +1294,78 @@ def test_generate_furnished_room_falls_back_to_text_guidance_and_ref_images_when
             output_path.unlink()
 
 
+def test_generate_furnished_room_keeps_full_furnished_scene_as_inventory_only_reference(
+    tmp_path,
+    monkeypatch,
+):
+    room_path = tmp_path / "locked-guide.png"
+    furnished_scene_path = tmp_path / "furnished-main.png"
+    room_path.write_bytes(_make_png_bytes(160, 90))
+    furnished_scene_path.write_bytes(_make_png_bytes(3200, 1800))
+
+    import application.render.furnished_generation_stage as generation_stage
+
+    monkeypatch.setattr(generation_stage.time, "time", lambda: 5250.0)
+    captured = {}
+
+    def fake_generation(model_name, content, *args, **kwargs):
+        captured["content"] = content
+        return _response()
+
+    result = generate_furnished_room(
+        str(room_path),
+        {"prompt": "Restore the exact furnished scene on the locked camera plate."},
+        None,
+        "locked-scene-reference",
+        furniture_specs_json=None,
+        room_dimensions=None,
+        room_dims_parsed=None,
+        room_planes=None,
+        scale_plan={"strict_scale_requested": False},
+        geometry_contract=None,
+        start_time=5250.0,
+        enable_scale_check=False,
+        max_generation_attempts=1,
+        furnished_scene_reference_path=str(furnished_scene_path),
+        total_timeout_limit=60,
+        detect_windows_present=lambda path: False,
+        logger=_logger(),
+        parse_room_dimensions_mm=lambda text: {},
+        normalize_dims_dict=lambda dims: dims,
+        is_two_dim_ok_label=lambda label: False,
+        available_dim_axes=lambda dims: set(),
+        summary_ref=_summary_ref(),
+        log_brief=False,
+        log_summary=False,
+        allow_all_safety_settings=lambda: {},
+        call_generation_with_failover=fake_generation,
+        generation_model_name="model",
+        match_aspect_to_target=lambda path, room: path,
+        validate_furnished_scale=lambda *args, **kwargs: (
+            True,
+            [],
+            {"failed_rules": [], "matched_items": {}, "unmatched_items": [], "rule_details": {}},
+        ),
+    )
+
+    output_path = Path(result["path"])
+    try:
+        content = captured["content"]
+        scene_label_index = next(
+            index
+            for index, part in enumerate(content)
+            if isinstance(part, str) and part.startswith("Furnished Scene Reference")
+        )
+        scene_image = content[scene_label_index + 1]
+        assert isinstance(scene_image, Image.Image)
+        assert scene_image.size == (1536, 864)
+        assert "ZERO authority over camera" in content[scene_label_index]
+        assert "world-space footprint" in content[scene_label_index]
+        assert output_path.exists()
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
 def test_generate_furnished_room_falls_back_to_ref_images_when_json_items_are_unusable(tmp_path, monkeypatch):
     room_path = tmp_path / "room.png"
     room_path.write_bytes(_make_png_bytes(160, 90))
