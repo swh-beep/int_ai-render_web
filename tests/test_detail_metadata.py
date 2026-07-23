@@ -40,6 +40,7 @@ class DetailMetadataTests(unittest.TestCase):
                 "generation_mode": "angle_generation",
                 "camera_mode": "side_angle",
                 "focus_side": "left",
+                "camera_travel_side": "left",
                 "angle_qc_attempts": 2,
                 "angle_qc": {
                     "passed": True,
@@ -66,6 +67,7 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail["generation_mode"], "angle_generation")
         self.assertEqual(detail["camera_mode"], "side_angle")
         self.assertEqual(detail["focus_side"], "left")
+        self.assertEqual(detail["camera_travel_side"], "left")
         self.assertEqual(detail["angle_qc_attempts"], 2)
         self.assertEqual(detail["angle_qc"]["metrics"]["camera_motion_score"], 0.81)
         self.assertEqual(output["furniture_data"][0]["target_key"], "cart_product-1_accent-chair_001")
@@ -385,7 +387,11 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[2]["focus_side"], "right")
         self.assertNotIn("simple_scene_detail", styles[0])
         combined_prompts = "\n".join(style["prompt"] for style in styles)
-        self.assertIn("genuine nearby high-angle camera move", styles[0]["prompt"])
+        self.assertIn("genuine nearby high-angle camera view", styles[0]["prompt"])
+        self.assertIn("Move the camera toward the LEFT side of the source viewpoint", styles[1]["prompt"])
+        self.assertIn("yaw gently back into the room", styles[1]["prompt"])
+        self.assertIn("Move the camera toward the RIGHT side of the source viewpoint", styles[2]["prompt"])
+        self.assertIn("yaw gently back into the room", styles[2]["prompt"])
         self.assertIn("real parallax", styles[1]["prompt"])
         self.assertIn("real parallax", styles[2]["prompt"])
         self.assertNotIn("VIEWPOINT SAFETY", combined_prompts)

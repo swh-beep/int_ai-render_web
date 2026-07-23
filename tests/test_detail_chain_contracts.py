@@ -1481,6 +1481,7 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
             "generation_mode": "angle_generation",
             "camera_mode": "side_angle",
             "focus_side": "left",
+            "camera_travel_side": "left",
             "angle_qc_attempts": 1,
             "angle_qc": {"passed": True, "reject_reasons": []},
         }
@@ -1520,6 +1521,7 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
     assert result["details"][0]["generation_mode"] == "angle_generation"
     assert result["details"][0]["camera_mode"] == "side_angle"
     assert result["details"][0]["focus_side"] == "left"
+    assert result["details"][0]["camera_travel_side"] == "left"
     assert result["details"][0]["angle_qc_attempts"] == 1
     assert result["details"][0]["angle_qc"]["passed"] is True
 

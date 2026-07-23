@@ -350,11 +350,11 @@ def construct_internal_angle_styles():
         {
             "name": "High Angle Overview",
             "prompt": (
-                "CAMERA POSITION: Create a genuine nearby high-angle camera move from inside the same room, "
-                "as if the camera is lifted above standing eye level and pitched downward.\n"
+                "CAMERA POSITION: Reconstruct a genuine nearby high-angle camera view from inside the same room. "
+                "Raise the camera roughly 0.8-1.2 m above the main viewpoint and pitch it downward about 18-28 degrees.\n"
                 "VIEWPOINT REQUIRED: The output must not match the main camera or a crop of the main image. "
-                "Show a measurable camera-height change, more visible top surfaces, and consistent perspective shift while preserving the same physical room.\n"
-                "CAMERA TILT: Mild-to-moderate downward tilt, enough to reveal more table, sofa, rug, and floor top planes. Keep the horizon natural and the vertical lines stable.\n"
+                "A clearly measurable camera-height change, substantially more visible top surfaces/floor, and a coherent perspective shift are mandatory.\n"
+                "CAMERA TILT: Use a clearly visible but natural downward tilt. Keep the horizon plausible and vertical lines stable.\n"
                 "FORBIDDEN CAMERA: Do NOT use bird's-eye, top-down, drone, ceiling-mounted, surveillance, or extreme overhead viewpoints.\n"
                 "COMPOSITION: Show the same room layout and objects from the elevated camera. Physical furniture placement, count, shape, material, and orientation must remain unchanged.\n"
                 "FAILURE CONDITION: If this could be achieved by crop, zoom, or reframe from the main image, it is wrong. If architecture or furniture identity changes, it is wrong.\n"
@@ -366,8 +366,10 @@ def construct_internal_angle_styles():
         {
             "name": "Side Composition (Focus Left)",
             "prompt": (
-                "CAMERA POSITION: Natural standing-height side-angle viewpoint after a real lateral camera move toward the LEFT side of the original room composition.\n"
-                "VIEWPOINT REQUIRED: Translate the camera left and add a modest yaw back into the room. The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
+                "VIEWPOINT SIDE: Create the LEFT-side viewpoint of the furnished room.\n"
+                "CAMERA POSITION: Move the camera toward the LEFT side of the source viewpoint, then yaw gently back into the room. "
+                "Use a clear lateral translation of roughly 12-20% of the visible room width plus a 15-30 degree yaw.\n"
+                "VIEWPOINT REQUIRED: The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
                 "COMPOSITION: The left side of the same physical room should become dominant while preserving furniture identities, room architecture, lighting direction, relative placement, and world-space orientation.\n"
                 "ALLOWED OCCLUSION: It is acceptable for right-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"
@@ -381,8 +383,10 @@ def construct_internal_angle_styles():
         {
             "name": "Side Composition (Focus Right)",
             "prompt": (
-                "CAMERA POSITION: Natural standing-height side-angle viewpoint after a real lateral camera move toward the RIGHT side of the original room composition.\n"
-                "VIEWPOINT REQUIRED: Translate the camera right and add a modest yaw back into the room. The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
+                "VIEWPOINT SIDE: Create the RIGHT-side viewpoint of the furnished room.\n"
+                "CAMERA POSITION: Move the camera toward the RIGHT side of the source viewpoint, then yaw gently back into the room. "
+                "Use a clear lateral translation of roughly 12-20% of the visible room width plus a 15-30 degree yaw.\n"
+                "VIEWPOINT REQUIRED: The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
                 "COMPOSITION: The right side of the same physical room should become dominant while preserving furniture identities, room architecture, lighting direction, relative placement, and world-space orientation.\n"
                 "ALLOWED OCCLUSION: It is acceptable for left-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"

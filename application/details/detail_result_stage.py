@@ -122,6 +122,7 @@ def _build_detail_entries(
             "generation_mode",
             "camera_mode",
             "focus_side",
+            "camera_travel_side",
             "angle_qc_attempts",
             "angle_qc",
         ):

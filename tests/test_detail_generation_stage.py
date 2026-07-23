@@ -374,6 +374,8 @@ def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
 def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    empty_room_path = tmp_path / "empty-room.png"
+    Image.new("RGB", (1600, 900), color=(232, 232, 228)).save(empty_room_path, format="PNG")
     cutout_path = tmp_path / "cutout.png"
     Image.new("RGB", (300, 300), color=(180, 180, 180)).save(cutout_path, format="PNG")
 
@@ -405,6 +407,7 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
             "name": "High Angle Overview",
             "ratio": "16:9",
             "target_box_2d": [100, 100, 400, 400],
+            "empty_room_path": str(empty_room_path),
             "prompt": "render a standing-height landscape overview",
         },
         "unitcase",
@@ -431,7 +434,8 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
         assert "OUTPUT ASPECT RATIO: 16:9" in captured["prompt"]
         assert "<SCENE LOCK: SAME ROOM, REAL HIGH CAMERA MOVE>" in captured["prompt"]
         assert "REAL HIGH CAMERA MOVE REQUIRED" in captured["prompt"]
-        assert "Raise the camera above the main viewpoint and pitch downward" in captured["prompt"]
+        assert "Raise the camera roughly 0.8-1.2 m above the main viewpoint" in captured["prompt"]
+        assert "pitch downward about 18-28 degrees" in captured["prompt"]
         assert "real high-camera perspective with changed projected positions and top-plane visibility" in captured["prompt"]
         assert "WORLD-SPACE POSE LOCK" in captured["prompt"]
         assert "projected screen positions, visible faces, occlusions, and perspective must change naturally" in captured["prompt"]
@@ -439,6 +443,8 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
         assert "SOURCE-CONSTRAINED REFRAME" not in captured["prompt"]
         assert "facing direction from the main render" not in captured["prompt"]
         assert "PRIMARY TARGET IN-ROOM CROP" not in captured["content"]
+        assert "Empty Room Architecture Reference (same room topology before furnishing):" in captured["content"]
+        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
         assert correction_calls == [
@@ -522,12 +528,16 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
         assert captured["request_options"]["image_size"] == "4K"
         assert "<SCENE LOCK: SAME ROOM, REAL SIDE CAMERA MOVE>" in captured["prompt"]
         assert "REAL SIDE CAMERA MOVE REQUIRED" in captured["prompt"]
+        assert "Move the camera toward the right side of the source viewpoint" in captured["prompt"]
+        assert "yaw gently back into the room" in captured["prompt"]
+        assert "right side viewpoint is unmistakable" in captured["prompt"]
         assert "real side-camera parallax" in captured["prompt"]
         assert "changed projected positions, side planes, and occlusions" in captured["prompt"]
         assert "This must be a new side camera viewpoint, not a crop, zoom, or source reframe." in captured["prompt"]
         assert "crop out or minimize the opposite side of the room" in captured["prompt"]
         assert "do NOT relocate objects to keep them visible" in captured["prompt"]
-        assert "<CRITICAL: WORLD-SPACE SCENE LOCK" in captured["prompt"]
+        assert "<CRITICAL: NEW CAMERA POSE + WORLD-SPACE SCENE LOCK>" in captured["prompt"]
+        assert "NEW CAMERA POSE IS NON-NEGOTIABLE" in captured["prompt"]
         assert "positions must remain EXACTLY the same as the input image" not in captured["prompt"]
         assert "WORLD-SPACE POSE LOCK" in captured["prompt"]
         assert "projected screen positions, visible faces, occlusions, and perspective must change naturally" in captured["prompt"]
@@ -556,9 +566,10 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             in captured["content"]
         )
         assert "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):" not in captured["content"]
-        assert "Empty Room Architecture Reference (same room topology before furnishing):" in captured["content"]
-        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
+        assert "Empty Room Architecture Reference (same room topology before furnishing):" not in captured["content"]
+        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 1
         assert result["aspect_ratio"] == "16:9"
+        assert result["camera_travel_side"] == "right"
         assert correction_calls == [
             (
                 str(output_path),
@@ -646,6 +657,9 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
         assert "<ANGLE QC RETRY FEEDBACK>" not in generation_calls[0]["prompt"]
         assert "<ANGLE QC RETRY FEEDBACK>" in generation_calls[1]["prompt"]
         assert "same_frame_or_crop" in generation_calls[1]["prompt"]
+        assert "Do not return another pixel-aligned copy of the source frame" in generation_calls[1]["prompt"]
+        assert "move the camera to the LEFT side of the source viewpoint" in generation_calls[1]["prompt"]
+        assert "yaw back into the room" in generation_calls[1]["prompt"]
         assert len(analysis_calls) == 2
         assert analysis_calls[0]["request_options"]["response_mime_type"] == "application/json"
         assert leaked == []

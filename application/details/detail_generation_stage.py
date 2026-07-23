@@ -588,11 +588,11 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
         )
 
     if is_side:
-        side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
-        move_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "laterally"
+        side_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "requested"
         return (
-            f"Using the provided image as the source room, create a genuine nearby {side_text} camera view of this exact space. "
-            f"Translate the camera {move_text} and yaw gently back into the room so the result has real parallax, changed occlusions, and newly visible side planes. "
+            f"Using the provided image as the source room, create a genuine nearby {side_text}-side camera viewpoint. "
+            f"Translate the camera toward the {side_text} side of the source viewpoint and yaw gently back into the room. "
+            "Use a clear 12-20% room-width lateral move plus a 15-30 degree yaw so the result has real parallax, changed occlusions, and newly visible side planes. "
             "This must be a new side camera viewpoint, not a crop, zoom, or source reframe. "
             f"{_NO_FAKE_FOREGROUND_GUARD}"
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
@@ -746,19 +746,22 @@ def generate_detail_view(
             )
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
         elif is_side_angle:
-            side_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "side"
+            camera_travel_side = "left" if focus_side == "left" else "right" if focus_side == "right" else "requested"
             scene_lock_block = (
                 "<SCENE LOCK: SAME ROOM, REAL SIDE CAMERA MOVE>\n"
                 "Create a genuine nearby side-angle camera view of the exact same finished room.\n"
-                f"Move the camera toward the {side_text} side and yaw gently back into the room.\n"
+                f"Move the camera toward the {camera_travel_side} side of the source viewpoint and yaw gently back into the room, "
+                f"so the {camera_travel_side} side viewpoint is unmistakable.\n"
+                "Use a clear lateral translation of roughly 12-20% of the visible room width plus a 15-30 degree yaw.\n"
                 "This must be a new side camera viewpoint, not a crop, zoom, or source reframe.\n"
-                "Priority order: (1) same physical room architecture, (2) same furniture identities and world-space placement, "
-                "(3) real side-camera parallax with changed projected positions, side planes, and occlusions.\n"
+                "Priority order: (1) unmistakable real side-camera parallax with changed projected positions, side planes, and occlusions, "
+                "(2) same physical room topology, (3) same furniture identities and world-space placement.\n"
                 "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT relocate objects to keep them visible.\n"
                 "Do not rotate or rebuild only the room around static front-facing furniture.\n"
             )
             camera_lock_line = (
                 "4. **REAL SIDE CAMERA MOVE REQUIRED:** Use a nearby lateral camera translation plus modest yaw. "
+                f"The camera travels toward the {camera_travel_side.upper()} side of the source viewpoint and looks back into the room. "
                 "Keep object world-space placement, physical orientation, footprint, and room geometry fixed, while allowing the screen projection, visible sides, occlusions, and perspective to change naturally. "
                 "Do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
             )
@@ -766,10 +769,10 @@ def generate_detail_view(
             scene_lock_block = (
                 "<SCENE LOCK: SAME ROOM, REAL HIGH CAMERA MOVE>\n"
                 "Create a genuine nearby high-angle camera view of the exact same finished room.\n"
-                "Raise the camera above the main viewpoint and pitch downward so more top surfaces and floor planes are visible.\n"
+                "Raise the camera roughly 0.8-1.2 m above the main viewpoint and pitch downward about 18-28 degrees so substantially more top surfaces and floor planes are visible.\n"
                 "This must be a new high camera viewpoint, not a crop, zoom, or source reframe.\n"
-                "Priority order: (1) same physical room architecture, (2) same furniture identities and world-space placement, "
-                "(3) real high-camera perspective with changed projected positions and top-plane visibility.\n"
+                "Priority order: (1) unmistakable real high-camera perspective with changed projected positions and top-plane visibility, "
+                "(2) same physical room topology, (3) same furniture identities and world-space placement.\n"
                 "Do not rotate or rebuild only the room around static front-facing furniture.\n"
             )
             camera_lock_line = (
@@ -1012,9 +1015,10 @@ def generate_detail_view(
         )
         if is_angle_style:
             layout_lock_block = (
-                "<CRITICAL: WORLD-SPACE SCENE LOCK (PRIORITY #0)>\n"
+                "<CRITICAL: NEW CAMERA POSE + WORLD-SPACE SCENE LOCK>\n"
+                "0. **NEW CAMERA POSE IS NON-NEGOTIABLE:** Reconstruct the scene from the requested new viewpoint. A pixel-aligned copy, crop, zoom, or same-camera edit is a failed output even if every object is preserved.\n"
                 "1. **LOCK THE PHYSICAL SCENE:** Keep every furniture, lighting, and decor item at the same real 3D footprint, height, scale, and physical orientation in the room.\n"
-                "1b. **CHANGE THE IMAGE-SPACE PROJECTION:** A real camera move MUST change screen positions, visible faces, overlaps, vanishing geometry, and occlusions coherently. Do not pin objects to their source-image pixels.\n"
+                "1b. **CHANGE THE IMAGE-SPACE PROJECTION:** The camera move MUST change screen positions, visible faces, overlaps, vanishing geometry, and occlusions coherently. Do not pin objects to their source-image pixels.\n"
                 "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
                 "3. **NO REMOVALS:** Do NOT remove an in-frame object to simplify reconstruction. Natural out-of-frame cropping or camera occlusion is allowed.\n"
                 "3b. **PRESERVE ROOM TOPOLOGY:** Keep the same walls, windows, doors, ceiling lines, floor boundaries, openings, built-ins, and object-to-room relationships.\n"
@@ -1059,7 +1063,7 @@ def generate_detail_view(
             ]
         angle_empty_room_img = None
         empty_room_path = str(style_config.get("empty_room_path") or "").strip()
-        if is_angle_style and empty_room_path and os.path.exists(empty_room_path):
+        if is_overview_angle and empty_room_path and os.path.exists(empty_room_path):
             try:
                 with Image.open(empty_room_path) as empty_opened:
                     angle_empty_room_img = ImageOps.exif_transpose(empty_opened).convert("RGB")
@@ -1303,10 +1307,30 @@ def generate_detail_view(
                                 flush=True,
                             )
                             if reasons:
-                                angle_retry_feedback = (
-                                    f"The previous angle candidate failed QC for: {reasons}. "
-                                    "Regenerate with a clearer real camera move, coherent furniture projection, preserved room topology, and no mask-like wall or panel artifacts."
+                                retry_lines = [
+                                    f"The previous angle candidate failed QC for: {reasons}.",
+                                    "Reconstruct the next candidate from a genuinely different camera pose. Do not return another pixel-aligned copy of the source frame.",
+                                ]
+                                if is_side_angle:
+                                    camera_travel_side = (
+                                        "left"
+                                        if focus_side == "left"
+                                        else "right"
+                                        if focus_side == "right"
+                                        else "requested"
+                                    )
+                                    retry_lines.append(
+                                        f"For this retry, move the camera to the {camera_travel_side.upper()} side of the source viewpoint "
+                                        "and yaw back into the room with an unmistakable 18-28% room-width translation."
+                                    )
+                                else:
+                                    retry_lines.append(
+                                        "For this retry, raise the camera about 1.0-1.4 m and pitch downward 22-32 degrees so top-plane and floor exposure visibly increase."
+                                    )
+                                retry_lines.append(
+                                    "Keep furniture count, identity, physical footprint, room topology, and architecture fixed; do not mirror, duplicate, relocate, or warp them."
                                 )
+                                angle_retry_feedback = " ".join(retry_lines)
                             for artifact_path in candidate_artifacts:
                                 _remove_file_quietly(artifact_path)
                             continue
@@ -1324,6 +1348,14 @@ def generate_detail_view(
                         result["camera_mode"] = camera_mode or ("side_angle" if style_name.startswith("Side Composition") else "overview_angle")
                         if focus_side:
                             result["focus_side"] = focus_side
+                        if is_side_angle:
+                            result["camera_travel_side"] = (
+                                "left"
+                                if focus_side == "left"
+                                else "right"
+                                if focus_side == "right"
+                                else "requested"
+                            )
                         result["angle_qc_attempts"] = attempt_index + 1
                         if last_angle_qc is not None:
                             result["angle_qc"] = last_angle_qc

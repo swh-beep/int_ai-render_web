@@ -582,6 +582,7 @@ def run_generate_details_job(
                         "generation_mode": result.get("generation_mode"),
                         "camera_mode": result.get("camera_mode"),
                         "focus_side": result.get("focus_side"),
+                        "camera_travel_side": result.get("camera_travel_side"),
                         "angle_qc_attempts": result.get("angle_qc_attempts"),
                         "angle_qc": result.get("angle_qc"),
                     }

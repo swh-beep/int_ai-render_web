@@ -113,10 +113,11 @@ def build_angle_quality_prompt(camera_mode: str, focus_side: str | None = None) 
             "top-surface/floor exposure, and coherent perspective change. A crop, zoom, or fake height impression fails."
         )
     else:
-        side_label = normalized_side if normalized_side in {"LEFT", "RIGHT"} else "REQUESTED"
+        camera_travel_side = normalized_side if normalized_side in {"LEFT", "RIGHT"} else "REQUESTED"
         camera_requirement = (
-            f"The candidate must be a real lateral camera translation toward the {side_label} side plus a coherent yaw "
-            "back into the room. It must show real parallax and newly visible side planes. A crop or zoom fails."
+            f"The candidate must use a real lateral camera translation toward the {camera_travel_side} side of the "
+            "source viewpoint, then yaw coherently back into the room. It must show real parallax and newly visible side planes. "
+            "A crop or zoom fails."
         )
 
     return (

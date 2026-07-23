@@ -113,7 +113,8 @@ def test_angle_quality_accepts_coherent_camera_move(tmp_path):
     model_images = [part for part in captured["content"] if isinstance(part, Image.Image)]
     assert len(model_images) == 2
     assert [image.size for image in model_images] == [(1024, 576), (1024, 576)]
-    assert "RIGHT side" in captured["content"][0]
+    assert "RIGHT side of the source viewpoint" in captured["content"][0]
+    assert "yaw coherently back into the room" in captured["content"][0]
     assert "real lateral camera translation" in captured["content"][0]
 
 
