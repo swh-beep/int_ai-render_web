@@ -2027,6 +2027,14 @@ def _generate_locked_angle_furnishing(
 ):
     locked_furnishing_started_at = time.time()
     inventory = _build_locked_angle_inventory(furniture_data, geometry_contract)
+    product_cutout_paths = {
+        os.path.normcase(os.path.realpath(os.path.abspath(str(item.get("crop_path")))))
+        for item in inventory
+        if isinstance(item, dict)
+        and str(item.get("crop_path") or "").strip()
+        and os.path.isfile(str(item.get("crop_path")))
+    }
+    product_cutout_reference_count = len(product_cutout_paths)
     furniture_specs_json = build_furniture_specs_json(inventory) if inventory else None
     room_dims_parsed = None
     if isinstance(room_dims_contract, dict):
@@ -2084,6 +2092,7 @@ def _generate_locked_angle_furnishing(
         f"detected_boxes={detected_box_count} "
         f"inventory_boxes={inventory_box_count} "
         f"atlas_boxes={combined_box_count} "
+        f"product_cutouts_local={product_cutout_reference_count} "
         f"fresh_detection_required={fresh_detection_required} "
         f"mode={inventory_reference_mode!r}",
         flush=True,
@@ -2098,6 +2107,7 @@ def _generate_locked_angle_furnishing(
         return {
             "path": None,
             "inventory_reference_mode": "furniture_only_atlas_unavailable",
+            "product_cutout_reference_count": product_cutout_reference_count,
         }
 
     try:
@@ -2147,11 +2157,13 @@ def _generate_locked_angle_furnishing(
         if isinstance(result, dict):
             result = dict(result)
             result["inventory_reference_mode"] = inventory_reference_mode
+            result["product_cutout_reference_count"] = product_cutout_reference_count
             return result
         if result:
             return {
                 "path": result,
                 "inventory_reference_mode": inventory_reference_mode,
+                "product_cutout_reference_count": product_cutout_reference_count,
             }
         return result
     finally:

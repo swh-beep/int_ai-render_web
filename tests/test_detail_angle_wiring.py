@@ -23,10 +23,12 @@ def test_main_wires_angle_generation_and_quality_gate_to_separate_providers():
     assert "refurnish_locked_angle=_generate_locked_angle_furnishing" in detail_block
 
 
-def test_locked_angle_stage2_uses_detail_timeout_budget(monkeypatch):
+def test_locked_angle_stage2_uses_detail_timeout_budget(tmp_path, monkeypatch):
     main = importlib.import_module("main")
     captured = {}
     monkeypatch.setattr(main.time, "time", lambda: 4321.5)
+    crop_path = tmp_path / "sofa-cutout.png"
+    crop_path.write_bytes(b"product-cutout")
 
     monkeypatch.setattr(
         main,
@@ -85,6 +87,7 @@ def test_locked_angle_stage2_uses_detail_timeout_budget(monkeypatch):
                 "label": "Sofa",
                 "box_2d": [430, 190, 810, 770],
                 "box_source": "main_render",
+                "crop_path": str(crop_path),
             }
         ],
         geometry_contract={
@@ -99,11 +102,13 @@ def test_locked_angle_stage2_uses_detail_timeout_budget(monkeypatch):
     assert result == {
         "path": "outputs/locked-stage2.png",
         "inventory_reference_mode": "detected_object_atlas",
+        "product_cutout_reference_count": 1,
     }
     assert captured["args"][0] == "outputs/validated-guide.png"
     assert captured["kwargs"]["furnished_scene_reference_path"] is None
     assert captured["kwargs"]["furniture_atlas_reference_path"] == str(atlas_paths[0])
     assert result["inventory_reference_mode"] == "detected_object_atlas"
+    assert result["product_cutout_reference_count"] == 1
     assert atlas_inputs[0]["label"] == "Detected Sofa"
     assert any(item.get("target_key") == "sofa-1" for item in atlas_inputs)
     assert not atlas_paths[0].exists()
@@ -152,6 +157,7 @@ def test_locked_angle_stage2_fails_closed_when_furniture_atlas_is_unavailable(
     assert result == {
         "path": None,
         "inventory_reference_mode": "furniture_only_atlas_unavailable",
+        "product_cutout_reference_count": 0,
     }
 
 

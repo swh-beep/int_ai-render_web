@@ -105,6 +105,28 @@ def _reconcile_internal_side_angle_results(
                 for key in slot_metadata_keys
             }
 
+    def _is_exact_requested_side(row: dict) -> bool:
+        requested_side = str(
+            row.get("requested_focus_side")
+            or row.get("focus_side")
+            or ""
+        ).strip().lower()
+        actual_side = str(row.get("camera_travel_side") or "").strip().lower()
+        if requested_side not in {"left", "right"} or actual_side != requested_side:
+            return False
+        angle_qc = row.get("angle_qc")
+        if not isinstance(angle_qc, dict):
+            return False
+        if angle_qc.get("passed") is not True:
+            return False
+        if angle_qc.get("passed_for_requested_slot") is not True:
+            return False
+        if bool(angle_qc.get("direction_only_mismatch")):
+            return False
+        if row.get("camera_direction_matches") is not True:
+            return False
+        return True
+
     def _quality_score(row: dict) -> float:
         angle_qc = row.get("angle_qc") if isinstance(row.get("angle_qc"), dict) else {}
         metrics = angle_qc.get("metrics") if isinstance(angle_qc.get("metrics"), dict) else {}
@@ -125,44 +147,30 @@ def _reconcile_internal_side_angle_results(
         exact_bonus = 10.0 if requested_side == actual_side else 0.0
         return exact_bonus + (0.75 * motion) + (0.25 * confidence)
 
-    selected_by_actual_side: dict[str, dict] = {}
+    selected_by_requested_side: dict[str, dict] = {}
     for row in side_rows:
-        actual_side = str(row.get("camera_travel_side") or "").strip().lower()
-        if actual_side not in {"left", "right"}:
+        if not _is_exact_requested_side(row):
             continue
-        angle_qc = row.get("angle_qc")
-        if isinstance(angle_qc, dict) and angle_qc.get("passed") is False:
-            continue
-        current = selected_by_actual_side.get(actual_side)
-        if current is None or _quality_score(row) > _quality_score(current):
-            selected_by_actual_side[actual_side] = row
-
-    selected_rows = []
-    for actual_side in ("left", "right"):
-        row = selected_by_actual_side.get(actual_side)
-        target_slot = requested_slots.get(actual_side)
-        if row is None or not isinstance(target_slot, dict):
-            continue
-        original_requested_side = str(
+        requested_side = str(
             row.get("requested_focus_side")
             or row.get("focus_side")
             or ""
         ).strip().lower()
-        target_slot = requested_slots[actual_side]
+        current = selected_by_requested_side.get(requested_side)
+        if current is None or _quality_score(row) > _quality_score(current):
+            selected_by_requested_side[requested_side] = row
+
+    selected_rows = []
+    for requested_side in ("left", "right"):
+        row = selected_by_requested_side.get(requested_side)
+        target_slot = requested_slots.get(requested_side)
+        if row is None or not isinstance(target_slot, dict):
+            continue
         for metadata_key, metadata_value in target_slot.items():
             row[metadata_key] = metadata_value
-        row["requested_focus_side"] = actual_side
-        row["focus_side"] = actual_side
+        row["requested_focus_side"] = requested_side
+        row["focus_side"] = requested_side
         row["camera_direction_matches"] = True
-        if original_requested_side != actual_side:
-            row["angle_direction_reconciled"] = True
-        angle_qc = row.get("angle_qc")
-        if isinstance(angle_qc, dict):
-            reconciled_qc = dict(angle_qc)
-            reconciled_qc["original_requested_focus_side"] = original_requested_side
-            reconciled_qc["assigned_focus_side"] = actual_side
-            reconciled_qc["camera_direction_matches_after_reconcile"] = True
-            row["angle_qc"] = reconciled_qc
         selected_rows.append(row)
 
     side_row_ids = {id(row) for row in side_rows}

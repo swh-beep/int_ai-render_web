@@ -1402,6 +1402,7 @@ def generate_detail_view(
                 "refurnish_attempts": [],
                 "refurnish_backend": None,
                 "inventory_reference_mode": None,
+                "product_cutout_reference_count": None,
                 "locked_plate_ignored": False,
             }
             if is_internal_angle
@@ -1906,8 +1907,8 @@ def generate_detail_view(
                         continue
                 _discard_fallback_artifacts(guide_artifacts)
 
-            if selected_guide is None and direction_only_guide is not None:
-                selected_guide = direction_only_guide
+            if direction_only_guide is not None:
+                _discard_fallback_artifacts(direction_only_guide["artifacts"])
                 direction_only_guide = None
             if selected_guide is None:
                 return None
@@ -1941,6 +1942,7 @@ def generate_detail_view(
                 if angle_pipeline_trace is not None:
                     angle_pipeline_trace["refurnish_backend"] = refurnish_backend
                 inventory_reference_mode = None
+                product_cutout_reference_count = None
                 if refurnish_locked_angle is not None:
                     stage2_result = refurnish_locked_angle(
                         guide_path=guide_path,
@@ -1968,12 +1970,31 @@ def generate_detail_view(
                         inventory_reference_mode = str(
                             stage2_result.get("inventory_reference_mode") or ""
                         ).strip() or None
+                        try:
+                            product_cutout_reference_count = max(
+                                0,
+                                int(
+                                    stage2_result.get(
+                                        "product_cutout_reference_count"
+                                    )
+                                    or 0
+                                ),
+                            )
+                        except (TypeError, ValueError):
+                            product_cutout_reference_count = 0
                     if (
                         angle_pipeline_trace is not None
                         and inventory_reference_mode
                     ):
                         angle_pipeline_trace["inventory_reference_mode"] = (
                             inventory_reference_mode
+                        )
+                    if (
+                        angle_pipeline_trace is not None
+                        and product_cutout_reference_count is not None
+                    ):
+                        angle_pipeline_trace["product_cutout_reference_count"] = (
+                            product_cutout_reference_count
                         )
                     stage2_path = (
                         stage2_result.get("path")
@@ -2039,6 +2060,7 @@ def generate_detail_view(
                                 "guide_translation": guide_translation or None,
                                 "backend": refurnish_backend,
                                 "inventory_reference_mode": inventory_reference_mode,
+                                "product_cutout_reference_count": product_cutout_reference_count,
                             }
                         )
                     continue
@@ -2075,6 +2097,7 @@ def generate_detail_view(
                             "guide_translation": guide_translation or None,
                             "backend": refurnish_backend,
                             "inventory_reference_mode": inventory_reference_mode,
+                            "product_cutout_reference_count": product_cutout_reference_count,
                             "locked_plate_ignored": locked_plate_ignored,
                             "qc": json.loads(json.dumps(last_angle_qc, ensure_ascii=True)),
                         }
@@ -2120,6 +2143,7 @@ def generate_detail_view(
                     f"guide_qc_passed={bool(guide_qc.get('passed'))} "
                     f"refurnish_backend={refurnish_backend!r} "
                     f"inventory_reference_mode={inventory_reference_mode!r} "
+                    f"product_cutout_reference_count={product_cutout_reference_count!r} "
                     f"locked_plate_ignored={locked_plate_ignored} "
                     f"attempt={fallback_attempt_index + 1}/{DETAIL_INTERNAL_ANGLE_TWO_STAGE_MAX_ATTEMPTS} "
                     f"physical_passed={bool(last_angle_qc.get('passed'))} requested_slot_passed=False "
@@ -2265,7 +2289,7 @@ def generate_detail_view(
             two_stage_result = _run_two_stage_internal_angle_fallback()
             if two_stage_result is not None:
                 return two_stage_result
-        if salvage_candidate is not None:
+        if salvage_candidate is not None and not is_side_angle:
             selected_salvage = salvage_candidate
             salvage_candidate = None
             return _finalize_candidate_result(

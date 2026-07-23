@@ -216,6 +216,33 @@ def _copy_cached_furniture_items(furniture_data) -> list[dict]:
     return [dict(item) for item in (furniture_data or []) if isinstance(item, dict)]
 
 
+def _materialize_cached_crop_references(
+    cached_items: list[dict],
+    *,
+    materialize_input: Callable[[str | None, str], str | None],
+) -> list[dict]:
+    restored = []
+    for index, item in enumerate(cached_items or []):
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        crop_url = str(row.get("crop_url") or "").strip()
+        crop_path = str(row.get("crop_path") or "").strip()
+        source_ref = crop_url or crop_path
+        if source_ref and not (crop_path and os.path.exists(crop_path)):
+            try:
+                materialized = materialize_input(source_ref, f"detail_retry_product_ref_{index + 1}")
+            except Exception:
+                materialized = None
+            try:
+                if materialized and os.path.exists(materialized):
+                    row["crop_path"] = materialized
+            except Exception:
+                pass
+        restored.append(row)
+    return restored
+
+
 def run_regenerate_single_detail_job(
     payload: dict,
     *,
@@ -257,6 +284,10 @@ def run_regenerate_single_detail_job(
         if not local_path or not os.path.exists(local_path):
             return {"error": "Original image not found"}
         resolve_image_url(local_path, s3_prefix_override=prefix_detail_user)
+        cached_items = _materialize_cached_crop_references(
+            cached_items,
+            materialize_input=materialize_input,
+        )
 
         if cached_items:
             print(">> [Single Retry] Using cached furniture targets for regeneration.", flush=True)

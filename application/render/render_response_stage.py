@@ -2,6 +2,30 @@ import os
 from typing import Callable
 
 
+def _with_persisted_crop_urls(
+    furniture_data: list[dict],
+    *,
+    resolve_image_url: Callable[[str | None, str | None], str | None],
+    crop_prefix: str,
+) -> list[dict]:
+    rows = []
+    for item in furniture_data or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        crop_path = str(row.get("crop_path") or "").strip()
+        if crop_path and not row.get("crop_url"):
+            try:
+                if os.path.exists(crop_path):
+                    crop_url = resolve_image_url(crop_path, s3_prefix_override=crop_prefix)
+                    if crop_url:
+                        row["crop_url"] = crop_url
+            except Exception:
+                pass
+        rows.append(row)
+    return rows
+
+
 def _build_selected_item_review(furniture_data: list[dict], selected_variant_review: dict | None) -> list[dict]:
     diagnostics = ((selected_variant_review or {}).get("scalecheck_diagnostics") or {}) if isinstance(selected_variant_review, dict) else {}
     matched_items = diagnostics.get("matched_items") or {}
@@ -122,6 +146,16 @@ def build_render_response_payload(
     resolve_image_url: Callable[[str | None, str | None], str | None],
 ) -> dict:
     final_before_url = resolve_image_url(step1_img, s3_prefix_override=prefix_main_empty)
+    source_reference_prefix = (
+        f"{str(artifact_root_prefix).rstrip('/')}/source-references"
+        if artifact_root_prefix
+        else prefix_main_user
+    )
+    persisted_furniture_data = _with_persisted_crop_urls(
+        furniture_data,
+        resolve_image_url=resolve_image_url,
+        crop_prefix=source_reference_prefix,
+    )
 
     scale_guide_url = None
     try:
@@ -161,7 +195,7 @@ def build_render_response_payload(
         "result_urls": result_urls,
         "moodboard_url": moodboard_url,
         "scale_guide_url": scale_guide_url,
-        "furniture_data": furniture_data,
+        "furniture_data": persisted_furniture_data,
         "volume_ranking": volume_ranking,
         "message": "QC blocked final selection" if final_result_blocked else "Complete",
     }
@@ -186,7 +220,7 @@ def build_render_response_payload(
         payload["selected_result_filename"] = selected_result_filename
         payload["selected_result_reason"] = selected_result_reason
         payload["selected_variant_review"] = dict(selected_variant_review or {})
-        payload["selected_item_review"] = _build_selected_item_review(furniture_data, selected_variant_review)
+        payload["selected_item_review"] = _build_selected_item_review(persisted_furniture_data, selected_variant_review)
         payload["variant_diagnostics"] = list(variant_diagnostics or [])
         payload["scale_plan"] = dict(scale_plan or {})
         payload["room_dims_contract"] = dict(room_dims_contract or {})

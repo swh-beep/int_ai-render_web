@@ -124,6 +124,32 @@ def _mark_product_localization_unverified(item: dict, reason: str) -> dict:
     return row
 
 
+def _materialize_crop_reference(
+    item: dict,
+    *,
+    materialize_input: Callable[[str | None, str], str | None],
+    label: str,
+) -> dict:
+    row = dict(item or {})
+    crop_url = str(row.get("crop_url") or "").strip()
+    crop_path = str(row.get("crop_path") or "").strip()
+    if crop_path and os.path.exists(crop_path):
+        return row
+    source_ref = crop_url or crop_path
+    if not source_ref:
+        return row
+    try:
+        materialized = materialize_input(source_ref, label)
+    except Exception:
+        materialized = None
+    try:
+        if materialized and os.path.exists(materialized):
+            row["crop_path"] = materialized
+    except Exception:
+        pass
+    return row
+
+
 def _call_product_localizer(
     *,
     detect_item_bbox_norm: Callable[..., object] | None,
@@ -159,7 +185,15 @@ def _localize_product_backed_items(
     if not cached_items:
         return []
 
-    rows = [dict(item) for item in cached_items if isinstance(item, dict)]
+    rows = [
+        _materialize_crop_reference(
+            item,
+            materialize_input=materialize_input,
+            label=f"detail_product_ref_{index + 1}",
+        )
+        for index, item in enumerate(cached_items or [])
+        if isinstance(item, dict)
+    ]
     if detect_item_bbox_norm is None or not local_path or not os.path.exists(local_path):
         return [
             _mark_product_localization_unverified(row, "product_reference_localization_unavailable")
@@ -185,15 +219,7 @@ def _localize_product_backed_items(
     def _localize(index: int) -> tuple[int, list[int] | None]:
         with ai_service_scope(scoped_ai_service_scope):
             item = rows[index]
-            crop_path = str(item.get("crop_path") or "").strip()
-            local_crop_path = crop_path
-            if crop_path:
-                try:
-                    materialized = materialize_input(crop_path, f"detail_product_ref_{index + 1}")
-                except Exception:
-                    materialized = None
-                if materialized:
-                    local_crop_path = materialized
+            local_crop_path = str(item.get("crop_path") or "").strip()
             box = _call_product_localizer(
                 detect_item_bbox_norm=detect_item_bbox_norm,
                 staged_path=local_path,
@@ -421,6 +447,8 @@ def _merge_cached_identity_into_fresh_items(
             row["description"] = cached_item.get("description")
         if cached_item.get("crop_path") not in (None, ""):
             row["crop_path"] = cached_item.get("crop_path")
+        if cached_item.get("crop_url") not in (None, ""):
+            row["crop_url"] = cached_item.get("crop_url")
 
         for field in (
             "dims_mm",

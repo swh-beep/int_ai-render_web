@@ -778,7 +778,7 @@ def test_generate_detail_view_retries_angle_then_returns_only_qc_passed_candidat
                 path.unlink()
 
 
-def test_generate_detail_view_keeps_best_direction_only_candidate_as_fallback(tmp_path, monkeypatch):
+def test_generate_detail_view_rejects_wrong_side_after_exhausting_direct_attempts(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
 
     def _room_bytes(*, shifted: bool) -> bytes:
@@ -867,23 +867,14 @@ def test_generate_detail_view_keeps_best_direction_only_candidate_as_fallback(tm
         safe_json_from_model_text=json.loads,
     )
 
-    output_path = Path(result["path"])
     artifacts = list(Path("outputs").glob("detail_*_direction-fallback-qc_37_*"))
     try:
+        assert result is None
         assert len(generation_prompts) == 2
         assert "<ANGLE QC RETRY FEEDBACK>" in generation_prompts[1]
         assert "previous camera physically moved LEFT" in generation_prompts[1]
-        assert result["angle_qc"]["passed"] is True
-        assert result["angle_qc"]["passed_for_requested_slot"] is False
-        assert result["angle_qc"]["direction_only_mismatch"] is True
-        assert result["focus_side"] == "right"
-        assert result["requested_focus_side"] == "right"
-        assert result["camera_travel_side"] == "left"
-        assert result["camera_direction_matches"] is False
-        assert result["angle_direction_fallback"] is True
-        assert result["angle_qc_attempts"] == 2
-        assert correction_calls == [str(output_path)]
-        assert artifacts == [output_path]
+        assert correction_calls == []
+        assert artifacts == []
     finally:
         for path in artifacts:
             if path.exists():
@@ -1164,6 +1155,7 @@ def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_valida
             "path": str(stage2_path),
             "scale_check_failed": False,
             "inventory_reference_mode": "furniture_only_atlas",
+            "product_cutout_reference_count": 1,
         }
 
     contracts = {
@@ -1218,12 +1210,19 @@ def test_generate_detail_view_uses_main_stage2_locked_canvas_callback_for_valida
         assert result["generation_mode"] == "angle_generation_two_stage"
         assert result["angle_pipeline_trace"]["refurnish_backend"] == "main_stage2_locked_canvas"
         assert result["angle_pipeline_trace"]["inventory_reference_mode"] == "furniture_only_atlas"
+        assert result["angle_pipeline_trace"]["product_cutout_reference_count"] == 1
         assert result["angle_pipeline_trace"]["refurnish_attempts"][0]["backend"] == "main_stage2_locked_canvas"
         assert (
             result["angle_pipeline_trace"]["refurnish_attempts"][0][
                 "inventory_reference_mode"
             ]
             == "furniture_only_atlas"
+        )
+        assert (
+            result["angle_pipeline_trace"]["refurnish_attempts"][0][
+                "product_cutout_reference_count"
+            ]
+            == 1
         )
         assert result["angle_pipeline_trace"]["locked_plate_ignored"] is False
         assert output_path == stage2_path
@@ -1465,6 +1464,115 @@ def test_generate_detail_view_never_refurnishes_when_all_camera_guides_fail_qc(
             "Detail.AngleGuide",
             "Detail.AngleGuide",
         ]
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_does_not_promote_direction_only_guide_to_stage2(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "room.png"
+    empty_room_path = tmp_path / "empty-room.png"
+    source_path.write_bytes(_landscape_png_bytes())
+    empty_room_path.write_bytes(_landscape_png_bytes())
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_DIRECT_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "DETAIL_INTERNAL_ANGLE_GUIDE_MAX_ATTEMPTS",
+        1,
+        raising=False,
+    )
+
+    hard_failure = {
+        "passed": False,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": False,
+        "inferred_camera_translation": "none",
+        "camera_direction_matches": None,
+        "reject_reasons": ["same_frame_or_crop", "insufficient_camera_motion"],
+        "warnings": [],
+        "metrics": {"camera_motion_score": 0.1, "model_confidence": 0.9},
+        "model_payload": {"reasons": ["The camera did not move."]},
+    }
+    direction_only_guide = {
+        "passed": True,
+        "passed_for_requested_slot": False,
+        "direction_only_mismatch": True,
+        "inferred_camera_translation": "right",
+        "camera_direction_matches": False,
+        "reject_reasons": [],
+        "warnings": ["camera_direction_mismatch", "direction_only_mismatch"],
+        "metrics": {"camera_motion_score": 0.92, "model_confidence": 0.96},
+        "model_payload": {"reasons": ["The guide moved right instead of left."]},
+    }
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_candidate",
+        lambda *_args, **_kwargs: hard_failure,
+    )
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "assess_angle_camera_guide",
+        lambda *_args, **_kwargs: direction_only_guide,
+    )
+
+    log_tags = []
+
+    def _call_gemini(_model_name, _content, _request_options, _safety_settings, **kwargs):
+        log_tags.append(kwargs.get("log_tag"))
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [
+                    type(
+                        "Part",
+                        (),
+                        {"inline_data": type("Inline", (), {"data": _landscape_png_bytes()})()},
+                    )()
+                ],
+            },
+        )()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "empty_room_path": str(empty_room_path),
+            "internal_angle_generation": True,
+            "prompt": "render a coherent left-side camera move",
+        },
+        "direction-only-guide-stop",
+        46,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: None,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("*direction-only-guide-stop*"))
+    try:
+        assert result is None
+        assert log_tags == ["Detail.Generate", "Detail.AngleGuide"]
         assert leaked == []
     finally:
         for path in leaked:
