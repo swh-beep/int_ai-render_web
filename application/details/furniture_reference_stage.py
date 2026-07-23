@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from collections import deque
 from statistics import median
@@ -29,13 +30,16 @@ def build_furniture_only_reference_atlas(
     empty_room_path: str | None,
     output_path: str | None,
     *,
+    item_boxes: Iterable[dict] | None = None,
     max_work_dimension: int = _WORK_MAX_DIMENSION,
 ) -> str | None:
-    """Build a camera-neutral furniture atlas from aligned furnished/empty room images.
+    """Build a camera-neutral furniture atlas from a furnished room image.
 
-    The returned image is a contact sheet of masked changed components. It intentionally
-    avoids preserving the original full-room composition so downstream generation does
-    not receive the source camera as a visual authority.
+    Valid detected object boxes are preferred because exact source-pixel crops preserve
+    light-colored furniture that can disappear in an image-difference mask. If no usable
+    boxes are available, aligned furnished/empty-room difference components are used as
+    a fallback. In both cases the result is a shuffled contact sheet rather than a full
+    room, so downstream generation does not receive the source camera as an authority.
     """
 
     if not furnished_main_path or not empty_room_path or not output_path:
@@ -44,7 +48,21 @@ def build_furniture_only_reference_atlas(
         return None
 
     try:
-        furnished = _load_rgb_capped(furnished_main_path, max_work_dimension)
+        furnished_full = _load_rgb(furnished_main_path)
+        # Crop before downscaling the complete 4K render so small objects retain
+        # their original source detail inside each atlas tile.
+        box_tiles = _build_box_reference_tiles(furnished_full, item_boxes)
+        if box_tiles:
+            atlas = _pack_tiles(box_tiles)
+            if atlas is None:
+                return None
+            parent = os.path.dirname(os.path.abspath(output_path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            atlas.save(output_path, format="JPEG", quality=92, optimize=True)
+            return output_path
+
+        furnished = _cap_rgb_image(furnished_full, max_work_dimension)
         empty = _load_rgb_capped(empty_room_path, max_work_dimension)
         if furnished.size != empty.size:
             empty = empty.resize(furnished.size, Image.Resampling.LANCZOS)
@@ -69,10 +87,18 @@ def build_furniture_only_reference_atlas(
 
 
 def _load_rgb_capped(path: str, max_dimension: int) -> Image.Image:
+    return _cap_rgb_image(_load_rgb(path), max_dimension)
+
+
+def _load_rgb(path: str) -> Image.Image:
     with Image.open(path) as opened:
-        img = ImageOps.exif_transpose(opened).convert("RGB")
+        return ImageOps.exif_transpose(opened).convert("RGB")
+
+
+def _cap_rgb_image(img: Image.Image, max_dimension: int) -> Image.Image:
     cap = max(1, int(max_dimension or _WORK_MAX_DIMENSION))
     if max(img.size) > cap:
+        img = img.copy()
         img.thumbnail((cap, cap), Image.Resampling.LANCZOS)
     return img
 
@@ -229,6 +255,111 @@ def _pack_components(
             continue
         tiles.append(tile)
 
+    return _pack_tiles(tiles)
+
+
+def _build_box_reference_tiles(
+    furnished: Image.Image,
+    item_boxes: Iterable[dict] | None,
+) -> list[Image.Image]:
+    candidates = _select_reference_boxes(item_boxes)
+    width, height = furnished.size
+    tiles: list[Image.Image] = []
+    for _area, (ymin, xmin, ymax, xmax) in candidates[:16]:
+        left = int(round(xmin * width))
+        top = int(round(ymin * height))
+        right = int(round(xmax * width))
+        bottom = int(round(ymax * height))
+        box_width = max(1, right - left)
+        box_height = max(1, bottom - top)
+        pad_x = max(4, int(round(box_width * 0.08)))
+        pad_y = max(4, int(round(box_height * 0.08)))
+        left = max(0, left - pad_x)
+        top = max(0, top - pad_y)
+        right = min(width, right + pad_x)
+        bottom = min(height, bottom + pad_y)
+        if right - left < 20 or bottom - top < 20:
+            continue
+        tile = furnished.crop((left, top, right, bottom))
+        tile.thumbnail((480, 360), Image.Resampling.LANCZOS)
+        if tile.width >= 20 and tile.height >= 20:
+            tiles.append(tile)
+    return tiles
+
+
+def count_usable_furniture_reference_boxes(
+    item_boxes: Iterable[dict] | None,
+) -> int:
+    """Return the exact number of object tiles the atlas builder would accept."""
+
+    return len(_select_reference_boxes(item_boxes))
+
+
+def _select_reference_boxes(
+    item_boxes: Iterable[dict] | None,
+) -> list[tuple[float, tuple[float, float, float, float]]]:
+    candidates: list[tuple[float, tuple[float, float, float, float]]] = []
+    for item in item_boxes or []:
+        if not isinstance(item, dict):
+            continue
+        normalized = _normalize_detection_box(item.get("box_2d"))
+        if normalized is None:
+            continue
+        ymin, xmin, ymax, xmax = normalized
+        area = (ymax - ymin) * (xmax - xmin)
+        # Full-frame source-reference placeholders are not object detections and
+        # would recreate the very camera authority this atlas is meant to remove.
+        if area < 0.0002 or area > 0.72:
+            continue
+        if any(
+            _normalized_box_iou(normalized, existing) >= 0.72
+            for _, existing in candidates
+        ):
+            continue
+        candidates.append((area, normalized))
+
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return candidates[:16]
+
+
+def _normalize_detection_box(raw_box) -> tuple[float, float, float, float] | None:
+    if not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4:
+        return None
+    try:
+        values = [float(value) for value in raw_box]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in values):
+        return None
+    scale = 1000.0 if max(abs(value) for value in values) > 1.0 else 1.0
+    ymin, xmin, ymax, xmax = [value / scale for value in values]
+    ymin = max(0.0, min(1.0, ymin))
+    xmin = max(0.0, min(1.0, xmin))
+    ymax = max(0.0, min(1.0, ymax))
+    xmax = max(0.0, min(1.0, xmax))
+    if ymax <= ymin or xmax <= xmin:
+        return None
+    return ymin, xmin, ymax, xmax
+
+
+def _normalized_box_iou(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> float:
+    first_ymin, first_xmin, first_ymax, first_xmax = first
+    second_ymin, second_xmin, second_ymax, second_xmax = second
+    inter_height = max(0.0, min(first_ymax, second_ymax) - max(first_ymin, second_ymin))
+    inter_width = max(0.0, min(first_xmax, second_xmax) - max(first_xmin, second_xmin))
+    intersection = inter_height * inter_width
+    if intersection <= 0.0:
+        return 0.0
+    first_area = (first_ymax - first_ymin) * (first_xmax - first_xmin)
+    second_area = (second_ymax - second_ymin) * (second_xmax - second_xmin)
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
+def _pack_tiles(tiles: list[Image.Image]) -> Image.Image | None:
     if not tiles:
         return None
 

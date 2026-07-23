@@ -24,6 +24,7 @@ from application.details.detail_generation_stage import (
 )
 from application.details.furniture_reference_stage import (
     build_furniture_only_reference_atlas,
+    count_usable_furniture_reference_boxes,
 )
 from application.details.detail_style_stage import construct_dynamic_styles as construct_dynamic_styles_stage
 from application import job_entrypoints as job_entrypoints_module
@@ -1539,6 +1540,201 @@ def detect_furniture_boxes(
     )
 
 
+_LOCKED_ANGLE_REFERENCE_BOX_CACHE_MAX = 64
+_LOCKED_ANGLE_NEGATIVE_BOX_CACHE_TTL_SEC = 30.0
+_locked_angle_reference_box_cache_lock = threading.Lock()
+_locked_angle_reference_box_cache: dict[
+    tuple[str, int, int],
+    tuple[float, tuple[dict, ...]],
+] = {}
+_locked_angle_reference_box_inflight: dict[
+    tuple[str, int, int],
+    threading.Event,
+] = {}
+
+
+def _clear_locked_angle_reference_box_cache() -> None:
+    """Clear the process-local cache; kept separate so tests can isolate state."""
+
+    with _locked_angle_reference_box_cache_lock:
+        _locked_angle_reference_box_cache.clear()
+
+
+def _detect_locked_angle_reference_boxes_once(
+    furnished_main_path: str | None,
+) -> list[dict]:
+    """Detect main-render objects once per local source file and share in-flight work.
+
+    Multiple angle styles and Stage2 retries can reach this function concurrently.
+    The first caller owns detection while other callers wait for that exact file
+    identity, then every caller receives its own dict copies.
+    """
+
+    if not furnished_main_path:
+        return []
+    resolved_path = os.path.normcase(
+        os.path.realpath(os.path.abspath(str(furnished_main_path)))
+    )
+    try:
+        stat = os.stat(resolved_path)
+    except OSError:
+        return []
+    cache_key = (resolved_path, int(stat.st_size), int(stat.st_mtime_ns))
+
+    with _locked_angle_reference_box_cache_lock:
+        cached = _locked_angle_reference_box_cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_rows = cached
+            if (
+                cached_rows
+                or time.monotonic() - cached_at
+                <= _LOCKED_ANGLE_NEGATIVE_BOX_CACHE_TTL_SEC
+            ):
+                return [dict(item) for item in cached_rows]
+            _locked_angle_reference_box_cache.pop(cache_key, None)
+        wait_event = _locked_angle_reference_box_inflight.get(cache_key)
+        owns_detection = wait_event is None
+        if owns_detection:
+            wait_event = threading.Event()
+            _locked_angle_reference_box_inflight[cache_key] = wait_event
+
+    if not owns_detection:
+        wait_event.wait()
+        with _locked_angle_reference_box_cache_lock:
+            cached = _locked_angle_reference_box_cache.get(
+                cache_key,
+                (time.monotonic(), ()),
+            )
+            return [dict(item) for item in cached[1]]
+
+    detected_rows: tuple[dict, ...] = ()
+    try:
+        raw_rows = detect_furniture_boxes(
+            resolved_path,
+            timeout_sec=120,
+            max_attempts=3,
+        )
+        detected_rows = tuple(
+            dict(item)
+            for item in (raw_rows or [])
+            if isinstance(item, dict)
+        )
+    except Exception:
+        logger.exception(
+            "[DetailAngleAtlas] furniture detection failed for %s",
+            resolved_path,
+        )
+    finally:
+        with _locked_angle_reference_box_cache_lock:
+            _locked_angle_reference_box_cache[cache_key] = (
+                time.monotonic(),
+                detected_rows,
+            )
+            while (
+                len(_locked_angle_reference_box_cache)
+                > _LOCKED_ANGLE_REFERENCE_BOX_CACHE_MAX
+            ):
+                oldest_key = next(iter(_locked_angle_reference_box_cache))
+                _locked_angle_reference_box_cache.pop(oldest_key, None)
+            completed_event = _locked_angle_reference_box_inflight.pop(
+                cache_key,
+                None,
+            )
+            if completed_event is not None:
+                completed_event.set()
+
+    return [dict(item) for item in detected_rows]
+
+
+_LOCKED_ANGLE_CURRENT_RENDER_BOX_SOURCES = {
+    "main_render",
+    "selected_variant_review",
+    "detail_current_image_analysis",
+    "product_reference_localization",
+}
+
+
+def _locked_angle_inventory_reference_items(inventory) -> list[dict]:
+    """Keep only inventory boxes known to be localized on the current render."""
+
+    selected: list[dict] = []
+    for item in inventory or []:
+        if not isinstance(item, dict):
+            continue
+        box_source = str(item.get("box_source") or "").strip().lower()
+        if box_source not in _LOCKED_ANGLE_CURRENT_RENDER_BOX_SOURCES:
+            continue
+        if (
+            box_source == "product_reference_localization"
+            and str(item.get("detail_localization_status") or "").strip()
+            != "product_reference_verified"
+        ):
+            continue
+        selected.append(dict(item))
+    return selected
+
+
+def _locked_angle_inventory_needs_fresh_detection(
+    inventory,
+    localized_items,
+) -> bool:
+    """Detect only when cached current-render boxes do not cover the scene."""
+
+    rows = [item for item in (inventory or []) if isinstance(item, dict)]
+    if not rows:
+        return True
+    usable_count = count_usable_furniture_reference_boxes(localized_items)
+    if usable_count <= 0 or usable_count / len(rows) < 0.75:
+        return True
+
+    ranked_major_items = []
+    for item in rows:
+        try:
+            volume_rank = int(item.get("volume_rank") or 0)
+        except (TypeError, ValueError):
+            volume_rank = 0
+        if 1 <= volume_rank <= 2:
+            ranked_major_items.append((volume_rank, item))
+    ranked_major_items.sort(key=lambda row: row[0])
+
+    if ranked_major_items:
+        major_items = [item for _rank, item in ranked_major_items]
+    else:
+        def _volume_proxy(item):
+            try:
+                return float(item.get("volume_proxy") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        volume_sorted = sorted(rows, key=_volume_proxy, reverse=True)
+        major_items = (
+            volume_sorted[:2]
+            if any(_volume_proxy(item) > 0.0 for item in volume_sorted)
+            else rows[:2]
+        )
+
+    # Missing either of the actual two largest items (typically the main
+    # sofa/bed and rug/table) justifies one fresh main-render scan even when
+    # many smaller decor boxes are already localized.
+    for major_item in major_items:
+        major_box_source = str(
+            major_item.get("box_source") or ""
+        ).strip().lower()
+        if major_box_source not in _LOCKED_ANGLE_CURRENT_RENDER_BOX_SOURCES:
+            return True
+        if (
+            major_box_source == "product_reference_localization"
+            and str(
+                major_item.get("detail_localization_status") or ""
+            ).strip()
+            != "product_reference_verified"
+        ):
+            return True
+        if count_usable_furniture_reference_boxes([major_item]) <= 0:
+            return True
+    return False
+
+
 def _normalize_label_for_match(label: str) -> str:
     return normalize_label_for_match_support(label)
 
@@ -1829,6 +2025,7 @@ def _generate_locked_angle_furnishing(
     placement_plan=None,
     timeout_sec=None,
 ):
+    locked_furnishing_started_at = time.time()
     inventory = _build_locked_angle_inventory(furniture_data, geometry_contract)
     furniture_specs_json = build_furniture_specs_json(inventory) if inventory else None
     room_dims_parsed = None
@@ -1850,10 +2047,52 @@ def _generate_locked_angle_furnishing(
         "outputs",
         f"detail_furniture_atlas_{safe_unique_id}.jpg",
     )
+    inventory_reference_items = _locked_angle_inventory_reference_items(
+        inventory
+    )
+    fresh_detection_required = _locked_angle_inventory_needs_fresh_detection(
+        inventory,
+        inventory_reference_items,
+    )
+    detected_reference_items = (
+        _detect_locked_angle_reference_boxes_once(furnished_main_path)
+        if fresh_detection_required
+        else []
+    )
+    detected_box_count = count_usable_furniture_reference_boxes(
+        detected_reference_items
+    )
+    inventory_box_count = count_usable_furniture_reference_boxes(
+        inventory_reference_items
+    )
+    atlas_reference_items = [
+        *detected_reference_items,
+        *inventory_reference_items,
+    ]
+    combined_box_count = count_usable_furniture_reference_boxes(
+        atlas_reference_items
+    )
+    if detected_box_count > 0 and combined_box_count > 0:
+        inventory_reference_mode = "detected_object_atlas"
+    elif inventory_box_count > 0 and combined_box_count > 0:
+        inventory_reference_mode = "cached_box_object_atlas"
+    else:
+        inventory_reference_mode = "difference_object_atlas"
+    print(
+        "[DetailAngleAtlas] "
+        f"unique_id={unique_id!r} "
+        f"detected_boxes={detected_box_count} "
+        f"inventory_boxes={inventory_box_count} "
+        f"atlas_boxes={combined_box_count} "
+        f"fresh_detection_required={fresh_detection_required} "
+        f"mode={inventory_reference_mode!r}",
+        flush=True,
+    )
     built_atlas_path = build_furniture_only_reference_atlas(
         furnished_main_path,
         empty_room_path,
         furniture_atlas_path,
+        item_boxes=atlas_reference_items,
     )
     if not built_atlas_path:
         return {
@@ -1886,7 +2125,9 @@ def _generate_locked_angle_furnishing(
             room_planes=(scene_contract or {}).get("room_planes"),
             windows_present=(scene_contract or {}).get("windows_present"),
             room_analysis_text=(scene_contract or {}).get("room_analysis_text"),
-            start_time=time.time(),
+            # Detection and atlas construction consume the same Stage2 budget;
+            # they must not silently extend the request deadline.
+            start_time=locked_furnishing_started_at,
             enable_scale_check=False,
             max_generation_attempts=1,
             furnished_scene_reference_path=None,
@@ -1905,12 +2146,12 @@ def _generate_locked_angle_furnishing(
         )
         if isinstance(result, dict):
             result = dict(result)
-            result["inventory_reference_mode"] = "furniture_only_atlas"
+            result["inventory_reference_mode"] = inventory_reference_mode
             return result
         if result:
             return {
                 "path": result,
-                "inventory_reference_mode": "furniture_only_atlas",
+                "inventory_reference_mode": inventory_reference_mode,
             }
         return result
     finally:

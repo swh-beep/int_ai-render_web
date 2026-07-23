@@ -2089,10 +2089,12 @@ def generate_furnished_room(
             reference_content += [
                 (
                     "Furniture-Only Object Atlas Reference "
-                    "(MOVABLE OBJECT identity, count, material, color, and source adjacency evidence only; "
-                    "the neutral tiles contain no valid room camera, crop, perspective, vanishing-point, "
-                    "architecture, or source pixel-position authority. Reproject the listed objects into the "
-                    "FINAL locked target canvas and never duplicate fragmented atlas regions)."
+                    "(INDEPENDENT exact source-pixel crops for MOVABLE OBJECT identity, count, material, color, "
+                    "shape, and local adjacency evidence only; each tile is a separate object reference and any "
+                    "small surrounding room fragment is incidental. The atlas grid and tile backgrounds contain "
+                    "no valid room camera, crop, perspective, vanishing-point, architecture, or source "
+                    "pixel-position authority. Reproject the listed objects into the FINAL locked target canvas; "
+                    "never duplicate fragmented atlas regions or overlapping object crops)."
                 ),
                 atlas_reference_img,
             ]
