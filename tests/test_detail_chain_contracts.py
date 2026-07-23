@@ -405,20 +405,33 @@ class DetailChainContractsTests(unittest.TestCase):
     def test_detail_generation_job_payload_keeps_furniture_data_without_moodboard(self):
         req = DetailRequest(
             image_url="https://cdn.example/rendered/main-1.png",
+            empty_room_url="https://cdn.example/rendered/empty-1.png",
             furniture_data=[{"label": "Accent Chair", "target_key": "detail_001"}],
+            room_dims_contract={"dims_mm_center": {"width_mm": 5000}},
+            geometry_contract={"geometry_source": "explicit_dimensions"},
+            scene_contract={"critical_item_keys": ["detail_001"]},
+            placement_plan={"anchor_item_key": "detail_001"},
             audience="internal",
+            require_details=True,
         )
 
         payload = build_detail_generation_job_payload(req)
 
         self.assertEqual(payload["image_url"], "https://cdn.example/rendered/main-1.png")
+        self.assertEqual(payload["empty_room_url"], "https://cdn.example/rendered/empty-1.png")
         self.assertIsNone(payload["moodboard_url"])
         self.assertEqual(payload["furniture_data"], [{"label": "Accent Chair", "target_key": "detail_001"}])
+        self.assertEqual(payload["room_dims_contract"]["dims_mm_center"]["width_mm"], 5000)
+        self.assertEqual(payload["geometry_contract"]["geometry_source"], "explicit_dimensions")
+        self.assertEqual(payload["scene_contract"]["critical_item_keys"], ["detail_001"])
+        self.assertEqual(payload["placement_plan"]["anchor_item_key"], "detail_001")
         self.assertEqual(payload["audience"], "internal")
+        self.assertIs(payload["require_details"], True)
 
     def test_regenerate_detail_job_payload_keeps_target_metadata_and_furniture_data(self):
         req = RegenerateDetailRequest(
             original_image_url="https://cdn.example/rendered/main-1.png",
+            empty_room_url="https://cdn.example/rendered/empty-1.png",
             style_index=2,
             target_key="detail_001",
             target_label="Accent Chair",
@@ -426,12 +439,17 @@ class DetailChainContractsTests(unittest.TestCase):
             target_source_box_2d=[12, 24, 198, 218],
             style_index_mode="overall",
             furniture_data=[{"label": "Accent Chair", "target_key": "detail_001"}],
+            room_dims_contract={"dims_mm_center": {"width_mm": 5000}},
+            geometry_contract={"geometry_source": "explicit_dimensions"},
+            scene_contract={"critical_item_keys": ["detail_001"]},
+            placement_plan={"anchor_item_key": "detail_001"},
             audience="internal",
         )
 
         payload = build_regenerate_detail_job_payload(req)
 
         self.assertEqual(payload["original_image_url"], "https://cdn.example/rendered/main-1.png")
+        self.assertEqual(payload["empty_room_url"], "https://cdn.example/rendered/empty-1.png")
         self.assertEqual(payload["style_index"], 2)
         self.assertEqual(payload["target_key"], "detail_001")
         self.assertEqual(payload["target_label"], "Accent Chair")
@@ -440,6 +458,10 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(payload["style_index_mode"], "overall")
         self.assertIsNone(payload["moodboard_url"])
         self.assertEqual(payload["furniture_data"], [{"label": "Accent Chair", "target_key": "detail_001"}])
+        self.assertEqual(payload["room_dims_contract"]["dims_mm_center"]["width_mm"], 5000)
+        self.assertEqual(payload["geometry_contract"]["geometry_source"], "explicit_dimensions")
+        self.assertEqual(payload["scene_contract"]["critical_item_keys"], ["detail_001"])
+        self.assertEqual(payload["placement_plan"]["anchor_item_key"], "detail_001")
         self.assertEqual(payload["audience"], "internal")
 
     def test_run_regenerate_single_detail_job_rehydrates_requested_target_when_snapshot_missing(self):
@@ -1249,6 +1271,78 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(analyze_calls, [])
         self.assertEqual(result["style_name"], "Detail: Accent Chair")
         self.assertEqual(result["furniture_data"][0]["target_key"], "chair_01")
+
+    def test_run_regenerate_single_angle_reuses_empty_room_and_scene_contracts(self):
+        source_path = Path("outputs/test-regenerate-angle-source.png")
+        empty_room_path = Path("outputs/test-regenerate-angle-empty.png")
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+            b"\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        source_path.write_bytes(png_bytes)
+        empty_room_path.write_bytes(png_bytes)
+        captured_style = {}
+
+        try:
+            result = run_regenerate_single_detail_job(
+                {
+                    "original_image_url": str(source_path),
+                    "empty_room_url": str(empty_room_path),
+                    "style_index": 1,
+                    "style_index_mode": "overall",
+                    "furniture_data": [
+                        {
+                            "label": "Accent Chair",
+                            "target_key": "chair_01",
+                            "box_2d": [120, 180, 820, 640],
+                        }
+                    ],
+                    "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
+                    "geometry_contract": {"geometry_source": "explicit_dimensions"},
+                    "scene_contract": {"critical_item_keys": ["chair_01"]},
+                    "placement_plan": {"anchor_item_key": "chair_01"},
+                    "audience": "internal",
+                },
+                normalize_audience=lambda audience: audience or "internal",
+                build_s3_prefix=lambda audience, category, suffix=None: f"{audience}/{category}/{suffix or 'root'}",
+                materialize_input=lambda url, prefix: url,
+                resolve_image_url=lambda path, s3_prefix_override=None: f"https://cdn.example/{Path(path).name}" if path else None,
+                detect_furniture_boxes=lambda path: [],
+                canonical_category=lambda label: str(label or "").strip().lower().replace(" ", "_"),
+                build_item_target_key=lambda source, index, label=None, category=None, item_id=None: f"{source}_{index:03d}",
+                max_concurrency_analysis=1,
+                analyze_cropped_item=lambda path, item: item,
+                attach_volume_ranks=lambda items: items,
+                construct_dynamic_styles=lambda items: [{"name": "Detail: Accent Chair"}],
+                normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+                generate_detail_view=lambda original_image_path, style_config, unique_id, index, furniture_data=None, **kwargs: (
+                    captured_style.update(style_config)
+                    or {
+                        "path": original_image_path,
+                        "style_name": style_config.get("name"),
+                        "generation_mode": "angle_generation_two_stage",
+                        "camera_mode": style_config.get("camera_mode"),
+                        "angle_direction_reconciled": True,
+                        "angle_pipeline_trace": {"guide_reference_mode": "empty_room"},
+                    }
+                ),
+                volume_ranking_snapshot=lambda items: [],
+            )
+        finally:
+            source_path.unlink(missing_ok=True)
+            empty_room_path.unlink(missing_ok=True)
+
+        self.assertEqual(result["style_name"], "High Angle Overview")
+        self.assertEqual(result["generation_mode"], "angle_generation_two_stage")
+        self.assertIs(result["angle_direction_reconciled"], True)
+        self.assertEqual(result["angle_pipeline_trace"]["guide_reference_mode"], "empty_room")
+        self.assertIs(captured_style["internal_angle_generation"], True)
+        self.assertEqual(captured_style["empty_room_path"], str(empty_room_path))
+        self.assertEqual(captured_style["room_dims_contract"]["dims_mm_center"]["width_mm"], 5000)
+        self.assertEqual(captured_style["geometry_contract"]["geometry_source"], "explicit_dimensions")
+        self.assertEqual(captured_style["scene_contract"]["critical_item_keys"], ["chair_01"])
+        self.assertEqual(captured_style["placement_plan"]["anchor_item_key"], "chair_01")
 
     def test_run_generate_details_job_blocks_source_reference_crop_targets(self):
         source_path = Path("outputs/test-detail-source-reference.png")

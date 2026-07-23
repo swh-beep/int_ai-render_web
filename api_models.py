@@ -103,14 +103,21 @@ class TrackerManifestPatchRequest(TrackerMetadataRequestMixin):
 
 class DetailRequest(BaseModel):
     image_url: str
+    empty_room_url: Optional[str] = None
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None
+    room_dims_contract: Optional[Dict[str, Any]] = None
+    geometry_contract: Optional[Dict[str, Any]] = None
+    scene_contract: Optional[Dict[str, Any]] = None
+    placement_plan: Optional[Dict[str, Any]] = None
     audience: Optional[str] = None
     simple_generation_mode: Optional[bool] = None
+    require_details: Optional[bool] = None
 
 
 class RegenerateDetailRequest(BaseModel):
     original_image_url: str
+    empty_room_url: Optional[str] = None
     style_index: int = 1
     target_key: Optional[str] = None
     target_label: Optional[str] = None
@@ -119,6 +126,10 @@ class RegenerateDetailRequest(BaseModel):
     style_index_mode: Optional[str] = "auto"
     moodboard_url: Optional[str] = None
     furniture_data: Optional[List[Dict[str, Any]]] = None
+    room_dims_contract: Optional[Dict[str, Any]] = None
+    geometry_contract: Optional[Dict[str, Any]] = None
+    scene_contract: Optional[Dict[str, Any]] = None
+    placement_plan: Optional[Dict[str, Any]] = None
     audience: Optional[str] = None
 
 

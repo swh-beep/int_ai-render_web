@@ -38,6 +38,11 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("✅ script.js 로드됨 (Multi Option FP Generation)");
 
     let currentFurnitureData = null;
+    let currentEmptyRoomUrl = null;
+    let currentRoomDimsContract = null;
+    let currentGeometryContract = null;
+    let currentSceneContract = null;
+    let currentPlacementPlan = null;
 
 
     // --- [1] 통합 모달 시스템 설정 ---
@@ -211,6 +216,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let roomSelectionRequestToken = 0;
     let styleSelectionRequestToken = 0;
 
+    function resetDetailGenerationState() {
+        currentDetailSourceUrl = null;
+        if (detailSection) detailSection.classList.add('hidden');
+        if (detailGridLandscape) detailGridLandscape.innerHTML = '';
+        if (detailGridPortrait) detailGridPortrait.innerHTML = '';
+    }
+
     function validateHomeImageUpload(file, contextLabel) {
         if (!file) return false;
 
@@ -256,6 +268,12 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedVariant = null;
         customMoodboardFile = null;
         currentMoodboardUrl = null;
+        currentEmptyRoomUrl = null;
+        currentRoomDimsContract = null;
+        currentGeometryContract = null;
+        currentSceneContract = null;
+        currentPlacementPlan = null;
+        resetDetailGenerationState();
 
         if (moodboardPreviewContainer) moodboardPreviewContainer.classList.add('hidden');
         if (moodboardUploadContainer) moodboardUploadContainer.classList.add('hidden');
@@ -1285,8 +1303,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
 
                 // 4. 컨텍스트 초기화 (기존 렌더링 데이터가 섞이지 않도록)
-                currentFurnitureData = null; // null이면 디테일 생성 시 백엔드가 알아서 다시 분석함
+                // null이면 디테일 생성 시 백엔드가 알아서 다시 분석함
+                currentFurnitureData = null;
                 currentMoodboardUrl = null;
+                currentEmptyRoomUrl = null;
+                currentRoomDimsContract = null;
+                currentGeometryContract = null;
+                currentSceneContract = null;
+                currentPlacementPlan = null;
+                resetDetailGenerationState();
 
                 // 5. 썸네일 컨테이너 비우기
                 if (thumbnailContainer) thumbnailContainer.innerHTML = '';
@@ -1322,6 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderBtn.disabled = true;
             loadingOverlay.classList.remove('hidden');
             resultSection.classList.add('hidden');
+            resetDetailGenerationState();
             if (comparisonContainer) comparisonContainer.classList.remove('direct-mode'); // 일반 렌더링 시 슬라이더 복구
 
             let startTime = Date.now();
@@ -1371,6 +1397,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     currentMoodboardUrl = null;
                 }
+                currentEmptyRoomUrl = data.empty_room_url || null;
+                currentRoomDimsContract = data.room_dims_contract || null;
+                currentGeometryContract = data.geometry_contract || null;
+                currentSceneContract = data.scene_contract || null;
+                currentPlacementPlan = data.placement_plan || null;
 
                 clearInterval(timerInterval);
                 loadingOverlay.classList.add('hidden');
@@ -1603,9 +1634,15 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const payload = {
                     image_url: currentImgUrl,
+                    empty_room_url: currentEmptyRoomUrl,
                     moodboard_url: currentMoodboardUrl,
                     furniture_data: currentFurnitureData,
-                    audience: "internal"
+                    room_dims_contract: currentRoomDimsContract,
+                    geometry_contract: currentGeometryContract,
+                    scene_contract: currentSceneContract,
+                    placement_plan: currentPlacementPlan,
+                    audience: "internal",
+                    require_details: true
                 };
 
                 const res = await fetch("/generate-details", {
@@ -1760,6 +1797,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     original_image_url: currentDetailSourceUrl,
+                    empty_room_url: currentEmptyRoomUrl,
                     style_index: styleIndex,
                     style_index_mode: (targetKey || targetLabel) ? "auto" : "overall",
                     target_key: targetKey,
@@ -1768,6 +1806,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     target_source_box_2d: detailMeta?.target_source_box_2d || null,
                     moodboard_url: currentMoodboardUrl,
                     furniture_data: currentFurnitureData,
+                    room_dims_contract: currentRoomDimsContract,
+                    geometry_contract: currentGeometryContract,
+                    scene_contract: currentSceneContract,
+                    placement_plan: currentPlacementPlan,
                     audience: "internal"
                 })
             });

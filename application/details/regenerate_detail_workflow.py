@@ -10,6 +10,17 @@ from application.details.regenerate_detail_resolution import (
 from application.details.detail_style_stage import with_internal_angle_styles
 
 
+def _is_angle_style(style: dict | None) -> bool:
+    style = style if isinstance(style, dict) else {}
+    camera_mode = str(style.get("camera_mode") or "").strip().lower()
+    style_name = str(style.get("name") or "").strip()
+    return bool(
+        camera_mode in {"overview_angle", "side_angle"}
+        or style_name == "High Angle Overview"
+        or style_name.startswith("Side Composition")
+    )
+
+
 def _normalize_box(box) -> list[float] | None:
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
@@ -314,6 +325,26 @@ def run_regenerate_single_detail_job(
         )
         if style is None:
             return {"error": "No matching style for regeneration"}
+        style = dict(style)
+        if aud == "internal" and _is_angle_style(style):
+            style["internal_angle_generation"] = True
+            empty_room_url = payload.get("empty_room_url")
+            if empty_room_url:
+                empty_room_path = materialize_input(
+                    empty_room_url,
+                    "detail_retry_empty_room",
+                )
+                if empty_room_path and os.path.exists(empty_room_path):
+                    style["empty_room_path"] = empty_room_path
+            for contract_key in (
+                "room_dims_contract",
+                "geometry_contract",
+                "scene_contract",
+                "placement_plan",
+            ):
+                contract_value = payload.get(contract_key)
+                if contract_value is not None:
+                    style[contract_key] = contract_value
 
         unique_id = uuid.uuid4().hex[:6]
         result = generate_detail_view(
@@ -356,6 +387,22 @@ def run_regenerate_single_detail_job(
             labels = list(result.get("cutout_ref_labels") or [])
             if labels:
                 output["cutout_ref_labels"] = labels
+            for metadata_key in (
+                "generation_mode",
+                "camera_mode",
+                "focus_side",
+                "requested_focus_side",
+                "camera_travel_side",
+                "camera_direction_matches",
+                "angle_direction_fallback",
+                "angle_direction_reconciled",
+                "angle_qc_attempts",
+                "angle_qc",
+                "angle_pipeline_trace",
+            ):
+                metadata_value = result.get(metadata_key)
+                if metadata_value is not None and metadata_value != "":
+                    output[metadata_key] = metadata_value
 
         return attach_regenerated_target_metadata(
             output,

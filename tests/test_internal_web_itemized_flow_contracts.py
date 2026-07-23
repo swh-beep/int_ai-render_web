@@ -34,8 +34,32 @@ class InternalWebItemizedFlowContractsTests(unittest.TestCase):
         for token in (
             "moodboard_url: currentMoodboardUrl",
             "furniture_data: currentFurnitureData",
+            "empty_room_url: currentEmptyRoomUrl",
+            "room_dims_contract: currentRoomDimsContract",
+            "geometry_contract: currentGeometryContract",
+            "scene_contract: currentSceneContract",
+            "placement_plan: currentPlacementPlan",
+            "require_details: true",
         ):
             self.assertIn(token, self.script)
+
+    def test_direct_upload_and_new_render_clear_stale_detail_retry_state(self):
+        for token in (
+            "function resetDetailGenerationState()",
+            "currentDetailSourceUrl = null;",
+            "if (detailSection) detailSection.classList.add('hidden');",
+            "if (detailGridLandscape) detailGridLandscape.innerHTML = '';",
+            "if (detailGridPortrait) detailGridPortrait.innerHTML = '';",
+        ):
+            self.assertIn(token, self.script)
+
+        self.assertGreaterEqual(self.script.count("resetDetailGenerationState();"), 3)
+        self.assertIn(
+            "currentFurnitureData = null;\n"
+            "                currentMoodboardUrl = null;\n"
+            "                currentEmptyRoomUrl = null;",
+            self.script,
+        )
 
     def test_script_has_shared_home_image_upload_validation(self):
         for token in (

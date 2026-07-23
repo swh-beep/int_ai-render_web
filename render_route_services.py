@@ -658,16 +658,23 @@ def build_external_render_video_job(req: ExternalRenderVideoRequest) -> dict:
 def build_detail_generation_job_payload(req: DetailRequest) -> dict:
     return {
         "image_url": req.image_url,
+        "empty_room_url": req.empty_room_url,
         "moodboard_url": req.moodboard_url,
         "furniture_data": req.furniture_data,
+        "room_dims_contract": req.room_dims_contract,
+        "geometry_contract": req.geometry_contract,
+        "scene_contract": req.scene_contract,
+        "placement_plan": req.placement_plan,
         "audience": req.audience,
         "simple_generation_mode": True if req.simple_generation_mode is None else bool(req.simple_generation_mode),
+        "require_details": bool(req.require_details),
     }
 
 
 def build_regenerate_detail_job_payload(req: RegenerateDetailRequest) -> dict:
     return {
         "original_image_url": req.original_image_url,
+        "empty_room_url": req.empty_room_url,
         "style_index": req.style_index,
         "target_key": req.target_key,
         "target_label": req.target_label,
@@ -676,6 +683,10 @@ def build_regenerate_detail_job_payload(req: RegenerateDetailRequest) -> dict:
         "style_index_mode": req.style_index_mode,
         "furniture_data": req.furniture_data,
         "moodboard_url": req.moodboard_url,
+        "room_dims_contract": req.room_dims_contract,
+        "geometry_contract": req.geometry_contract,
+        "scene_contract": req.scene_contract,
+        "placement_plan": req.placement_plan,
         "audience": req.audience,
     }
 
