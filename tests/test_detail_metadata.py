@@ -384,6 +384,13 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(styles[2]["camera_mode"], "side_angle")
         self.assertEqual(styles[2]["focus_side"], "right")
         self.assertNotIn("simple_scene_detail", styles[0])
+        combined_prompts = "\n".join(style["prompt"] for style in styles)
+        self.assertIn("genuine nearby high-angle camera move", styles[0]["prompt"])
+        self.assertIn("real parallax", styles[1]["prompt"])
+        self.assertIn("real parallax", styles[2]["prompt"])
+        self.assertNotIn("VIEWPOINT SAFETY", combined_prompts)
+        self.assertNotIn("safer crop-like result", combined_prompts)
+        self.assertNotIn("source-image crop/reframe", combined_prompts)
 
     def test_construct_dynamic_styles_deduplicates_same_product_detail_targets(self):
         analyzed_items = [

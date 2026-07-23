@@ -209,9 +209,11 @@ def assess_angle_candidate(
     model_checked = False
     analysis_available = call_analysis_with_failover is not None and bool(str(analysis_model_name or "").strip())
     if analysis_available:
-        source_for_model = _load_model_image(source_path)
-        candidate_for_model = _load_model_image(candidate_path)
+        source_for_model = None
+        candidate_for_model = None
         try:
+            source_for_model = _load_model_image(source_path)
+            candidate_for_model = _load_model_image(candidate_path)
             response = call_analysis_with_failover(
                 analysis_model_name,
                 [
@@ -236,8 +238,10 @@ def assess_angle_candidate(
         except Exception:
             model_payload = {}
         finally:
-            source_for_model.close()
-            candidate_for_model.close()
+            if source_for_model is not None:
+                source_for_model.close()
+            if candidate_for_model is not None:
+                candidate_for_model.close()
 
     required_boolean_fields = {
         "same_frame_or_crop",

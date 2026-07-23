@@ -182,3 +182,28 @@ def test_angle_quality_rejects_when_required_model_qc_is_unavailable(tmp_path):
     assert result["passed"] is False
     assert "model_qc_unavailable" in result["reject_reasons"]
     assert result["model_checked"] is False
+
+
+def test_angle_quality_rejects_incomplete_model_contract(tmp_path):
+    source_path = tmp_path / "source.png"
+    candidate_path = tmp_path / "candidate.png"
+    _save_structured_room(source_path)
+    _save_structured_room(candidate_path, shifted=True)
+
+    result = assess_angle_candidate(
+        str(source_path),
+        str(candidate_path),
+        camera_mode="side_angle",
+        focus_side="left",
+        call_analysis_with_failover=lambda *_args, **_kwargs: _analysis_response(
+            {"same_frame_or_crop": False}
+        ),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+        require_model_qc=True,
+    )
+
+    assert result["passed"] is False
+    assert "model_qc_incomplete" in result["reject_reasons"]
+    assert "insufficient_camera_motion" in result["reject_reasons"]
+    assert "model_qc_low_confidence" in result["reject_reasons"]

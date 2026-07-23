@@ -2,7 +2,7 @@ import io
 import json
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from application.details import detail_generation_stage
 from application.details.detail_generation_stage import (
@@ -458,6 +458,8 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
 def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    empty_room_path = tmp_path / "empty-room.png"
+    Image.new("RGB", (1600, 900), color=(232, 232, 228)).save(empty_room_path, format="PNG")
     cutout_path = tmp_path / "cutout.png"
     Image.new("RGB", (300, 300), color=(180, 180, 180)).save(cutout_path, format="PNG")
 
@@ -490,6 +492,11 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             "ratio": "16:9",
             "camera_mode": "side_angle",
             "focus_side": "right",
+            "empty_room_path": str(empty_room_path),
+            "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
+            "geometry_contract": {"geometry_source": "explicit_dimensions"},
+            "scene_contract": {"critical_item_keys": ["sofa_01"]},
+            "placement_plan": {"anchor_item_key": "sofa_01"},
             "prompt": "render a materially different right-side angle",
         },
         "unitcase",
@@ -520,8 +527,17 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
         assert "This must be a new side camera viewpoint, not a crop, zoom, or source reframe." in captured["prompt"]
         assert "crop out or minimize the opposite side of the room" in captured["prompt"]
         assert "do NOT relocate objects to keep them visible" in captured["prompt"]
+        assert "<CRITICAL: WORLD-SPACE SCENE LOCK" in captured["prompt"]
+        assert "positions must remain EXACTLY the same as the input image" not in captured["prompt"]
         assert "WORLD-SPACE POSE LOCK" in captured["prompt"]
         assert "projected screen positions, visible faces, occlusions, and perspective must change naturally" in captured["prompt"]
+        assert "<ANGLE SCENE CONTRACT>" in captured["prompt"]
+        assert "ROOM DIMS CONTRACT" in captured["prompt"]
+        assert "GEOMETRY CONTRACT" in captured["prompt"]
+        assert "SCENE CONTRACT" in captured["prompt"]
+        assert "PLACEMENT PLAN" in captured["prompt"]
+        assert "The furnished main image is the sole truth for furniture" in captured["prompt"]
+        assert "Never remove furniture because it is absent from the empty-room reference" in captured["prompt"]
         assert "Do not create a new camera angle" not in captured["prompt"]
         assert "SOURCE-CONSTRAINED REFRAME" not in captured["prompt"]
         assert "facing direction from the main render" not in captured["prompt"]
@@ -535,6 +551,8 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             isinstance(part, str) and "CUTOUT" in part
             for part in captured["content"]
         )
+        assert "Empty Room Architecture Reference (same room topology before furnishing):" in captured["content"]
+        assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
         assert result["aspect_ratio"] == "16:9"
         assert correction_calls == [
             (
@@ -551,10 +569,16 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
     monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 2)
+
+    def _write_corrected_sibling(path, **_kwargs):
+        corrected_path = f"{path}.wb.jpg"
+        Path(corrected_path).write_bytes(Path(path).read_bytes())
+        return type("Correction", (), {"path": corrected_path})()
+
     monkeypatch.setattr(
         detail_generation_stage,
         "apply_reference_relative_white_balance",
-        lambda path, **_kwargs: type("Correction", (), {"path": path})(),
+        _write_corrected_sibling,
     )
 
     generation_calls = []
@@ -609,7 +633,7 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
         safe_json_from_model_text=json.loads,
     )
 
-    leaked = list(Path("outputs").glob("detail_*_same-frame-qc_35_*.png"))
+    leaked = list(Path("outputs").glob("detail_*_same-frame-qc_35_*"))
     try:
         assert result is None
         assert len(generation_calls) == 2
@@ -622,6 +646,107 @@ def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, m
         assert leaked == []
     finally:
         for path in leaked:
+            if path.exists():
+                path.unlink()
+
+
+def test_generate_detail_view_retries_angle_then_returns_only_qc_passed_candidate(tmp_path, monkeypatch):
+    source_path = tmp_path / "room.png"
+
+    def _room_bytes(*, shifted: bool) -> bytes:
+        image = Image.new("RGB", (1600, 900), color=(232, 228, 220))
+        draw = ImageDraw.Draw(image)
+        vanishing_x = 900 if shifted else 800
+        draw.line((0, 0, vanishing_x, 420), fill=(55, 55, 55), width=10)
+        draw.line((1599, 0, vanishing_x, 420), fill=(55, 55, 55), width=10)
+        draw.line((0, 899, vanishing_x, 420), fill=(80, 80, 80), width=10)
+        draw.line((1599, 899, vanishing_x, 420), fill=(80, 80, 80), width=10)
+        sofa_left = 360 if shifted else 500
+        draw.rectangle((sofa_left, 500, sofa_left + 650, 760), fill=(145, 105, 80))
+        draw.rectangle((sofa_left + 80, 400, sofa_left + 560, 590), fill=(160, 120, 90))
+        draw.rectangle((1130 if shifted else 1080, 130, 1450, 530), outline=(45, 75, 115), width=18)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image.close()
+        return buffer.getvalue()
+
+    source_bytes = _room_bytes(shifted=False)
+    shifted_bytes = _room_bytes(shifted=True)
+    source_path.write_bytes(source_bytes)
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda path, **_kwargs: type("Correction", (), {"path": path})(),
+    )
+
+    generation_prompts = []
+
+    def _call_gemini(_model_name, content, _request_options, _safety_settings, **_kwargs):
+        generation_prompts.append(content[0])
+        payload = source_bytes if len(generation_prompts) == 1 else shifted_bytes
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": payload})()})()],
+            },
+        )()
+
+    passing_payload = {
+        "same_frame_or_crop": False,
+        "camera_direction_matches": True,
+        "room_topology_preserved": True,
+        "background_only_rotation": False,
+        "furniture_projection_coherent": True,
+        "large_artificial_panel": False,
+        "severe_geometry_warp": False,
+        "camera_motion_score": 0.86,
+        "confidence": 0.92,
+        "reasons": [],
+    }
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Right)",
+            "ratio": "16:9",
+            "focus_side": "right",
+            "prompt": "render a coherent right-side camera move",
+        },
+        "retry-pass-qc",
+        36,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=lambda *_args, **_kwargs: type(
+            "Resp",
+            (),
+            {"text": json.dumps(passing_payload)},
+        )(),
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    output_path = Path(result["path"])
+    artifacts = list(Path("outputs").glob("detail_*_retry-pass-qc_36_*"))
+    try:
+        assert len(generation_prompts) == 2
+        assert "<ANGLE QC RETRY FEEDBACK>" not in generation_prompts[0]
+        assert "<ANGLE QC RETRY FEEDBACK>" in generation_prompts[1]
+        assert result["generation_mode"] == "angle_generation"
+        assert result["camera_mode"] == "side_angle"
+        assert result["focus_side"] == "right"
+        assert result["angle_qc_attempts"] == 2
+        assert result["angle_qc"]["passed"] is True
+        assert result["angle_qc"]["model_checked"] is True
+        assert artifacts == [output_path]
+    finally:
+        for path in artifacts:
             if path.exists():
                 path.unlink()
 
