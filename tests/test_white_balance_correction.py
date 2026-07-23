@@ -35,6 +35,19 @@ def test_neutral_image_is_noop(tmp_path):
     assert result.elapsed_ms >= 0
 
 
+def test_custom_stage_name_is_preserved_in_diagnostics(tmp_path):
+    image_path = tmp_path / "neutral.png"
+    _save_image(image_path, (190, 190, 190))
+
+    result = apply_reference_relative_white_balance(
+        str(image_path),
+        stage_name="image_studio_edit",
+    )
+
+    assert result.corrected is False
+    assert result.diagnostics["stage"] == "image_studio_edit"
+
+
 def test_reference_relative_target_preserves_intentional_warmth(tmp_path):
     reference_path = tmp_path / "reference.png"
     image_path = tmp_path / "matching-warm-output.png"

@@ -60,6 +60,7 @@ def apply_reference_relative_white_balance(
     *,
     reference_path: str | None = None,
     empty_room: bool = False,
+    stage_name: str | None = None,
     enabled: bool | None = None,
     logger_override=None,
 ) -> WhiteBalanceCorrectionResult:
@@ -73,7 +74,8 @@ def apply_reference_relative_white_balance(
     started_at = time.perf_counter()
     active_logger = logger_override or logger
     original_path = str(image_path)
-    stage = "empty" if empty_room else "main"
+    default_stage = "empty" if empty_room else "main"
+    stage = str(stage_name or default_stage).strip() or default_stage
     if enabled is None:
         enabled = os.getenv("RENDER_WHITE_BALANCE_CORRECTION_ENABLED", "1").strip().lower() not in {
             "0",

@@ -1,5 +1,7 @@
 from typing import Callable, Optional
 
+from application.render.white_balance_correction import apply_reference_relative_white_balance
+
 
 def run_image_edit_job(
     payload: dict,
@@ -39,6 +41,13 @@ def run_image_edit_job(
     result_path = process_image_edit_logic(local_photos, instructions, mode, unique_id, 1, local_mask)
     if not result_path:
         return {"error": "Failed to generate image"}
+
+    correction_stage = "image_studio_edit" if mode == "edit" else "image_studio_decorate"
+    result_path = apply_reference_relative_white_balance(
+        result_path,
+        reference_path=local_photos[0],
+        stage_name=correction_stage,
+    ).path
 
     result_url = resolve_image_url(result_path, s3_prefix_override=prefix_rendered)
     if not result_url:

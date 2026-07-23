@@ -1,5 +1,7 @@
 from typing import Callable, Optional
 
+from application.render.white_balance_correction import apply_reference_relative_white_balance
+
 
 def run_frontal_view_job(
     payload: dict,
@@ -34,6 +36,12 @@ def run_frontal_view_job(
     result_path = generate_frontal_room_from_photos(local_photos, unique_id, 1)
     if not result_path:
         return {"error": "Failed to generate images"}
+
+    result_path = apply_reference_relative_white_balance(
+        result_path,
+        reference_path=local_photos[0],
+        stage_name="image_studio_real_photo",
+    ).path
 
     result_url = resolve_image_url(result_path, s3_prefix_override=prefix_rendered)
     if not result_url:
