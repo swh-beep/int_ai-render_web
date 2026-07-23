@@ -1,4 +1,5 @@
 import io
+import json
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -327,6 +328,7 @@ def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
     def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
         captured["request_options"] = dict(request_options)
         captured["prompt"] = content[0]
+        captured["content"] = list(content)
         return type(
             "Resp",
             (),
@@ -372,6 +374,8 @@ def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
 def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    cutout_path = tmp_path / "cutout.png"
+    Image.new("RGB", (300, 300), color=(180, 180, 180)).save(cutout_path, format="PNG")
 
     captured = {}
     correction_calls = []
@@ -385,6 +389,7 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
     def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
         captured["request_options"] = dict(request_options)
         captured["prompt"] = content[0]
+        captured["content"] = list(content)
         return type(
             "Resp",
             (),
@@ -399,12 +404,15 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
         {
             "name": "High Angle Overview",
             "ratio": "16:9",
+            "target_box_2d": [100, 100, 400, 400],
             "prompt": "render a standing-height landscape overview",
         },
         "unitcase",
         33,
-        furniture_data=[],
-        materialize_input=lambda path, prefix: path,
+        furniture_data=[{"label": "Accent Chair", "crop_path": str(cutout_path)}],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("angle cutout refs should not be materialized")
+        ),
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
@@ -413,10 +421,24 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
 
     output_path = Path(result["path"])
     try:
+        assert result["generation_mode"] == "angle_generation"
+        assert result["camera_mode"] == "overview_angle"
+        assert result["cutout_ref_count"] == 0
+        assert result["cutout_ref_labels"] == []
         assert result["aspect_ratio"] == "16:9"
         assert captured["request_options"]["aspect_ratio"] == "16:9"
         assert captured["request_options"]["image_size"] == "4K"
         assert "OUTPUT ASPECT RATIO: 16:9" in captured["prompt"]
+        assert "<SCENE LOCK: SAME ROOM, REAL HIGH CAMERA MOVE>" in captured["prompt"]
+        assert "REAL HIGH CAMERA MOVE REQUIRED" in captured["prompt"]
+        assert "Raise the camera above the main viewpoint and pitch downward" in captured["prompt"]
+        assert "real high-camera perspective with changed projected positions and top-plane visibility" in captured["prompt"]
+        assert "WORLD-SPACE POSE LOCK" in captured["prompt"]
+        assert "projected screen positions, visible faces, occlusions, and perspective must change naturally" in captured["prompt"]
+        assert "Do not create a new camera angle" not in captured["prompt"]
+        assert "SOURCE-CONSTRAINED REFRAME" not in captured["prompt"]
+        assert "facing direction from the main render" not in captured["prompt"]
+        assert "PRIMARY TARGET IN-ROOM CROP" not in captured["content"]
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
         assert correction_calls == [
@@ -436,6 +458,8 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, 
 def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    cutout_path = tmp_path / "cutout.png"
+    Image.new("RGB", (300, 300), color=(180, 180, 180)).save(cutout_path, format="PNG")
 
     captured = {}
     correction_calls = []
@@ -470,8 +494,10 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
         },
         "unitcase",
         34,
-        furniture_data=[],
-        materialize_input=lambda path, prefix: path,
+        furniture_data=[{"label": "Sofa", "crop_path": str(cutout_path)}],
+        materialize_input=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("angle cutout refs should not be materialized")
+        ),
         normalize_label_for_match=lambda text: str(text or "").strip().lower(),
         allow_harassment_only_safety_settings=lambda: {},
         call_gemini_with_failover=_call_gemini,
@@ -480,19 +506,33 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
 
     output_path = Path(result["path"])
     try:
+        assert result["generation_mode"] == "angle_generation"
+        assert result["camera_mode"] == "side_angle"
+        assert result["focus_side"] == "right"
+        assert result["cutout_ref_count"] == 0
+        assert result["cutout_ref_labels"] == []
         assert captured["request_options"]["aspect_ratio"] == "16:9"
         assert captured["request_options"]["image_size"] == "4K"
-        assert "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED SIDE REFRAME>" in captured["prompt"]
-        assert "Do not create a new camera angle that reveals unseen sides of furniture." in captured["prompt"]
-        assert "SOURCE-CONSTRAINED REFRAME ONLY" in captured["prompt"]
+        assert "<SCENE LOCK: SAME ROOM, REAL SIDE CAMERA MOVE>" in captured["prompt"]
+        assert "REAL SIDE CAMERA MOVE REQUIRED" in captured["prompt"]
+        assert "real side-camera parallax" in captured["prompt"]
+        assert "changed projected positions, side planes, and occlusions" in captured["prompt"]
+        assert "This must be a new side camera viewpoint, not a crop, zoom, or source reframe." in captured["prompt"]
         assert "crop out or minimize the opposite side of the room" in captured["prompt"]
         assert "do NOT relocate objects to keep them visible" in captured["prompt"]
-        assert "Never duplicate, mirror, or copy furniture because of the mask." in captured["prompt"]
-        assert "real parallax" not in captured["prompt"]
+        assert "WORLD-SPACE POSE LOCK" in captured["prompt"]
+        assert "projected screen positions, visible faces, occlusions, and perspective must change naturally" in captured["prompt"]
+        assert "Do not create a new camera angle" not in captured["prompt"]
+        assert "SOURCE-CONSTRAINED REFRAME" not in captured["prompt"]
+        assert "facing direction from the main render" not in captured["prompt"]
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
-        assert any(
-            isinstance(part, str) and "Side Focus Composition Mask (RIGHT side target)" in part
+        assert not any(
+            isinstance(part, str) and "Side Focus Composition Mask" in part
+            for part in captured["content"]
+        )
+        assert not any(
+            isinstance(part, str) and "CUTOUT" in part
             for part in captured["content"]
         )
         assert result["aspect_ratio"] == "16:9"
@@ -505,6 +545,85 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
     finally:
         if output_path.exists():
             output_path.unlink()
+
+
+def test_generate_detail_view_rejects_angle_same_frame_qc_candidates(tmp_path, monkeypatch):
+    source_path = tmp_path / "room.png"
+    Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
+    monkeypatch.setattr(detail_generation_stage, "DETAIL_ANGLE_QC_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(
+        detail_generation_stage,
+        "apply_reference_relative_white_balance",
+        lambda path, **_kwargs: type("Correction", (), {"path": path})(),
+    )
+
+    generation_calls = []
+    analysis_calls = []
+
+    def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
+        generation_calls.append({"request_options": dict(request_options), "prompt": content[0]})
+        return type(
+            "Resp",
+            (),
+            {
+                "candidates": [object()],
+                "parts": [type("Part", (), {"inline_data": type("Inline", (), {"data": source_path.read_bytes()})()})()],
+            },
+        )()
+
+    def _call_analysis(model_name, content, request_options, safety_settings, **kwargs):
+        analysis_calls.append({"model_name": model_name, "request_options": dict(request_options)})
+        payload = {
+            "same_frame_or_crop": False,
+            "camera_direction_matches": True,
+            "room_topology_preserved": True,
+            "background_only_rotation": False,
+            "furniture_projection_coherent": True,
+            "large_artificial_panel": False,
+            "severe_geometry_warp": False,
+            "camera_motion_score": 0.9,
+            "confidence": 0.9,
+            "reasons": [],
+        }
+        return type("Resp", (), {"text": json.dumps(payload)})()
+
+    result = generate_detail_view(
+        str(source_path),
+        {
+            "name": "Side Composition (Focus Left)",
+            "ratio": "16:9",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "prompt": "render a materially different left-side angle",
+        },
+        "same-frame-qc",
+        35,
+        furniture_data=[],
+        materialize_input=lambda path, prefix: path,
+        normalize_label_for_match=lambda text: str(text or "").strip().lower(),
+        allow_harassment_only_safety_settings=lambda: {},
+        call_gemini_with_failover=_call_gemini,
+        model_name="gemini-3.1-flash-image",
+        call_analysis_with_failover=_call_analysis,
+        analysis_model_name="analysis-model",
+        safe_json_from_model_text=json.loads,
+    )
+
+    leaked = list(Path("outputs").glob("detail_*_same-frame-qc_35_*.png"))
+    try:
+        assert result is None
+        assert len(generation_calls) == 2
+        assert generation_calls[0]["request_options"]["image_size"] == "4K"
+        assert "<ANGLE QC RETRY FEEDBACK>" not in generation_calls[0]["prompt"]
+        assert "<ANGLE QC RETRY FEEDBACK>" in generation_calls[1]["prompt"]
+        assert "same_frame_or_crop" in generation_calls[1]["prompt"]
+        assert len(analysis_calls) == 2
+        assert analysis_calls[0]["request_options"]["response_mime_type"] == "application/json"
+        assert leaked == []
+    finally:
+        for path in leaked:
+            if path.exists():
+                path.unlink()
 
 
 def test_generate_detail_view_sanitizes_invalid_ratio_to_vertical_canvas(tmp_path):

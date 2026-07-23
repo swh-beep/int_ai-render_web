@@ -118,6 +118,16 @@ def _build_detail_entries(
             "aspect_ratio": item.get("style_ratio"),
             "cutout_ref_count": int(item.get("cutout_ref_count") or 0),
         }
+        for metadata_key in (
+            "generation_mode",
+            "camera_mode",
+            "focus_side",
+            "angle_qc_attempts",
+            "angle_qc",
+        ):
+            metadata_value = item.get(metadata_key)
+            if metadata_value is not None and metadata_value != "":
+                detail_obj[metadata_key] = metadata_value
         labels = item.get("cutout_ref_labels") or []
         if labels:
             detail_obj["cutout_ref_labels"] = labels

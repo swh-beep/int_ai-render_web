@@ -473,6 +473,10 @@ def run_generate_details_job(
         if not local_path or not os.path.exists(local_path):
             return _ret({"error": "Original image not found"})
         resolve_image_url(local_path, prefix_detail_user)
+        empty_room_path = None
+        empty_room_url = payload.get("empty_room_url")
+        if empty_room_url:
+            empty_room_path = materialize_input(empty_room_url, "detail_empty_room")
 
         unique_id = uuid.uuid4().hex[:6]
         log_section(f"[Detail View] REQUEST START ({unique_id}) - Smart Analysis Mode")
@@ -526,6 +530,22 @@ def run_generate_details_job(
 
         generated_paths = []
 
+        def _is_angle_style(style_payload: dict) -> bool:
+            style_name = str((style_payload or {}).get("name") or "")
+            camera_mode = str((style_payload or {}).get("camera_mode") or "").strip().lower()
+            return camera_mode in {"overview_angle", "side_angle"} or style_name == "High Angle Overview" or style_name.startswith("Side Composition")
+
+        def _style_payload_for_generation(style: dict) -> dict:
+            style_payload = dict(style or {})
+            if _is_angle_style(style_payload):
+                if empty_room_path:
+                    style_payload["empty_room_path"] = empty_room_path
+                for key in ("room_dims_contract", "geometry_contract", "scene_contract", "placement_plan"):
+                    value = payload.get(key)
+                    if value is not None:
+                        style_payload[key] = value
+            return style_payload
+
         def _append_detail_result(index: int, style_payload: dict, result) -> None:
             if not result:
                 return
@@ -540,6 +560,11 @@ def run_generate_details_job(
                         "style_target_label": style_payload.get("target_label"),
                         "cutout_ref_count": int(result.get("cutout_ref_count") or 0),
                         "cutout_ref_labels": list(result.get("cutout_ref_labels") or []),
+                        "generation_mode": result.get("generation_mode"),
+                        "camera_mode": result.get("camera_mode"),
+                        "focus_side": result.get("focus_side"),
+                        "angle_qc_attempts": result.get("angle_qc_attempts"),
+                        "angle_qc": result.get("angle_qc"),
                     }
                 )
                 return
@@ -568,7 +593,7 @@ def run_generate_details_job(
                         remaining_budget = _remaining_deadline_sec()
                         if remaining_budget is not None and remaining_budget < minimum_detail_budget_sec:
                             break
-                        style_payload = dict(style or {})
+                        style_payload = _style_payload_for_generation(style)
                         if remaining_budget is not None:
                             style_payload["timeout_sec"] = max(
                                 1.0,
@@ -598,7 +623,7 @@ def run_generate_details_job(
                     remaining_budget = _remaining_deadline_sec()
                     if remaining_budget is not None and remaining_budget < minimum_detail_budget_sec:
                         break
-                    style_payload = dict(style or {})
+                    style_payload = _style_payload_for_generation(style)
                     if remaining_budget is not None:
                         style_payload["timeout_sec"] = max(
                             1.0,
@@ -627,7 +652,7 @@ def run_generate_details_job(
                                 generate_detail_view,
                                 scoped_ai_service_scope,
                                 local_path,
-                                style,
+                                _style_payload_for_generation(style),
                                 unique_id,
                                 index + 1,
                                 analyzed_items,

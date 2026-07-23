@@ -3,13 +3,15 @@ import os
 import time
 from typing import Callable
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageOps
+from application.details.detail_angle_quality import assess_angle_candidate
 from application.render.curtain_material_stage import CURTAIN_BLACKOUT_PERCENT, CURTAIN_DETAIL_MODE
 from application.render.postprocess_support import category_match_family
 from application.render.white_balance_correction import apply_reference_relative_white_balance
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
+DETAIL_ANGLE_QC_MAX_ATTEMPTS = max(1, int(os.getenv("DETAIL_ANGLE_QC_MAX_ATTEMPTS", "2") or "2"))
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "1280") or "1280"))
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "1600") or "1600"))
 
@@ -443,7 +445,8 @@ def _build_simple_scene_detail_prompt(target_label: str) -> str:
         "- The target must remain the same object in the same physical location, with nearby objects preserved as context.\n\n"
         "<CAMERA>\n"
         "Use a source-constrained crop/reframe from the main image camera. You may tighten framing, crop, slightly zoom, and add subtle depth of field "
-        "to make the target read clearly, but do not create a new camera angle that reveals unseen sides of furniture.\n\n"
+        "to make the target read clearly, but do not create a new camera angle that reveals unseen sides of furniture. "
+        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose the safer source-constrained crop instead.\n\n"
         "<STYLE>\n"
         "High-end interior magazine photography: natural depth of field, clean composition, realistic texture, balanced shadows, no text, no watermark."
     )
@@ -551,35 +554,44 @@ def _build_gpt_image_detail_prompt(style_config: dict, target_label: str, shot_i
     focus_side = str((style_config or {}).get("focus_side") or "").strip().lower()
     is_overview = camera_mode == "overview_angle" or style_name == "High Angle Overview"
     is_side = camera_mode == "side_angle" or style_name.startswith("Side Composition")
+    angle_pose_guard = (
+        "Preserve each furniture/decor item's real world-space footprint, scale, identity, material, and physical orientation in the room. "
+        "Because the camera moves, screen positions, visible side planes, perspective, and occlusions MUST change consistently with that camera movement. "
+        "Do not keep furniture visually front-facing while rotating or rebuilding only the room. "
+    )
     stability_guard = (
         "The camera may crop or hide objects, but it must never move any object into a new place. "
         "If an object is not visible in the safer reframe, leave it out of frame instead of relocating it. "
-        "All objects must stay anchored to their original wall/floor/window relationships, facing direction, footprint, and nearby-object distances. "
+        "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose the safer source-constrained crop instead. "
+        "All objects must stay anchored to their original wall/floor/window relationships, footprint, and nearby-object distances. "
     )
 
     if is_overview:
         return (
-            "Using the provided image as the only source, create a source-constrained editorial overview reframe of this exact space. "
-            "Use stable crop, slight zoom, mild camera-height impression, and depth of field only when the source layout remains unchanged. "
+            "Using the provided image as the source room, create a genuine nearby high-angle camera view of this exact space. "
+            "Move the camera higher than the main image and pitch it downward enough to reveal more top surfaces and floor planes. "
+            "This must be a new camera viewpoint, not a crop, zoom, or source reframe. "
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
-            f"{stability_guard}"
+            f"{angle_pose_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Do not create a new camera angle that reveals unseen sides of furniture. "
-            "Only change crop, framing, slight zoom, and focal depth. "
+            "Do not warp walls, windows, ceiling lines, doorways, mirrors, stairs, or built-in architecture. "
+            "No crop-only solution; real perspective change is required. "
             "No text or watermark."
         )
 
     if is_side:
         side_text = "left-side" if focus_side == "left" else "right-side" if focus_side == "right" else "side"
+        move_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "laterally"
         return (
-            f"Using the provided image as the only source, create a source-constrained editorial reframe weighted toward the {side_text} area of this exact space. "
-            "Use crop, slight zoom, and focal depth to make the side area read clearly. "
+            f"Using the provided image as the source room, create a genuine nearby {side_text} camera view of this exact space. "
+            f"Translate the camera {move_text} and yaw gently back into the room so the result has real parallax, changed occlusions, and newly visible side planes. "
+            "This must be a new side camera viewpoint, not a crop, zoom, or source reframe. "
             f"{_NO_FAKE_FOREGROUND_GUARD}"
             "Keep the room layout and every visible furniture/decor item's position, shape, size, count, color, material, and nearby relationships unchanged. "
-            f"{stability_guard}"
+            f"{angle_pose_guard}"
             "Do not move, replace, resize, duplicate, restage, redesign, or reinterpret anything. "
-            "Do not create a new camera angle that reveals unseen sides of furniture. "
-            "Only change crop, framing, slight zoom, and focal depth to focus on that side area. "
+            "Do not warp walls, windows, ceiling lines, doorways, mirrors, stairs, or built-in architecture. "
+            "If only the background rotates while furniture remains front-facing, the result is invalid. "
             "No text or watermark."
         )
 
@@ -681,6 +693,9 @@ def generate_detail_view(
     allow_harassment_only_safety_settings: Callable[[], object],
     call_gemini_with_failover: Callable[..., object],
     model_name: str,
+    call_analysis_with_failover: Callable[..., object] | None = None,
+    analysis_model_name: str | None = None,
+    safe_json_from_model_text: Callable[[str], object] | None = None,
 ):
     img = None
     extra_imgs = []
@@ -720,18 +735,35 @@ def generate_detail_view(
             )
             camera_lock_line = "4. **CAMERA ONLY:** The close-up must be achieved ONLY by changing the camera framing/crop/zoom. Keep the scene geometry unchanged.\n\n"
         elif camera_mode == "side_angle":
+            side_text = "left" if focus_side == "left" else "right" if focus_side == "right" else "side"
             scene_lock_block = (
-                "<SCENE LOCK: SAME ROOM, SOURCE-CONSTRAINED SIDE REFRAME>\n"
-                "Create a source-constrained editorial reframe of the exact same finished room.\n"
-                "Priority order: (1) same furniture identities, (2) same relative furniture placement and room architecture, "
-                "(3) a modest side-weighted framing if it can be achieved without changing the scene.\n"
-                "Do not create a new camera angle that reveals unseen sides of furniture.\n"
+                "<SCENE LOCK: SAME ROOM, REAL SIDE CAMERA MOVE>\n"
+                "Create a genuine nearby side-angle camera view of the exact same finished room.\n"
+                f"Move the camera toward the {side_text} side and yaw gently back into the room.\n"
+                "This must be a new side camera viewpoint, not a crop, zoom, or source reframe.\n"
+                "Priority order: (1) same physical room architecture, (2) same furniture identities and world-space placement, "
+                "(3) real side-camera parallax with changed projected positions, side planes, and occlusions.\n"
                 "Side-specific composition is allowed to crop out or minimize the opposite side of the room; do NOT relocate objects to keep them visible.\n"
-                "If a side-focus composition mask is provided, use it only to choose framing weight. Never duplicate, mirror, or copy furniture because of the mask.\n"
+                "Do not rotate or rebuild only the room around static front-facing furniture.\n"
             )
             camera_lock_line = (
-                "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth to make the side area read clearly. "
-                "Keep object placement, facing direction, footprint, and room geometry fixed. Do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
+                "4. **REAL SIDE CAMERA MOVE REQUIRED:** Use a nearby lateral camera translation plus modest yaw. "
+                "Keep object world-space placement, physical orientation, footprint, and room geometry fixed, while allowing the screen projection, visible sides, occlusions, and perspective to change naturally. "
+                "Do not add blurred foreground panels, curtains, doorframes, wall edges, or obstruction strips.\n\n"
+            )
+        elif camera_mode == "overview_angle" or style_name == "High Angle Overview":
+            scene_lock_block = (
+                "<SCENE LOCK: SAME ROOM, REAL HIGH CAMERA MOVE>\n"
+                "Create a genuine nearby high-angle camera view of the exact same finished room.\n"
+                "Raise the camera above the main viewpoint and pitch downward so more top surfaces and floor planes are visible.\n"
+                "This must be a new high camera viewpoint, not a crop, zoom, or source reframe.\n"
+                "Priority order: (1) same physical room architecture, (2) same furniture identities and world-space placement, "
+                "(3) real high-camera perspective with changed projected positions and top-plane visibility.\n"
+                "Do not rotate or rebuild only the room around static front-facing furniture.\n"
+            )
+            camera_lock_line = (
+                "4. **REAL HIGH CAMERA MOVE REQUIRED:** Use camera elevation plus downward pitch. "
+                "Keep object world-space placement, physical orientation, footprint, and room geometry fixed, while allowing the screen projection, visible top surfaces, occlusions, and perspective to change naturally.\n\n"
             )
         else:
             scene_lock_block = (
@@ -740,6 +772,7 @@ def generate_detail_view(
                 "Use the main render as the visual source of truth. This is a crop/reframe/detail-polish task, not a restaging task.\n"
                 "Keep the architecture, furniture placement, object scale, object identities, materials, lighting direction, and nearby-object relationships unchanged.\n"
                 "Do not create a new camera angle that reveals unseen sides of furniture.\n"
+                "If a more dynamic view would require moving, rotating, replacing, or reinterpreting any object, choose the safer source-constrained crop instead.\n"
             )
             camera_lock_line = "4. **SOURCE-CONSTRAINED REFRAME ONLY:** Use crop, framing, slight zoom, and focal depth. Keep object placement, facing direction, footprint, and room geometry fixed.\n\n"
 
@@ -924,7 +957,22 @@ def generate_detail_view(
                 "3. IMPORTANT: focus on the specified target area only and make it read like a dedicated editorial shot of that object in the room.\n"
             )
 
-        target_crop = _build_target_crop(img, target_box_2d)
+        angle_context_block = ""
+        if is_angle_style:
+            angle_context_lines = []
+            for label, key in (
+                ("ROOM DIMS CONTRACT", "room_dims_contract"),
+                ("GEOMETRY CONTRACT", "geometry_contract"),
+                ("SCENE CONTRACT", "scene_contract"),
+                ("PLACEMENT PLAN", "placement_plan"),
+            ):
+                compact_value = _compact_prompt_metadata(style_config.get(key))
+                if compact_value:
+                    angle_context_lines.append(f"- {label}: {compact_value}")
+            if angle_context_lines:
+                angle_context_block = "<ANGLE SCENE CONTRACT>\n" + "\n".join(angle_context_lines) + "\n\n"
+
+        target_crop = None if is_angle_style else _build_target_crop(img, target_box_2d)
         if target_crop is not None:
             extra_imgs.append(target_crop)
             target_lock_block += (
@@ -934,17 +982,24 @@ def generate_detail_view(
                 "- Do NOT enlarge the target beyond what a real crop/zoom from the same scene would produce.\n\n"
             )
 
+        pose_lock_line = (
+            "3c. **WORLD-SPACE POSE LOCK:** Do not move or physically rotate sofas, chairs, lamps, tables, decor, or rugs. "
+            "Their real room positions and orientations stay fixed, but their projected screen positions, visible faces, occlusions, and perspective must change naturally when the camera moves.\n"
+            if is_angle_style
+            else "3c. **NO OBJECT ROTATION:** Do not rotate sofas, chairs, lamps, tables, decor, or rugs to show a more attractive side. Keep each visible object's facing direction from the main render.\n"
+        )
         final_prompt = (
             f"{scene_lock_block}\n"
             f"{target_lock_block}"
             f"{target_anchor_block}"
+            f"{angle_context_block}"
             f"{style_config['prompt']}\n\n"
             "<CRITICAL: LAYOUT FREEZE (PRIORITY #0)>\n"
             "1. **DO NOT MOVE / REARRANGE ANYTHING:** Every existing furniture, lighting fixture, decor item, and their positions must remain EXACTLY the same as the input image.\n"
             "2. **NO NEW OBJECTS:** Do NOT add new objects (no extra vases, cats, books, lamps, shelves, plants, art, etc.).\n"
             "3. **NO REMOVALS:** Do NOT remove existing objects either.\n"
             "3b. **PRESERVE THE MAIN-SHOT LAYOUT:** Keep the target object anchored to the same physical footprint, neighboring objects, wall/floor relationship, and room geometry seen in the main render.\n"
-            "3c. **NO OBJECT ROTATION:** Do not rotate sofas, chairs, lamps, tables, decor, or rugs to show a more attractive side. Keep each visible object's facing direction from the main render.\n"
+            f"{pose_lock_line}"
             f"{camera_lock_line}"
             "<OUTPUT REQUIREMENTS>\n"
             "1. Generate a photorealistic high-quality detail view based on the selected camera shot.\n"
@@ -961,131 +1016,113 @@ def generate_detail_view(
                 "CURTAIN MATERIAL SWATCH (material/color/weave reference only; not an object or framing reference):",
                 material_reference_img,
             ]
+        angle_empty_room_img = None
+        empty_room_path = str(style_config.get("empty_room_path") or "").strip()
+        if is_angle_style and empty_room_path and os.path.exists(empty_room_path):
+            try:
+                with Image.open(empty_room_path) as empty_opened:
+                    angle_empty_room_img = ImageOps.exif_transpose(empty_opened).convert("RGB")
+                    angle_empty_room_img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+                extra_imgs.append(angle_empty_room_img)
+                content += [
+                    "Empty Room Architecture Reference (same room topology before furnishing):",
+                    angle_empty_room_img,
+                ]
+            except Exception:
+                angle_empty_room_img = None
         if target_crop is not None:
             content += [
                 "PRIMARY TARGET IN-ROOM CROP (match this target scale and perspective):",
                 target_crop,
             ]
 
-        if camera_mode == "side_angle" and focus_side in {"left", "right"}:
+        if not is_angle_style:
             try:
-                mask_width, mask_height = 768, 432
-                mask = Image.new("RGB", (mask_width, mask_height), color=(72, 72, 72))
-                draw = ImageDraw.Draw(mask)
-                if focus_side == "left":
-                    draw.rectangle((0, 0, int(mask_width * 0.70), mask_height), fill=(245, 245, 245))
-                    draw.rectangle((int(mask_width * 0.70), 0, mask_width, mask_height), fill=(98, 98, 98))
-                else:
-                    draw.rectangle((0, 0, int(mask_width * 0.30), mask_height), fill=(98, 98, 98))
-                    draw.rectangle((int(mask_width * 0.30), 0, mask_width, mask_height), fill=(245, 245, 245))
-                extra_imgs.append(mask)
-                content += [
-                    (
-                        f"Side Focus Composition Mask ({focus_side.upper()} side target): "
-                        "white area is the dominant source-image side, dark area is peripheral/cropped. "
-                        "This is only a framing guide, not an object or furniture reference."
-                    ),
-                    mask,
-                ]
-            except Exception:
-                pass
+                max_cutout_refs = 12
+                max_detail_aux_cutout_refs = 2
+                target_label_norm = normalize_label_for_match(style_target_label)
+                is_detail_target_mode = bool(style_name.startswith("Detail:"))
 
-        try:
-            max_cutout_refs = 12
-            max_detail_aux_cutout_refs = 2
-            target_label_norm = normalize_label_for_match(style_target_label)
-            is_detail_target_mode = bool(style_name.startswith("Detail:"))
+                candidates = []
+                for item in furniture_data or []:
+                    if not isinstance(item, dict):
+                        continue
+                    crop_path = item.get("crop_path")
+                    if not crop_path:
+                        continue
+                    local_path = materialize_input(crop_path, f"detail_cutout_{len(candidates) + 1}") if isinstance(crop_path, str) else None
+                    if not local_path or not os.path.exists(local_path):
+                        continue
+                    if local_path != crop_path:
+                        temp_cutout_paths.append(local_path)
 
-            candidates = []
-            for item in furniture_data or []:
-                if not isinstance(item, dict):
-                    continue
-                crop_path = item.get("crop_path")
-                if not crop_path:
-                    continue
-                local_path = materialize_input(crop_path, f"detail_cutout_{len(candidates) + 1}") if isinstance(crop_path, str) else None
-                if not local_path or not os.path.exists(local_path):
-                    continue
-                if local_path != crop_path:
-                    temp_cutout_paths.append(local_path)
+                    try:
+                        source_index_val = int(item.get("source_index") or (len(candidates) + 1))
+                    except Exception:
+                        source_index_val = len(candidates) + 1
 
-                try:
-                    source_index_val = int(item.get("source_index") or (len(candidates) + 1))
-                except Exception:
-                    source_index_val = len(candidates) + 1
-
-                candidates.append(
-                    {
-                        "label": str(item.get("label") or "Item"),
-                        "path": local_path,
-                        "target_key": str(item.get("target_key") or "").strip(),
-                        "source_index": source_index_val,
-                        "box_2d": _coerce_box_2d(item.get("box_2d")),
-                        "source_box_2d": _coerce_box_2d(item.get("source_box_2d")),
-                    }
-                )
-
-            target_items = []
-            other_items = []
-            for candidate in candidates:
-                candidate_key = str(candidate.get("target_key") or "").strip()
-                candidate_label_norm = normalize_label_for_match(candidate.get("label") or "")
-                is_target = False
-                if style_target_key and candidate_key and candidate_key == style_target_key:
-                    is_target = True
-                elif target_label_norm and candidate_label_norm and candidate_label_norm == target_label_norm:
-                    is_target = True
-                elif target_label_norm and candidate_label_norm and (
-                    target_label_norm in candidate_label_norm or candidate_label_norm in target_label_norm
-                ):
-                    is_target = True
-
-                if is_target:
-                    target_items.append(candidate)
-                else:
-                    other_items.append(candidate)
-
-            def _cutout_sort_key(row: dict):
-                try:
-                    idx = int(row.get("source_index") or 10**9)
-                except Exception:
-                    idx = 10**9
-                return (idx, str(row.get("label") or ""))
-
-            target_items.sort(key=_cutout_sort_key)
-            if is_detail_target_mode and target_items:
-                target_anchor = target_items[0]
-                other_items.sort(
-                    key=lambda row: (
-                        _context_distance_score(row, target_anchor),
-                        *_cutout_sort_key(row),
+                    candidates.append(
+                        {
+                            "label": str(item.get("label") or "Item"),
+                            "path": local_path,
+                            "target_key": str(item.get("target_key") or "").strip(),
+                            "source_index": source_index_val,
+                            "box_2d": _coerce_box_2d(item.get("box_2d")),
+                            "source_box_2d": _coerce_box_2d(item.get("source_box_2d")),
+                        }
                     )
-                )
-            else:
-                other_items.sort(key=_cutout_sort_key)
 
-            ordered_items = []
-            seen_paths = set()
-
-            if target_items:
-                target = target_items[0]
-                if target.get("path") not in seen_paths:
-                    target = dict(target)
-                    target["is_target"] = True
-                    ordered_items.append(target)
-                    seen_paths.add(target.get("path"))
-
-            for candidate in other_items:
-                path = candidate.get("path")
-                if path in seen_paths:
-                    continue
-                item = dict(candidate)
-                item["is_target"] = False
-                ordered_items.append(item)
-                seen_paths.add(path)
-
-            if not ordered_items:
+                target_items = []
+                other_items = []
                 for candidate in candidates:
+                    candidate_key = str(candidate.get("target_key") or "").strip()
+                    candidate_label_norm = normalize_label_for_match(candidate.get("label") or "")
+                    is_target = False
+                    if style_target_key and candidate_key and candidate_key == style_target_key:
+                        is_target = True
+                    elif target_label_norm and candidate_label_norm and candidate_label_norm == target_label_norm:
+                        is_target = True
+                    elif target_label_norm and candidate_label_norm and (
+                        target_label_norm in candidate_label_norm or candidate_label_norm in target_label_norm
+                    ):
+                        is_target = True
+
+                    if is_target:
+                        target_items.append(candidate)
+                    else:
+                        other_items.append(candidate)
+
+                def _cutout_sort_key(row: dict):
+                    try:
+                        idx = int(row.get("source_index") or 10**9)
+                    except Exception:
+                        idx = 10**9
+                    return (idx, str(row.get("label") or ""))
+
+                target_items.sort(key=_cutout_sort_key)
+                if is_detail_target_mode and target_items:
+                    target_anchor = target_items[0]
+                    other_items.sort(
+                        key=lambda row: (
+                            _context_distance_score(row, target_anchor),
+                            *_cutout_sort_key(row),
+                        )
+                    )
+                else:
+                    other_items.sort(key=_cutout_sort_key)
+
+                ordered_items = []
+                seen_paths = set()
+
+                if target_items:
+                    target = target_items[0]
+                    if target.get("path") not in seen_paths:
+                        target = dict(target)
+                        target["is_target"] = True
+                        ordered_items.append(target)
+                        seen_paths.add(target.get("path"))
+
+                for candidate in other_items:
                     path = candidate.get("path")
                     if path in seen_paths:
                         continue
@@ -1094,52 +1131,73 @@ def generate_detail_view(
                     ordered_items.append(item)
                     seen_paths.add(path)
 
-            if is_detail_target_mode and ordered_items:
-                forced_target = [item for item in ordered_items if item.get("is_target")][:1]
-                aux = [item for item in ordered_items if not item.get("is_target")]
-                aux_cap = max(0, min(max_detail_aux_cutout_refs, max_cutout_refs - len(forced_target)))
-                cutout_items = forced_target + aux[:aux_cap]
-            else:
-                cutout_items = ordered_items[:max_cutout_refs]
+                if not ordered_items:
+                    for candidate in candidates:
+                        path = candidate.get("path")
+                        if path in seen_paths:
+                            continue
+                        item = dict(candidate)
+                        item["is_target"] = False
+                        ordered_items.append(item)
+                        seen_paths.add(path)
 
-            cutout_labels = [str(item.get("label") or "Item") for item in cutout_items]
-            cutout_ref_count = len(cutout_labels)
-
-            for item in cutout_items:
-                cutout_img = Image.open(item["path"])
-                try:
-                    cutout_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
-                except Exception:
-                    pass
-                extra_imgs.append(cutout_img)
-                if item.get("is_target"):
-                    content += [
-                        f"PRIMARY TARGET CUTOUT (ABSOLUTE PRIORITY, MUST MATCH EXACT DESIGN): {item['label']}",
-                        cutout_img,
-                    ]
+                if is_detail_target_mode and ordered_items:
+                    forced_target = [item for item in ordered_items if item.get("is_target")][:1]
+                    aux = [item for item in ordered_items if not item.get("is_target")]
+                    aux_cap = max(0, min(max_detail_aux_cutout_refs, max_cutout_refs - len(forced_target)))
+                    cutout_items = forced_target + aux[:aux_cap]
                 else:
-                    content += [
-                        f"Secondary Furniture Cutout Reference (context only, do not override primary target): {item['label']}",
-                        cutout_img,
-                    ]
-        except Exception:
-            pass
+                    cutout_items = ordered_items[:max_cutout_refs]
+
+                cutout_labels = [str(item.get("label") or "Item") for item in cutout_items]
+                cutout_ref_count = len(cutout_labels)
+
+                for item in cutout_items:
+                    cutout_img = Image.open(item["path"])
+                    try:
+                        cutout_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                    except Exception:
+                        pass
+                    extra_imgs.append(cutout_img)
+                    if item.get("is_target"):
+                        content += [
+                            f"PRIMARY TARGET CUTOUT (ABSOLUTE PRIORITY, MUST MATCH EXACT DESIGN): {item['label']}",
+                            cutout_img,
+                        ]
+                    else:
+                        content += [
+                            f"Secondary Furniture Cutout Reference (context only, do not override primary target): {item['label']}",
+                            cutout_img,
+                        ]
+            except Exception:
+                pass
 
         requested_ratio = target_ratio
-        response = call_gemini_with_failover(
-            model_name,
-            content,
-            {
-                "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
-                "aspect_ratio": requested_ratio,
-                **({"image_size": "4K"} if is_angle_style else {}),
-                "thinking_level": "high",
-                "include_thoughts": False,
-            },
-            safety_settings,
-            log_tag="Detail.Generate",
-        )
-        if response and hasattr(response, "candidates") and response.candidates:
+        max_attempts = DETAIL_ANGLE_QC_MAX_ATTEMPTS if is_angle_style and call_analysis_with_failover else 1
+        last_angle_qc = None
+        angle_retry_feedback = ""
+        for attempt_index in range(max_attempts):
+            generation_content = content
+            if angle_retry_feedback:
+                generation_content = [
+                    f"{final_prompt}\n\n<ANGLE QC RETRY FEEDBACK>\n{angle_retry_feedback}",
+                    *content[1:],
+                ]
+            response = call_gemini_with_failover(
+                model_name,
+                generation_content,
+                {
+                    "timeout": max(1.0, min(DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC, request_timeout_sec)),
+                    "aspect_ratio": requested_ratio,
+                    **({"image_size": "4K"} if is_angle_style else {}),
+                    "thinking_level": "high",
+                    "include_thoughts": False,
+                },
+                safety_settings,
+                log_tag="Detail.Generate",
+            )
+            if not response or not hasattr(response, "candidates") or not response.candidates:
+                continue
             for part in response.parts:
                 if hasattr(part, "inline_data"):
                     timestamp = int(time.time())
@@ -1175,14 +1233,45 @@ def generate_detail_view(
                             reference_path=original_image_path,
                             stage_name=angle_stage,
                         ).path
-                    return {
+                    if is_angle_style and call_analysis_with_failover:
+                        last_angle_qc = assess_angle_candidate(
+                            original_image_path,
+                            path,
+                            camera_mode=camera_mode or ("side_angle" if style_name.startswith("Side Composition") else "overview_angle"),
+                            focus_side=focus_side,
+                            call_analysis_with_failover=call_analysis_with_failover,
+                            analysis_model_name=analysis_model_name,
+                            safe_json_from_model_text=safe_json_from_model_text,
+                            require_model_qc=True,
+                        )
+                        if not last_angle_qc.get("passed"):
+                            reasons = ", ".join(str(reason) for reason in last_angle_qc.get("reject_reasons") or [])
+                            if reasons:
+                                angle_retry_feedback = (
+                                    f"The previous angle candidate failed QC for: {reasons}. "
+                                    "Regenerate with a clearer real camera move, coherent furniture projection, preserved room topology, and no mask-like wall or panel artifacts."
+                                )
+                            try:
+                                os.remove(path)
+                            except Exception:
+                                pass
+                            continue
+                    result = {
                         "path": path,
                         "style_name": style_config.get("name"),
                         "aspect_ratio": requested_ratio,
                         "cutout_ref_count": cutout_ref_count,
                         "cutout_ref_labels": cutout_labels,
-                        "generation_mode": "model_regeneration",
+                        "generation_mode": "angle_generation" if is_angle_style else "model_regeneration",
                     }
+                    if is_angle_style:
+                        result["camera_mode"] = camera_mode or ("side_angle" if style_name.startswith("Side Composition") else "overview_angle")
+                        if focus_side:
+                            result["focus_side"] = focus_side
+                        result["angle_qc_attempts"] = attempt_index + 1
+                        if last_angle_qc is not None:
+                            result["angle_qc"] = last_angle_qc
+                    return result
         return None
     except Exception as exc:
         print(f"!! Detail Generation Error: {exc}", flush=True)

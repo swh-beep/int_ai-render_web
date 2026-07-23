@@ -37,6 +37,15 @@ class DetailMetadataTests(unittest.TestCase):
                 "style_target_label": "Accent Chair",
                 "cutout_ref_count": 1,
                 "cutout_ref_labels": ["Accent Chair"],
+                "generation_mode": "angle_generation",
+                "camera_mode": "side_angle",
+                "focus_side": "left",
+                "angle_qc_attempts": 2,
+                "angle_qc": {
+                    "passed": True,
+                    "reject_reasons": [],
+                    "metrics": {"camera_motion_score": 0.81},
+                },
             }
         ]
         output = build_detail_generation_output(
@@ -54,6 +63,11 @@ class DetailMetadataTests(unittest.TestCase):
         self.assertEqual(detail["target_key"], "cart_product-1_accent-chair_001")
         self.assertEqual(detail["target_box_source"], "main_render")
         self.assertEqual(detail["target_box_2d"], [10, 10, 20, 20])
+        self.assertEqual(detail["generation_mode"], "angle_generation")
+        self.assertEqual(detail["camera_mode"], "side_angle")
+        self.assertEqual(detail["focus_side"], "left")
+        self.assertEqual(detail["angle_qc_attempts"], 2)
+        self.assertEqual(detail["angle_qc"]["metrics"]["camera_motion_score"], 0.81)
         self.assertEqual(output["furniture_data"][0]["target_key"], "cart_product-1_accent-chair_001")
         self.assertEqual(output["furniture_data"][0]["description"], "Soft boucle accent chair")
         self.assertNotIn("_normalized_label", output["furniture_data"][0])

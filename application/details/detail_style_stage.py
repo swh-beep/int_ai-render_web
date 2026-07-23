@@ -350,13 +350,14 @@ def construct_internal_angle_styles():
         {
             "name": "High Angle Overview",
             "prompt": (
-                "CAMERA POSITION: Moderately elevated high-angle overview from just above standing eye level, "
-                "as if photographed by a person holding the camera slightly above head height inside the room.\n"
-                "VIEWPOINT SAFETY: Prefer a stable crop/reframe from the source composition. A mild camera-height change is allowed only if it does not alter any object direction, footprint, or room relationship.\n"
-                "CAMERA TILT: Mild downward tilt only, enough to reveal a little more top surface. Keep the horizon natural and the vertical lines stable.\n"
+                "CAMERA POSITION: Create a genuine nearby high-angle camera move from inside the same room, "
+                "as if the camera is lifted above standing eye level and pitched downward.\n"
+                "VIEWPOINT REQUIRED: The output must not match the main camera or a crop of the main image. "
+                "Show a measurable camera-height change, more visible top surfaces, and consistent perspective shift while preserving the same physical room.\n"
+                "CAMERA TILT: Mild-to-moderate downward tilt, enough to reveal more table, sofa, rug, and floor top planes. Keep the horizon natural and the vertical lines stable.\n"
                 "FORBIDDEN CAMERA: Do NOT use bird's-eye, top-down, drone, ceiling-mounted, surveillance, or extreme overhead viewpoints.\n"
-                "COMPOSITION: Show the entire room layout exactly as shown in the original image. Do not chase novelty if it risks changing object placement or shape.\n"
-                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong even if the camera feels more dynamic.\n"
+                "COMPOSITION: Show the same room layout and objects from the elevated camera. Physical furniture placement, count, shape, material, and orientation must remain unchanged.\n"
+                "FAILURE CONDITION: If this could be achieved by crop, zoom, or reframe from the main image, it is wrong. If architecture or furniture identity changes, it is wrong.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait close-up or detail crop.\n"
             ),
             "ratio": "16:9",
@@ -365,12 +366,12 @@ def construct_internal_angle_styles():
         {
             "name": "Side Composition (Focus Left)",
             "prompt": (
-                "CAMERA POSITION: Natural standing-height side-angle viewpoint from the LEFT side of the original room composition.\n"
-                "VIEWPOINT SAFETY: Prefer a source-image crop/reframe weighted toward the left side. Only a slight lateral camera shift is allowed, and only when all furniture footprints and facing directions remain unchanged.\n"
-                "COMPOSITION: The left half of the source room should become the dominant area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
+                "CAMERA POSITION: Natural standing-height side-angle viewpoint after a real lateral camera move toward the LEFT side of the original room composition.\n"
+                "VIEWPOINT REQUIRED: Translate the camera left and add a modest yaw back into the room. The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
+                "COMPOSITION: The left side of the same physical room should become dominant while preserving furniture identities, room architecture, lighting direction, relative placement, and world-space orientation.\n"
                 "ALLOWED OCCLUSION: It is acceptable for right-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"
-                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong. A safer crop-like result is better than a dynamic but unstable one.\n"
+                "FAILURE CONDITION: If this could be achieved by crop, zoom, or reframe from the main image, it is wrong. If only the room rotates while furniture stays front-facing, it is wrong.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait detail crop.\n"
             ),
             "ratio": "16:9",
@@ -380,12 +381,12 @@ def construct_internal_angle_styles():
         {
             "name": "Side Composition (Focus Right)",
             "prompt": (
-                "CAMERA POSITION: Natural standing-height side-angle viewpoint from the RIGHT side of the original room composition.\n"
-                "VIEWPOINT SAFETY: Prefer a source-image crop/reframe weighted toward the right side. Only a slight lateral camera shift is allowed, and only when all furniture footprints and facing directions remain unchanged.\n"
-                "COMPOSITION: The right half of the source room should become the dominant area while preserving the same furniture identities, room architecture, lighting direction, and relative placement.\n"
+                "CAMERA POSITION: Natural standing-height side-angle viewpoint after a real lateral camera move toward the RIGHT side of the original room composition.\n"
+                "VIEWPOINT REQUIRED: Translate the camera right and add a modest yaw back into the room. The view must show real parallax, changed occlusions, and newly visible side planes caused by camera movement.\n"
+                "COMPOSITION: The right side of the same physical room should become dominant while preserving furniture identities, room architecture, lighting direction, relative placement, and world-space orientation.\n"
                 "ALLOWED OCCLUSION: It is acceptable for left-side objects to be cropped out by the frame; do not relocate them to keep them visible.\n"
                 "FORBIDDEN: Do NOT mirror the room, duplicate furniture, invent new furniture, or keep the exact centered source camera.\n"
-                "FAILURE CONDITION: If furniture placement, direction, count, or shape changes, it is wrong. A safer crop-like result is better than a dynamic but unstable one.\n"
+                "FAILURE CONDITION: If this could be achieved by crop, zoom, or reframe from the main image, it is wrong. If only the room rotates while furniture stays front-facing, it is wrong.\n"
                 "OUTPUT FORMAT: Wide horizontal 16:9 angle shot, not a portrait detail crop.\n"
             ),
             "ratio": "16:9",

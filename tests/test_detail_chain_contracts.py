@@ -186,8 +186,13 @@ class DetailChainContractsTests(unittest.TestCase):
     def test_build_detail_payload_preserves_itemized_context(self):
         render_result = {
             "result_urls": ["https://cdn.example/rendered/main-1.png"],
+            "empty_room_url": "https://cdn.example/rendered/empty-1.png",
             "moodboard_url": None,
             "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+            "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
+            "geometry_contract": {"geometry_source": "explicit_dimensions"},
+            "scene_contract": {"critical_item_keys": ["detail_001"]},
+            "placement_plan": {"anchor_item_key": "detail_001"},
         }
 
         payload = build_detail_payload(render_result, audience="internal")
@@ -196,6 +201,11 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertIsNone(payload["moodboard_url"])
         self.assertEqual(payload["furniture_data"], [{"label": "Accent Chair", "target_key": "detail_001"}])
         self.assertEqual(payload["audience"], "internal")
+        self.assertEqual(payload["empty_room_url"], "https://cdn.example/rendered/empty-1.png")
+        self.assertEqual(payload["room_dims_contract"]["dims_mm_center"]["width_mm"], 5000)
+        self.assertEqual(payload["geometry_contract"]["geometry_source"], "explicit_dimensions")
+        self.assertEqual(payload["scene_contract"]["critical_item_keys"], ["detail_001"])
+        self.assertEqual(payload["placement_plan"]["anchor_item_key"], "detail_001")
 
     def test_detail_generation_job_payload_keeps_furniture_data_without_moodboard(self):
         req = DetailRequest(
@@ -1468,6 +1478,11 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
         return {
             "path": original_image_path,
             "style_name": style_config.get("name"),
+            "generation_mode": "angle_generation",
+            "camera_mode": "side_angle",
+            "focus_side": "left",
+            "angle_qc_attempts": 1,
+            "angle_qc": {"passed": True, "reject_reasons": []},
         }
 
     with ai_service_scope("internal_tool"):
@@ -1502,6 +1517,11 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_parallel_detail_
 
     assert len(result["details"]) == 2
     assert observed_scopes == ["internal_tool", "internal_tool"]
+    assert result["details"][0]["generation_mode"] == "angle_generation"
+    assert result["details"][0]["camera_mode"] == "side_angle"
+    assert result["details"][0]["focus_side"] == "left"
+    assert result["details"][0]["angle_qc_attempts"] == 1
+    assert result["details"][0]["angle_qc"]["passed"] is True
 
 
 def test_run_generate_details_job_preserves_ai_service_scope_in_budgeted_parallel_threads(monkeypatch, tmp_path):
@@ -1558,9 +1578,11 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_budgeted_paralle
 
 def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path):
     image_path = tmp_path / "detail-src.png"
+    empty_room_path = tmp_path / "detail-empty.png"
     image_path.write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
     )
+    empty_room_path.write_bytes(image_path.read_bytes())
     recorded_styles = {}
     recorded_crop_preferences = {}
 
@@ -1576,7 +1598,12 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     result = run_generate_details_job(
         {
             "image_url": str(image_path),
+            "empty_room_url": str(empty_room_path),
             "furniture_data": [{"label": "Accent Chair", "target_key": "detail_001"}],
+            "room_dims_contract": {"dims_mm_center": {"width_mm": 5000}},
+            "geometry_contract": {"geometry_source": "explicit_dimensions"},
+            "scene_contract": {"critical_item_keys": ["detail_001"]},
+            "placement_plan": {"anchor_item_key": "detail_001"},
             "audience": "internal",
         },
         normalize_audience=lambda audience: audience or "internal",
@@ -1619,8 +1646,15 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_styles[2].get("focus_side") == "left"
     assert recorded_styles[3].get("camera_mode") == "side_angle"
     assert recorded_styles[3].get("focus_side") == "right"
+    for index in (1, 2, 3):
+        assert recorded_styles[index].get("empty_room_path") == str(empty_room_path)
+        assert recorded_styles[index]["room_dims_contract"]["dims_mm_center"]["width_mm"] == 5000
+        assert recorded_styles[index]["geometry_contract"]["geometry_source"] == "explicit_dimensions"
+        assert recorded_styles[index]["scene_contract"]["critical_item_keys"] == ["detail_001"]
+        assert recorded_styles[index]["placement_plan"]["anchor_item_key"] == "detail_001"
     assert recorded_styles[4].get("ratio") == "4:5"
     assert recorded_styles[4].get("simple_scene_detail") is True
+    assert "empty_room_path" not in recorded_styles[4]
     assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
 
 
