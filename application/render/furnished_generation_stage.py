@@ -2071,7 +2071,11 @@ def generate_furnished_room(
 
         reference_content = []
 
-        if furnished_scene_reference_path and os.path.exists(furnished_scene_reference_path):
+        furnished_scene_reference_attached = bool(
+            furnished_scene_reference_path
+            and os.path.exists(furnished_scene_reference_path)
+        )
+        if furnished_scene_reference_attached:
             with Image.open(furnished_scene_reference_path) as scene_reference_opened:
                 scene_reference_img = ImageOps.exif_transpose(
                     scene_reference_opened
@@ -2101,6 +2105,17 @@ def generate_furnished_room(
             prompt = prompt_override if prompt_override is not None else base_prompt
             image = room_image_override if room_image_override is not None else room_img
             refs = reference_override if reference_override is not None else reference_content
+            if furnished_scene_reference_attached:
+                return [
+                    prompt,
+                    *list(refs or []),
+                    (
+                        room_label
+                        or "FINAL Locked Empty-Room Target Canvas "
+                        "(SOLE camera, crop, perspective, architecture, and pixel-position authority - EDIT THIS IMAGE):"
+                    ),
+                    image,
+                ]
             return [prompt, room_label or room_input_label, image, *list(refs or [])]
 
         try:

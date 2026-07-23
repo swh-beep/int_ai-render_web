@@ -1400,11 +1400,7 @@ def generate_detail_view(
                 "guide_reference_mode": None,
                 "guide_attempts": [],
                 "refurnish_attempts": [],
-                "refurnish_backend": (
-                    "main_stage2_locked_canvas"
-                    if refurnish_locked_angle is not None
-                    else "detail_handcrafted"
-                ),
+                "refurnish_backend": None,
                 "locked_plate_ignored": False,
             }
             if is_internal_angle
@@ -1941,6 +1937,8 @@ def generate_detail_view(
                     if refurnish_locked_angle is not None
                     else "detail_handcrafted"
                 )
+                if angle_pipeline_trace is not None:
+                    angle_pipeline_trace["refurnish_backend"] = refurnish_backend
                 if refurnish_locked_angle is not None:
                     stage2_result = refurnish_locked_angle(
                         guide_path=guide_path,

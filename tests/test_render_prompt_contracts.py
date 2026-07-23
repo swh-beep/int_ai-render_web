@@ -1361,6 +1361,11 @@ def test_generate_furnished_room_keeps_full_furnished_scene_as_inventory_only_re
         assert scene_image.size == (1536, 864)
         assert "ZERO authority over camera" in content[scene_label_index]
         assert "world-space footprint" in content[scene_label_index]
+        assert scene_label_index < len(content) - 2
+        assert content[-2].startswith("FINAL Locked Empty-Room Target Canvas")
+        target_canvas = content[-1]
+        assert isinstance(target_canvas, Image.Image)
+        assert target_canvas.size == (160, 90)
         assert output_path.exists()
     finally:
         output_path.unlink(missing_ok=True)
