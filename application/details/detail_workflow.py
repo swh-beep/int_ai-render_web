@@ -29,12 +29,36 @@ def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
 DETAIL_GENERATION_TIMEOUT_CAP_SEC = _env_int("DETAIL_GENERATION_TIMEOUT_SEC", 180, minimum=10)
 DETAIL_GENERATION_BUDGETED_MAX_WORKERS = _env_int("DETAIL_GENERATION_BUDGETED_MAX_WORKERS", 10)
 DETAIL_GENERATION_MAX_WORKERS = _env_int("DETAIL_GENERATION_MAX_WORKERS", 20)
+DETAIL_ANGLE_GENERATION_MAX_WORKERS = _env_int("DETAIL_ANGLE_GENERATION_MAX_WORKERS", 2)
 EXTERNAL_DETAIL_STYLE_LIMIT = 6
 DETAIL_SPATIAL_DIVERSITY_IOU_THRESHOLD = _env_float("DETAIL_SPATIAL_DIVERSITY_IOU_THRESHOLD", 0.42)
 DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVAS_WIDTH", 1376)
 DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT = _env_int("DETAIL_SPATIAL_DIVERSITY_CANVAS_HEIGHT", 768)
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = _env_int("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", 400)
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = _env_int("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", 500)
+
+
+def _is_angle_style(style_payload: dict) -> bool:
+    style_name = str((style_payload or {}).get("name") or "")
+    camera_mode = str((style_payload or {}).get("camera_mode") or "").strip().lower()
+    return (
+        camera_mode in {"overview_angle", "side_angle"}
+        or style_name == "High Angle Overview"
+        or style_name.startswith("Side Composition")
+    )
+
+
+def _detail_generation_max_workers(
+    styles: list[dict] | None,
+    *,
+    configured_max_workers: int | None = None,
+) -> int:
+    style_rows = list(styles or [])
+    configured_limit = DETAIL_GENERATION_MAX_WORKERS if configured_max_workers is None else max(1, int(configured_max_workers))
+    worker_limit = max(1, min(configured_limit, len(style_rows) or 1))
+    if any(_is_angle_style(style) for style in style_rows):
+        worker_limit = min(worker_limit, DETAIL_ANGLE_GENERATION_MAX_WORKERS)
+    return max(1, worker_limit)
 
 
 def _generate_detail_view_in_scope(
@@ -530,11 +554,6 @@ def run_generate_details_job(
 
         generated_paths = []
 
-        def _is_angle_style(style_payload: dict) -> bool:
-            style_name = str((style_payload or {}).get("name") or "")
-            camera_mode = str((style_payload or {}).get("camera_mode") or "").strip().lower()
-            return camera_mode in {"overview_angle", "side_angle"} or style_name == "High Angle Overview" or style_name.startswith("Side Composition")
-
         def _style_payload_for_generation(style: dict) -> dict:
             style_payload = dict(style or {})
             if _is_angle_style(style_payload):
@@ -586,7 +605,10 @@ def run_generate_details_job(
             print(f"?? Generating {len(dynamic_styles)} Budgeted Dynamic Shots...", flush=True)
             if len(dynamic_styles) > 1:
                 futures = []
-                max_workers = min(DETAIL_GENERATION_BUDGETED_MAX_WORKERS, len(dynamic_styles))
+                max_workers = _detail_generation_max_workers(
+                    dynamic_styles,
+                    configured_max_workers=DETAIL_GENERATION_BUDGETED_MAX_WORKERS,
+                )
                 scoped_ai_service_scope = current_ai_service_scope()
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     for index, style in enumerate(dynamic_styles):
@@ -641,7 +663,7 @@ def run_generate_details_job(
         else:
             print(f"?? Generating {len(dynamic_styles)} Dynamic Shots...", flush=True)
             scoped_ai_service_scope = current_ai_service_scope()
-            with ThreadPoolExecutor(max_workers=min(DETAIL_GENERATION_MAX_WORKERS, len(dynamic_styles))) as executor:
+            with ThreadPoolExecutor(max_workers=_detail_generation_max_workers(dynamic_styles)) as executor:
                 futures = []
                 for index, style in enumerate(dynamic_styles):
                     futures.append(
