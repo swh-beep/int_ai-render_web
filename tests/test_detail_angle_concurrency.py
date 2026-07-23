@@ -1,4 +1,8 @@
-from application.details import detail_workflow
+from application.details import detail_generation_stage, detail_workflow
+
+
+def test_internal_angle_qc_gets_three_generation_attempts_by_default():
+    assert detail_generation_stage.DETAIL_ANGLE_QC_MAX_ATTEMPTS == 3
 
 
 def test_internal_angle_styles_cap_per_job_generation_concurrency(monkeypatch):

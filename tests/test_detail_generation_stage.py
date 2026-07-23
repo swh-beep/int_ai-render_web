@@ -551,6 +551,11 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             isinstance(part, str) and "CUTOUT" in part
             for part in captured["content"]
         )
+        assert (
+            "Furnished Main Reference (furniture truth and world-space scene source; generate the requested new camera viewpoint):"
+            in captured["content"]
+        )
+        assert "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):" not in captured["content"]
         assert "Empty Room Architecture Reference (same room topology before furnishing):" in captured["content"]
         assert len([part for part in captured["content"] if isinstance(part, Image.Image)]) == 2
         assert result["aspect_ratio"] == "16:9"

@@ -11,7 +11,7 @@ from application.render.white_balance_correction import apply_reference_relative
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
-DETAIL_ANGLE_QC_MAX_ATTEMPTS = max(1, int(os.getenv("DETAIL_ANGLE_QC_MAX_ATTEMPTS", "2") or "2"))
+DETAIL_ANGLE_QC_MAX_ATTEMPTS = max(1, int(os.getenv("DETAIL_ANGLE_QC_MAX_ATTEMPTS", "3") or "3"))
 DETAIL_CROP_MIN_SOURCE_WIDTH_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_WIDTH_PX", "1280") or "1280"))
 DETAIL_CROP_MIN_SOURCE_HEIGHT_PX = max(1, int(os.getenv("DETAIL_CROP_MIN_SOURCE_HEIGHT_PX", "1600") or "1600"))
 
@@ -1046,7 +1046,12 @@ def generate_detail_view(
         )
 
         safety_settings = allow_harassment_only_safety_settings()
-        content = [final_prompt, "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):", img]
+        source_reference_label = (
+            "Furnished Main Reference (furniture truth and world-space scene source; generate the requested new camera viewpoint):"
+            if is_angle_style
+            else "Original Room Reality (CANVAS - DO NOT ALTER LAYOUT):"
+        )
+        content = [final_prompt, source_reference_label, img]
         if material_reference_img is not None:
             content += [
                 "CURTAIN MATERIAL SWATCH (material/color/weave reference only; not an object or framing reference):",
@@ -1288,6 +1293,15 @@ def generate_detail_view(
                             raise
                         if not last_angle_qc.get("passed"):
                             reasons = ", ".join(str(reason) for reason in last_angle_qc.get("reject_reasons") or [])
+                            print(
+                                "[DetailAngleQC] "
+                                f"style={style_name!r} camera_mode={camera_mode!r} focus_side={focus_side!r} "
+                                f"attempt={attempt_index + 1}/{max_attempts} passed=False "
+                                f"reasons={reasons or 'unknown'} "
+                                f"metrics={json.dumps(last_angle_qc.get('metrics') or {}, ensure_ascii=True, sort_keys=True)} "
+                                f"model={json.dumps(last_angle_qc.get('model_payload') or {}, ensure_ascii=True, sort_keys=True)}",
+                                flush=True,
+                            )
                             if reasons:
                                 angle_retry_feedback = (
                                     f"The previous angle candidate failed QC for: {reasons}. "
