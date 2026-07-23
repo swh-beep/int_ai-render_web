@@ -64,11 +64,13 @@ def apply_reference_relative_white_balance(
     enabled: bool | None = None,
     logger_override=None,
 ) -> WhiteBalanceCorrectionResult:
-    """Correct global color cast toward the request's own source-room white balance.
+    """Correct global color cast toward absolute neutral LAB a=0, b=0.
 
-    Generated images use the same cast eligibility threshold: one mild pass, or
-    up to two stronger measured passes for a severe cast. The source file is never
-    modified and any processing error falls back to it.
+    A supplied reference image is measured for diagnostics only; it does not
+    drive the correction target. Generated images use the same cast eligibility
+    threshold: one mild pass, or up to two stronger measured passes for a severe
+    cast. The source file is never modified and any processing error falls back
+    to it.
     """
 
     started_at = time.perf_counter()
@@ -97,8 +99,8 @@ def apply_reference_relative_white_balance(
         else:
             reference_measurement = _NeutralMeasurement(0.0, 0.0, 0)
 
-        raw_delta_a = source_measurement.a - reference_measurement.a
-        raw_delta_b = source_measurement.b - reference_measurement.b
+        raw_delta_a = source_measurement.a
+        raw_delta_b = source_measurement.b
         raw_max_axis = max(abs(raw_delta_a), abs(raw_delta_b))
         base_diagnostics = {
             "stage": stage,
@@ -107,6 +109,11 @@ def apply_reference_relative_white_balance(
             "reference_neutral_pixels": reference_measurement.pixel_count,
             "reference_a": round(reference_measurement.a, 3),
             "reference_b": round(reference_measurement.b, 3),
+            "reference_provided": reference_path is not None,
+            "target_mode": "absolute_neutral",
+            "target_a": 0.0,
+            "target_b": 0.0,
+            "highlight_protection": "hybrid_40_original_lab_l",
         }
 
         if _within_deadband(raw_delta_a, raw_delta_b):
@@ -127,13 +134,14 @@ def apply_reference_relative_white_balance(
         min_neutral_weight = _SEVERE_MIN_NEUTRAL_WEIGHT if severe else _MILD_MIN_NEUTRAL_WEIGHT
         with Image.open(image_path) as source:
             current_rgb = source.convert("RGB")
+            original_rgb = current_rgb.copy()
 
         passes = 0
         try:
             for _pass_index in range(pass_limit):
                 current_measurement = _measure_top_neutral(current_rgb)
-                delta_a = current_measurement.a - reference_measurement.a
-                delta_b = current_measurement.b - reference_measurement.b
+                delta_a = current_measurement.a
+                delta_b = current_measurement.b
                 offset_a = _effective_offset(delta_a, _DEADBAND_A, _MAX_CORRECTION_A) * strength
                 offset_b = _effective_offset(delta_b, _DEADBAND_B, _MAX_CORRECTION_B) * strength
                 if abs(offset_a) < 0.5 and abs(offset_b) < 0.5:
@@ -162,16 +170,20 @@ def apply_reference_relative_white_balance(
 
             output_path = _corrected_sibling_path(Path(image_path))
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            blended_rgb = _apply_hybrid40_final_blend(original_rgb, current_rgb)
+            current_rgb.close()
+            current_rgb = blended_rgb
             current_rgb.save(output_path, format="JPEG", quality=97, subsampling=0)
         finally:
             current_rgb.close()
+            original_rgb.close()
 
         with Image.open(output_path) as corrected_image:
             if corrected_image.size != source_size:
                 raise ValueError(f"corrected image size changed: {corrected_image.size} != {source_size}")
             final_measurement = _measure_top_neutral(corrected_image)
-        final_delta_a = final_measurement.a - reference_measurement.a
-        final_delta_b = final_measurement.b - reference_measurement.b
+        final_delta_a = final_measurement.a
+        final_delta_b = final_measurement.b
         before_error = math.hypot(raw_delta_a, raw_delta_b)
         after_error = math.hypot(final_delta_a, final_delta_b)
         if after_error > before_error + 0.25:
@@ -357,6 +369,25 @@ def _shift_lab_ab(
         weight.close()
 
 
+def _apply_hybrid40_final_blend(original: Image.Image, candidate: Image.Image) -> Image.Image:
+    original_rgb = original.convert("RGB")
+    candidate_rgb = candidate.convert("RGB")
+    lab = _rgb_to_lab(original_rgb)
+    l_channel, a_channel, b_channel = lab.split()
+    lab.close()
+    a_channel.close()
+    b_channel.close()
+
+    weight = l_channel.point(_hybrid40_final_blend_lut())
+    l_channel.close()
+    try:
+        return Image.composite(candidate_rgb, original_rgb, weight)
+    finally:
+        original_rgb.close()
+        candidate_rgb.close()
+        weight.close()
+
+
 def _neutral_weight_lut(minimum_weight: float) -> list[int]:
     values = []
     for value in range(256):
@@ -380,6 +411,20 @@ def _highlight_weight_lut() -> list[int]:
     for value in range(256):
         lightness = value * 100.0 / 255.0
         weight = max(0.30, min(1.0, (101.0 - lightness) / 5.0))
+        values.append(round(weight * 255))
+    return values
+
+
+def _hybrid40_final_blend_lut() -> list[int]:
+    values = []
+    for value in range(256):
+        lightness = value * 100.0 / 255.0
+        if lightness <= 60.0:
+            weight = 1.0
+        elif lightness >= 95.0:
+            weight = 0.40
+        else:
+            weight = 1.0 - ((lightness - 60.0) / 35.0) * 0.60
         values.append(round(weight * 255))
     return values
 
