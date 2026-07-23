@@ -3,6 +3,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+from application.details import detail_generation_stage
 from application.details.detail_generation_stage import (
     _box_to_pixels,
     _expand_bounds,
@@ -368,11 +369,18 @@ def test_generate_detail_view_honors_style_ratio_for_overview_styles(tmp_path):
             output_path.unlink()
 
 
-def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path):
+def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
 
     captured = {}
+    correction_calls = []
+
+    def _correct(path, **kwargs):
+        correction_calls.append((path, kwargs))
+        return type("Correction", (), {"path": path})()
+
+    monkeypatch.setattr(detail_generation_stage, "apply_reference_relative_white_balance", _correct)
 
     def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
         captured["request_options"] = dict(request_options)
@@ -411,6 +419,12 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path):
         assert "OUTPUT ASPECT RATIO: 16:9" in captured["prompt"]
         assert "this is a room angle shot, not an object close-up" in captured["prompt"]
         assert "focus on the specified target area only" not in captured["prompt"]
+        assert correction_calls == [
+            (
+                str(output_path),
+                {"reference_path": str(source_path), "stage_name": "detail_high_angle"},
+            )
+        ]
         with Image.open(output_path) as rendered:
             assert abs((rendered.size[0] / rendered.size[1]) - (16.0 / 9.0)) < 0.02
             assert rendered.size[0] > rendered.size[1]
@@ -419,11 +433,18 @@ def test_generate_detail_view_honors_landscape_ratio_for_angle_styles(tmp_path):
             output_path.unlink()
 
 
-def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_path):
+def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_path, monkeypatch):
     source_path = tmp_path / "room.png"
     Image.new("RGB", (1600, 900), color=(245, 245, 245)).save(source_path, format="PNG")
 
     captured = {}
+    correction_calls = []
+
+    def _correct(path, **kwargs):
+        correction_calls.append((path, kwargs))
+        return type("Correction", (), {"path": path})()
+
+    monkeypatch.setattr(detail_generation_stage, "apply_reference_relative_white_balance", _correct)
 
     def _call_gemini(model_name, content, request_options, safety_settings, **kwargs):
         captured["prompt"] = content[0]
@@ -475,6 +496,12 @@ def test_generate_detail_view_uses_side_camera_scene_lock_for_side_angles(tmp_pa
             for part in captured["content"]
         )
         assert result["aspect_ratio"] == "16:9"
+        assert correction_calls == [
+            (
+                str(output_path),
+                {"reference_path": str(source_path), "stage_name": "detail_side_angle"},
+            )
+        ]
     finally:
         if output_path.exists():
             output_path.unlink()

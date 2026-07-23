@@ -66,9 +66,9 @@ def apply_reference_relative_white_balance(
 ) -> WhiteBalanceCorrectionResult:
     """Correct global color cast toward the request's own source-room white balance.
 
-    Empty rooms are corrected only for a strong cast. Furnished main candidates use
-    one mild pass, or up to two stronger measured passes for a severe cast. The
-    source file is never modified and any processing error falls back to it.
+    Generated images use the same cast eligibility threshold: one mild pass, or
+    up to two stronger measured passes for a severe cast. The source file is never
+    modified and any processing error falls back to it.
     """
 
     started_at = time.perf_counter()
@@ -109,18 +109,7 @@ def apply_reference_relative_white_balance(
             "reference_b": round(reference_measurement.b, 3),
         }
 
-        if empty_room and raw_max_axis < _SEVERE_CAST_THRESHOLD:
-            result = _no_change_result(
-                original_path,
-                "empty_room_cast_below_threshold",
-                started_at,
-                raw_delta_a=raw_delta_a,
-                raw_delta_b=raw_delta_b,
-                diagnostics=base_diagnostics,
-            )
-            _log_result(active_logger, result, stage)
-            return result
-        if not empty_room and _within_deadband(raw_delta_a, raw_delta_b):
+        if _within_deadband(raw_delta_a, raw_delta_b):
             result = _no_change_result(
                 original_path,
                 "within_deadband",

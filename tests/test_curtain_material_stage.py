@@ -2,6 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from application.render import curtain_material_stage
 from application.render.curtain_material_stage import (
     CURTAIN_BLACKOUT_PERCENT,
     apply_curtain_material_edit,
@@ -100,17 +101,26 @@ def test_prepare_material_swatch_preserves_full_frame_without_cutout(tmp_path):
         assert prepared.mode == "RGB"
 
 
-def test_apply_curtain_material_edit_calls_editor_once_and_replaces_selected_main(tmp_path):
+def test_apply_curtain_material_edit_calls_editor_once_and_replaces_selected_main(tmp_path, monkeypatch):
     base = tmp_path / "base.png"
     swatch = tmp_path / "swatch.png"
     edited = tmp_path / "edited.png"
     for path, color in ((base, "white"), (swatch, "gray"), (edited, "pink")):
         Image.new("RGB", (20, 20), color=color).save(path)
     calls = []
+    correction_calls = []
+    published_paths = []
+    corrected = tmp_path / "edited.corrected.jpg"
 
     def process(photo_paths, instructions, mode, unique_id, index):
         calls.append((list(photo_paths), instructions, mode, unique_id, index))
         return str(edited)
+
+    def correct(path, **kwargs):
+        correction_calls.append((path, kwargs))
+        return type("Correction", (), {"path": str(corrected)})()
+
+    monkeypatch.setattr(curtain_material_stage, "apply_reference_relative_white_balance", correct)
 
     result = apply_curtain_material_edit(
         {
@@ -123,7 +133,7 @@ def test_apply_curtain_material_edit_calls_editor_once_and_replaces_selected_mai
         audience="external",
         materialize_input=lambda value, prefix: str(base) if value == "base-url" else str(swatch),
         process_image_edit_logic=process,
-        resolve_image_url=lambda path, **kwargs: "edited-url",
+        resolve_image_url=lambda path, **kwargs: published_paths.append(path) or "edited-url",
         build_s3_prefix=lambda *parts: "/".join(parts),
     )
 
@@ -131,6 +141,13 @@ def test_apply_curtain_material_edit_calls_editor_once_and_replaces_selected_mai
     assert calls[0][0] == [str(base), str(swatch)]
     assert calls[0][2] == "edit"
     assert calls[0][4] == 1
+    assert correction_calls == [
+        (
+            str(edited),
+            {"reference_path": str(base), "stage_name": "curtain_material"},
+        )
+    ]
+    assert published_paths == [str(corrected)]
     assert "90%" in calls[0][1]
     assert "밝게 유지" in calls[0][1]
     assert result["result_url"] == "edited-url"

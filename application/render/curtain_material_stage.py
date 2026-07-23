@@ -8,6 +8,7 @@ from PIL import Image, ImageOps
 
 from application.render.artifact_paths import artifact_subprefix
 from application.render.postprocess_support import category_match_family
+from application.render.white_balance_correction import apply_reference_relative_white_balance
 
 
 CURTAIN_BLACKOUT_PERCENT = 90
@@ -145,6 +146,11 @@ def apply_curtain_material_edit(
         )
         if not edited_path:
             raise RuntimeError("curtain material edit returned no image")
+        edited_path = apply_reference_relative_white_balance(
+            edited_path,
+            reference_path=local_base,
+            stage_name="curtain_material",
+        ).path
         edited_url = resolve_image_url(
             edited_path,
             s3_prefix_override=_curtain_result_prefix(

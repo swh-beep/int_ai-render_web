@@ -124,14 +124,16 @@ def test_spatial_weighting_protects_saturated_product_color():
         corrected.close()
 
 
-def test_empty_room_skips_mild_cast(tmp_path):
+def test_empty_room_uses_same_cast_threshold_as_main(tmp_path):
     image_path = tmp_path / "mild.png"
     _save_image(image_path, (194, 190, 184))
 
-    result = apply_reference_relative_white_balance(str(image_path), empty_room=True)
+    main_result = apply_reference_relative_white_balance(str(image_path))
+    empty_result = apply_reference_relative_white_balance(str(image_path), empty_room=True)
 
-    assert result.corrected is False
-    assert result.reason == "empty_room_cast_below_threshold"
+    assert empty_result.corrected is main_result.corrected is True
+    assert empty_result.reason == main_result.reason == "corrected"
+    assert empty_result.passes == main_result.passes
 
 
 def test_empty_room_corrects_strong_cast(tmp_path):

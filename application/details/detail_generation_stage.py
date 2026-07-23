@@ -6,6 +6,7 @@ from typing import Callable
 from PIL import Image, ImageDraw, ImageOps
 from application.render.curtain_material_stage import CURTAIN_BLACKOUT_PERCENT, CURTAIN_DETAIL_MODE
 from application.render.postprocess_support import category_match_family
+from application.render.white_balance_correction import apply_reference_relative_white_balance
 from shared.image_canvas import get_image_size, match_aspect_to_ratio
 
 DETAIL_IMAGE_REQUEST_TIMEOUT_CAP_SEC = 180.0
@@ -1163,6 +1164,17 @@ def generate_detail_view(
                         except Exception:
                             pass
                         path = normalized_path
+                    if is_angle_style:
+                        angle_stage = (
+                            "detail_side_angle"
+                            if camera_mode == "side_angle" or style_name.startswith("Side Composition")
+                            else "detail_high_angle"
+                        )
+                        path = apply_reference_relative_white_balance(
+                            path,
+                            reference_path=original_image_path,
+                            stage_name=angle_stage,
+                        ).path
                     return {
                         "path": path,
                         "style_name": style_config.get("name"),
