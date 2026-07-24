@@ -528,10 +528,13 @@ def _should_prefer_crop_extract_for_detail(style: dict, *, audience: str) -> boo
     detail_mode = str(style.get("detail_mode") or "").strip().lower()
     if detail_mode == CURTAIN_DETAIL_MODE:
         return False
+    normalized_audience = str(audience or "").strip().lower()
+    if normalized_audience == "internal":
+        return True
     box_source = str(style.get("target_box_source") or "").strip().lower()
     if detail_mode == "product_identity_lock" and box_source == "product_reference_localization":
         return True
-    return str(audience or "").strip().lower() == "external" and _is_product_backed_external_style(style)
+    return normalized_audience == "external" and _is_product_backed_external_style(style)
 
 
 def run_generate_details_job(

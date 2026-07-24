@@ -79,6 +79,7 @@ def test_external_detail_selection_keeps_cap_and_prioritizes_curtain_generation(
     assert len(selected) == 6
     assert selected[0]["detail_mode"] == "curtain_material_generation"
     assert _should_prefer_crop_extract_for_detail(selected[0], audience="external") is False
+    assert _should_prefer_crop_extract_for_detail(selected[0], audience="internal") is False
 
 
 @pytest.mark.parametrize(
