@@ -8,6 +8,7 @@ from application.details.regenerate_detail_resolution import (
     resolve_regeneration_style,
 )
 from application.details.detail_style_stage import with_internal_angle_styles
+from application.details.detail_workflow import _should_prefer_crop_extract_for_detail
 
 
 def _normalize_box(box) -> list[float] | None:
@@ -322,7 +323,10 @@ def run_regenerate_single_detail_job(
             unique_id,
             int(resolved_style_index or 1),
             analyzed_items,
-            prefer_crop_extract=False,
+            prefer_crop_extract=(
+                aud == "internal"
+                and _should_prefer_crop_extract_for_detail(style, audience=aud)
+            ),
         )
         if not result:
             return {"error": "Generation failed"}

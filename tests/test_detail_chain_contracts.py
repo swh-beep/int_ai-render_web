@@ -312,7 +312,7 @@ class DetailChainContractsTests(unittest.TestCase):
         self.assertEqual(result["resolved_by"], "requested_target_fallback->target_key")
         self.assertEqual(result["furniture_data"][0]["target_key"], "detail_001_floor-lamp")
         self.assertEqual(result["furniture_data"][0]["box_source"], "detail_current_image_analysis")
-        self.assertEqual(generation_kwargs[0].get("prefer_crop_extract"), False)
+        self.assertEqual(generation_kwargs[0].get("prefer_crop_extract"), True)
 
     def test_run_regenerate_single_detail_job_preserves_requested_target_even_when_box_overlaps_other_detection(self):
         source_path = Path("outputs/test-regenerate-box-source.png")
@@ -945,7 +945,7 @@ class DetailChainContractsTests(unittest.TestCase):
             )
         )
 
-    def test_run_regenerate_single_detail_job_uses_simple_generation_for_detail_styles(self):
+    def test_run_regenerate_single_detail_job_uses_crop_extract_for_internal_detail_styles(self):
         source_path = Path("outputs/test-regenerate-crop-mode.png")
         source_path.parent.mkdir(parents=True, exist_ok=True)
         source_path.write_bytes(
@@ -990,7 +990,7 @@ class DetailChainContractsTests(unittest.TestCase):
             source_path.unlink(missing_ok=True)
 
         self.assertEqual(result["style_name"], "Detail: Accent Chair")
-        self.assertFalse(captured["prefer_crop_extract"])
+        self.assertTrue(captured["prefer_crop_extract"])
 
     def test_run_regenerate_single_detail_job_uses_cached_snapshot_without_current_image_analysis(self):
         source_path = Path("outputs/test-regenerate-cached-no-analysis.png")
@@ -1576,7 +1576,7 @@ def test_run_generate_details_job_preserves_ai_service_scope_in_budgeted_paralle
     assert observed_scopes == ["internal_tool", "internal_tool"]
 
 
-def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path):
+def test_internal_generate_details_job_keeps_angles_generated_and_crops_portrait_details(tmp_path):
     image_path = tmp_path / "detail-src.png"
     empty_room_path = tmp_path / "detail-empty.png"
     image_path.write_bytes(
@@ -1655,7 +1655,7 @@ def test_internal_generate_details_job_returns_landscape_angle_metadata(tmp_path
     assert recorded_styles[4].get("ratio") == "4:5"
     assert recorded_styles[4].get("simple_scene_detail") is True
     assert "empty_room_path" not in recorded_styles[4]
-    assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: False}
+    assert recorded_crop_preferences == {1: False, 2: False, 3: False, 4: True}
 
 
 def test_internal_generate_details_job_localizes_uploaded_item_targets_without_fresh_detection_loss(tmp_path):
